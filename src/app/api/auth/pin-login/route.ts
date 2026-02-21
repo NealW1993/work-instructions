@@ -38,7 +38,7 @@ export async function POST(request: Request) {
       {
         error: email
           ? "Invalid email or PIN."
-          : "Invalid PIN, or the PIN is shared by multiple users. Contact your system admin.",
+          : "Invalid PIN. If this keeps happening, ask your system admin to reset your PIN.",
       },
       { status: 401 },
     );
