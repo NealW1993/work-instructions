@@ -335,6 +335,34 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         throw new Error(workItemError?.message ?? "Unable to save work item.");
       }
 
+      let duplicateCheckRequest = supabase
+        .from("work_instructions")
+        .select("id")
+        .eq("work_item_id", typedWorkItem.id)
+        .limit(1);
+
+      if (mode === "edit" && initialData?.instructionId) {
+        duplicateCheckRequest = duplicateCheckRequest.neq("id", initialData.instructionId);
+      }
+
+      const { data: duplicateInstruction, error: duplicateCheckError } =
+        await duplicateCheckRequest.maybeSingle();
+
+      if (duplicateCheckError) {
+        throw new Error(duplicateCheckError.message);
+      }
+
+      if (duplicateInstruction) {
+        setFieldErrors((current) => ({
+          ...current,
+          itemTitle: true,
+        }));
+        itemTitleInputRef.current?.focus();
+        throw new Error(
+          "A work instruction with this title already exists for this Part/Mold. Open the existing instruction to edit it.",
+        );
+      }
+
       let instructionId = initialData?.instructionId ?? "";
 
       if (mode === "create") {
