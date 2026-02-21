@@ -1,0 +1,179 @@
+/* eslint-disable @next/next/no-img-element */
+
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+import { requireAuthenticatedUser } from "@/lib/auth";
+import { canEditInstructions } from "@/lib/roles";
+import type { InstructionMedia } from "@/lib/types";
+
+interface InstructionPageProps {
+  params: Promise<{
+    id: string;
+  }>;
+}
+
+interface InstructionRecord {
+  id: string;
+  title: string;
+  body_markdown: string;
+  notes_markdown: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
+  created_by: string;
+  updated_by: string;
+  work_items:
+    | {
+        id: string;
+        part_number: string;
+        mold_number: string;
+        item_title: string;
+        description: string | null;
+      }
+    | Array<{
+        id: string;
+        part_number: string;
+        mold_number: string;
+        item_title: string;
+        description: string | null;
+      }>;
+  instruction_media: InstructionMedia[];
+}
+
+function getWorkItem(relation: InstructionRecord["work_items"]) {
+  if (Array.isArray(relation)) {
+    return relation[0] ?? null;
+  }
+
+  return relation;
+}
+
+export default async function InstructionDetailsPage({ params }: InstructionPageProps) {
+  const { id } = await params;
+  const { supabase, profile } = await requireAuthenticatedUser();
+
+  const { data, error } = await supabase
+    .from("work_instructions")
+    .select(
+      "id, title, body_markdown, notes_markdown, version, created_at, updated_at, created_by, updated_by, work_items(id, part_number, mold_number, item_title, description), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
+    )
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data) {
+    notFound();
+  }
+
+  const instruction = data as InstructionRecord;
+  const workItem = getWorkItem(instruction.work_items);
+
+  if (!workItem) {
+    notFound();
+  }
+
+  const { data: users } = await supabase
+    .from("profiles")
+    .select("id, full_name")
+    .in("id", [instruction.created_by, instruction.updated_by]);
+
+  const userMap = new Map((users ?? []).map((entry) => [entry.id, entry.full_name]));
+
+  return (
+    <article className="grid gap-5">
+      <header className="rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-300">
+              {workItem.item_title}
+            </p>
+            <h1 className="text-3xl font-extrabold text-slate-900 dark:text-slate-100">
+              {instruction.title}
+            </h1>
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              Part: <strong>{workItem.part_number}</strong> | Mold:{" "}
+              <strong>{workItem.mold_number || "N/A"}</strong> | Version{" "}
+              <strong>{instruction.version}</strong>
+            </p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Created by {userMap.get(instruction.created_by) ?? "Unknown"} on{" "}
+              {new Date(instruction.created_at).toLocaleString()} | Updated by{" "}
+              {userMap.get(instruction.updated_by) ?? "Unknown"} on{" "}
+              {new Date(instruction.updated_at).toLocaleString()}
+            </p>
+          </div>
+          {canEditInstructions(profile.role) ? (
+            <Link
+              href={`/instructions/${instruction.id}/edit`}
+              className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-200"
+            >
+              Edit Instruction
+            </Link>
+          ) : null}
+        </div>
+      </header>
+
+      <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+        <h2 className="text-xl font-bold">Steps</h2>
+        <div className="prose-markdown">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {instruction.body_markdown}
+          </ReactMarkdown>
+        </div>
+      </section>
+
+      {instruction.notes_markdown ? (
+        <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+          <h2 className="text-xl font-bold">Notes</h2>
+          <div className="prose-markdown">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {instruction.notes_markdown}
+            </ReactMarkdown>
+          </div>
+        </section>
+      ) : null}
+
+      {instruction.instruction_media.length > 0 ? (
+        <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+          <h2 className="text-xl font-bold">Media</h2>
+          <div className="grid gap-4 md:grid-cols-2">
+            {instruction.instruction_media
+              .slice()
+              .sort((a, b) => a.sort_order - b.sort_order)
+              .map((media) => (
+                <figure
+                  key={media.id}
+                  className="overflow-hidden rounded-2xl border border-slate-300/70 bg-slate-50 dark:border-slate-700 dark:bg-slate-950"
+                >
+                  {media.media_type === "video" ? (
+                    <video
+                      src={media.public_url}
+                      controls
+                      className="max-h-[420px] w-full bg-black"
+                    />
+                  ) : (
+                    <img
+                      src={media.public_url}
+                      alt={media.caption ?? "Instruction media"}
+                      className="max-h-[420px] w-full object-cover"
+                    />
+                  )}
+                  {media.caption ? (
+                    <figcaption className="p-2 text-xs text-slate-600 dark:text-slate-300">
+                      {media.caption}
+                    </figcaption>
+                  ) : null}
+                </figure>
+              ))}
+          </div>
+        </section>
+      ) : null}
+    </article>
+  );
+}

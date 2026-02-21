@@ -1,36 +1,350 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Work Instructions Platform
 
-## Getting Started
+Internal work-instructions software built with React (Next.js), TypeScript, Supabase Postgres + RLS, Tailwind CSS, PostHog, SMTP email, and Docker.
 
-First, run the development server:
+## What this app includes
+
+- Role levels:
+  - `system_admin`: full access + user management
+  - `admin`: create/edit instructions
+  - `user`: view/search instructions
+- Authentication:
+  - Email + password login (Supabase Auth passwords are hashed by Supabase)
+  - 6-digit PIN login
+  - Password recovery by email reset link (SMTP/Mailpit)
+  - Password recovery by 6-digit PIN
+- Work instruction data model:
+  - Search by `Part Number` or `Mold Number`
+  - Each part/mold work item can have multiple instructions
+  - Markdown steps + markdown notes
+  - Image/video attachments (tablet camera compatible)
+- Security:
+  - Full Postgres schema + RLS + role policies
+  - Storage policies for media bucket
+- UX:
+  - Responsive mobile/tablet-friendly UI
+  - Dark/light mode toggle
+  - Modern visual style
+- Analytics:
+  - PostHog client integration (optional, env-driven)
+- Deployment:
+  - Local dev and Docker compose
+  - Mailpit SMTP for local email testing
+  - Ready for Synology Docker deployment
+
+## Tech stack
+
+- Next.js (React) + TypeScript
+- Tailwind CSS
+- Supabase Auth + Supabase Postgres + Supabase Storage
+- PostHog (`posthog-js`)
+- Nodemailer SMTP
+- Mailpit (local SMTP + inbox UI)
+- Docker / Docker Compose
+
+## Project structure
+
+- `src/app/(auth)/...`: login and password reset pages
+- `src/app/(app)/...`: authenticated app pages (dashboard, instructions, admin)
+- `src/app/api/...`: server API routes for PIN auth and user admin
+- `src/components/...`: UI components
+- `src/lib/...`: Supabase clients, auth helpers, env, mailer
+- `supabase/migrations/202602210001_init.sql`: full database schema + RLS + policies
+- `supabase/seeds/001_promote_system_admin.sql`: manual system-admin promotion helper
+- `docker-compose.yml`: app + Mailpit local stack
+
+## Prerequisites
+
+- Node.js 20+
+- npm 10+
+- Supabase CLI (`npx supabase`)
+- Docker Desktop (for containerized run)
+
+## 1) Configure environment
+
+Copy `.env.example` to `.env` and fill values:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.example .env
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Required values:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Recommended:
 
-## Learn More
+- `SYSTEM_ADMIN_EMAIL=you@company.com` for automatic first system-admin bootstrap
+- `SMTP_HOST=mailpit` and `SMTP_PORT=1025` for local email testing in Docker
+- `NEXT_PUBLIC_POSTHOG_KEY` if analytics is desired
 
-To learn more about Next.js, take a look at the following resources:
+## 2) Start local Supabase backend in Docker (recommended for local)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm run supabase:start
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Local endpoints:
 
-## Deploy on Vercel
+- API: `http://127.0.0.1:56321`
+- DB: `postgresql://postgres:postgres@127.0.0.1:56322/postgres`
+- Studio: `http://127.0.0.1:56323`
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Reset DB + apply migration + run seed:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm run supabase:reset
+```
+
+## 3) Apply Supabase schema + policies to hosted Supabase (optional)
+
+Run SQL in Supabase SQL Editor:
+
+1. Open and execute `supabase/migrations/202602210001_init.sql`
+2. Optional: run `supabase/seeds/001_promote_system_admin.sql` after replacing email
+
+What this migration creates:
+
+- Tables: `profiles`, `user_security`, `work_items`, `work_instructions`, `instruction_media`, `password_reset_tokens`
+- Enum roles and media types
+- Triggers for profile creation from `auth.users`
+- PIN helpers: `set_my_pin`, `set_user_pin`, `verify_pin_login`
+- RLS policies by role
+- Storage bucket: `instruction-media` + storage RLS policies
+
+### Security/Performance Advisor hotfix query
+
+If Supabase Advisor reports:
+- `Function public.set_updated_at has a role mutable search_path`
+- RLS policy performance warnings on `profiles`, `work_items`, `work_instructions`, `instruction_media`
+
+Run the SQL in:
+- `supabase/migrations/202602210002_advisor_fixes.sql`
+
+Copy/paste query:
+
+```sql
+begin;
+
+create or replace function public.set_updated_at()
+returns trigger
+language plpgsql
+set search_path = public, pg_catalog
+as $$
+begin
+  new.updated_at = timezone('utc', now());
+  return new;
+end;
+$$;
+
+drop policy if exists profiles_update_self_or_admin on public.profiles;
+create policy profiles_update_self_or_admin
+on public.profiles
+for update
+to authenticated
+using ((select auth.uid()) = id or (select public.is_system_admin()))
+with check ((select auth.uid()) = id or (select public.is_system_admin()));
+
+drop policy if exists work_items_insert_editors on public.work_items;
+create policy work_items_insert_editors
+on public.work_items
+for insert
+to authenticated
+with check ((select public.is_editor()) and created_by = (select auth.uid()));
+
+drop policy if exists work_items_update_editors on public.work_items;
+create policy work_items_update_editors
+on public.work_items
+for update
+to authenticated
+using ((select public.is_editor()))
+with check ((select public.is_editor()));
+
+drop policy if exists work_items_delete_editors on public.work_items;
+create policy work_items_delete_editors
+on public.work_items
+for delete
+to authenticated
+using ((select public.is_editor()));
+
+drop policy if exists work_instructions_insert_editors on public.work_instructions;
+create policy work_instructions_insert_editors
+on public.work_instructions
+for insert
+to authenticated
+with check (
+  (select public.is_editor())
+  and created_by = (select auth.uid())
+  and updated_by = (select auth.uid())
+);
+
+drop policy if exists work_instructions_update_editors on public.work_instructions;
+create policy work_instructions_update_editors
+on public.work_instructions
+for update
+to authenticated
+using ((select public.is_editor()))
+with check ((select public.is_editor()));
+
+drop policy if exists work_instructions_delete_editors on public.work_instructions;
+create policy work_instructions_delete_editors
+on public.work_instructions
+for delete
+to authenticated
+using ((select public.is_editor()));
+
+drop policy if exists instruction_media_insert_editors on public.instruction_media;
+create policy instruction_media_insert_editors
+on public.instruction_media
+for insert
+to authenticated
+with check ((select public.is_editor()) and created_by = (select auth.uid()));
+
+drop policy if exists instruction_media_update_editors on public.instruction_media;
+create policy instruction_media_update_editors
+on public.instruction_media
+for update
+to authenticated
+using ((select public.is_editor()))
+with check ((select public.is_editor()));
+
+drop policy if exists instruction_media_delete_editors on public.instruction_media;
+create policy instruction_media_delete_editors
+on public.instruction_media
+for delete
+to authenticated
+using ((select public.is_editor()));
+
+commit;
+```
+
+## 4) Local development run
+
+```bash
+npm install
+npm run dev
+```
+
+App URL: `http://localhost:3000`
+
+## 5) Docker + Mailpit local run
+
+```bash
+docker compose up --build
+```
+
+- App: `http://localhost:3000`
+- Mailpit web inbox: `http://localhost:8025`
+- SMTP: `mailpit:1025` inside Docker network
+
+## First account / system admin
+
+Two options:
+
+1. Auto-bootstrap option (recommended):
+   - Set `SYSTEM_ADMIN_EMAIL` in `.env`
+   - Create account from login page with that email
+   - If no existing system admin exists, account is promoted automatically
+
+2. Manual SQL promotion:
+   - Run `supabase/seeds/001_promote_system_admin.sql` after updating email
+
+## User management flow
+
+`system_admin` can open **User Admin** page to:
+
+- Create users (with role, password, and PIN)
+- Change role (`user`, `admin`, `system_admin`)
+- Reset user PIN
+
+## Instruction authoring flow
+
+`admin` and `system_admin` can:
+
+- Create instructions
+- Edit instructions
+- Upload image/video media
+- Capture from tablet camera (file input uses `capture="environment"`)
+
+`user` can:
+
+- Search by part number or mold number
+- View all permitted instructions and media
+
+## Password recovery
+
+- Email reset:
+  - User requests reset link from login page
+  - Route sends email via SMTP (Mailpit in local)
+  - User opens `/reset-password` link and sets new password
+- PIN reset:
+  - User enters email + PIN + new password directly on login page
+
+## PIN login design
+
+PIN login endpoint verifies hashed PIN against `user_security.pin_hash`, then issues a Supabase magic-link token hash through admin API. Client verifies OTP and receives normal Supabase session.
+
+## PostHog
+
+Set:
+
+- `NEXT_PUBLIC_POSTHOG_KEY`
+- `NEXT_PUBLIC_POSTHOG_HOST` (default `https://us.i.posthog.com`)
+
+If key is empty, PostHog is disabled automatically.
+
+## Scripts
+
+- `npm run dev` - start dev server
+- `npm run build` - production build
+- `npm run start` - run production server
+- `npm run lint` - lint code
+- `npm run typecheck` - TypeScript checks
+- `npm run docker:build` - build Docker image
+- `npm run docker:run` - run Docker compose stack
+- `npm run supabase:start` - start local Supabase backend (Docker)
+- `npm run supabase:stop` - stop local Supabase backend
+- `npm run supabase:status` - show local Supabase endpoints and keys
+- `npm run supabase:reset` - recreate DB, apply migrations, run seeds
+
+## Deploy to Synology (Docker)
+
+1. Copy repo to Synology or push image to your registry.
+2. Put production `.env` on Synology.
+3. Run docker compose stack:
+   - `docker compose up -d --build`
+4. Expose container port `3000` through reverse proxy or local network.
+5. Ensure `NEXT_PUBLIC_APP_URL` points to the final accessible URL.
+
+## Mobile/tablet testing
+
+- Open app on tablet browser using local network IP (example: `http://192.168.1.50:3000`)
+- Ensure same value is used in `NEXT_PUBLIC_APP_URL`
+- Use instruction editor media upload input to capture photos/videos from camera
+
+## Security notes
+
+- Passwords are managed and hashed by Supabase Auth
+- PINs are stored as bcrypt hashes in `user_security.pin_hash`
+- RLS enforces role-based access at DB level
+- Service role key is only used server-side in API routes
+- Never expose `SUPABASE_SERVICE_ROLE_KEY` client-side
+
+## Troubleshooting
+
+- `missing_profile` on login:
+  - migration not applied or trigger missing
+- Email reset not appearing:
+  - check Mailpit at `http://localhost:8025`
+  - verify SMTP env values
+- Cannot upload media:
+  - verify storage bucket and policies from migration
+- Role update denied:
+  - ensure logged in user has `system_admin`
+
+## Notes
+
+- This app expects Supabase project-level auth settings suitable for internal use.
+- For stricter enterprise controls, add rate limiting, audit trails, IP restrictions, and SSO.
