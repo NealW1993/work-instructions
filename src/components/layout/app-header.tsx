@@ -1,7 +1,6 @@
 import Link from "next/link";
 
 import { SignOutButton } from "@/components/layout/sign-out-button";
-import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { canEditInstructions, isSystemAdmin, roleLabel } from "@/lib/roles";
 import type { Profile } from "@/lib/types";
 
@@ -38,6 +37,12 @@ export function AppHeader({ profile }: { profile: Profile }) {
               New Instruction
             </Link>
           ) : null}
+          <Link
+            href="/account"
+            className="rounded-full px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-900/10 dark:text-slate-100 dark:hover:bg-white/10"
+          >
+            Account Settings
+          </Link>
           {isSystemAdmin(profile.role) ? (
             <Link
               href="/admin/users"
@@ -46,7 +51,6 @@ export function AppHeader({ profile }: { profile: Profile }) {
               User Admin
             </Link>
           ) : null}
-          <ThemeToggle />
           <SignOutButton />
         </nav>
       </div>

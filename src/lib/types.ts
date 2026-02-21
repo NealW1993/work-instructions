@@ -1,4 +1,5 @@
 export type AppRole = "system_admin" | "admin" | "user";
+export type ThemePreference = "light" | "dark";
 
 export type MediaType = "image" | "video";
 
@@ -8,6 +9,7 @@ export interface Profile {
   full_name: string;
   role: AppRole;
   is_active: boolean;
+  theme_preference?: ThemePreference;
   created_at: string;
   updated_at: string;
 }

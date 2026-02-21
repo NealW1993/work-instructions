@@ -4,7 +4,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import sanitizeHtml from "sanitize-html";
 
+import { PinInstructionButton } from "@/components/instructions/pin-instruction-button";
 import { requireAuthenticatedUser } from "@/lib/auth";
 import { canEditInstructions } from "@/lib/roles";
 import type { InstructionMedia } from "@/lib/types";
@@ -19,7 +21,6 @@ interface InstructionRecord {
   id: string;
   title: string;
   body_markdown: string;
-  notes_markdown: string;
   version: number;
   created_at: string;
   updated_at: string;
@@ -43,12 +44,96 @@ interface InstructionRecord {
   instruction_media: InstructionMedia[];
 }
 
+function looksLikeHtml(value: string): boolean {
+  return /<\/?[a-z][\s\S]*>/i.test(value);
+}
+
+function sanitizeRichHtml(value: string): string {
+  return sanitizeHtml(value, {
+    allowedTags: [
+      "p",
+      "br",
+      "strong",
+      "b",
+      "em",
+      "i",
+      "u",
+      "s",
+      "mark",
+      "a",
+      "ul",
+      "ol",
+      "li",
+      "blockquote",
+      "code",
+      "pre",
+      "h1",
+      "h2",
+      "h3",
+      "hr",
+      "span",
+      "div",
+      "label",
+      "input",
+    ],
+    allowedAttributes: {
+      a: ["href", "target", "rel"],
+      span: ["style"],
+      div: ["style", "data-type"],
+      p: ["style"],
+      h1: ["style"],
+      h2: ["style"],
+      h3: ["style"],
+      ul: ["data-type"],
+      li: ["data-type", "data-checked"],
+      label: ["contenteditable"],
+      input: ["type", "checked", "disabled"],
+      mark: ["style", "data-color"],
+      "*": ["class", "style"],
+    },
+    allowedSchemes: ["http", "https", "mailto", "tel"],
+    allowedStyles: {
+      "*": {
+        "text-align": [/^left$/, /^right$/, /^center$/, /^justify$/],
+      },
+      span: {
+        color: [/^#[0-9a-fA-F]{3,8}$/, /^rgb\([0-9,\s.]+\)$/],
+        "font-size": [/^[0-9]+(px|em|rem|%)$/],
+      },
+      mark: {
+        "background-color": [/^#[0-9a-fA-F]{3,8}$/, /^rgb\([0-9,\s.]+\)$/],
+      },
+    },
+  });
+}
+
 function getWorkItem(relation: InstructionRecord["work_items"]) {
   if (Array.isArray(relation)) {
     return relation[0] ?? null;
   }
 
   return relation;
+}
+
+function renderInstructionContent(value: string) {
+  if (!value.trim()) {
+    return null;
+  }
+
+  if (looksLikeHtml(value)) {
+    return (
+      <div
+        className="prose-markdown"
+        dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(value) }}
+      />
+    );
+  }
+
+  return (
+    <div className="prose-markdown">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{value}</ReactMarkdown>
+    </div>
+  );
 }
 
 export default async function InstructionDetailsPage({ params }: InstructionPageProps) {
@@ -58,7 +143,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, title, body_markdown, notes_markdown, version, created_at, updated_at, created_by, updated_by, work_items(id, part_number, mold_number, item_title, description), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
+      "id, title, body_markdown, version, created_at, updated_at, created_by, updated_by, work_items(id, part_number, mold_number, item_title, description), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -82,6 +167,13 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
     .from("profiles")
     .select("id, full_name")
     .in("id", [instruction.created_by, instruction.updated_by]);
+
+  const { data: pinnedInstruction } = await supabase
+    .from("user_pinned_instructions")
+    .select("instruction_id")
+    .eq("user_id", profile.id)
+    .eq("instruction_id", instruction.id)
+    .maybeSingle();
 
   const userMap = new Map((users ?? []).map((entry) => [entry.id, entry.full_name]));
 
@@ -108,36 +200,28 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
               {new Date(instruction.updated_at).toLocaleString()}
             </p>
           </div>
-          {canEditInstructions(profile.role) ? (
-            <Link
-              href={`/instructions/${instruction.id}/edit`}
-              className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-200"
-            >
-              Edit Instruction
-            </Link>
-          ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            <PinInstructionButton
+              instructionId={instruction.id}
+              userId={profile.id}
+              initialPinned={Boolean(pinnedInstruction)}
+            />
+            {canEditInstructions(profile.role) ? (
+              <Link
+                href={`/instructions/${instruction.id}/edit`}
+                className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-200"
+              >
+                Edit Instruction
+              </Link>
+            ) : null}
+          </div>
         </div>
       </header>
 
       <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
-        <h2 className="text-xl font-bold">Steps</h2>
-        <div className="prose-markdown">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {instruction.body_markdown}
-          </ReactMarkdown>
-        </div>
+        <h2 className="text-xl font-bold">Work Instructions</h2>
+        {renderInstructionContent(instruction.body_markdown)}
       </section>
-
-      {instruction.notes_markdown ? (
-        <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
-          <h2 className="text-xl font-bold">Notes</h2>
-          <div className="prose-markdown">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {instruction.notes_markdown}
-            </ReactMarkdown>
-          </div>
-        </section>
-      ) : null}
 
       {instruction.instruction_media.length > 0 ? (
         <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">

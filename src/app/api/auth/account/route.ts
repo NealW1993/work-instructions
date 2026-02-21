@@ -2,12 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
-import type { Profile } from "@/lib/types";
+import type { Profile, ThemePreference } from "@/lib/types";
 
 interface UpdateAccountBody {
   fullName?: string;
   email?: string;
   password?: string;
+  themePreference?: ThemePreference;
 }
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -29,10 +30,11 @@ export async function PATCH(request: NextRequest) {
   const includeFullName = hasOwn(body, "fullName");
   const includeEmail = hasOwn(body, "email");
   const includePassword = hasOwn(body, "password");
+  const includeThemePreference = hasOwn(body, "themePreference");
 
-  if (!includeFullName && !includeEmail && !includePassword) {
+  if (!includeFullName && !includeEmail && !includePassword && !includeThemePreference) {
     return NextResponse.json(
-      { error: "fullName, email, or password is required." },
+      { error: "fullName, email, password, or themePreference is required." },
       { status: 400 },
     );
   }
@@ -40,6 +42,7 @@ export async function PATCH(request: NextRequest) {
   const fullName = body.fullName?.trim();
   const normalizedEmail = body.email?.trim().toLowerCase();
   const password = body.password?.trim();
+  const themePreference = body.themePreference;
 
   if (includeFullName && !fullName) {
     return NextResponse.json(
@@ -84,13 +87,22 @@ export async function PATCH(request: NextRequest) {
     }
   }
 
+  if (includeThemePreference) {
+    if (themePreference !== "light" && themePreference !== "dark") {
+      return NextResponse.json(
+        { error: "Theme must be either light or dark." },
+        { status: 400 },
+      );
+    }
+  }
+
   const authUpdate: {
     email?: string;
     email_confirm?: boolean;
     password?: string;
     user_metadata?: Record<string, string>;
   } = {};
-  const profileUpdate: Partial<Pick<Profile, "full_name" | "email">> = {};
+  const profileUpdate: Partial<Pick<Profile, "full_name" | "email" | "theme_preference">> = {};
 
   if (fullName && fullName !== requester.full_name) {
     authUpdate.user_metadata = {
@@ -107,6 +119,14 @@ export async function PATCH(request: NextRequest) {
 
   if (password) {
     authUpdate.password = password;
+  }
+
+  if (
+    includeThemePreference &&
+    themePreference &&
+    themePreference !== requester.theme_preference
+  ) {
+    profileUpdate.theme_preference = themePreference;
   }
 
   if (Object.keys(authUpdate).length > 0) {
@@ -133,7 +153,7 @@ export async function PATCH(request: NextRequest) {
 
   const { data: profile, error: readError } = await supabaseAdmin
     .from("profiles")
-    .select("id, email, full_name, role, is_active, created_at, updated_at")
+    .select("id, email, full_name, role, is_active, theme_preference, created_at, updated_at")
     .eq("id", requester.id)
     .maybeSingle<Profile>();
 

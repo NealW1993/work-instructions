@@ -23,7 +23,6 @@ interface EditInstructionRecord {
   id: string;
   title: string;
   body_markdown: string;
-  notes_markdown: string;
   version: number;
   work_item_id: string;
   work_items: WorkItemRelation | WorkItemRelation[];
@@ -51,7 +50,7 @@ export default async function EditInstructionPage({ params }: EditInstructionPag
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, title, body_markdown, notes_markdown, version, work_item_id, work_items(id, part_number, mold_number, item_title, description), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
+      "id, title, body_markdown, version, work_item_id, work_items(id, part_number, mold_number, item_title, description), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -89,7 +88,6 @@ export default async function EditInstructionPage({ params }: EditInstructionPag
           description: workItem.description ?? "",
           instructionTitle: instruction.title,
           bodyMarkdown: instruction.body_markdown,
-          notesMarkdown: instruction.notes_markdown,
           version: instruction.version,
           media: instruction.instruction_media,
         }}

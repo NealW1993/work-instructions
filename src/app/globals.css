@@ -74,6 +74,20 @@ h6 {
   line-height: 1.65;
 }
 
+.prose-markdown strong,
+.prose-markdown b {
+  font-weight: 700;
+}
+
+.prose-markdown em,
+.prose-markdown i {
+  font-style: italic;
+}
+
+.prose-markdown u {
+  text-decoration: underline;
+}
+
 .prose-markdown ul,
 .prose-markdown ol {
   margin-left: 1.25rem;
@@ -99,4 +113,70 @@ h6 {
   border-left: 3px solid color-mix(in oklab, var(--ring) 80%, transparent);
   padding-left: 0.75rem;
   color: var(--muted);
+}
+
+.tiptap-editor-content.ProseMirror {
+  outline: none;
+}
+
+.tiptap-editor-content p {
+  margin: 0.25rem 0;
+  line-height: 1.6;
+}
+
+.tiptap-editor-content strong,
+.tiptap-editor-content b {
+  font-weight: 700;
+}
+
+.tiptap-editor-content em,
+.tiptap-editor-content i {
+  font-style: italic;
+}
+
+.tiptap-editor-content u {
+  text-decoration: underline;
+}
+
+.tiptap-editor-content h1,
+.tiptap-editor-content h2,
+.tiptap-editor-content h3 {
+  margin-top: 0.8rem;
+  margin-bottom: 0.45rem;
+  font-weight: 700;
+}
+
+.tiptap-editor-content ul,
+.tiptap-editor-content ol {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+}
+
+.tiptap-editor-content blockquote {
+  border-left: 3px solid color-mix(in oklab, var(--ring) 80%, transparent);
+  margin: 0.6rem 0;
+  padding-left: 0.75rem;
+  color: var(--muted);
+}
+
+.tiptap-editor-content code {
+  border-radius: 0.35rem;
+  background: color-mix(in oklab, var(--foreground) 8%, transparent);
+  padding: 0.1rem 0.35rem;
+  font-size: 0.92em;
+}
+
+.tiptap-editor-content pre {
+  overflow-x: auto;
+  border-radius: 0.75rem;
+  background: color-mix(in oklab, var(--foreground) 10%, transparent);
+  padding: 0.9rem;
+}
+
+.tiptap-editor-content p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: #94a3b8;
+  pointer-events: none;
+  float: left;
+  height: 0;
 }

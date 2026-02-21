@@ -2,24 +2,31 @@
 
 import { Eye, EyeOff } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useTheme } from "next-themes";
 import { FormEvent, useMemo, useState } from "react";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
+import type { ThemePreference } from "@/lib/types";
 
 interface AccountSettingsPanelProps {
   initialFullName: string;
   initialEmail: string;
+  initialThemePreference: ThemePreference;
 }
 
 export function AccountSettingsPanel({
   initialFullName,
   initialEmail,
+  initialThemePreference,
 }: AccountSettingsPanelProps) {
   const router = useRouter();
+  const { setTheme } = useTheme();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
   const [fullName, setFullName] = useState(initialFullName);
   const [email, setEmail] = useState(initialEmail);
+  const [themePreference, setThemePreference] =
+    useState<ThemePreference>(initialThemePreference);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -37,6 +44,7 @@ export function AccountSettingsPanel({
   const hasChanges =
     normalizedFullName !== initialFullName ||
     normalizedEmail !== initialEmail.toLowerCase() ||
+    themePreference !== initialThemePreference ||
     password.length > 0;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -79,10 +87,12 @@ export function AccountSettingsPanel({
       const payload: {
         fullName: string;
         email: string;
+        themePreference: ThemePreference;
         password?: string;
       } = {
         fullName: normalizedFullName,
         email: normalizedEmail,
+        themePreference,
       };
 
       if (password) {
@@ -108,6 +118,7 @@ export function AccountSettingsPanel({
 
       setPassword("");
       setConfirmPassword("");
+      setTheme(themePreference);
       setMessage("Account updated.");
       router.refresh();
     } catch (caughtError) {
@@ -161,6 +172,34 @@ export function AccountSettingsPanel({
             className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
           />
         </label>
+
+        <fieldset className="grid gap-1 text-sm">
+          <legend>Theme</legend>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setThemePreference("dark")}
+              className={`rounded-xl border px-3 py-1.5 text-sm font-semibold transition ${
+                themePreference === "dark"
+                  ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
+                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-900"
+              }`}
+            >
+              Dark
+            </button>
+            <button
+              type="button"
+              onClick={() => setThemePreference("light")}
+              className={`rounded-xl border px-3 py-1.5 text-sm font-semibold transition ${
+                themePreference === "light"
+                  ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
+                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-900"
+              }`}
+            >
+              Light
+            </button>
+          </div>
+        </fieldset>
 
         <label className="grid gap-1 text-sm">
           <span>New Password (Optional)</span>

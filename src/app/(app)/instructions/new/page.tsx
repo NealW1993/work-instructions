@@ -18,8 +18,8 @@ export default async function NewInstructionPage() {
           New Work Instruction
         </h1>
         <p className="text-sm text-slate-600 dark:text-slate-300">
-          Include markdown steps, notes, and photos/videos captured directly from
-          tablet cameras.
+          Use rich text formatting, attach media, and add clear descriptions for
+          photos/videos captured directly from tablets.
         </p>
       </header>
       <InstructionEditor mode="create" />

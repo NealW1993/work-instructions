@@ -2,10 +2,11 @@
 
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Trash2, UploadCloud } from "lucide-react";
+import { Loader2, Save, Trash2, UploadCloud } from "lucide-react";
 
+import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import type { InstructionMedia } from "@/lib/types";
 import { sanitizeFileName } from "@/lib/utils";
@@ -21,34 +22,129 @@ interface InstructionEditorProps {
     description: string;
     instructionTitle: string;
     bodyMarkdown: string;
-    notesMarkdown: string;
     version: number;
     media: InstructionMedia[];
   };
 }
 
+interface PendingUpload {
+  id: string;
+  file: File;
+  caption: string;
+  previewUrl: string;
+  mediaType: "image" | "video";
+}
+
+function looksLikeHtml(value: string): boolean {
+  return /<\/?[a-z][\s\S]*>/i.test(value);
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function plainTextToHtml(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  return trimmed
+    .split(/\n{2,}/)
+    .map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, "<br>")}</p>`)
+    .join("");
+}
+
+function normalizeEditorContent(value: string): string {
+  if (!value.trim()) {
+    return "";
+  }
+
+  if (looksLikeHtml(value)) {
+    return value;
+  }
+
+  return plainTextToHtml(value);
+}
+
+function richTextToPlain(value: string): string {
+  return value
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|h1|h2|h3|h4|h5|h6)>/gi, "\n")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .trim();
+}
+
+function revokePendingUploadPreviews(uploads: PendingUpload[]) {
+  for (const upload of uploads) {
+    URL.revokeObjectURL(upload.previewUrl);
+  }
+}
+
+const DEFAULT_PART_NUMBER = "GENERAL";
+const DEFAULT_MOLD_NUMBER = "";
+
 export function InstructionEditor({ mode, initialData }: InstructionEditorProps) {
   const router = useRouter();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
-  const [partNumber, setPartNumber] = useState(initialData?.partNumber ?? "");
-  const [moldNumber, setMoldNumber] = useState(initialData?.moldNumber ?? "");
   const [itemTitle, setItemTitle] = useState(initialData?.itemTitle ?? "");
   const [description, setDescription] = useState(initialData?.description ?? "");
-  const [instructionTitle, setInstructionTitle] = useState(
-    initialData?.instructionTitle ?? "",
-  );
-  const [bodyMarkdown, setBodyMarkdown] = useState(initialData?.bodyMarkdown ?? "");
-  const [notesMarkdown, setNotesMarkdown] = useState(
-    initialData?.notesMarkdown ?? "",
+  const [bodyMarkdown, setBodyMarkdown] = useState(
+    normalizeEditorContent(initialData?.bodyMarkdown ?? ""),
   );
   const [version, setVersion] = useState(initialData?.version ?? 1);
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [selectedUploads, setSelectedUploads] = useState<PendingUpload[]>([]);
   const [existingMedia, setExistingMedia] = useState(initialData?.media ?? []);
+  const [existingCaptionDrafts, setExistingCaptionDrafts] = useState<
+    Record<string, string>
+  >(() => {
+    const entries = initialData?.media ?? [];
+    return Object.fromEntries(entries.map((media) => [media.id, media.caption ?? ""]));
+  });
 
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => () => revokePendingUploadPreviews(selectedUploads), [selectedUploads]);
+
+  function handlePendingFiles(fileList: FileList | null) {
+    setSelectedUploads((current) => {
+      revokePendingUploadPreviews(current);
+
+      if (!fileList || fileList.length === 0) {
+        return [];
+      }
+
+      return Array.from(fileList).map((file) => ({
+        id: crypto.randomUUID(),
+        file,
+        caption: "",
+        previewUrl: URL.createObjectURL(file),
+        mediaType: file.type.startsWith("video/") ? "video" : "image",
+      }));
+    });
+  }
+
+  function updatePendingCaption(id: string, caption: string) {
+    setSelectedUploads((current) =>
+      current.map((entry) =>
+        entry.id === id
+          ? {
+              ...entry,
+              caption,
+            }
+          : entry,
+      ),
+    );
+  }
 
   async function handleRemoveMedia(media: InstructionMedia) {
     if (busy) {
@@ -79,6 +175,11 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       }
 
       setExistingMedia((current) => current.filter((entry) => entry.id !== media.id));
+      setExistingCaptionDrafts((current) => {
+        const next = { ...current };
+        delete next[media.id];
+        return next;
+      });
       setMessage("Media deleted.");
     } catch (caughtError) {
       const normalizedMessage =
@@ -89,13 +190,57 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     }
   }
 
-  async function uploadNewFiles(instructionId: string, userId: string) {
-    if (selectedFiles.length === 0) {
+  async function handleSaveMediaCaption(mediaId: string) {
+    if (busy) {
       return;
     }
 
-    for (let index = 0; index < selectedFiles.length; index += 1) {
-      const file = selectedFiles[index];
+    const draft = (existingCaptionDrafts[mediaId] ?? "").trim();
+
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const { error: captionError } = await supabase
+        .from("instruction_media")
+        .update({
+          caption: draft || null,
+        })
+        .eq("id", mediaId);
+
+      if (captionError) {
+        throw new Error(captionError.message);
+      }
+
+      setExistingMedia((current) =>
+        current.map((entry) =>
+          entry.id === mediaId
+            ? {
+                ...entry,
+                caption: draft || null,
+              }
+            : entry,
+        ),
+      );
+      setMessage("Media description updated.");
+    } catch (caughtError) {
+      const normalizedMessage =
+        caughtError instanceof Error ? caughtError.message : "Unable to update media description";
+      setError(normalizedMessage);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function uploadNewFiles(instructionId: string, userId: string) {
+    if (selectedUploads.length === 0) {
+      return;
+    }
+
+    for (let index = 0; index < selectedUploads.length; index += 1) {
+      const upload = selectedUploads[index];
+      const file = upload.file;
       const storagePath = `${instructionId}/${crypto.randomUUID()}-${sanitizeFileName(
         file.name,
       )}`;
@@ -124,7 +269,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         storage_path: storagePath,
         public_url: publicUrl,
         media_type: mediaType,
-        caption: file.name,
+        caption: upload.caption.trim() || file.name,
         sort_order: existingMedia.length + index,
         created_by: userId,
       });
@@ -143,6 +288,14 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     setError(null);
 
     try {
+      if (!itemTitle.trim()) {
+        throw new Error("Work item title is required.");
+      }
+
+      if (!richTextToPlain(bodyMarkdown)) {
+        throw new Error("Instruction steps are required.");
+      }
+
       const {
         data: { user },
         error: userError,
@@ -152,23 +305,35 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         throw new Error("You must be signed in.");
       }
 
-      const moldNumberValue = moldNumber.trim();
+      const effectivePartNumber = initialData?.partNumber?.trim() || DEFAULT_PART_NUMBER;
+      const effectiveMoldNumber = initialData?.moldNumber?.trim() || DEFAULT_MOLD_NUMBER;
+      const effectiveInstructionTitle =
+        initialData?.instructionTitle?.trim() || itemTitle.trim() || "Work Instruction";
+
+      const workItemPayload: {
+        id?: string;
+        part_number: string;
+        mold_number: string;
+        item_title: string;
+        description: string | null;
+        created_by: string;
+      } = {
+        part_number: effectivePartNumber,
+        mold_number: effectiveMoldNumber,
+        item_title: itemTitle.trim(),
+        description: description.trim() || null,
+        created_by: user.id,
+      };
+
+      if (initialData?.workItemId) {
+        workItemPayload.id = initialData.workItemId;
+      }
 
       const { data: workItem, error: workItemError } = await supabase
         .from("work_items")
-        .upsert(
-          {
-            id: initialData?.workItemId,
-            part_number: partNumber.trim(),
-            mold_number: moldNumberValue,
-            item_title: itemTitle.trim(),
-            description: description.trim() || null,
-            created_by: user.id,
-          },
-          {
-            onConflict: "part_number,mold_number,item_title",
-          },
-        )
+        .upsert(workItemPayload, {
+          onConflict: "part_number,mold_number,item_title",
+        })
         .select("id")
         .single();
 
@@ -185,9 +350,9 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           .from("work_instructions")
           .insert({
             work_item_id: typedWorkItem.id,
-            title: instructionTitle.trim(),
+            title: effectiveInstructionTitle,
             body_markdown: bodyMarkdown,
-            notes_markdown: notesMarkdown,
+            notes_markdown: "",
             version,
             created_by: user.id,
             updated_by: user.id,
@@ -209,9 +374,9 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           .from("work_instructions")
           .update({
             work_item_id: typedWorkItem.id,
-            title: instructionTitle.trim(),
+            title: effectiveInstructionTitle,
             body_markdown: bodyMarkdown,
-            notes_markdown: notesMarkdown,
+            notes_markdown: "",
             version,
             updated_by: user.id,
           })
@@ -224,7 +389,10 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
       await uploadNewFiles(instructionId, user.id);
 
-      setSelectedFiles([]);
+      setSelectedUploads((current) => {
+        revokePendingUploadPreviews(current);
+        return [];
+      });
       setMessage(
         mode === "create"
           ? "Instruction created successfully."
@@ -255,27 +423,10 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         </p>
       ) : null}
 
-      <form onSubmit={handleSubmit} className="grid gap-4 rounded-3xl border border-white/30 bg-white/75 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
-        <div className="grid gap-3 md:grid-cols-2">
-          <label className="grid gap-1 text-sm">
-            <span className="font-semibold">Part Number</span>
-            <input
-              required
-              value={partNumber}
-              onChange={(event) => setPartNumber(event.target.value)}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-            />
-          </label>
-          <label className="grid gap-1 text-sm">
-            <span className="font-semibold">Mold Number</span>
-            <input
-              value={moldNumber}
-              onChange={(event) => setMoldNumber(event.target.value)}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-            />
-          </label>
-        </div>
-
+      <form
+        onSubmit={handleSubmit}
+        className="grid gap-4 rounded-3xl border border-white/30 bg-white/75 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7"
+      >
         <label className="grid gap-1 text-sm">
           <span className="font-semibold">Work Item Title</span>
           <input
@@ -297,53 +448,27 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           />
         </label>
 
-        <div className="grid gap-3 md:grid-cols-[1fr_130px]">
-          <label className="grid gap-1 text-sm">
-            <span className="font-semibold">Instruction Title</span>
-            <input
-              required
-              value={instructionTitle}
-              onChange={(event) => setInstructionTitle(event.target.value)}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-            />
-          </label>
-          <label className="grid gap-1 text-sm">
-            <span className="font-semibold">Version</span>
-            <input
-              required
-              min={1}
-              type="number"
-              value={version}
-              onChange={(event) =>
-                setVersion(Number.parseInt(event.target.value || "1", 10))
-              }
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-            />
-          </label>
-        </div>
-
-        <label className="grid gap-1 text-sm">
-          <span className="font-semibold">Instruction Steps (Markdown)</span>
-          <textarea
+        <label className="grid max-w-[140px] min-w-0 gap-1 text-sm">
+          <span className="font-semibold">Version</span>
+          <input
             required
-            rows={12}
-            value={bodyMarkdown}
-            onChange={(event) => setBodyMarkdown(event.target.value)}
-            placeholder="# Step 1\n- Do this\n- Do that"
-            className="rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+            min={1}
+            type="number"
+            value={version}
+            onChange={(event) =>
+              setVersion(Number.parseInt(event.target.value || "1", 10))
+            }
+            className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
           />
         </label>
 
-        <label className="grid gap-1 text-sm">
-          <span className="font-semibold">Notes (Markdown)</span>
-          <textarea
-            rows={6}
-            value={notesMarkdown}
-            onChange={(event) => setNotesMarkdown(event.target.value)}
-            placeholder="## Safety\nWear PPE at all times."
-            className="rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-          />
-        </label>
+        <RichTextEditor
+          label="Work Instructions (Rich Text)"
+          value={bodyMarkdown}
+          onChange={setBodyMarkdown}
+          placeholder="Type work instructions here. Use toolbar buttons for bold, underline, lists, and links."
+          minHeightClassName="min-h-72"
+        />
 
         <div className="grid gap-2">
           <label className="text-sm font-semibold">Media Upload (Image/Video)</label>
@@ -352,13 +477,37 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
             accept="image/*,video/*"
             capture="environment"
             multiple
-            onChange={(event) => setSelectedFiles(Array.from(event.target.files ?? []))}
+            onChange={(event) => handlePendingFiles(event.target.files)}
             className="rounded-xl border border-dashed border-slate-400 bg-white/70 px-3 py-3 text-sm dark:border-slate-600 dark:bg-slate-900/60"
           />
-          {selectedFiles.length > 0 ? (
-            <ul className="grid gap-1 text-xs text-slate-600 dark:text-slate-300">
-              {selectedFiles.map((file) => (
-                <li key={file.name + file.size}>{file.name}</li>
+          {selectedUploads.length > 0 ? (
+            <ul className="grid gap-3 text-xs text-slate-600 dark:text-slate-300">
+              {selectedUploads.map((upload) => (
+                <li
+                  key={upload.id}
+                  className="grid gap-2 rounded-xl border border-slate-300/70 bg-white/70 p-2 dark:border-slate-700 dark:bg-slate-950/60"
+                >
+                  {upload.mediaType === "video" ? (
+                    <video
+                      src={upload.previewUrl}
+                      controls
+                      className="max-h-56 w-full rounded-lg bg-black"
+                    />
+                  ) : (
+                    <img
+                      src={upload.previewUrl}
+                      alt={upload.file.name}
+                      className="max-h-56 w-full rounded-lg object-cover"
+                    />
+                  )}
+                  <span className="font-medium">{upload.file.name}</span>
+                  <input
+                    value={upload.caption}
+                    onChange={(event) => updatePendingCaption(upload.id, event.target.value)}
+                    placeholder="Describe this image/video (optional)"
+                    className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                  />
+                </li>
               ))}
             </ul>
           ) : null}
@@ -382,16 +531,36 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                       className="max-h-64 w-full object-cover"
                     />
                   )}
-                  <div className="flex items-center justify-between gap-2 p-2 text-xs">
-                    <span className="line-clamp-1">{media.caption ?? "Media"}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveMedia(media)}
-                      className="inline-flex items-center gap-1 rounded-full border border-rose-500/30 px-2 py-1 text-rose-700 transition hover:bg-rose-500/10 dark:text-rose-300"
-                    >
-                      <Trash2 size={12} />
-                      Remove
-                    </button>
+                  <div className="grid gap-2 p-2 text-xs">
+                    <input
+                      value={existingCaptionDrafts[media.id] ?? ""}
+                      onChange={(event) =>
+                        setExistingCaptionDrafts((current) => ({
+                          ...current,
+                          [media.id]: event.target.value,
+                        }))
+                      }
+                      placeholder="Describe this image/video"
+                      className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                    />
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void handleSaveMediaCaption(media.id)}
+                        className="inline-flex items-center gap-1 rounded-full border border-cyan-500/30 px-2 py-1 text-cyan-700 transition hover:bg-cyan-500/10 dark:text-cyan-300"
+                      >
+                        <Save size={12} />
+                        Save description
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleRemoveMedia(media)}
+                        className="inline-flex items-center gap-1 rounded-full border border-rose-500/30 px-2 py-1 text-rose-700 transition hover:bg-rose-500/10 dark:text-rose-300"
+                      >
+                        <Trash2 size={12} />
+                        Remove
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}

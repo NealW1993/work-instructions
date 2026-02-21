@@ -48,7 +48,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   }, [shouldEnablePostHog]);
 
   const content = (
-    <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+    <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
       {children}
     </ThemeProvider>
   );

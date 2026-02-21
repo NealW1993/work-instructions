@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { Search } from "lucide-react";
 
-import { AccountSettingsPanel } from "@/components/account/account-settings-panel";
 import { requireAuthenticatedUser } from "@/lib/auth";
 import { canEditInstructions } from "@/lib/roles";
 import { escapeLikeQuery } from "@/lib/utils";
@@ -16,7 +15,27 @@ interface DashboardInstruction {
   id: string;
   title: string;
   version: number;
+  created_at: string;
   updated_at: string;
+  work_items: DashboardInstructionWorkItem | DashboardInstructionWorkItem[];
+}
+
+interface DashboardWorkItemInstruction {
+  id: string;
+  title: string;
+  version: number;
+  updated_at: string;
+}
+
+interface DashboardInstructionWorkItem {
+  part_number: string;
+  mold_number: string;
+  item_title: string;
+}
+
+interface DashboardPinnedInstructionRow {
+  created_at: string;
+  work_instructions: DashboardInstruction | DashboardInstruction[] | null;
 }
 
 interface DashboardWorkItem {
@@ -26,7 +45,47 @@ interface DashboardWorkItem {
   item_title: string;
   description: string | null;
   updated_at: string;
-  work_instructions: DashboardInstruction[];
+  work_instructions: DashboardWorkItemInstruction[];
+}
+
+interface DashboardInstructionCard extends DashboardInstruction {
+  workItem: DashboardInstructionWorkItem;
+}
+
+interface DashboardPinnedInstructionCard extends DashboardInstructionCard {
+  pinned_at: string;
+}
+
+function normalizeWorkItem(
+  relation:
+    | DashboardInstructionWorkItem
+    | DashboardInstructionWorkItem[]
+    | null
+    | undefined,
+) {
+  if (!relation) {
+    return null;
+  }
+
+  if (Array.isArray(relation)) {
+    return relation[0] ?? null;
+  }
+
+  return relation;
+}
+
+function normalizeInstruction(
+  relation: DashboardInstruction | DashboardInstruction[] | null,
+) {
+  if (!relation) {
+    return null;
+  }
+
+  if (Array.isArray(relation)) {
+    return relation[0] ?? null;
+  }
+
+  return relation;
 }
 
 export default async function DashboardPage({ searchParams }: DashboardPageProps) {
@@ -34,7 +93,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const params = await searchParams;
   const query = params.q?.trim() ?? "";
 
-  let request = supabase
+  let searchRequest = supabase
     .from("work_items")
     .select(
       "id, part_number, mold_number, item_title, description, updated_at, work_instructions(id, title, version, updated_at)",
@@ -44,14 +103,70 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
 
   if (query) {
     const safeQuery = escapeLikeQuery(query);
-    request = request.or(
+    searchRequest = searchRequest.or(
       `part_number.ilike.%${safeQuery}%,mold_number.ilike.%${safeQuery}%`,
     );
   }
 
-  const { data, error } = await request;
+  const newestRequest = supabase
+    .from("work_instructions")
+    .select(
+      "id, title, version, created_at, updated_at, work_items(part_number, mold_number, item_title)",
+    )
+    .order("created_at", { ascending: false })
+    .limit(5);
 
-  const items = (data ?? []) as DashboardWorkItem[];
+  const pinnedRequest = supabase
+    .from("user_pinned_instructions")
+    .select(
+      "created_at, work_instructions(id, title, version, created_at, updated_at, work_items(part_number, mold_number, item_title))",
+    )
+    .eq("user_id", profile.id)
+    .order("created_at", { ascending: false })
+    .limit(25);
+
+  const [
+    { data: searchData, error: searchError },
+    { data: newestData, error: newestError },
+    { data: pinnedData, error: pinnedError },
+  ] = await Promise.all([searchRequest, newestRequest, pinnedRequest]);
+
+  const items = (searchData ?? []) as DashboardWorkItem[];
+  const newestInstructions = ((newestData ?? []) as DashboardInstruction[])
+    .map((instruction) => {
+      const workItem = normalizeWorkItem(instruction.work_items);
+      if (!workItem) {
+        return null;
+      }
+
+      return {
+        ...instruction,
+        workItem,
+      };
+    })
+    .filter((instruction): instruction is DashboardInstructionCard => instruction !== null);
+
+  const pinnedInstructions = ((pinnedData ?? []) as DashboardPinnedInstructionRow[])
+    .map((row) => {
+      const instruction = normalizeInstruction(row.work_instructions);
+      if (!instruction) {
+        return null;
+      }
+
+      const workItem = normalizeWorkItem(instruction.work_items);
+      if (!workItem) {
+        return null;
+      }
+
+      return {
+        ...instruction,
+        workItem,
+        pinned_at: row.created_at,
+      };
+    })
+    .filter(
+      (instruction): instruction is DashboardPinnedInstructionCard => instruction !== null,
+    );
 
   return (
     <div className="grid gap-6">
@@ -101,14 +216,89 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         </form>
       </section>
 
-      <AccountSettingsPanel
-        initialFullName={profile.full_name}
-        initialEmail={profile.email}
-      />
+      <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+        <div>
+          <h2 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
+            Your Pinned Instructions
+          </h2>
+          <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+            Quick-access instructions you&apos;ve pinned.
+          </p>
+        </div>
+        {pinnedError ? (
+          <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-200">
+            {pinnedError.message}
+          </p>
+        ) : pinnedInstructions.length === 0 ? (
+          <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+            No pinned instructions yet. Open an instruction and click the pin button.
+          </p>
+        ) : (
+          <div className="grid gap-2 md:grid-cols-2">
+            {pinnedInstructions.map((instruction) => (
+              <Link
+                key={instruction.id}
+                href={`/instructions/${instruction.id}`}
+                className="rounded-xl border border-slate-300/70 bg-white/70 p-3 transition hover:border-cyan-500 hover:bg-cyan-500/5 dark:border-slate-700 dark:bg-slate-950/70"
+              >
+                <p className="font-semibold">{instruction.title}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {instruction.workItem.item_title} | Part {instruction.workItem.part_number} | Mold{" "}
+                  {instruction.workItem.mold_number || "N/A"}
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Version {instruction.version} | Pinned{" "}
+                  {new Date(instruction.pinned_at).toLocaleDateString()}
+                </p>
+              </Link>
+            ))}
+          </div>
+        )}
+      </section>
 
-      {error ? (
+      <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+        <div>
+          <h2 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
+            Newest Work Instructions
+          </h2>
+          <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+            The latest 5 instructions created across the system.
+          </p>
+        </div>
+        {newestError ? (
+          <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-200">
+            {newestError.message}
+          </p>
+        ) : newestInstructions.length === 0 ? (
+          <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+            No instructions available yet.
+          </p>
+        ) : (
+          <div className="grid gap-2 md:grid-cols-2">
+            {newestInstructions.map((instruction) => (
+              <Link
+                key={instruction.id}
+                href={`/instructions/${instruction.id}`}
+                className="rounded-xl border border-slate-300/70 bg-white/70 p-3 transition hover:border-cyan-500 hover:bg-cyan-500/5 dark:border-slate-700 dark:bg-slate-950/70"
+              >
+                <p className="font-semibold">{instruction.title}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {instruction.workItem.item_title} | Part {instruction.workItem.part_number} | Mold{" "}
+                  {instruction.workItem.mold_number || "N/A"}
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Version {instruction.version} | Created{" "}
+                  {new Date(instruction.created_at).toLocaleDateString()}
+                </p>
+              </Link>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {searchError ? (
         <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-200">
-          {error.message}
+          {searchError.message}
         </p>
       ) : null}
 
