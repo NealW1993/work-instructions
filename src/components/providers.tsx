@@ -18,11 +18,19 @@ function initializePostHog() {
     return;
   }
 
-  posthog.init(clientEnv.NEXT_PUBLIC_POSTHOG_KEY, {
-    api_host: clientEnv.NEXT_PUBLIC_POSTHOG_HOST,
-    person_profiles: "identified_only",
-    capture_pageview: false,
-  });
+  try {
+    posthog.init(clientEnv.NEXT_PUBLIC_POSTHOG_KEY, {
+      api_host: clientEnv.NEXT_PUBLIC_POSTHOG_HOST,
+      person_profiles: "identified_only",
+      capture_pageview: true,
+      capture_pageleave: true,
+      autocapture: true,
+    });
+  } catch (error) {
+    // Prevent analytics setup failures from breaking the app shell.
+    console.error("PostHog initialization failed", error);
+    return;
+  }
 
   posthogInitialized = true;
 }

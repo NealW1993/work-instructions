@@ -290,10 +290,23 @@ PIN login endpoint verifies hashed PIN against `user_security.pin_hash`, then is
 
 Set:
 
-- `NEXT_PUBLIC_POSTHOG_KEY`
-- `NEXT_PUBLIC_POSTHOG_HOST` (default `https://us.i.posthog.com`)
+- `NEXT_PUBLIC_POSTHOG_KEY` = your PostHog **Project token** (`phc_...`)
+- `NEXT_PUBLIC_POSTHOG_HOST` = `https://us.i.posthog.com` (US Cloud) or `https://eu.i.posthog.com` (EU Cloud)
 
 If key is empty, PostHog is disabled automatically.
+
+What this app sends:
+
+- `$pageview` on route changes
+- `autocapture` browser interaction events
+- identified user profile on authenticated pages (`email`, `full_name`, `role`)
+
+Quick verification checklist:
+
+1. Start app and sign in.
+2. Open a few pages (`/dashboard`, `/instructions/new`, etc.).
+3. In PostHog, open **Product analytics -> Events** and filter for `$pageview`.
+4. In dashboard insights, choose event `$pageview` (or `All events`) and a recent time window.
 
 ## Scripts
 

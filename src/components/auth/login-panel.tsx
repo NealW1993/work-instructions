@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useState } from "react";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { normalizePin } from "@/lib/utils";
@@ -33,7 +33,6 @@ async function parseJsonResponse(response: Response) {
 export function LoginPanel() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
   const [mode, setMode] = useState<AuthMode>("password");
 
@@ -67,6 +66,7 @@ export function LoginPanel() {
     event.preventDefault();
 
     await withBusy(async () => {
+      const supabase = getSupabaseBrowserClient();
       const { error: loginError } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -85,6 +85,7 @@ export function LoginPanel() {
     event.preventDefault();
 
     await withBusy(async () => {
+      const supabase = getSupabaseBrowserClient();
       const response = await fetch("/api/auth/pin-login", {
         method: "POST",
         headers: {
@@ -119,6 +120,8 @@ export function LoginPanel() {
     event.preventDefault();
 
     await withBusy(async () => {
+      const supabase = getSupabaseBrowserClient();
+
       if (pin.length !== 6) {
         throw new Error("PIN must be exactly 6 digits.");
       }
