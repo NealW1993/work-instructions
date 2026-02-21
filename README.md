@@ -11,8 +11,7 @@ Internal work-instructions software built with React (Next.js), TypeScript, Supa
 - Authentication:
   - Email + password login (Supabase Auth passwords are hashed by Supabase)
   - 6-digit PIN login
-  - Password recovery by email reset link (SMTP/Mailpit)
-  - Password recovery by 6-digit PIN
+  - Password recovery tools inside Password tab (email reset link and PIN-based temporary password)
 - Work instruction data model:
   - Search by `Part Number` or `Mold Number`
   - Each part/mold work item can have multiple instructions
@@ -276,12 +275,9 @@ Two options:
 
 ## Password recovery
 
-- Email reset:
-  - User requests reset link from login page
-  - Route sends email via SMTP (Mailpit in local)
-  - User opens `/reset-password` link and sets new password
-- PIN reset:
-  - User enters email + PIN + new password directly on login page
+- From Password tab -> **Forgot password?**:
+  - Send reset link by email
+  - Or enter email + PIN to generate a temporary password (masked until revealed)
 
 ## PIN login design
 

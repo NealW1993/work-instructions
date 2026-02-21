@@ -1,0 +1,7 @@
+<svg width="1600" height="320" viewBox="0 0 1600 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="14" y="14" width="236" height="236" rx="52" stroke="white" stroke-width="20"/>
+  <rect x="63" y="63" width="138" height="138" rx="32" stroke="white" stroke-width="14"/>
+  <text x="288" y="172" fill="white" font-family="Segoe UI, Arial, sans-serif" font-size="184" font-weight="700" letter-spacing="8">OMNI</text>
+  <line x1="290" y1="210" x2="1586" y2="210" stroke="white" stroke-width="12"/>
+  <text x="86" y="304" fill="white" font-family="Segoe UI, Arial, sans-serif" font-size="128" font-weight="700" letter-spacing="5">TECHNOLOGIES</text>
+</svg>

@@ -1,21 +1,23 @@
 "use client";
 
+import { Eye, EyeOff } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 import { PinInput } from "@/components/ui/pin-input";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 
-type AuthMode = "password" | "pin" | "signup" | "recover_email" | "recover_pin";
+type AuthMode = "pin" | "password" | "signup";
 
 const MODES: Array<{ mode: AuthMode; label: string }> = [
   { mode: "pin", label: "PIN" },
   { mode: "password", label: "Password" },
   { mode: "signup", label: "Create Account" },
-  { mode: "recover_email", label: "Email Reset" },
-  { mode: "recover_pin", label: "PIN Reset" },
 ];
+
+const REMEMBER_EMAIL_KEY = "work_instructions_remembered_email";
 
 async function parseJsonResponse(response: Response) {
   const payload = (await response.json().catch(() => ({}))) as {
@@ -36,15 +38,39 @@ export function LoginPanel() {
 
   const [mode, setMode] = useState<AuthMode>("pin");
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [fullName, setFullName] = useState("");
-  const [pin, setPin] = useState("");
-  const [newPassword, setNewPassword] = useState("");
+  const [pinLoginValue, setPinLoginValue] = useState("");
+
+  const [passwordEmail, setPasswordEmail] = useState("");
+  const [passwordValue, setPasswordValue] = useState("");
+  const [rememberMe, setRememberMe] = useState(true);
+  const [showForgotTools, setShowForgotTools] = useState(false);
+
+  const [signupName, setSignupName] = useState("");
+  const [signupEmail, setSignupEmail] = useState("");
+  const [signupPassword, setSignupPassword] = useState("");
+  const [signupPasswordConfirm, setSignupPasswordConfirm] = useState("");
+  const [signupPin, setSignupPin] = useState("");
+  const [signupPinConfirm, setSignupPinConfirm] = useState("");
+
+  const [recoveryEmail, setRecoveryEmail] = useState("");
+  const [recoveryPin, setRecoveryPin] = useState("");
+  const [temporaryPassword, setTemporaryPassword] = useState("");
+  const [showTemporaryPassword, setShowTemporaryPassword] = useState(false);
 
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const savedEmail = window.localStorage.getItem(REMEMBER_EMAIL_KEY);
+    if (savedEmail) {
+      setPasswordEmail(savedEmail);
+      setRememberMe(true);
+      setRecoveryEmail(savedEmail);
+    } else {
+      setRememberMe(false);
+    }
+  }, []);
 
   async function withBusy(action: () => Promise<void>) {
     setBusy(true);
@@ -62,18 +88,30 @@ export function LoginPanel() {
     }
   }
 
+  function getRecoveryEmail() {
+    return (recoveryEmail || passwordEmail).trim().toLowerCase();
+  }
+
   async function handlePasswordLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     await withBusy(async () => {
       const supabase = getSupabaseBrowserClient();
+      const normalizedEmail = passwordEmail.trim().toLowerCase();
+
       const { error: loginError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+        email: normalizedEmail,
+        password: passwordValue,
       });
 
       if (loginError) {
         throw new Error(loginError.message);
+      }
+
+      if (rememberMe) {
+        window.localStorage.setItem(REMEMBER_EMAIL_KEY, normalizedEmail);
+      } else {
+        window.localStorage.removeItem(REMEMBER_EMAIL_KEY);
       }
 
       router.push("/dashboard");
@@ -92,7 +130,7 @@ export function LoginPanel() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          pin,
+          pin: pinLoginValue,
         }),
       });
 
@@ -122,23 +160,33 @@ export function LoginPanel() {
     await withBusy(async () => {
       const supabase = getSupabaseBrowserClient();
 
-      if (pin.length !== 6) {
+      if (signupPassword !== signupPasswordConfirm) {
+        throw new Error("Password and Confirm Password must match.");
+      }
+
+      if (signupPin !== signupPinConfirm) {
+        throw new Error("PIN and Confirm PIN must match.");
+      }
+
+      if (signupPin.length !== 6) {
         throw new Error("PIN must be exactly 6 digits.");
       }
 
       const { data, error: signupError } = await supabase.auth.signUp({
-        email,
-        password,
+        email: signupEmail.trim().toLowerCase(),
+        password: signupPassword,
         options: {
           data: {
-            full_name: fullName,
+            full_name: signupName,
           },
         },
       });
 
       if (signupError) {
         if (signupError.message.toLowerCase().includes("already registered")) {
-          setMessage("That account already exists. Use PIN login or reset your password.");
+          setMessage(
+            "That account already exists. Use PIN login or Password -> Forgot password.",
+          );
           setMode("pin");
           return;
         }
@@ -147,7 +195,7 @@ export function LoginPanel() {
 
       if (data.session) {
         const { error: pinError } = await supabase.rpc("set_my_pin", {
-          new_pin: pin,
+          new_pin: signupPin,
         });
 
         if (pinError) {
@@ -178,54 +226,80 @@ export function LoginPanel() {
     });
   }
 
-  async function handleEmailResetRequest(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
+  async function sendEmailResetLink() {
     await withBusy(async () => {
+      const normalizedEmail = getRecoveryEmail();
+      if (!normalizedEmail) {
+        throw new Error("Enter an email to send a reset link.");
+      }
+
       const response = await fetch("/api/auth/request-password-reset", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email: normalizedEmail }),
       });
 
       await parseJsonResponse(response);
+      setRecoveryEmail(normalizedEmail);
       setMessage("If the account exists, a reset link was sent.");
     });
   }
 
-  async function handlePinReset(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
+  async function generateTemporaryPassword() {
     await withBusy(async () => {
-      const response = await fetch("/api/auth/pin-reset", {
+      const normalizedEmail = getRecoveryEmail();
+      if (!normalizedEmail) {
+        throw new Error("Enter an email before using PIN recovery.");
+      }
+
+      if (recoveryPin.length !== 6) {
+        throw new Error("Enter a valid 6-digit PIN.");
+      }
+
+      const response = await fetch("/api/auth/recover-password-by-pin", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          email,
-          pin,
-          newPassword,
+          email: normalizedEmail,
+          pin: recoveryPin,
         }),
       });
 
-      await parseJsonResponse(response);
-      setMessage("Password was reset. You can now sign in with your new password.");
-      setMode("pin");
+      const payload = (await parseJsonResponse(response)) as {
+        temporaryPassword: string;
+      };
+
+      setTemporaryPassword(payload.temporaryPassword);
+      setShowTemporaryPassword(false);
+      setPasswordEmail(normalizedEmail);
+      setPasswordValue(payload.temporaryPassword);
+      setMode("password");
+      setMessage(
+        "Temporary password generated. Sign in with it, then change your password.",
+      );
     });
   }
 
   return (
     <div className="grid gap-6 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/75 md:p-8">
       <div className="space-y-3">
+        <Image
+          src="/omni-technologies-logo.svg"
+          alt="OMNI Technologies"
+          width={420}
+          height={100}
+          priority
+          className="h-10 w-auto opacity-95"
+        />
         <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
           Work Instructions
         </h1>
         <p className="text-sm text-slate-600 dark:text-slate-300">
-          Sign in fast with your 6-digit PIN. Password login is still available,
-          plus reset link and PIN reset recovery.
+          Sign in fast with your 6-digit PIN. Password login is still available.
         </p>
         <div className="flex flex-wrap gap-2">
           {MODES.map((item) => (
@@ -262,46 +336,14 @@ export function LoginPanel() {
         </p>
       ) : null}
 
-      {mode === "password" ? (
-        <form className="grid gap-3" onSubmit={handlePasswordLogin}>
-          <label className="grid gap-1 text-sm">
-            <span>Email</span>
-            <input
-              required
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-            />
-          </label>
-          <label className="grid gap-1 text-sm">
-            <span>Password</span>
-            <input
-              required
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-            />
-          </label>
-          <button
-            type="submit"
-            disabled={busy}
-            className="mt-1 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            {busy ? "Signing in..." : "Sign In"}
-          </button>
-        </form>
-      ) : null}
-
       {mode === "pin" ? (
         <form className="grid gap-3" onSubmit={handlePinLogin}>
           <label className="grid gap-1 text-sm">
             <span>6-Digit PIN</span>
             <PinInput
               required
-              value={pin}
-              onChange={setPin}
+              value={pinLoginValue}
+              onChange={setPinLoginValue}
               className="tracking-[0.35em]"
             />
           </label>
@@ -315,14 +357,147 @@ export function LoginPanel() {
         </form>
       ) : null}
 
+      {mode === "password" ? (
+        <form className="grid gap-3" onSubmit={handlePasswordLogin}>
+          <label className="grid gap-1 text-sm">
+            <span>Email</span>
+            <input
+              required
+              type="email"
+              value={passwordEmail}
+              onChange={(event) => setPasswordEmail(event.target.value)}
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+            />
+          </label>
+          <label className="grid gap-1 text-sm">
+            <span>Password</span>
+            <input
+              required
+              type="password"
+              value={passwordValue}
+              onChange={(event) => setPasswordValue(event.target.value)}
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+            />
+          </label>
+
+          <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-300">
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(event) => setRememberMe(event.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 accent-cyan-500 dark:border-slate-600"
+              />
+              <span>Remember me</span>
+            </label>
+            <button
+              type="button"
+              onClick={() => setShowForgotTools((current) => !current)}
+              className="font-semibold underline underline-offset-2 transition hover:text-cyan-600 dark:hover:text-cyan-300"
+            >
+              {showForgotTools ? "Hide forgot tools" : "Forgot password?"}
+            </button>
+          </div>
+
+          <button
+            type="submit"
+            disabled={busy}
+            className="mt-1 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {busy ? "Signing in..." : "Sign In"}
+          </button>
+
+          {showForgotTools ? (
+            <div className="mt-1 grid gap-3 rounded-2xl border border-white/20 bg-slate-900/30 p-3 text-sm">
+              <p className="text-xs text-slate-300">
+                Enter your email to send a reset link, or enter email + PIN to
+                generate a temporary password you can reveal.
+              </p>
+              <label className="grid gap-1 text-sm">
+                <span>Recovery Email</span>
+                <input
+                  type="email"
+                  value={recoveryEmail}
+                  onChange={(event) => setRecoveryEmail(event.target.value)}
+                  placeholder={passwordEmail || "you@company.com"}
+                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void sendEmailResetLink()}
+                disabled={busy}
+                className="rounded-xl border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                Send reset link
+              </button>
+
+              <div className="h-px bg-white/15" />
+
+              <label className="grid gap-1 text-sm">
+                <span>6-Digit PIN</span>
+                <PinInput
+                  value={recoveryPin}
+                  onChange={setRecoveryPin}
+                  className="tracking-[0.35em]"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void generateTemporaryPassword()}
+                disabled={busy}
+                className="rounded-xl border border-cyan-400/40 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                Get temporary password
+              </button>
+
+              {temporaryPassword ? (
+                <label className="grid gap-1 text-sm">
+                  <span>Temporary Password</span>
+                  <div className="relative">
+                    <input
+                      readOnly
+                      type={showTemporaryPassword ? "text" : "password"}
+                      value={temporaryPassword}
+                      className="w-full rounded-xl border border-slate-500/50 bg-slate-900/70 px-3 py-2 pr-11 text-slate-100"
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setShowTemporaryPassword((current) => !current)
+                      }
+                      aria-label={
+                        showTemporaryPassword
+                          ? "Hide temporary password"
+                          : "Show temporary password"
+                      }
+                      className="absolute inset-y-0 right-2 flex items-center rounded-md px-1.5 text-slate-400 transition hover:text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500"
+                    >
+                      {showTemporaryPassword ? (
+                        <EyeOff size={16} aria-hidden="true" />
+                      ) : (
+                        <Eye size={16} aria-hidden="true" />
+                      )}
+                    </button>
+                  </div>
+                  <span className="text-xs text-slate-400">
+                    Sign in with this password, then change it immediately.
+                  </span>
+                </label>
+              ) : null}
+            </div>
+          ) : null}
+        </form>
+      ) : null}
+
       {mode === "signup" ? (
         <form className="grid gap-3" onSubmit={handleSignup}>
           <label className="grid gap-1 text-sm">
             <span>Full Name</span>
             <input
               required
-              value={fullName}
-              onChange={(event) => setFullName(event.target.value)}
+              value={signupName}
+              onChange={(event) => setSignupName(event.target.value)}
               className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
             />
           </label>
@@ -331,8 +506,8 @@ export function LoginPanel() {
             <input
               required
               type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
+              value={signupEmail}
+              onChange={(event) => setSignupEmail(event.target.value)}
               className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
             />
           </label>
@@ -342,8 +517,19 @@ export function LoginPanel() {
               required
               minLength={8}
               type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
+              value={signupPassword}
+              onChange={(event) => setSignupPassword(event.target.value)}
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+            />
+          </label>
+          <label className="grid gap-1 text-sm">
+            <span>Confirm Password</span>
+            <input
+              required
+              minLength={8}
+              type="password"
+              value={signupPasswordConfirm}
+              onChange={(event) => setSignupPasswordConfirm(event.target.value)}
               className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
             />
           </label>
@@ -351,8 +537,17 @@ export function LoginPanel() {
             <span>6-Digit PIN</span>
             <PinInput
               required
-              value={pin}
-              onChange={setPin}
+              value={signupPin}
+              onChange={setSignupPin}
+              className="tracking-[0.35em]"
+            />
+          </label>
+          <label className="grid gap-1 text-sm">
+            <span>Confirm PIN</span>
+            <PinInput
+              required
+              value={signupPinConfirm}
+              onChange={setSignupPinConfirm}
               className="tracking-[0.35em]"
             />
           </label>
@@ -367,70 +562,6 @@ export function LoginPanel() {
             New accounts are created as <strong>user</strong> by default.
             System admin can promote roles in User Admin.
           </p>
-        </form>
-      ) : null}
-
-      {mode === "recover_email" ? (
-        <form className="grid gap-3" onSubmit={handleEmailResetRequest}>
-          <label className="grid gap-1 text-sm">
-            <span>Email</span>
-            <input
-              required
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-            />
-          </label>
-          <button
-            type="submit"
-            disabled={busy}
-            className="mt-1 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            {busy ? "Sending..." : "Send reset link"}
-          </button>
-        </form>
-      ) : null}
-
-      {mode === "recover_pin" ? (
-        <form className="grid gap-3" onSubmit={handlePinReset}>
-          <label className="grid gap-1 text-sm">
-            <span>Email</span>
-            <input
-              required
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-            />
-          </label>
-          <label className="grid gap-1 text-sm">
-            <span>6-Digit PIN</span>
-            <PinInput
-              required
-              value={pin}
-              onChange={setPin}
-              className="tracking-[0.35em]"
-            />
-          </label>
-          <label className="grid gap-1 text-sm">
-            <span>New Password</span>
-            <input
-              required
-              type="password"
-              minLength={8}
-              value={newPassword}
-              onChange={(event) => setNewPassword(event.target.value)}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-            />
-          </label>
-          <button
-            type="submit"
-            disabled={busy}
-            className="mt-1 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            {busy ? "Resetting..." : "Reset with PIN"}
-          </button>
         </form>
       ) : null}
 
