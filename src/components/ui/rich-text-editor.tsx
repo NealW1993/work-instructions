@@ -84,6 +84,8 @@ interface RichTextEditorProps {
   onChange: (value: string) => void;
   placeholder?: string;
   minHeightClassName?: string;
+  hasError?: boolean;
+  focusRequestKey?: number;
 }
 
 interface ToolbarButtonProps {
@@ -636,6 +638,8 @@ export function RichTextEditor({
   onChange,
   placeholder,
   minHeightClassName = "min-h-52",
+  hasError = false,
+  focusRequestKey = 0,
 }: RichTextEditorProps) {
   const [, setToolbarRefreshCounter] = useState(0);
   const [toolbarMessage, setToolbarMessage] = useState<string | null>(null);
@@ -687,6 +691,9 @@ export function RichTextEditor({
         attributes: {
           class: cn(
             "tiptap-editor-content w-full max-w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 dark:border-slate-700 dark:bg-slate-950 resize-y overflow-auto",
+            hasError
+              ? "border-rose-500 ring-2 ring-rose-500/30 focus:border-rose-500 focus:ring-rose-500/30"
+              : "",
             minHeightClassName,
           ),
         },
@@ -699,7 +706,7 @@ export function RichTextEditor({
       onFocus: refreshToolbarState,
       onBlur: refreshToolbarState,
     },
-    [extensions, minHeightClassName, refreshToolbarState],
+    [extensions, hasError, minHeightClassName, refreshToolbarState],
   );
 
   useEffect(() => {
@@ -712,6 +719,16 @@ export function RichTextEditor({
       editor.commands.setContent(value || "", { emitUpdate: false });
     }
   }, [editor, value]);
+
+  useEffect(() => {
+    if (!editor) {
+      return;
+    }
+
+    if (focusRequestKey > 0) {
+      editor.commands.focus("end");
+    }
+  }, [editor, focusRequestKey]);
 
   useEffect(() => {
     if (!editor) {
@@ -795,6 +812,7 @@ export function RichTextEditor({
         <div
           className={cn(
             "rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950",
+            hasError ? "border-rose-500 ring-2 ring-rose-500/30" : "",
             minHeightClassName,
           )}
         />
@@ -852,7 +870,12 @@ export function RichTextEditor({
     <div className="grid min-w-0 gap-1 text-sm">
       <span className="font-semibold">{label}</span>
 
-      <div className="flex w-full max-w-full min-w-0 flex-wrap items-center gap-1 overflow-x-auto rounded-xl border border-slate-300 bg-slate-100/70 p-2 dark:border-slate-700 dark:bg-slate-900/60">
+      <div
+        className={cn(
+          "flex w-full max-w-full min-w-0 flex-wrap items-center gap-1 overflow-x-auto rounded-xl border border-slate-300 bg-slate-100/70 p-2 dark:border-slate-700 dark:bg-slate-900/60",
+          hasError ? "border-rose-500" : "",
+        )}
+      >
         <ToolbarButton
           ariaLabel="Bold"
           onClick={() => runAndRefresh(() => editor.chain().focus().toggleBold().run())}

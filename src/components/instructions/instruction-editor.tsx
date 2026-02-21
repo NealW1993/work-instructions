@@ -1,12 +1,12 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, UploadCloud } from "lucide-react";
 
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
-import { escapeLikeQuery } from "@/lib/utils";
+import { cn, escapeLikeQuery } from "@/lib/utils";
 
 interface InstructionEditorProps {
   mode: "create" | "edit";
@@ -27,6 +27,18 @@ interface WorkItemSearchResult {
   mold_number: string;
   item_title: string;
 }
+
+interface FieldErrors {
+  partOrMold: boolean;
+  itemTitle: boolean;
+  body: boolean;
+}
+
+const DEFAULT_FIELD_ERRORS: FieldErrors = {
+  partOrMold: false,
+  itemTitle: false,
+  body: false,
+};
 
 function looksLikeHtml(value: string): boolean {
   return /<\/?[a-z][\s\S]*>/i.test(value);
@@ -85,18 +97,22 @@ function summarizePartMold(partNumber: string, moldNumber: string) {
   return part || mold || "";
 }
 
+function normalizeSubmissionError(error: unknown) {
+  return error instanceof Error ? error.message : "Save failed";
+}
+
 export function InstructionEditor({ mode, initialData }: InstructionEditorProps) {
   const router = useRouter();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
   const [partNumber, setPartNumber] = useState(initialData?.partNumber ?? "");
   const [moldNumber, setMoldNumber] = useState(initialData?.moldNumber ?? "");
-  const [partOrMoldSearch, setPartOrMoldSearch] = useState(
-    summarizePartMold(initialData?.partNumber ?? "", initialData?.moldNumber ?? ""),
-  );
-  const [matchedWorkItems, setMatchedWorkItems] = useState<WorkItemSearchResult[]>([]);
-  const [searchBusy, setSearchBusy] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
+  const [partSuggestions, setPartSuggestions] = useState<WorkItemSearchResult[]>([]);
+  const [moldSuggestions, setMoldSuggestions] = useState<WorkItemSearchResult[]>([]);
+  const [partSearchBusy, setPartSearchBusy] = useState(false);
+  const [moldSearchBusy, setMoldSearchBusy] = useState(false);
+  const [partSearchOpen, setPartSearchOpen] = useState(false);
+  const [moldSearchOpen, setMoldSearchOpen] = useState(false);
 
   const [workItemId, setWorkItemId] = useState<string | null>(
     initialData?.workItemId ?? null,
@@ -106,28 +122,34 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     normalizeEditorContent(initialData?.bodyMarkdown ?? ""),
   );
   const [revision, setRevision] = useState(initialData?.revision ?? 1);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>(DEFAULT_FIELD_ERRORS);
+  const [bodyFocusRequestKey, setBodyFocusRequestKey] = useState(0);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const partInputRef = useRef<HTMLInputElement | null>(null);
+  const moldInputRef = useRef<HTMLInputElement | null>(null);
+  const itemTitleInputRef = useRef<HTMLInputElement | null>(null);
+
   useEffect(() => {
-    const trimmedQuery = partOrMoldSearch.trim();
-    if (trimmedQuery.length < 2) {
-      setMatchedWorkItems([]);
-      setSearchBusy(false);
+    const query = partNumber.trim();
+    if (query.length < 2) {
+      setPartSuggestions([]);
+      setPartSearchBusy(false);
       return;
     }
 
     let isActive = true;
-    const timer = setTimeout(() => {
+    const timer = window.setTimeout(() => {
       void (async () => {
-        setSearchBusy(true);
+        setPartSearchBusy(true);
         try {
-          const safeQuery = escapeLikeQuery(trimmedQuery);
+          const safeQuery = escapeLikeQuery(query);
           const { data, error: searchError } = await supabase
             .from("work_items")
             .select("id, part_number, mold_number, item_title")
-            .or(`part_number.ilike.%${safeQuery}%,mold_number.ilike.%${safeQuery}%`)
+            .ilike("part_number", `%${safeQuery}%`)
             .order("updated_at", { ascending: false })
             .limit(8);
 
@@ -139,36 +161,97 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
             throw searchError;
           }
 
-          setMatchedWorkItems((data ?? []) as WorkItemSearchResult[]);
-          setSearchOpen(true);
+          setPartSuggestions((data ?? []) as WorkItemSearchResult[]);
         } catch {
           if (!isActive) {
             return;
           }
 
-          setMatchedWorkItems([]);
+          setPartSuggestions([]);
         } finally {
           if (isActive) {
-            setSearchBusy(false);
+            setPartSearchBusy(false);
           }
         }
       })();
-    }, 220);
+    }, 200);
 
     return () => {
       isActive = false;
-      clearTimeout(timer);
+      window.clearTimeout(timer);
     };
-  }, [partOrMoldSearch, supabase]);
+  }, [partNumber, supabase]);
 
-  function handleSelectWorkItem(result: WorkItemSearchResult) {
+  useEffect(() => {
+    const query = moldNumber.trim();
+    if (query.length < 2) {
+      setMoldSuggestions([]);
+      setMoldSearchBusy(false);
+      return;
+    }
+
+    let isActive = true;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        setMoldSearchBusy(true);
+        try {
+          const safeQuery = escapeLikeQuery(query);
+          const { data, error: searchError } = await supabase
+            .from("work_items")
+            .select("id, part_number, mold_number, item_title")
+            .ilike("mold_number", `%${safeQuery}%`)
+            .order("updated_at", { ascending: false })
+            .limit(8);
+
+          if (!isActive) {
+            return;
+          }
+
+          if (searchError) {
+            throw searchError;
+          }
+
+          setMoldSuggestions((data ?? []) as WorkItemSearchResult[]);
+        } catch {
+          if (!isActive) {
+            return;
+          }
+
+          setMoldSuggestions([]);
+        } finally {
+          if (isActive) {
+            setMoldSearchBusy(false);
+          }
+        }
+      })();
+    }, 200);
+
+    return () => {
+      isActive = false;
+      window.clearTimeout(timer);
+    };
+  }, [moldNumber, supabase]);
+
+  function applySuggestedWorkItem(result: WorkItemSearchResult) {
     setPartNumber(result.part_number);
     setMoldNumber(result.mold_number);
     setItemTitle(result.item_title);
     setWorkItemId(result.id);
-    setPartOrMoldSearch(summarizePartMold(result.part_number, result.mold_number));
-    setMatchedWorkItems([]);
-    setSearchOpen(false);
+    setPartSearchOpen(false);
+    setMoldSearchOpen(false);
+    setFieldErrors((current) => ({
+      ...current,
+      partOrMold: false,
+      itemTitle: false,
+    }));
+  }
+
+  function setPartOrMoldErrorAndFocus() {
+    setFieldErrors((current) => ({
+      ...current,
+      partOrMold: true,
+    }));
+    partInputRef.current?.focus();
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -177,23 +260,41 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     setBusy(true);
     setMessage(null);
     setError(null);
+    setFieldErrors(DEFAULT_FIELD_ERRORS);
+
+    const normalizedPartNumber = partNumber.trim();
+    const normalizedMoldNumber = moldNumber.trim();
+
+    if (!normalizedPartNumber && !normalizedMoldNumber) {
+      setPartOrMoldErrorAndFocus();
+      setError("Part # or Mold # is required.");
+      setBusy(false);
+      return;
+    }
+
+    if (!itemTitle.trim()) {
+      setFieldErrors((current) => ({
+        ...current,
+        itemTitle: true,
+      }));
+      setError("Work item title is required.");
+      itemTitleInputRef.current?.focus();
+      setBusy(false);
+      return;
+    }
+
+    if (!richTextToPlain(bodyMarkdown)) {
+      setFieldErrors((current) => ({
+        ...current,
+        body: true,
+      }));
+      setError("Instruction steps are required.");
+      setBodyFocusRequestKey((current) => current + 1);
+      setBusy(false);
+      return;
+    }
 
     try {
-      const normalizedPartNumber = partNumber.trim();
-      const normalizedMoldNumber = moldNumber.trim();
-
-      if (!normalizedPartNumber && !normalizedMoldNumber) {
-        throw new Error("Part # or Mold # is required.");
-      }
-
-      if (!itemTitle.trim()) {
-        throw new Error("Work item title is required.");
-      }
-
-      if (!richTextToPlain(bodyMarkdown)) {
-        throw new Error("Instruction steps are required.");
-      }
-
       const {
         data: { user },
         error: userError,
@@ -285,9 +386,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       router.push(`/instructions/${instructionId}`);
       router.refresh();
     } catch (caughtError) {
-      const normalizedMessage =
-        caughtError instanceof Error ? caughtError.message : "Save failed";
-      setError(normalizedMessage);
+      setError(normalizeSubmissionError(caughtError));
     } finally {
       setBusy(false);
     }
@@ -310,52 +409,64 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         onSubmit={handleSubmit}
         className="grid min-w-0 gap-4 overflow-hidden rounded-3xl border border-white/30 bg-white/75 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7"
       >
-        <div className="grid gap-2">
+        <div className="grid gap-3 md:grid-cols-2">
           <label className="grid gap-1 text-sm">
-            <span className="font-semibold">Mold # or Part #</span>
+            <span className="font-semibold">Part #</span>
             <div className="relative">
               <input
-                value={partOrMoldSearch}
-                placeholder="Type a part # or mold # to find existing records"
+                ref={partInputRef}
+                value={partNumber}
+                placeholder="Example: PART-123"
                 onFocus={() => {
-                  if (matchedWorkItems.length > 0) {
-                    setSearchOpen(true);
+                  if (partSuggestions.length > 0) {
+                    setPartSearchOpen(true);
                   }
                 }}
                 onBlur={() => {
-                  window.setTimeout(() => setSearchOpen(false), 120);
+                  window.setTimeout(() => setPartSearchOpen(false), 120);
                 }}
                 onChange={(event) => {
-                  setPartOrMoldSearch(event.target.value);
-                  setSearchOpen(true);
+                  setPartNumber(event.target.value);
+                  setPartSearchOpen(true);
+                  setWorkItemId(null);
+                  if (fieldErrors.partOrMold) {
+                    setFieldErrors((current) => ({
+                      ...current,
+                      partOrMold: false,
+                    }));
+                  }
                 }}
-                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                className={cn(
+                  "rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950",
+                  fieldErrors.partOrMold ? "border-rose-500 ring-2 ring-rose-500/30" : "",
+                )}
               />
-              {searchOpen ? (
+              {partSearchOpen ? (
                 <div className="absolute left-0 right-0 top-[calc(100%+0.4rem)] z-20 max-h-60 overflow-auto rounded-xl border border-slate-300 bg-white/95 p-1 shadow-xl backdrop-blur dark:border-slate-700 dark:bg-slate-950/95">
-                  {searchBusy ? (
+                  {partSearchBusy ? (
                     <p className="px-2 py-2 text-xs text-slate-500 dark:text-slate-300">
                       Searching...
                     </p>
-                  ) : matchedWorkItems.length === 0 ? (
+                  ) : partSuggestions.length === 0 ? (
                     <p className="px-2 py-2 text-xs text-slate-500 dark:text-slate-300">
-                      No matches yet.
+                      No part matches.
                     </p>
                   ) : (
-                    matchedWorkItems.map((result) => (
+                    partSuggestions.map((result) => (
                       <button
                         key={result.id}
                         type="button"
                         onMouseDown={(event) => {
                           event.preventDefault();
-                          handleSelectWorkItem(result);
+                          applySuggestedWorkItem(result);
                         }}
                         className="grid w-full gap-0.5 rounded-lg px-2 py-1.5 text-left text-xs transition hover:bg-cyan-500/10"
                       >
                         <span className="font-semibold text-slate-800 dark:text-slate-100">
-                          {summarizePartMold(result.part_number, result.mold_number)}
+                          {result.part_number}
                         </span>
                         <span className="text-slate-500 dark:text-slate-300">
+                          {summarizePartMold(result.part_number, result.mold_number)} |{" "}
                           {result.item_title}
                         </span>
                       </button>
@@ -365,48 +476,96 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
               ) : null}
             </div>
           </label>
-          <p className="text-xs text-slate-500 dark:text-slate-300">
-            Selecting a match autofills the part, mold, and work item title.
-          </p>
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="grid gap-1 text-sm">
-              <span className="font-semibold">Part #</span>
+
+          <label className="grid gap-1 text-sm">
+            <span className="font-semibold">Mold #</span>
+            <div className="relative">
               <input
-                value={partNumber}
-                placeholder="Example: PART-123"
-                onChange={(event) => {
-                  setPartNumber(event.target.value);
-                  setWorkItemId(null);
-                }}
-                className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-              />
-            </label>
-            <label className="grid gap-1 text-sm">
-              <span className="font-semibold">Mold #</span>
-              <input
+                ref={moldInputRef}
                 value={moldNumber}
                 placeholder="Example: MOLD-4"
+                onFocus={() => {
+                  if (moldSuggestions.length > 0) {
+                    setMoldSearchOpen(true);
+                  }
+                }}
+                onBlur={() => {
+                  window.setTimeout(() => setMoldSearchOpen(false), 120);
+                }}
                 onChange={(event) => {
                   setMoldNumber(event.target.value);
+                  setMoldSearchOpen(true);
                   setWorkItemId(null);
+                  if (fieldErrors.partOrMold) {
+                    setFieldErrors((current) => ({
+                      ...current,
+                      partOrMold: false,
+                    }));
+                  }
                 }}
-                className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                className={cn(
+                  "rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950",
+                  fieldErrors.partOrMold ? "border-rose-500 ring-2 ring-rose-500/30" : "",
+                )}
               />
-            </label>
-          </div>
+              {moldSearchOpen ? (
+                <div className="absolute left-0 right-0 top-[calc(100%+0.4rem)] z-20 max-h-60 overflow-auto rounded-xl border border-slate-300 bg-white/95 p-1 shadow-xl backdrop-blur dark:border-slate-700 dark:bg-slate-950/95">
+                  {moldSearchBusy ? (
+                    <p className="px-2 py-2 text-xs text-slate-500 dark:text-slate-300">
+                      Searching...
+                    </p>
+                  ) : moldSuggestions.length === 0 ? (
+                    <p className="px-2 py-2 text-xs text-slate-500 dark:text-slate-300">
+                      No mold matches.
+                    </p>
+                  ) : (
+                    moldSuggestions.map((result) => (
+                      <button
+                        key={result.id}
+                        type="button"
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          applySuggestedWorkItem(result);
+                        }}
+                        className="grid w-full gap-0.5 rounded-lg px-2 py-1.5 text-left text-xs transition hover:bg-cyan-500/10"
+                      >
+                        <span className="font-semibold text-slate-800 dark:text-slate-100">
+                          {result.mold_number || "N/A"}
+                        </span>
+                        <span className="text-slate-500 dark:text-slate-300">
+                          {summarizePartMold(result.part_number, result.mold_number)} |{" "}
+                          {result.item_title}
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              ) : null}
+            </div>
+          </label>
         </div>
 
         <label className="grid gap-1 text-sm">
           <span className="font-semibold">Work Item Title</span>
           <input
+            ref={itemTitleInputRef}
             required
             placeholder="Example: Daily Setup Sequence"
             value={itemTitle}
             onChange={(event) => {
               setItemTitle(event.target.value);
               setWorkItemId(null);
+              if (fieldErrors.itemTitle) {
+                setFieldErrors((current) => ({
+                  ...current,
+                  itemTitle: false,
+                }));
+              }
             }}
-            className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+            className={cn(
+              "rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950",
+              fieldErrors.itemTitle ? "border-rose-500 ring-2 ring-rose-500/30" : "",
+            )}
           />
         </label>
 
@@ -425,9 +584,19 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         <RichTextEditor
           label="Work Instructions (Rich Text)"
           value={bodyMarkdown}
-          onChange={setBodyMarkdown}
+          onChange={(nextValue) => {
+            setBodyMarkdown(nextValue);
+            if (fieldErrors.body && richTextToPlain(nextValue)) {
+              setFieldErrors((current) => ({
+                ...current,
+                body: false,
+              }));
+            }
+          }}
           placeholder="Type work instructions here. Use toolbar buttons for formatting and inline media."
           minHeightClassName="min-h-72"
+          hasError={fieldErrors.body}
+          focusRequestKey={bodyFocusRequestKey}
         />
 
         <button
