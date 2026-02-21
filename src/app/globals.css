@@ -1,7 +1,8 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --background: #f3f7ff;
+  --background: #eef4ff;
   --surface: #ffffffcc;
   --surface-strong: #ffffff;
   --foreground: #0f172a;
@@ -38,14 +39,30 @@ body {
   min-height: 100%;
 }
 
+html {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
 body {
+  background:
+    radial-gradient(circle at 12% 14%, rgba(14, 165, 233, 0.11) 0%, transparent 46%),
+    radial-gradient(circle at 86% 10%, rgba(37, 99, 235, 0.09) 0%, transparent 38%),
+    linear-gradient(180deg, #f7fbff 0%, #edf4ff 100%),
+    var(--background);
+  color: var(--foreground);
+  font-family: var(--font-body), "Segoe UI", sans-serif;
+}
+
+.dark body {
   background:
     radial-gradient(circle at 10% 15%, rgba(14, 165, 233, 0.2) 0%, transparent 45%),
     radial-gradient(circle at 85% 10%, rgba(37, 99, 235, 0.17) 0%, transparent 35%),
     radial-gradient(circle at 20% 85%, rgba(6, 182, 212, 0.13) 0%, transparent 40%),
     var(--background);
-  color: var(--foreground);
-  font-family: var(--font-body), "Segoe UI", sans-serif;
 }
 
 h1,
@@ -113,6 +130,44 @@ h6 {
   border-left: 3px solid color-mix(in oklab, var(--ring) 80%, transparent);
   padding-left: 0.75rem;
   color: var(--muted);
+}
+
+html:not(.dark) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]),
+html:not(.dark) textarea,
+html:not(.dark) select {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+html:not(.dark) h1,
+html:not(.dark) h2,
+html:not(.dark) h3,
+html:not(.dark) h4,
+html:not(.dark) h5,
+html:not(.dark) h6 {
+  color: #0f172a !important;
+}
+
+html:not(.dark) label,
+html:not(.dark) legend {
+  color: #0f172a !important;
+}
+
+html:not(.dark) input::placeholder,
+html:not(.dark) textarea::placeholder {
+  color: #64748b !important;
+}
+
+html:not(.dark) input:-webkit-autofill,
+html:not(.dark) input:-webkit-autofill:hover,
+html:not(.dark) input:-webkit-autofill:focus,
+html:not(.dark) textarea:-webkit-autofill,
+html:not(.dark) textarea:-webkit-autofill:hover,
+html:not(.dark) textarea:-webkit-autofill:focus {
+  -webkit-text-fill-color: #0f172a !important;
+  box-shadow: 0 0 0 1000px #ffffff inset !important;
+  caret-color: #0f172a !important;
+  transition: background-color 9999s ease-in-out 0s;
 }
 
 .tiptap-editor-content.ProseMirror {

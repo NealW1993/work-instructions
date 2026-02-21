@@ -23,10 +23,16 @@ export function AccountSettingsPanel({
   const { setTheme } = useTheme();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
+  const [savedFullName, setSavedFullName] = useState(initialFullName);
+  const [savedEmail, setSavedEmail] = useState(initialEmail.toLowerCase());
+  const [savedThemePreference, setSavedThemePreference] =
+    useState<ThemePreference>(initialThemePreference);
+
   const [fullName, setFullName] = useState(initialFullName);
   const [email, setEmail] = useState(initialEmail);
   const [themePreference, setThemePreference] =
     useState<ThemePreference>(initialThemePreference);
+  const [wantsPasswordChange, setWantsPasswordChange] = useState(false);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -39,13 +45,22 @@ export function AccountSettingsPanel({
   const normalizedFullName = fullName.trim();
   const normalizedEmail = email.trim().toLowerCase();
   const passwordMismatch =
-    confirmPassword.length > 0 && password !== confirmPassword;
+    wantsPasswordChange && confirmPassword.length > 0 && password !== confirmPassword;
+  const fullNameChanged = normalizedFullName !== savedFullName;
+  const emailChanged = normalizedEmail !== savedEmail;
+  const themeChanged = themePreference !== savedThemePreference;
+  const passwordChanged = wantsPasswordChange && password.length > 0;
 
   const hasChanges =
-    normalizedFullName !== initialFullName ||
-    normalizedEmail !== initialEmail.toLowerCase() ||
-    themePreference !== initialThemePreference ||
-    password.length > 0;
+    fullNameChanged ||
+    emailChanged ||
+    themeChanged ||
+    passwordChanged;
+
+  function applyThemeSelection(nextTheme: ThemePreference) {
+    setThemePreference(nextTheme);
+    setTheme(nextTheme);
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -66,7 +81,7 @@ export function AccountSettingsPanel({
         throw new Error("Email cannot be empty.");
       }
 
-      if (password || confirmPassword) {
+      if (wantsPasswordChange) {
         if (password.length < 8) {
           throw new Error("Password must be at least 8 characters.");
         }
@@ -85,17 +100,25 @@ export function AccountSettingsPanel({
       }
 
       const payload: {
-        fullName: string;
-        email: string;
-        themePreference: ThemePreference;
+        fullName?: string;
+        email?: string;
+        themePreference?: ThemePreference;
         password?: string;
-      } = {
-        fullName: normalizedFullName,
-        email: normalizedEmail,
-        themePreference,
-      };
+      } = {};
 
-      if (password) {
+      if (fullNameChanged) {
+        payload.fullName = normalizedFullName;
+      }
+
+      if (emailChanged) {
+        payload.email = normalizedEmail;
+      }
+
+      if (themeChanged) {
+        payload.themePreference = themePreference;
+      }
+
+      if (wantsPasswordChange && password) {
         payload.password = password;
       }
 
@@ -118,9 +141,17 @@ export function AccountSettingsPanel({
 
       setPassword("");
       setConfirmPassword("");
-      setTheme(themePreference);
+      setWantsPasswordChange(false);
+      setShowPassword(false);
+      setShowConfirmPassword(false);
+      setSavedFullName(normalizedFullName);
+      setSavedEmail(normalizedEmail);
+      setSavedThemePreference(themePreference);
       setMessage("Account updated.");
-      router.refresh();
+
+      if (fullNameChanged || emailChanged) {
+        router.refresh();
+      }
     } catch (caughtError) {
       const normalizedMessage =
         caughtError instanceof Error ? caughtError.message : "Unable to update account.";
@@ -178,7 +209,7 @@ export function AccountSettingsPanel({
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => setThemePreference("dark")}
+              onClick={() => applyThemeSelection("dark")}
               className={`rounded-xl border px-3 py-1.5 text-sm font-semibold transition ${
                 themePreference === "dark"
                   ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
@@ -189,7 +220,7 @@ export function AccountSettingsPanel({
             </button>
             <button
               type="button"
-              onClick={() => setThemePreference("light")}
+              onClick={() => applyThemeSelection("light")}
               className={`rounded-xl border px-3 py-1.5 text-sm font-semibold transition ${
                 themePreference === "light"
                   ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
@@ -201,55 +232,89 @@ export function AccountSettingsPanel({
           </div>
         </fieldset>
 
-        <label className="grid gap-1 text-sm">
-          <span>New Password (Optional)</span>
-          <div className="relative">
-            <input
-              type={showPassword ? "text" : "password"}
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-11 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword((current) => !current)}
-              aria-label={showPassword ? "Hide password" : "Show password"}
-              className="absolute inset-y-0 right-2 flex items-center rounded-md px-1.5 text-slate-500 transition hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 dark:text-slate-400 dark:hover:text-slate-200"
-            >
-              {showPassword ? (
-                <EyeOff size={16} aria-hidden="true" />
-              ) : (
-                <Eye size={16} aria-hidden="true" />
-              )}
-            </button>
-          </div>
-        </label>
-
-        <label className="grid gap-1 text-sm">
-          <span>Confirm New Password</span>
-          <div className="relative">
-            <input
-              type={showConfirmPassword ? "text" : "password"}
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-11 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-            />
-            <button
-              type="button"
-              onClick={() => setShowConfirmPassword((current) => !current)}
-              aria-label={
-                showConfirmPassword ? "Hide confirm password" : "Show confirm password"
+        <div className="grid gap-1 text-sm">
+          <span>Password</span>
+          <button
+            type="button"
+            onClick={() => {
+              if (wantsPasswordChange) {
+                setWantsPasswordChange(false);
+                setPassword("");
+                setConfirmPassword("");
+                setShowPassword(false);
+                setShowConfirmPassword(false);
+                return;
               }
-              className="absolute inset-y-0 right-2 flex items-center rounded-md px-1.5 text-slate-500 transition hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 dark:text-slate-400 dark:hover:text-slate-200"
-            >
-              {showConfirmPassword ? (
-                <EyeOff size={16} aria-hidden="true" />
-              ) : (
-                <Eye size={16} aria-hidden="true" />
-              )}
-            </button>
-          </div>
-        </label>
+
+              setWantsPasswordChange(true);
+            }}
+            className={`w-fit rounded-xl border px-3 py-1.5 text-sm font-semibold transition ${
+              wantsPasswordChange
+                ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
+                : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-900"
+            }`}
+          >
+            {wantsPasswordChange ? "Cancel password change" : "Change password"}
+          </button>
+        </div>
+
+        {wantsPasswordChange ? (
+          <>
+            <label className="grid gap-1 text-sm">
+              <span>New Password</span>
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  name="account_new_password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-11 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((current) => !current)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  className="absolute inset-y-0 right-2 flex items-center rounded-md px-1.5 text-slate-500 transition hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 dark:text-slate-400 dark:hover:text-slate-200"
+                >
+                  {showPassword ? (
+                    <EyeOff size={16} aria-hidden="true" />
+                  ) : (
+                    <Eye size={16} aria-hidden="true" />
+                  )}
+                </button>
+              </div>
+            </label>
+
+            <label className="grid gap-1 text-sm">
+              <span>Confirm New Password</span>
+              <div className="relative">
+                <input
+                  type={showConfirmPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  name="account_confirm_new_password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-11 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword((current) => !current)}
+                  aria-label={
+                    showConfirmPassword ? "Hide confirm password" : "Show confirm password"
+                  }
+                  className="absolute inset-y-0 right-2 flex items-center rounded-md px-1.5 text-slate-500 transition hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 dark:text-slate-400 dark:hover:text-slate-200"
+                >
+                  {showConfirmPassword ? (
+                    <EyeOff size={16} aria-hidden="true" />
+                  ) : (
+                    <Eye size={16} aria-hidden="true" />
+                  )}
+                </button>
+              </div>
+            </label>
+          </>
+        ) : null}
 
         {passwordMismatch ? (
           <p className="text-sm text-rose-600 dark:text-rose-300">
