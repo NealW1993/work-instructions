@@ -78,6 +78,20 @@ function instructionMatchesQuery(
   return haystack.toLowerCase().includes(normalizedQuery);
 }
 
+function getPrimaryPartOrMoldLabel(workItem: DashboardInstructionCardData["workItem"]) {
+  const mold = workItem.mold_number?.trim();
+  if (mold) {
+    return `Mold # ${mold}`;
+  }
+
+  const part = workItem.part_number?.trim();
+  if (part) {
+    return `Part # ${part}`;
+  }
+
+  return "Part # N/A";
+}
+
 export function DashboardClient({
   canEdit,
   initialQuery,
@@ -269,10 +283,11 @@ export function DashboardClient({
                     href={`/instructions/${instruction.id}`}
                     className="rounded-xl border border-slate-300/70 bg-white/70 p-3 transition hover:border-cyan-500 hover:bg-cyan-500/5 dark:border-slate-700 dark:bg-slate-950/70"
                   >
-                    <p className="font-semibold">{instruction.workItem.item_title}</p>
+                    <p className="font-semibold">
+                      {getPrimaryPartOrMoldLabel(instruction.workItem)}
+                    </p>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Part {instruction.workItem.part_number || "N/A"} | Mold{" "}
-                      {instruction.workItem.mold_number || "N/A"}
+                      {instruction.workItem.item_title}
                     </p>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
                       Revision {instruction.revision} | Created{" "}
@@ -310,10 +325,11 @@ export function DashboardClient({
                     href={`/instructions/${instruction.id}`}
                     className="rounded-xl border border-slate-300/70 bg-white/70 p-3 transition hover:border-cyan-500 hover:bg-cyan-500/5 dark:border-slate-700 dark:bg-slate-950/70"
                   >
-                    <p className="font-semibold">{instruction.workItem.item_title}</p>
+                    <p className="font-semibold">
+                      {getPrimaryPartOrMoldLabel(instruction.workItem)}
+                    </p>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Part {instruction.workItem.part_number || "N/A"} | Mold{" "}
-                      {instruction.workItem.mold_number || "N/A"}
+                      {instruction.workItem.item_title}
                     </p>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
                       Revision {instruction.revision} | Created{" "}

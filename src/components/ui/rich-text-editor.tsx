@@ -866,6 +866,27 @@ export function RichTextEditor({
     );
   };
 
+  const applyFontSize = (nextFontSize: string | null) => {
+    const fallbackSelection = editor.state.selection;
+    const selection = selectionRangeRef.current ?? {
+      from: fallbackSelection.from,
+      to: fallbackSelection.to,
+    };
+
+    runAndRefresh(() => {
+      const chain = editor.chain().focus().setTextSelection({
+        from: selection.from,
+        to: selection.to,
+      });
+
+      if (!nextFontSize) {
+        return chain.unsetFontSize().run();
+      }
+
+      return chain.setFontSize(nextFontSize).run();
+    });
+  };
+
   return (
     <div className="grid min-w-0 gap-1 text-sm">
       <span className="font-semibold">{label}</span>
@@ -999,14 +1020,18 @@ export function RichTextEditor({
 
         <select
           value={activeFontSize}
+          onMouseDown={() => {
+            const { from, to } = editor.state.selection;
+            selectionRangeRef.current = { from, to };
+          }}
           onChange={(event) => {
             const selected = event.target.value;
             if (selected === "default") {
-              runAndRefresh(() => editor.chain().focus().unsetFontSize().run());
+              applyFontSize(null);
               return;
             }
 
-            runAndRefresh(() => editor.chain().focus().setFontSize(selected).run());
+            applyFontSize(selected);
           }}
           className="h-8 shrink-0 rounded-lg border border-slate-300 bg-white px-2 text-xs outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
         >
