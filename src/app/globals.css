@@ -132,6 +132,19 @@ h6 {
   color: var(--muted);
 }
 
+.prose-markdown figure {
+  margin-top: 0.85rem;
+  margin-bottom: 0.85rem;
+}
+
+.prose-markdown figure img,
+.prose-markdown figure video {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 0.5rem;
+}
+
 html:not(.dark) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]),
 html:not(.dark) textarea,
 html:not(.dark) select {
@@ -212,6 +225,18 @@ html:not(.dark) textarea:-webkit-autofill:focus {
   margin: 0.6rem 0;
   padding-left: 0.75rem;
   color: var(--muted);
+}
+
+.tiptap-editor-content figure {
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.tiptap-editor-content figure img,
+.tiptap-editor-content figure video {
+  display: block;
+  width: 100%;
+  height: auto;
 }
 
 .tiptap-editor-content code {

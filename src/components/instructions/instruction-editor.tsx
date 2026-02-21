@@ -19,10 +19,8 @@ interface InstructionEditorProps {
     partNumber: string;
     moldNumber: string;
     itemTitle: string;
-    description: string;
-    instructionTitle: string;
     bodyMarkdown: string;
-    version: number;
+    revision: number;
     media: InstructionMedia[];
   };
 }
@@ -95,11 +93,10 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
   const [itemTitle, setItemTitle] = useState(initialData?.itemTitle ?? "");
-  const [description, setDescription] = useState(initialData?.description ?? "");
   const [bodyMarkdown, setBodyMarkdown] = useState(
     normalizeEditorContent(initialData?.bodyMarkdown ?? ""),
   );
-  const [version, setVersion] = useState(initialData?.version ?? 1);
+  const [revision, setRevision] = useState(initialData?.revision ?? 1);
   const [selectedUploads, setSelectedUploads] = useState<PendingUpload[]>([]);
   const [existingMedia, setExistingMedia] = useState(initialData?.media ?? []);
   const [existingCaptionDrafts, setExistingCaptionDrafts] = useState<
@@ -307,21 +304,16 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
       const effectivePartNumber = initialData?.partNumber?.trim() || DEFAULT_PART_NUMBER;
       const effectiveMoldNumber = initialData?.moldNumber?.trim() || DEFAULT_MOLD_NUMBER;
-      const effectiveInstructionTitle =
-        initialData?.instructionTitle?.trim() || itemTitle.trim() || "Work Instruction";
-
       const workItemPayload: {
         id?: string;
         part_number: string;
         mold_number: string;
         item_title: string;
-        description: string | null;
         created_by: string;
       } = {
         part_number: effectivePartNumber,
         mold_number: effectiveMoldNumber,
         item_title: itemTitle.trim(),
-        description: description.trim() || null,
         created_by: user.id,
       };
 
@@ -350,10 +342,9 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           .from("work_instructions")
           .insert({
             work_item_id: typedWorkItem.id,
-            title: effectiveInstructionTitle,
             body_markdown: bodyMarkdown,
             notes_markdown: "",
-            version,
+            revision,
             created_by: user.id,
             updated_by: user.id,
           })
@@ -374,10 +365,9 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           .from("work_instructions")
           .update({
             work_item_id: typedWorkItem.id,
-            title: effectiveInstructionTitle,
             body_markdown: bodyMarkdown,
             notes_markdown: "",
-            version,
+            revision,
             updated_by: user.id,
           })
           .eq("id", instructionId);
@@ -411,7 +401,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   }
 
   return (
-    <div className="grid gap-5">
+    <div className="grid min-w-0 gap-5">
       {message ? (
         <p className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-200">
           {message}
@@ -425,7 +415,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
       <form
         onSubmit={handleSubmit}
-        className="grid gap-4 rounded-3xl border border-white/30 bg-white/75 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7"
+        className="grid min-w-0 gap-4 overflow-hidden rounded-3xl border border-white/30 bg-white/75 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7"
       >
         <label className="grid gap-1 text-sm">
           <span className="font-semibold">Work Item Title</span>
@@ -438,25 +428,15 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           />
         </label>
 
-        <label className="grid gap-1 text-sm">
-          <span className="font-semibold">Work Item Description</span>
-          <textarea
-            rows={2}
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-          />
-        </label>
-
         <label className="grid max-w-[140px] min-w-0 gap-1 text-sm">
-          <span className="font-semibold">Version</span>
+          <span className="font-semibold">Revision</span>
           <input
             required
             min={1}
             type="number"
-            value={version}
+            value={revision}
             onChange={(event) =>
-              setVersion(Number.parseInt(event.target.value || "1", 10))
+              setRevision(Number.parseInt(event.target.value || "1", 10))
             }
             className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
           />
@@ -466,7 +446,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           label="Work Instructions (Rich Text)"
           value={bodyMarkdown}
           onChange={setBodyMarkdown}
-          placeholder="Type work instructions here. Use toolbar buttons for bold, underline, lists, and links."
+          placeholder="Type work instructions here. Use toolbar buttons for formatting and inline media."
           minHeightClassName="min-h-72"
         />
 

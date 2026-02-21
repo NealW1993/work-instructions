@@ -1,6 +1,6 @@
 "use client";
 
-import { Extension } from "@tiptap/core";
+import { Extension, mergeAttributes, Node } from "@tiptap/core";
 import Color from "@tiptap/extension-color";
 import Highlight from "@tiptap/extension-highlight";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -9,7 +9,13 @@ import TaskList from "@tiptap/extension-task-list";
 import TextAlign from "@tiptap/extension-text-align";
 import { TextStyle } from "@tiptap/extension-text-style";
 import Underline from "@tiptap/extension-underline";
-import { EditorContent, useEditor } from "@tiptap/react";
+import {
+  EditorContent,
+  type NodeViewProps,
+  NodeViewWrapper,
+  ReactNodeViewRenderer,
+  useEditor,
+} from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import {
   AlignCenter,
@@ -18,20 +24,33 @@ import {
   AlignRight,
   Bold,
   Eraser,
+  GripVertical,
   Heading1,
   Heading2,
   Highlighter,
+  ImagePlus,
   Italic,
   List,
   ListOrdered,
+  MoveDiagonal2,
   Pilcrow,
   Quote,
   Redo2,
   Strikethrough,
   Underline as UnderlineIcon,
   Undo2,
+  Video,
 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type ChangeEvent,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -41,7 +60,291 @@ declare module "@tiptap/core" {
       setFontSize: (fontSize: string) => ReturnType;
       unsetFontSize: () => ReturnType;
     };
+    resizableImage: {
+      setResizableImage: (options: {
+        src: string;
+        alt?: string;
+        width?: number;
+        align?: MediaAlign;
+      }) => ReturnType;
+    };
+    resizableVideo: {
+      setResizableVideo: (options: {
+        src: string;
+        width?: number;
+        align?: MediaAlign;
+      }) => ReturnType;
+    };
   }
+}
+
+interface RichTextEditorProps {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  minHeightClassName?: string;
+}
+
+interface ToolbarButtonProps {
+  ariaLabel: string;
+  onClick: () => void;
+  children: ReactNode;
+  isActive?: boolean;
+  disabled?: boolean;
+}
+
+type MediaAlign = "left" | "center" | "right";
+
+const FONT_SIZE_OPTIONS = ["12px", "14px", "16px", "18px", "24px", "32px"];
+const DEFAULT_MEDIA_WIDTH = 520;
+const MIN_MEDIA_WIDTH = 180;
+const MAX_MEDIA_WIDTH = 1200;
+const MAX_INLINE_IMAGE_BYTES = 4 * 1024 * 1024;
+const MAX_INLINE_VIDEO_BYTES = 14 * 1024 * 1024;
+
+function clampMediaWidth(width: number) {
+  return Math.max(MIN_MEDIA_WIDTH, Math.min(MAX_MEDIA_WIDTH, Math.round(width)));
+}
+
+function normalizeMediaAlign(value: string | null | undefined): MediaAlign {
+  if (value === "left" || value === "right") {
+    return value;
+  }
+
+  return "center";
+}
+
+function parseNumericWidth(value: string | null | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(value.replace("px", ""), 10);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function getAlignMargins(align: MediaAlign) {
+  if (align === "left") {
+    return { marginLeft: "0", marginRight: "auto" };
+  }
+
+  if (align === "right") {
+    return { marginLeft: "auto", marginRight: "0" };
+  }
+
+  return { marginLeft: "auto", marginRight: "auto" };
+}
+
+function getMediaFigureStyle(width: number, align: MediaAlign): string {
+  const margins = getAlignMargins(align);
+  return [
+    `width:${width}px`,
+    "max-width:100%",
+    "display:block",
+    `margin-left:${margins.marginLeft}`,
+    `margin-right:${margins.marginRight}`,
+  ].join(";");
+}
+
+function getMediaWidthFromElement(element: HTMLElement): number {
+  const directWidth =
+    parseNumericWidth(element.getAttribute("data-width")) ??
+    parseNumericWidth(element.style.width || null) ??
+    parseNumericWidth(element.getAttribute("width"));
+
+  if (directWidth) {
+    return clampMediaWidth(directWidth);
+  }
+
+  const nestedMedia = element.querySelector("img,video");
+  if (nestedMedia instanceof HTMLElement) {
+    const nestedWidth =
+      parseNumericWidth(nestedMedia.getAttribute("data-width")) ??
+      parseNumericWidth(nestedMedia.style.width || null) ??
+      parseNumericWidth(nestedMedia.getAttribute("width"));
+
+    if (nestedWidth) {
+      return clampMediaWidth(nestedWidth);
+    }
+  }
+
+  return DEFAULT_MEDIA_WIDTH;
+}
+
+function dataUrlFromFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`Unable to read file: ${file.name}`));
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.readAsDataURL(file);
+  });
+}
+
+function ToolbarButton({
+  ariaLabel,
+  onClick,
+  children,
+  isActive,
+  disabled,
+}: ToolbarButtonProps) {
+  return (
+    <button
+      type="button"
+      aria-label={ariaLabel}
+      title={ariaLabel}
+      disabled={disabled}
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onClick}
+      className={cn(
+        "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 disabled:cursor-not-allowed disabled:opacity-50",
+        isActive
+          ? "border-cyan-500/70 bg-cyan-500/20 text-cyan-800 dark:text-cyan-200"
+          : "border-slate-300 bg-white/80 text-slate-700 hover:bg-cyan-500/15 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function MediaNodeView({ node, selected, updateAttributes }: NodeViewProps) {
+  const mediaType: "image" | "video" =
+    node.type.name === "resizableVideo" ? "video" : "image";
+  const src = String(node.attrs.src ?? "");
+  const alt = String(node.attrs.alt ?? "");
+  const width = clampMediaWidth(Number(node.attrs.width ?? DEFAULT_MEDIA_WIDTH));
+  const align = normalizeMediaAlign(node.attrs.align as string | undefined);
+
+  const setAlign = (nextAlign: MediaAlign) => {
+    updateAttributes({ align: nextAlign });
+  };
+
+  const startResize = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const startX = event.clientX;
+    const startWidth = width;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      const nextWidth = clampMediaWidth(startWidth + deltaX);
+      updateAttributes({ width: nextWidth });
+    };
+
+    const handleMouseUp = () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
+
+  const alignClassName =
+    align === "left" ? "mr-auto" : align === "right" ? "ml-auto" : "mx-auto";
+
+  return (
+    <NodeViewWrapper
+      as="figure"
+      data-type={mediaType === "image" ? "resizable-image" : "resizable-video"}
+      data-width={width}
+      data-align={align}
+      className={cn("group relative my-3 max-w-full", alignClassName)}
+      style={{ width: `${width}px`, maxWidth: "100%" }}
+    >
+      <div
+        className={cn(
+          "relative overflow-hidden rounded-lg border border-slate-300/70 bg-slate-900/10 shadow-sm dark:border-slate-700/80 dark:bg-slate-900/40",
+          selected ? "ring-2 ring-cyan-500/70" : "",
+        )}
+      >
+        <button
+          type="button"
+          aria-label="Drag media"
+          title="Drag media"
+          contentEditable={false}
+          data-drag-handle
+          onMouseDown={(event) => event.preventDefault()}
+          className="absolute left-2 top-2 z-10 inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/40 bg-slate-950/70 text-white opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100"
+        >
+          <GripVertical size={14} />
+        </button>
+
+        {mediaType === "video" ? (
+          <video src={src} controls className="block h-auto w-full bg-black" />
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={src} alt={alt || "Inline media"} className="block h-auto w-full" />
+        )}
+
+        <div
+          contentEditable={false}
+          className="absolute bottom-2 right-2 flex items-center gap-1 rounded-md border border-white/40 bg-slate-950/70 p-1 text-white opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100"
+        >
+          <button
+            type="button"
+            aria-label="Align media left"
+            title="Align left"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              setAlign("left");
+            }}
+            className={cn(
+              "inline-flex h-6 w-6 items-center justify-center rounded",
+              align === "left" ? "bg-cyan-500/60" : "hover:bg-white/20",
+            )}
+          >
+            <AlignLeft size={12} />
+          </button>
+          <button
+            type="button"
+            aria-label="Align media center"
+            title="Align center"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              setAlign("center");
+            }}
+            className={cn(
+              "inline-flex h-6 w-6 items-center justify-center rounded",
+              align === "center" ? "bg-cyan-500/60" : "hover:bg-white/20",
+            )}
+          >
+            <AlignCenter size={12} />
+          </button>
+          <button
+            type="button"
+            aria-label="Align media right"
+            title="Align right"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              setAlign("right");
+            }}
+            className={cn(
+              "inline-flex h-6 w-6 items-center justify-center rounded",
+              align === "right" ? "bg-cyan-500/60" : "hover:bg-white/20",
+            )}
+          >
+            <AlignRight size={12} />
+          </button>
+          <button
+            type="button"
+            aria-label="Resize media"
+            title="Resize media"
+            onMouseDown={startResize}
+            className="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-white/20"
+          >
+            <MoveDiagonal2 size={12} />
+          </button>
+        </div>
+      </div>
+    </NodeViewWrapper>
+  );
 }
 
 const FontSize = Extension.create({
@@ -90,52 +393,195 @@ const FontSize = Extension.create({
   },
 });
 
-interface RichTextEditorProps {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  minHeightClassName?: string;
-}
+const ResizableImage = Node.create({
+  name: "resizableImage",
+  group: "block",
+  atom: true,
+  draggable: true,
+  selectable: true,
 
-interface ToolbarButtonProps {
-  ariaLabel: string;
-  onClick: () => void;
-  children: ReactNode;
-  isActive?: boolean;
-  disabled?: boolean;
-}
+  addAttributes() {
+    return {
+      src: {
+        default: "",
+        parseHTML: (element: HTMLElement) => {
+          if (element.tagName === "IMG") {
+            return element.getAttribute("src") ?? "";
+          }
 
-const FONT_SIZE_OPTIONS = ["12px", "14px", "16px", "18px", "24px", "32px"];
+          return element.querySelector("img")?.getAttribute("src") ?? "";
+        },
+      },
+      alt: {
+        default: "",
+        parseHTML: (element: HTMLElement) => {
+          if (element.tagName === "IMG") {
+            return element.getAttribute("alt") ?? "";
+          }
 
-function ToolbarButton({
-  ariaLabel,
-  onClick,
-  children,
-  isActive,
-  disabled,
-}: ToolbarButtonProps) {
-  return (
-    <button
-      type="button"
-      aria-label={ariaLabel}
-      title={ariaLabel}
-      disabled={disabled}
-      onMouseDown={(event) => {
-        event.preventDefault();
-        onClick();
-      }}
-      className={cn(
-        "inline-flex h-8 w-8 items-center justify-center rounded-lg border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 disabled:cursor-not-allowed disabled:opacity-50",
-        isActive
-          ? "border-cyan-500/70 bg-cyan-500/20 text-cyan-800 dark:text-cyan-200"
-          : "border-slate-300 bg-white/80 text-slate-700 hover:bg-cyan-500/15 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200",
-      )}
-    >
-      {children}
-    </button>
-  );
-}
+          return element.querySelector("img")?.getAttribute("alt") ?? "";
+        },
+      },
+      width: {
+        default: DEFAULT_MEDIA_WIDTH,
+        parseHTML: (element: HTMLElement) => getMediaWidthFromElement(element),
+      },
+      align: {
+        default: "center",
+        parseHTML: (element: HTMLElement) =>
+          normalizeMediaAlign(element.getAttribute("data-align")),
+      },
+    };
+  },
+
+  parseHTML() {
+    return [
+      { tag: 'figure[data-type="resizable-image"]' },
+      { tag: "img[src]" },
+    ];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    const src = String(HTMLAttributes.src ?? "");
+    const alt = String(HTMLAttributes.alt ?? "");
+    const width = clampMediaWidth(Number(HTMLAttributes.width ?? DEFAULT_MEDIA_WIDTH));
+    const align = normalizeMediaAlign(String(HTMLAttributes.align ?? "center"));
+    const figureAttributes = mergeAttributes(
+      {
+        "data-type": "resizable-image",
+        "data-width": String(width),
+        "data-align": align,
+        style: getMediaFigureStyle(width, align),
+      },
+      this.options.HTMLAttributes,
+    );
+
+    return [
+      "figure",
+      figureAttributes,
+      [
+        "img",
+        {
+          src,
+          alt,
+          style: "display:block;width:100%;height:auto;",
+        },
+      ],
+    ];
+  },
+
+  addCommands() {
+    return {
+      setResizableImage:
+        (options) =>
+        ({ chain }) =>
+          chain()
+            .insertContent({
+              type: this.name,
+              attrs: {
+                src: options.src,
+                alt: options.alt ?? "",
+                width: clampMediaWidth(options.width ?? DEFAULT_MEDIA_WIDTH),
+                align: normalizeMediaAlign(options.align),
+              },
+            })
+            .run(),
+    };
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(MediaNodeView);
+  },
+});
+
+const ResizableVideo = Node.create({
+  name: "resizableVideo",
+  group: "block",
+  atom: true,
+  draggable: true,
+  selectable: true,
+
+  addAttributes() {
+    return {
+      src: {
+        default: "",
+        parseHTML: (element: HTMLElement) => {
+          if (element.tagName === "VIDEO") {
+            return element.getAttribute("src") ?? "";
+          }
+
+          return element.querySelector("video")?.getAttribute("src") ?? "";
+        },
+      },
+      width: {
+        default: DEFAULT_MEDIA_WIDTH,
+        parseHTML: (element: HTMLElement) => getMediaWidthFromElement(element),
+      },
+      align: {
+        default: "center",
+        parseHTML: (element: HTMLElement) =>
+          normalizeMediaAlign(element.getAttribute("data-align")),
+      },
+    };
+  },
+
+  parseHTML() {
+    return [
+      { tag: 'figure[data-type="resizable-video"]' },
+      { tag: "video[src]" },
+    ];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    const src = String(HTMLAttributes.src ?? "");
+    const width = clampMediaWidth(Number(HTMLAttributes.width ?? DEFAULT_MEDIA_WIDTH));
+    const align = normalizeMediaAlign(String(HTMLAttributes.align ?? "center"));
+    const figureAttributes = mergeAttributes(
+      {
+        "data-type": "resizable-video",
+        "data-width": String(width),
+        "data-align": align,
+        style: getMediaFigureStyle(width, align),
+      },
+      this.options.HTMLAttributes,
+    );
+
+    return [
+      "figure",
+      figureAttributes,
+      [
+        "video",
+        {
+          src,
+          controls: "true",
+          style: "display:block;width:100%;height:auto;",
+        },
+      ],
+    ];
+  },
+
+  addCommands() {
+    return {
+      setResizableVideo:
+        (options) =>
+        ({ chain }) =>
+          chain()
+            .insertContent({
+              type: this.name,
+              attrs: {
+                src: options.src,
+                width: clampMediaWidth(options.width ?? DEFAULT_MEDIA_WIDTH),
+                align: normalizeMediaAlign(options.align),
+              },
+            })
+            .run(),
+    };
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(MediaNodeView);
+  },
+});
 
 export function RichTextEditor({
   label,
@@ -145,6 +591,10 @@ export function RichTextEditor({
   minHeightClassName = "min-h-52",
 }: RichTextEditorProps) {
   const [, setToolbarRefreshCounter] = useState(0);
+  const [toolbarMessage, setToolbarMessage] = useState<string | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const videoInputRef = useRef<HTMLInputElement | null>(null);
+
   const refreshToolbarState = useCallback(() => {
     setToolbarRefreshCounter((current) => current + 1);
   }, []);
@@ -173,6 +623,8 @@ export function RichTextEditor({
         placeholder: placeholder ?? "Start typing...",
       }),
       FontSize,
+      ResizableImage,
+      ResizableVideo,
     ],
     [placeholder],
   );
@@ -184,7 +636,7 @@ export function RichTextEditor({
       editorProps: {
         attributes: {
           class: cn(
-            "tiptap-editor-content w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 dark:border-slate-700 dark:bg-slate-950",
+            "tiptap-editor-content w-full max-w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 dark:border-slate-700 dark:bg-slate-950 resize-y overflow-auto",
             minHeightClassName,
           ),
         },
@@ -194,6 +646,8 @@ export function RichTextEditor({
       },
       onTransaction: refreshToolbarState,
       onSelectionUpdate: refreshToolbarState,
+      onFocus: refreshToolbarState,
+      onBlur: refreshToolbarState,
     },
     [extensions, minHeightClassName, refreshToolbarState],
   );
@@ -209,9 +663,64 @@ export function RichTextEditor({
     }
   }, [editor, value]);
 
+  const insertInlineMedia = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>, mediaType: "image" | "video") => {
+      const files = Array.from(event.target.files ?? []);
+      event.target.value = "";
+
+      if (!editor || files.length === 0) {
+        return;
+      }
+
+      setToolbarMessage(null);
+
+      for (const file of files) {
+        const sizeLimit = mediaType === "image" ? MAX_INLINE_IMAGE_BYTES : MAX_INLINE_VIDEO_BYTES;
+        if (file.size > sizeLimit) {
+          setToolbarMessage(
+            `${file.name} is too large for inline ${mediaType}. Max size is ${Math.round(
+              sizeLimit / (1024 * 1024),
+            )}MB.`,
+          );
+          continue;
+        }
+
+        try {
+          const dataUrl = await dataUrlFromFile(file);
+          const inserted =
+            mediaType === "image"
+              ? editor
+                  .chain()
+                  .focus()
+                  .setResizableImage({
+                    src: dataUrl,
+                    alt: file.name,
+                  })
+                  .run()
+              : editor
+                  .chain()
+                  .focus()
+                  .setResizableVideo({
+                    src: dataUrl,
+                  })
+                  .run();
+
+          if (!inserted) {
+            setToolbarMessage(`Unable to insert ${file.name}.`);
+          }
+        } catch {
+          setToolbarMessage(`Unable to read ${file.name}.`);
+        }
+      }
+
+      refreshToolbarState();
+    },
+    [editor, refreshToolbarState],
+  );
+
   if (!editor) {
     return (
-      <div className="grid gap-1 text-sm">
+      <div className="grid min-w-0 gap-1 text-sm">
         <span className="font-semibold">{label}</span>
         <div
           className={cn(
@@ -223,43 +732,52 @@ export function RichTextEditor({
     );
   }
 
+  const hasStoredMark = (markName: string) =>
+    Boolean(editor.state.storedMarks?.some((mark) => mark.type.name === markName));
+  const isMarkActive = (markName: string) =>
+    editor.isActive(markName) || hasStoredMark(markName);
+
   const activeFontSize = (editor.getAttributes("textStyle").fontSize as string) || "16px";
   const activeColor = (editor.getAttributes("textStyle").color as string) || "#0f172a";
-  const runAndRefresh = (command: () => void) => {
+  const runAndRefresh = (command: () => boolean) => {
+    if (!editor.isFocused) {
+      editor.commands.focus("end");
+    }
+
     command();
-    refreshToolbarState();
+    requestAnimationFrame(refreshToolbarState);
   };
 
   return (
-    <div className="grid gap-1 text-sm">
+    <div className="grid min-w-0 gap-1 text-sm">
       <span className="font-semibold">{label}</span>
 
-      <div className="flex flex-wrap items-center gap-1 rounded-xl border border-slate-300 bg-slate-100/70 p-2 dark:border-slate-700 dark:bg-slate-900/60">
+      <div className="flex w-full max-w-full min-w-0 flex-wrap items-center gap-1 overflow-x-auto rounded-xl border border-slate-300 bg-slate-100/70 p-2 dark:border-slate-700 dark:bg-slate-900/60">
         <ToolbarButton
           ariaLabel="Bold"
           onClick={() => runAndRefresh(() => editor.chain().focus().toggleBold().run())}
-          isActive={editor.isActive("bold")}
+          isActive={isMarkActive("bold")}
         >
           <Bold size={14} />
         </ToolbarButton>
         <ToolbarButton
           ariaLabel="Italic"
           onClick={() => runAndRefresh(() => editor.chain().focus().toggleItalic().run())}
-          isActive={editor.isActive("italic")}
+          isActive={isMarkActive("italic")}
         >
           <Italic size={14} />
         </ToolbarButton>
         <ToolbarButton
           ariaLabel="Underline"
           onClick={() => runAndRefresh(() => editor.chain().focus().toggleUnderline().run())}
-          isActive={editor.isActive("underline")}
+          isActive={isMarkActive("underline")}
         >
           <UnderlineIcon size={14} />
         </ToolbarButton>
         <ToolbarButton
           ariaLabel="Strikethrough"
           onClick={() => runAndRefresh(() => editor.chain().focus().toggleStrike().run())}
-          isActive={editor.isActive("strike")}
+          isActive={isMarkActive("strike")}
         >
           <Strikethrough size={14} />
         </ToolbarButton>
@@ -290,18 +808,14 @@ export function RichTextEditor({
         </ToolbarButton>
         <ToolbarButton
           ariaLabel="Bullet List"
-          onClick={() =>
-            runAndRefresh(() => editor.chain().focus().toggleBulletList().run())
-          }
+          onClick={() => runAndRefresh(() => editor.chain().focus().toggleBulletList().run())}
           isActive={editor.isActive("bulletList")}
         >
           <List size={14} />
         </ToolbarButton>
         <ToolbarButton
           ariaLabel="Numbered List"
-          onClick={() =>
-            runAndRefresh(() => editor.chain().focus().toggleOrderedList().run())
-          }
+          onClick={() => runAndRefresh(() => editor.chain().focus().toggleOrderedList().run())}
           isActive={editor.isActive("orderedList")}
         >
           <ListOrdered size={14} />
@@ -315,9 +829,7 @@ export function RichTextEditor({
         </ToolbarButton>
         <ToolbarButton
           ariaLabel="Block Quote"
-          onClick={() =>
-            runAndRefresh(() => editor.chain().focus().toggleBlockquote().run())
-          }
+          onClick={() => runAndRefresh(() => editor.chain().focus().toggleBlockquote().run())}
           isActive={editor.isActive("blockquote")}
         >
           <Quote size={14} />
@@ -325,7 +837,7 @@ export function RichTextEditor({
         <ToolbarButton
           ariaLabel="Highlight"
           onClick={() => runAndRefresh(() => editor.chain().focus().toggleHighlight().run())}
-          isActive={editor.isActive("highlight")}
+          isActive={isMarkActive("highlight")}
         >
           <Highlighter size={14} />
         </ToolbarButton>
@@ -373,7 +885,7 @@ export function RichTextEditor({
 
             runAndRefresh(() => editor.chain().focus().setFontSize(selected).run());
           }}
-          className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-xs outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+          className="h-8 shrink-0 rounded-lg border border-slate-300 bg-white px-2 text-xs outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
         >
           <option value="default">Default</option>
           {FONT_SIZE_OPTIONS.map((size) => (
@@ -390,14 +902,34 @@ export function RichTextEditor({
             runAndRefresh(() => editor.chain().focus().setColor(event.target.value).run())
           }
           aria-label="Text color"
-          className="h-8 w-10 cursor-pointer rounded border border-slate-300 bg-white p-0.5 dark:border-slate-700 dark:bg-slate-950"
+          className="h-8 w-10 shrink-0 cursor-pointer rounded border border-slate-300 bg-white p-0.5 dark:border-slate-700 dark:bg-slate-950"
         />
+
+        <ToolbarButton
+          ariaLabel="Insert Image"
+          onClick={() => imageInputRef.current?.click()}
+        >
+          <ImagePlus size={14} />
+        </ToolbarButton>
+        <ToolbarButton
+          ariaLabel="Insert Video"
+          onClick={() => videoInputRef.current?.click()}
+        >
+          <Video size={14} />
+        </ToolbarButton>
 
         <ToolbarButton
           ariaLabel="Clear Formatting"
           onClick={() =>
             runAndRefresh(() =>
-              editor.chain().focus().unsetColor().unsetHighlight().unsetAllMarks().run(),
+              editor
+                .chain()
+                .focus()
+                .unsetColor()
+                .unsetHighlight()
+                .unsetFontSize()
+                .unsetAllMarks()
+                .run(),
             )
           }
         >
@@ -419,6 +951,33 @@ export function RichTextEditor({
           <Redo2 size={14} />
         </ToolbarButton>
       </div>
+
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(event) => {
+          void insertInlineMedia(event, "image");
+        }}
+      />
+      <input
+        ref={videoInputRef}
+        type="file"
+        accept="video/*"
+        multiple
+        className="hidden"
+        onChange={(event) => {
+          void insertInlineMedia(event, "video");
+        }}
+      />
+
+      {toolbarMessage ? (
+        <p className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+          {toolbarMessage}
+        </p>
+      ) : null}
 
       <EditorContent editor={editor} />
     </div>

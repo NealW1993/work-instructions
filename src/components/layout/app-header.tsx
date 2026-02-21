@@ -7,10 +7,10 @@ import type { Profile } from "@/lib/types";
 export function AppHeader({ profile }: { profile: Profile }) {
   return (
     <header className="sticky top-0 z-20 border-b border-white/20 bg-white/75 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/70">
-      <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-4 py-3 md:px-8">
-        <div className="flex items-center gap-3">
+      <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3 md:px-8">
+        <div className="flex min-w-0 items-center gap-3">
           <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-cyan-400 via-sky-500 to-blue-700" />
-          <div>
+          <div className="min-w-0">
             <p className="text-sm font-semibold tracking-wide text-slate-500 dark:text-slate-300">
               Internal Work Instructions
             </p>
@@ -22,7 +22,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
             </p>
           </div>
         </div>
-        <nav className="flex items-center gap-2 md:gap-3">
+        <nav className="flex w-full flex-wrap items-center justify-end gap-2 md:w-auto md:gap-3">
           <Link
             href="/dashboard"
             className="rounded-full px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-900/10 dark:text-slate-100 dark:hover:bg-white/10"

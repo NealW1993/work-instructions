@@ -19,9 +19,8 @@ interface InstructionPageProps {
 
 interface InstructionRecord {
   id: string;
-  title: string;
   body_markdown: string;
-  version: number;
+  revision: number;
   created_at: string;
   updated_at: string;
   created_by: string;
@@ -32,14 +31,12 @@ interface InstructionRecord {
         part_number: string;
         mold_number: string;
         item_title: string;
-        description: string | null;
       }
     | Array<{
         id: string;
         part_number: string;
         mold_number: string;
         item_title: string;
-        description: string | null;
       }>;
   instruction_media: InstructionMedia[];
 }
@@ -60,7 +57,6 @@ function sanitizeRichHtml(value: string): string {
       "u",
       "s",
       "mark",
-      "a",
       "ul",
       "ol",
       "li",
@@ -73,11 +69,16 @@ function sanitizeRichHtml(value: string): string {
       "hr",
       "span",
       "div",
+      "figure",
+      "img",
+      "video",
       "label",
       "input",
     ],
     allowedAttributes: {
-      a: ["href", "target", "rel"],
+      figure: ["data-type", "data-align", "data-width", "style", "class"],
+      img: ["src", "alt", "title", "width", "height", "style", "class"],
+      video: ["src", "controls", "width", "height", "style", "class"],
       span: ["style"],
       div: ["style", "data-type"],
       p: ["style"],
@@ -91,10 +92,20 @@ function sanitizeRichHtml(value: string): string {
       mark: ["style", "data-color"],
       "*": ["class", "style"],
     },
-    allowedSchemes: ["http", "https", "mailto", "tel"],
+    allowedSchemes: ["http", "https", "data"],
+    allowedSchemesByTag: {
+      img: ["http", "https", "data"],
+      video: ["http", "https", "data"],
+    },
     allowedStyles: {
       "*": {
         "text-align": [/^left$/, /^right$/, /^center$/, /^justify$/],
+        display: [/^block$/, /^inline-block$/],
+        width: [/^[0-9.]+(px|%)$/],
+        height: [/^[0-9.]+(px|%)$/, /^auto$/],
+        "max-width": [/^[0-9.]+(px|%)$/],
+        "margin-left": [/^auto$/, /^[0-9.]+(px|%)$/],
+        "margin-right": [/^auto$/, /^[0-9.]+(px|%)$/],
       },
       span: {
         color: [/^#[0-9a-fA-F]{3,8}$/, /^rgb\([0-9,\s.]+\)$/],
@@ -143,7 +154,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, title, body_markdown, version, created_at, updated_at, created_by, updated_by, work_items(id, part_number, mold_number, item_title, description), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
+      "id, body_markdown, revision, created_at, updated_at, created_by, updated_by, work_items(id, part_number, mold_number, item_title), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -182,16 +193,13 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
       <header className="rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-300">
-              {workItem.item_title}
-            </p>
             <h1 className="text-3xl font-extrabold text-slate-900 dark:text-slate-100">
-              {instruction.title}
+              {workItem.item_title}
             </h1>
             <p className="text-sm text-slate-600 dark:text-slate-300">
               Part: <strong>{workItem.part_number}</strong> | Mold:{" "}
-              <strong>{workItem.mold_number || "N/A"}</strong> | Version{" "}
-              <strong>{instruction.version}</strong>
+              <strong>{workItem.mold_number || "N/A"}</strong> | Revision{" "}
+              <strong>{instruction.revision}</strong>
             </p>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
               Created by {userMap.get(instruction.created_by) ?? "Unknown"} on{" "}

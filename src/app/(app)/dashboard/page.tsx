@@ -13,8 +13,7 @@ interface DashboardPageProps {
 
 interface DashboardInstruction {
   id: string;
-  title: string;
-  version: number;
+  revision: number;
   created_at: string;
   updated_at: string;
   work_items: DashboardInstructionWorkItem | DashboardInstructionWorkItem[];
@@ -22,8 +21,7 @@ interface DashboardInstruction {
 
 interface DashboardWorkItemInstruction {
   id: string;
-  title: string;
-  version: number;
+  revision: number;
   updated_at: string;
 }
 
@@ -43,7 +41,6 @@ interface DashboardWorkItem {
   part_number: string;
   mold_number: string;
   item_title: string;
-  description: string | null;
   updated_at: string;
   work_instructions: DashboardWorkItemInstruction[];
 }
@@ -96,7 +93,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   let searchRequest = supabase
     .from("work_items")
     .select(
-      "id, part_number, mold_number, item_title, description, updated_at, work_instructions(id, title, version, updated_at)",
+      "id, part_number, mold_number, item_title, updated_at, work_instructions(id, revision, updated_at)",
     )
     .order("updated_at", { ascending: false })
     .limit(200);
@@ -111,7 +108,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const newestRequest = supabase
     .from("work_instructions")
     .select(
-      "id, title, version, created_at, updated_at, work_items(part_number, mold_number, item_title)",
+      "id, revision, created_at, updated_at, work_items(part_number, mold_number, item_title)",
     )
     .order("created_at", { ascending: false })
     .limit(5);
@@ -119,7 +116,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const pinnedRequest = supabase
     .from("user_pinned_instructions")
     .select(
-      "created_at, work_instructions(id, title, version, created_at, updated_at, work_items(part_number, mold_number, item_title))",
+      "created_at, work_instructions(id, revision, created_at, updated_at, work_items(part_number, mold_number, item_title))",
     )
     .eq("user_id", profile.id)
     .order("created_at", { ascending: false })
@@ -241,13 +238,13 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 href={`/instructions/${instruction.id}`}
                 className="rounded-xl border border-slate-300/70 bg-white/70 p-3 transition hover:border-cyan-500 hover:bg-cyan-500/5 dark:border-slate-700 dark:bg-slate-950/70"
               >
-                <p className="font-semibold">{instruction.title}</p>
+                <p className="font-semibold">{instruction.workItem.item_title}</p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {instruction.workItem.item_title} | Part {instruction.workItem.part_number} | Mold{" "}
+                  Part {instruction.workItem.part_number} | Mold{" "}
                   {instruction.workItem.mold_number || "N/A"}
                 </p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Version {instruction.version} | Pinned{" "}
+                  Revision {instruction.revision} | Pinned{" "}
                   {new Date(instruction.pinned_at).toLocaleDateString()}
                 </p>
               </Link>
@@ -281,13 +278,13 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 href={`/instructions/${instruction.id}`}
                 className="rounded-xl border border-slate-300/70 bg-white/70 p-3 transition hover:border-cyan-500 hover:bg-cyan-500/5 dark:border-slate-700 dark:bg-slate-950/70"
               >
-                <p className="font-semibold">{instruction.title}</p>
+                <p className="font-semibold">{instruction.workItem.item_title}</p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {instruction.workItem.item_title} | Part {instruction.workItem.part_number} | Mold{" "}
+                  Part {instruction.workItem.part_number} | Mold{" "}
                   {instruction.workItem.mold_number || "N/A"}
                 </p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Version {instruction.version} | Created{" "}
+                  Revision {instruction.revision} | Created{" "}
                   {new Date(instruction.created_at).toLocaleDateString()}
                 </p>
               </Link>
@@ -329,9 +326,6 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 {item.work_instructions.length === 1 ? "" : "s"}
               </span>
             </div>
-            {item.description ? (
-              <p className="text-sm text-slate-700 dark:text-slate-300">{item.description}</p>
-            ) : null}
             <div className="grid gap-2 md:grid-cols-2">
               {item.work_instructions.length === 0 ? (
                 <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -344,9 +338,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                     href={`/instructions/${instruction.id}`}
                     className="rounded-xl border border-slate-300/70 bg-white/70 p-3 transition hover:border-cyan-500 hover:bg-cyan-500/5 dark:border-slate-700 dark:bg-slate-950/70"
                   >
-                    <p className="font-semibold">{instruction.title}</p>
+                    <p className="font-semibold">Revision {instruction.revision}</p>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Version {instruction.version} | Updated{" "}
+                      Updated{" "}
                       {new Date(instruction.updated_at).toLocaleDateString()}
                     </p>
                   </Link>

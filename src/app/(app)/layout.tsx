@@ -11,7 +11,7 @@ export default async function AppLayout({
   const { profile } = await requireAuthenticatedUser();
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen overflow-x-hidden">
       <PostHogIdentify
         id={profile.id}
         email={profile.email}
@@ -20,7 +20,7 @@ export default async function AppLayout({
       />
       <ThemePreferenceSync themePreference={profile.theme_preference ?? "dark"} />
       <AppHeader profile={profile} />
-      <main className="mx-auto w-full max-w-7xl px-4 py-6 md:px-8 md:py-8">
+      <main className="mx-auto w-full min-w-0 max-w-7xl px-4 py-6 md:px-8 md:py-8">
         {children}
       </main>
     </div>

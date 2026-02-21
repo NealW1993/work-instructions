@@ -19,7 +19,6 @@ export interface WorkItem {
   part_number: string;
   mold_number: string | null;
   item_title: string;
-  description: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -28,10 +27,9 @@ export interface WorkItem {
 export interface WorkInstruction {
   id: string;
   work_item_id: string;
-  title: string;
   body_markdown: string;
   notes_markdown: string;
-  version: number;
+  revision: number;
   is_archived: boolean;
   created_by: string;
   updated_by: string;
