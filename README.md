@@ -356,6 +356,10 @@ Quick verification checklist:
   - verify storage bucket and policies from migration
 - Role update denied:
   - ensure logged in user has `system_admin`
+- `supabase_vector_*` container keeps restarting:
+  - root cause is Docker API on `host.docker.internal:2375` not exposed
+  - this repo disables local Supabase analytics by default in `supabase/config.toml` (`[analytics].enabled = false`)
+  - if you want Supabase analytics enabled, turn on Docker Desktop setting: `Expose daemon on tcp://localhost:2375 without TLS`, then restart Supabase
 
 ## Notes
 
