@@ -5,6 +5,7 @@ import posthog from "posthog-js";
 import { PostHogProvider } from "posthog-js/react";
 import { useMemo } from "react";
 
+import { PostHogPageview } from "@/components/analytics/posthog-pageview";
 import { clientEnv } from "@/lib/env.client";
 
 let posthogInitialized = false;
@@ -22,7 +23,7 @@ function initializePostHog() {
     posthog.init(clientEnv.NEXT_PUBLIC_POSTHOG_KEY, {
       api_host: clientEnv.NEXT_PUBLIC_POSTHOG_HOST,
       person_profiles: "identified_only",
-      capture_pageview: true,
+      capture_pageview: false,
       capture_pageleave: true,
       autocapture: true,
     });
@@ -57,5 +58,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
     return content;
   }
 
-  return <PostHogProvider client={posthogClient}>{content}</PostHogProvider>;
+  return (
+    <PostHogProvider client={posthogClient}>
+      <PostHogPageview />
+      {content}
+    </PostHogProvider>
+  );
 }

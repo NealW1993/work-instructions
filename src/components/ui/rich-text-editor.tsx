@@ -52,7 +52,8 @@ import {
   useState,
 } from "react";
 
-import { cn } from "@/lib/utils";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { cn, sanitizeFileName } from "@/lib/utils";
 
 declare module "@tiptap/core" {
   interface Commands<ReturnType> {
@@ -225,13 +226,15 @@ function getMediaWidthFromElement(element: HTMLElement): number {
   return DEFAULT_MEDIA_WIDTH;
 }
 
-function dataUrlFromFile(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error(`Unable to read file: ${file.name}`));
-    reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.readAsDataURL(file);
-  });
+function buildMediaStoragePath(file: File, mediaType: "image" | "video") {
+  const safeName = sanitizeFileName(file.name || `${mediaType}.bin`);
+  const uniqueId =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const dateFolder = new Date().toISOString().slice(0, 10);
+
+  return `inline/${mediaType}/${dateFolder}/${uniqueId}-${safeName}`;
 }
 
 function ToolbarButton({
@@ -648,6 +651,7 @@ export function RichTextEditor({
   const colorInputRef = useRef<HTMLInputElement | null>(null);
   const selectionRangeRef = useRef<{ from: number; to: number } | null>(null);
   const [lastPickedColor, setLastPickedColor] = useState("#dbeafe");
+  const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
   const refreshToolbarState = useCallback(() => {
     setToolbarRefreshCounter((current) => current + 1);
@@ -773,14 +777,35 @@ export function RichTextEditor({
         }
 
         try {
-          const dataUrl = await dataUrlFromFile(file);
+          const storagePath = buildMediaStoragePath(file, mediaType);
+          const { error: uploadError } = await supabase.storage
+            .from("instruction-media")
+            .upload(storagePath, file, {
+              cacheControl: "3600",
+              upsert: false,
+              contentType: file.type || undefined,
+            });
+
+          if (uploadError) {
+            throw new Error(uploadError.message);
+          }
+
+          const { data: publicUrlData } = supabase.storage
+            .from("instruction-media")
+            .getPublicUrl(storagePath);
+
+          const publicUrl = publicUrlData.publicUrl;
+          if (!publicUrl) {
+            throw new Error(`Unable to resolve public URL for ${file.name}.`);
+          }
+
           const inserted =
             mediaType === "image"
               ? editor
                   .chain()
                   .focus()
                   .setResizableImage({
-                    src: dataUrl,
+                    src: publicUrl,
                     alt: file.name,
                   })
                   .run()
@@ -788,7 +813,7 @@ export function RichTextEditor({
                   .chain()
                   .focus()
                   .setResizableVideo({
-                    src: dataUrl,
+                    src: publicUrl,
                   })
                   .run();
 
@@ -802,7 +827,7 @@ export function RichTextEditor({
 
       refreshToolbarState();
     },
-    [editor, refreshToolbarState],
+    [editor, refreshToolbarState, supabase],
   );
 
   if (!editor) {

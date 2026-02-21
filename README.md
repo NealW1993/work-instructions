@@ -16,7 +16,7 @@ Internal work-instructions software built with React (Next.js), TypeScript, Supa
   - Search by `Part Number` or `Mold Number`
   - Each part/mold work item can have multiple instructions
   - Markdown steps + markdown notes
-  - Image/video attachments (tablet camera compatible)
+  - Inline image/video inserts upload to Supabase Storage bucket `instruction-media` (tablet camera compatible)
 - Security:
   - Full Postgres schema + RLS + role policies
   - Storage policies for media bucket
@@ -310,6 +310,7 @@ Quick verification checklist:
 2. Open a few pages (`/dashboard`, `/instructions/new`, etc.).
 3. In PostHog, open **Product analytics -> Events** and filter for `$pageview`.
 4. In dashboard insights, choose event `$pageview` (or `All events`) and a recent time window.
+5. If you changed PostHog env vars, restart the Next.js server so client-side env values refresh.
 
 ## Scripts
 
