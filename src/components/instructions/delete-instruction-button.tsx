@@ -15,18 +15,11 @@ export function DeleteInstructionButton({
 }: DeleteInstructionButtonProps) {
   const router = useRouter();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleDelete() {
-    if (
-      !window.confirm(
-        "Delete this work instruction? This action cannot be undone.",
-      )
-    ) {
-      return;
-    }
-
     setBusy(true);
     setError(null);
 
@@ -54,11 +47,12 @@ export function DeleteInstructionButton({
         throw new Error(payload.error ?? "Unable to delete instruction.");
       }
 
+      setConfirmOpen(false);
       router.push("/dashboard");
       router.refresh();
     } catch (caughtError) {
       const normalizedMessage =
-        caughtError instanceof Error ? caughtError.message : "Unable to delete instruction.";
+        caughtError instanceof Error ? caughtError.message : "Unable to archive instruction.";
       setError(normalizedMessage);
     } finally {
       setBusy(false);
@@ -70,15 +64,51 @@ export function DeleteInstructionButton({
       <button
         type="button"
         onClick={() => {
-          void handleDelete();
+          setConfirmOpen(true);
         }}
         disabled={busy}
         className="inline-flex items-center gap-2 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-sm font-semibold text-rose-200 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-70"
       >
         {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-        Delete Instruction
+        Archive Instruction
       </button>
       {error ? <p className="text-xs text-rose-300">{error}</p> : null}
+
+      {confirmOpen ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div className="grid w-full max-w-md gap-4 rounded-2xl border border-rose-500/30 bg-slate-950/95 p-5 shadow-2xl">
+            <div className="grid gap-1">
+              <h3 className="text-lg font-bold text-slate-100">Archive Instruction?</h3>
+              <p className="text-sm text-slate-300">
+                This will hide the instruction from dashboard and search results.
+                It is not permanently deleted.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmOpen(false)}
+                disabled={busy}
+                className="rounded-xl border border-slate-600 bg-slate-900/70 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleDelete();
+                }}
+                disabled={busy}
+                className="inline-flex items-center gap-2 rounded-xl border border-rose-500/50 bg-rose-500/20 px-4 py-2 text-sm font-semibold text-rose-200 transition hover:bg-rose-500/30 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                Archive
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

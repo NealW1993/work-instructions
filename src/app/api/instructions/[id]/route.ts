@@ -5,7 +5,7 @@ import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 interface InstructionDeleteRecord {
   id: string;
-  work_item_id: string;
+  is_archived: boolean;
 }
 
 export async function DELETE(
@@ -20,7 +20,7 @@ export async function DELETE(
 
   if (requester.role !== "system_admin") {
     return NextResponse.json(
-      { error: "Only system admins can delete work instructions." },
+      { error: "Only system admins can archive work instructions." },
       { status: 403 },
     );
   }
@@ -30,7 +30,7 @@ export async function DELETE(
 
   const { data: instruction, error: instructionReadError } = await supabaseAdmin
     .from("work_instructions")
-    .select("id, work_item_id")
+    .select("id, is_archived")
     .eq("id", id)
     .maybeSingle<InstructionDeleteRecord>();
 
@@ -48,29 +48,23 @@ export async function DELETE(
     );
   }
 
-  const { error: deleteInstructionError } = await supabaseAdmin
+  if (instruction.is_archived) {
+    return NextResponse.json({ success: true, archived: true });
+  }
+
+  const { error: archiveInstructionError } = await supabaseAdmin
     .from("work_instructions")
-    .delete()
+    .update({
+      is_archived: true,
+    })
     .eq("id", id);
 
-  if (deleteInstructionError) {
+  if (archiveInstructionError) {
     return NextResponse.json(
-      { error: deleteInstructionError.message },
+      { error: archiveInstructionError.message },
       { status: 500 },
     );
   }
 
-  const { count, error: remainingInstructionCountError } = await supabaseAdmin
-    .from("work_instructions")
-    .select("id", { count: "exact", head: true })
-    .eq("work_item_id", instruction.work_item_id);
-
-  if (!remainingInstructionCountError && (count ?? 0) === 0) {
-    await supabaseAdmin
-      .from("work_items")
-      .delete()
-      .eq("id", instruction.work_item_id);
-  }
-
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, archived: true });
 }

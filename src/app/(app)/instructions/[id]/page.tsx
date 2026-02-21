@@ -20,6 +20,7 @@ interface InstructionPageProps {
 
 interface InstructionRecord {
   id: string;
+  is_archived: boolean;
   body_markdown: string;
   revision: number;
   created_at: string;
@@ -155,9 +156,10 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, body_markdown, revision, created_at, updated_at, created_by, updated_by, work_items(id, part_number, mold_number, item_title), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
+      "id, is_archived, body_markdown, revision, created_at, updated_at, created_by, updated_by, work_items(id, part_number, mold_number, item_title), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
     )
     .eq("id", id)
+    .eq("is_archived", false)
     .maybeSingle();
 
   if (error) {

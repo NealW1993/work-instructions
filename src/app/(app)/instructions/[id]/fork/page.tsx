@@ -20,6 +20,7 @@ interface WorkItemRelation {
 
 interface ForkInstructionRecord {
   id: string;
+  is_archived: boolean;
   body_markdown: string;
   revision: number;
   work_items: WorkItemRelation | WorkItemRelation[];
@@ -45,8 +46,9 @@ export default async function ForkInstructionPage({ params }: ForkInstructionPag
 
   const { data, error } = await supabase
     .from("work_instructions")
-    .select("id, body_markdown, revision, work_items(id, part_number, mold_number, item_title)")
+    .select("id, is_archived, body_markdown, revision, work_items(id, part_number, mold_number, item_title)")
     .eq("id", id)
+    .eq("is_archived", false)
     .maybeSingle();
 
   if (error) {

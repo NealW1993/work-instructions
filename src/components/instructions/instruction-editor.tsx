@@ -163,8 +163,9 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           const safeQuery = escapeLikeQuery(query);
           const { data, error: searchError } = await supabase
             .from("work_items")
-            .select("id, part_number, mold_number, item_title")
+            .select("id, part_number, mold_number, item_title, work_instructions!inner(id)")
             .ilike("part_number", `%${safeQuery}%`)
+            .eq("work_instructions.is_archived", false)
             .order("updated_at", { ascending: false })
             .limit(8);
 
@@ -213,8 +214,9 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           const safeQuery = escapeLikeQuery(query);
           const { data, error: searchError } = await supabase
             .from("work_items")
-            .select("id, part_number, mold_number, item_title")
+            .select("id, part_number, mold_number, item_title, work_instructions!inner(id)")
             .ilike("mold_number", `%${safeQuery}%`)
+            .eq("work_instructions.is_archived", false)
             .order("updated_at", { ascending: false })
             .limit(8);
 
@@ -289,6 +291,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         revision === initialForkSnapshot.revision;
 
       if (forkUnchanged) {
+        window.alert("Fork canceled: no changes were made.");
         setMessage("No changes detected. Fork canceled.");
         if (initialData?.sourceInstructionId) {
           router.push(`/instructions/${initialData.sourceInstructionId}`);
@@ -373,6 +376,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         let duplicateCheckRequest = supabase
           .from("work_instructions")
           .select("id")
+          .eq("is_archived", false)
           .eq("work_item_id", typedWorkItem.id)
           .limit(1);
 

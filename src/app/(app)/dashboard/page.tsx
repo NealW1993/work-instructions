@@ -96,8 +96,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const searchRequest = supabase
     .from("work_items")
     .select(
-      "id, part_number, mold_number, item_title, updated_at, work_instructions(id, revision, created_at, updated_at, created_by)",
+      "id, part_number, mold_number, item_title, updated_at, work_instructions!inner(id, revision, created_at, updated_at, created_by)",
     )
+    .eq("work_instructions.is_archived", false)
     .order("updated_at", { ascending: false })
     .limit(300);
 
@@ -106,15 +107,17 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     .select(
       "id, revision, created_at, updated_at, created_by, work_items(part_number, mold_number, item_title)",
     )
+    .eq("is_archived", false)
     .order("created_at", { ascending: false })
     .limit(6);
 
   const pinnedRequest = supabase
     .from("user_pinned_instructions")
     .select(
-      "created_at, work_instructions(id, revision, created_at, updated_at, created_by, work_items(part_number, mold_number, item_title))",
+      "created_at, work_instructions!inner(id, revision, created_at, updated_at, created_by, is_archived, work_items(part_number, mold_number, item_title))",
     )
     .eq("user_id", profile.id)
+    .eq("work_instructions.is_archived", false)
     .order("created_at", { ascending: false })
     .limit(25);
 

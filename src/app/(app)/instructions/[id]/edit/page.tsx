@@ -20,6 +20,7 @@ interface WorkItemRelation {
 
 interface EditInstructionRecord {
   id: string;
+  is_archived: boolean;
   body_markdown: string;
   revision: number;
   work_item_id: string;
@@ -47,9 +48,10 @@ export default async function EditInstructionPage({ params }: EditInstructionPag
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, body_markdown, revision, work_item_id, work_items(id, part_number, mold_number, item_title)",
+      "id, is_archived, body_markdown, revision, work_item_id, work_items(id, part_number, mold_number, item_title)",
     )
     .eq("id", id)
+    .eq("is_archived", false)
     .maybeSingle();
 
   if (error) {
