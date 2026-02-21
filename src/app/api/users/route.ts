@@ -3,10 +3,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getRequestProfile } from "@/lib/api-auth";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { AppRole, Profile } from "@/lib/types";
+import { isValidEmployeeId, normalizeEmployeeId } from "@/lib/utils";
 
 interface CreateUserBody {
   fullName?: string;
   email?: string;
+  employeeId?: string;
   password?: string;
   pin?: string;
   role?: AppRole;
@@ -49,7 +51,7 @@ export async function GET(request: NextRequest) {
 
   const { data, error } = await supabaseAdmin
     .from("profiles")
-    .select("id, email, full_name, role, is_active, created_at")
+    .select("id, email, employee_id, full_name, role, is_active, created_at")
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -71,19 +73,27 @@ export async function POST(request: NextRequest) {
 
   const fullName = body.fullName?.trim();
   const email = body.email?.trim().toLowerCase();
+  const employeeId = normalizeEmployeeId(body.employeeId ?? "");
   const password = body.password?.trim();
   const pin = body.pin?.trim();
   const role = body.role;
 
-  if (!fullName || !email || !password || !pin || !role) {
+  if (!fullName || !email || !employeeId || !password || !pin || !role) {
     return NextResponse.json(
-      { error: "fullName, email, password, pin, and role are required." },
+      { error: "fullName, email, employeeId, password, pin, and role are required." },
       { status: 400 },
     );
   }
 
   if (!validateRole(role)) {
     return NextResponse.json({ error: "Invalid role." }, { status: 400 });
+  }
+
+  if (!isValidEmployeeId(employeeId)) {
+    return NextResponse.json(
+      { error: "Employee ID must be 1-6 digits." },
+      { status: 400 },
+    );
   }
 
   if (password.length < 8) {
@@ -107,6 +117,7 @@ export async function POST(request: NextRequest) {
       email_confirm: true,
       user_metadata: {
         full_name: fullName,
+        employee_id: employeeId,
       },
     },
   );
@@ -151,6 +162,7 @@ export async function POST(request: NextRequest) {
     .from("profiles")
     .update({
       full_name: fullName,
+      employee_id: employeeId,
       role,
     })
     .eq("id", userId);
@@ -172,7 +184,7 @@ export async function POST(request: NextRequest) {
 
   const { data: profile } = await supabaseAdmin
     .from("profiles")
-    .select("id, email, full_name, role, is_active, created_at, updated_at")
+    .select("id, email, employee_id, full_name, role, is_active, created_at, updated_at")
     .eq("id", userId)
     .single<Profile>();
 

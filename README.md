@@ -10,7 +10,7 @@ Internal work-instructions software built with React (Next.js), TypeScript, Supa
   - `user`: view/search instructions
 - Authentication:
   - Email + password login (Supabase Auth passwords are hashed by Supabase)
-  - 6-digit PIN login
+  - Employee ID + 6-digit PIN login (`employee_id` must be numeric, 1-6 digits)
   - Password recovery tools inside Password tab (email reset link and PIN-based temporary password)
 - Work instruction data model:
   - Search by `Part Number` or `Mold Number`
@@ -50,6 +50,8 @@ Internal work-instructions software built with React (Next.js), TypeScript, Supa
 - `src/lib/...`: Supabase clients, auth helpers, env, mailer
 - `supabase/migrations/202602210001_init.sql`: full database schema + RLS + policies
 - `supabase/seeds/001_promote_system_admin.sql`: manual system-admin promotion helper
+- `supabase/migrations/202602210007_employee_id_login_requirements.sql`: employee ID constraints + PIN lookup updates
+- `supabase/seeds/002_backfill_employee_ids.sql`: helper seed to assign employee IDs to existing users
 - `docker-compose.yml`: app + Mailpit local stack
 
 ## Prerequisites
@@ -101,8 +103,9 @@ npm run supabase:reset
 
 Run SQL in Supabase SQL Editor:
 
-1. Open and execute `supabase/migrations/202602210001_init.sql`
+1. Execute migrations in order from `supabase/migrations/`
 2. Optional: run `supabase/seeds/001_promote_system_admin.sql` after replacing email
+3. Optional: run `supabase/seeds/002_backfill_employee_ids.sql` after replacing values
 
 What this migration creates:
 
@@ -245,7 +248,7 @@ Two options:
 
 1. Auto-bootstrap option (recommended):
    - Set `SYSTEM_ADMIN_EMAIL` in `.env`
-   - Create account from login page with that email
+   - Create account from login page with that email and a numeric 1-6 digit Employee ID
    - If no existing system admin exists, account is promoted automatically
 
 2. Manual SQL promotion:
@@ -255,8 +258,9 @@ Two options:
 
 `system_admin` can open **User Admin** page to:
 
-- Create users (with role, password, and PIN)
+- Create users (with role, employee ID, password, and PIN)
 - Change role (`user`, `admin`, `system_admin`)
+- Update employee ID
 - Reset user PIN
 
 ## Instruction authoring flow
@@ -281,9 +285,9 @@ Two options:
 
 ## PIN login design
 
-PIN login endpoint verifies hashed PIN against `user_security.pin_hash`, then issues a Supabase magic-link token hash through admin API. Client verifies OTP and receives normal Supabase session.
+PIN login endpoint verifies hashed PIN against `user_security.pin_hash` using Employee ID as the login identifier, then issues a Supabase magic-link token hash through admin API. Client verifies OTP and receives normal Supabase session.
 
-PIN-only login (no email) is enabled. To prevent ambiguous PIN matches, PIN update functions reject duplicate PINs across active users.
+Employee IDs are unique in `profiles.employee_id` and constrained to numeric `1-6` digits.
 
 ## PostHog
 

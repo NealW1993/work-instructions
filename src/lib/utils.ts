@@ -16,3 +16,11 @@ export function sanitizeFileName(fileName: string): string {
 export function escapeLikeQuery(value: string): string {
   return value.replace(/[%,_]/g, "");
 }
+
+export function normalizeEmployeeId(value: string): string {
+  return value.replace(/\D/g, "").slice(0, 6);
+}
+
+export function isValidEmployeeId(value: string): boolean {
+  return /^[0-9]{1,6}$/.test(value);
+}

@@ -5,10 +5,12 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { PinInput } from "@/components/ui/pin-input";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import type { AppRole } from "@/lib/types";
+import { isValidEmployeeId, normalizeEmployeeId } from "@/lib/utils";
 
 interface AdminUser {
   id: string;
   email: string;
+  employee_id: string | null;
   full_name: string;
   role: AppRole;
   is_active: boolean;
@@ -27,12 +29,14 @@ export function UserAdminPanel() {
 
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
+  const [newEmployeeId, setNewEmployeeId] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newPin, setNewPin] = useState("");
   const [newRole, setNewRole] = useState<AppRole>("user");
 
   const [pinUpdates, setPinUpdates] = useState<Record<string, string>>({});
   const [roleUpdates, setRoleUpdates] = useState<Record<string, AppRole>>({});
+  const [employeeIdUpdates, setEmployeeIdUpdates] = useState<Record<string, string>>({});
 
   const getAuthHeaders = useCallback(async () => {
     const {
@@ -94,6 +98,11 @@ export function UserAdminPanel() {
         throw new Error("PIN must be exactly 6 digits.");
       }
 
+      const normalizedEmployeeId = normalizeEmployeeId(newEmployeeId);
+      if (!isValidEmployeeId(normalizedEmployeeId)) {
+        throw new Error("Employee ID must be 1-6 digits.");
+      }
+
       const headers = await getAuthHeaders();
       const response = await fetch("/api/users", {
         method: "POST",
@@ -101,6 +110,7 @@ export function UserAdminPanel() {
         body: JSON.stringify({
           fullName: newName,
           email: newEmail,
+          employeeId: normalizedEmployeeId,
           password: newPassword,
           pin: newPin,
           role: newRole,
@@ -118,6 +128,7 @@ export function UserAdminPanel() {
       setMessage("User created.");
       setNewName("");
       setNewEmail("");
+      setNewEmployeeId("");
       setNewPassword("");
       setNewPin("");
       setNewRole("user");
@@ -209,6 +220,52 @@ export function UserAdminPanel() {
     }
   }
 
+  async function updateEmployeeId(userId: string) {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const employeeId = normalizeEmployeeId(
+        employeeIdUpdates[userId] ?? users.find((user) => user.id === userId)?.employee_id ?? "",
+      );
+
+      if (!isValidEmployeeId(employeeId)) {
+        throw new Error("Employee ID must be 1-6 digits.");
+      }
+
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/users/${userId}/employee-id`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          employeeId,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to update employee ID.");
+      }
+
+      setMessage("Employee ID updated.");
+      setEmployeeIdUpdates((current) => ({
+        ...current,
+        [userId]: employeeId,
+      }));
+      await fetchUsers();
+    } catch (caughtError) {
+      const normalizedMessage =
+        caughtError instanceof Error ? caughtError.message : "Unable to update employee ID";
+      setError(normalizedMessage);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="grid gap-5">
       {message ? (
@@ -243,6 +300,18 @@ export function UserAdminPanel() {
             type="email"
             value={newEmail}
             onChange={(event) => setNewEmail(event.target.value)}
+            className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+          />
+        </label>
+        <label className="grid gap-1 text-sm">
+          <span>Employee ID</span>
+          <input
+            required
+            inputMode="numeric"
+            pattern="[0-9]{1,6}"
+            maxLength={6}
+            value={newEmployeeId}
+            onChange={(event) => setNewEmployeeId(normalizeEmployeeId(event.target.value))}
             className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
           />
         </label>
@@ -296,6 +365,7 @@ export function UserAdminPanel() {
               <tr>
                 <th className="px-3 py-2">Name</th>
                 <th className="px-3 py-2">Email</th>
+                <th className="px-3 py-2">Employee ID</th>
                 <th className="px-3 py-2">Role</th>
                 <th className="px-3 py-2">PIN Reset</th>
                 <th className="px-3 py-2">Created</th>
@@ -306,6 +376,30 @@ export function UserAdminPanel() {
                 <tr key={user.id} className="border-t border-slate-200/70 dark:border-slate-800">
                   <td className="px-3 py-2 font-medium">{user.full_name}</td>
                   <td className="px-3 py-2">{user.email}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <input
+                        value={employeeIdUpdates[user.id] ?? user.employee_id ?? ""}
+                        onChange={(event) =>
+                          setEmployeeIdUpdates((current) => ({
+                            ...current,
+                            [user.id]: normalizeEmployeeId(event.target.value),
+                          }))
+                        }
+                        inputMode="numeric"
+                        pattern="[0-9]{1,6}"
+                        maxLength={6}
+                        className="rounded-lg border border-slate-300 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-950"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void updateEmployeeId(user.id)}
+                        className="rounded-lg border border-cyan-500/30 px-2 py-1 text-cyan-700 transition hover:bg-cyan-500/10 dark:text-cyan-300"
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-2">
                       <select

@@ -7,16 +7,19 @@ import { FormEvent, useMemo, useState } from "react";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import type { ThemePreference } from "@/lib/types";
+import { isValidEmployeeId, normalizeEmployeeId } from "@/lib/utils";
 
 interface AccountSettingsPanelProps {
   initialFullName: string;
   initialEmail: string;
+  initialEmployeeId: string;
   initialThemePreference: ThemePreference;
 }
 
 export function AccountSettingsPanel({
   initialFullName,
   initialEmail,
+  initialEmployeeId,
   initialThemePreference,
 }: AccountSettingsPanelProps) {
   const router = useRouter();
@@ -25,11 +28,13 @@ export function AccountSettingsPanel({
 
   const [savedFullName, setSavedFullName] = useState(initialFullName);
   const [savedEmail, setSavedEmail] = useState(initialEmail.toLowerCase());
+  const [savedEmployeeId, setSavedEmployeeId] = useState(initialEmployeeId);
   const [savedThemePreference, setSavedThemePreference] =
     useState<ThemePreference>(initialThemePreference);
 
   const [fullName, setFullName] = useState(initialFullName);
   const [email, setEmail] = useState(initialEmail);
+  const [employeeId, setEmployeeId] = useState(initialEmployeeId);
   const [themePreference, setThemePreference] =
     useState<ThemePreference>(initialThemePreference);
   const [wantsPasswordChange, setWantsPasswordChange] = useState(false);
@@ -44,16 +49,19 @@ export function AccountSettingsPanel({
 
   const normalizedFullName = fullName.trim();
   const normalizedEmail = email.trim().toLowerCase();
+  const normalizedEmployeeId = normalizeEmployeeId(employeeId);
   const passwordMismatch =
     wantsPasswordChange && confirmPassword.length > 0 && password !== confirmPassword;
   const fullNameChanged = normalizedFullName !== savedFullName;
   const emailChanged = normalizedEmail !== savedEmail;
+  const employeeIdChanged = normalizedEmployeeId !== savedEmployeeId;
   const themeChanged = themePreference !== savedThemePreference;
   const passwordChanged = wantsPasswordChange && password.length > 0;
 
   const hasChanges =
     fullNameChanged ||
     emailChanged ||
+    employeeIdChanged ||
     themeChanged ||
     passwordChanged;
 
@@ -81,6 +89,10 @@ export function AccountSettingsPanel({
         throw new Error("Email cannot be empty.");
       }
 
+      if (!isValidEmployeeId(normalizedEmployeeId)) {
+        throw new Error("Employee ID must be 1-6 digits.");
+      }
+
       if (wantsPasswordChange) {
         if (password.length < 8) {
           throw new Error("Password must be at least 8 characters.");
@@ -102,6 +114,7 @@ export function AccountSettingsPanel({
       const payload: {
         fullName?: string;
         email?: string;
+        employeeId?: string;
         themePreference?: ThemePreference;
         password?: string;
       } = {};
@@ -112,6 +125,10 @@ export function AccountSettingsPanel({
 
       if (emailChanged) {
         payload.email = normalizedEmail;
+      }
+
+      if (employeeIdChanged) {
+        payload.employeeId = normalizedEmployeeId;
       }
 
       if (themeChanged) {
@@ -146,10 +163,11 @@ export function AccountSettingsPanel({
       setShowConfirmPassword(false);
       setSavedFullName(normalizedFullName);
       setSavedEmail(normalizedEmail);
+      setSavedEmployeeId(normalizedEmployeeId);
       setSavedThemePreference(themePreference);
       setMessage("Account updated.");
 
-      if (fullNameChanged || emailChanged) {
+      if (fullNameChanged || emailChanged || employeeIdChanged) {
         router.refresh();
       }
     } catch (caughtError) {
@@ -168,7 +186,7 @@ export function AccountSettingsPanel({
           Account Settings
         </h2>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-          Update your full name, email, and password.
+          Update your full name, email, employee ID, and password.
         </p>
       </div>
 
@@ -200,6 +218,18 @@ export function AccountSettingsPanel({
             type="email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
+            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+          />
+        </label>
+        <label className="grid gap-1 text-sm">
+          <span>Employee ID</span>
+          <input
+            required
+            inputMode="numeric"
+            pattern="[0-9]{1,6}"
+            maxLength={6}
+            value={employeeId}
+            onChange={(event) => setEmployeeId(normalizeEmployeeId(event.target.value))}
             className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
           />
         </label>

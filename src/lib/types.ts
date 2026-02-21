@@ -6,6 +6,7 @@ export type MediaType = "image" | "video";
 export interface Profile {
   id: string;
   email: string;
+  employee_id: string | null;
   full_name: string;
   role: AppRole;
   is_active: boolean;

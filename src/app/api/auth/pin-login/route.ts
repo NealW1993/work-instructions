@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import { isValidEmployeeId, normalizeEmployeeId } from "@/lib/utils";
 
 interface PinLoginBody {
-  email?: string;
+  employeeId?: string;
   pin?: string;
 }
 
@@ -11,8 +12,15 @@ export async function POST(request: Request) {
   const supabaseAdmin = getSupabaseAdminClient();
   const body = (await request.json().catch(() => ({}))) as PinLoginBody;
 
-  const email = body.email?.trim().toLowerCase();
+  const employeeId = normalizeEmployeeId(body.employeeId ?? "");
   const pin = body.pin?.trim();
+
+  if (!isValidEmployeeId(employeeId)) {
+    return NextResponse.json(
+      { error: "Employee ID must be 1-6 digits." },
+      { status: 400 },
+    );
+  }
 
   if (!pin || !/^\d{6}$/.test(pin)) {
     return NextResponse.json(
@@ -24,7 +32,7 @@ export async function POST(request: Request) {
   const { data: userId, error: pinError } = await supabaseAdmin.rpc(
     "verify_pin_login",
     {
-      login_email: email ?? null,
+      login_identifier: employeeId,
       submitted_pin: pin,
     },
   );
@@ -35,11 +43,7 @@ export async function POST(request: Request) {
 
   if (!userId) {
     return NextResponse.json(
-      {
-        error: email
-          ? "Invalid email or PIN."
-          : "Invalid PIN. If this keeps happening, ask your system admin to reset your PIN.",
-      },
+      { error: "Invalid credentials." },
       { status: 401 },
     );
   }

@@ -40,7 +40,7 @@ export async function POST(request: Request) {
   const { data: userId, error: pinError } = await supabaseAdmin.rpc(
     "verify_pin_login",
     {
-      login_email: email,
+      login_identifier: email,
       submitted_pin: pin,
     },
   );

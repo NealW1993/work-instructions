@@ -3,10 +3,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getRequestProfile } from "@/lib/api-auth";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { Profile, ThemePreference } from "@/lib/types";
+import { isValidEmployeeId, normalizeEmployeeId } from "@/lib/utils";
 
 interface UpdateAccountBody {
   fullName?: string;
   email?: string;
+  employeeId?: string;
   password?: string;
   themePreference?: ThemePreference;
 }
@@ -29,18 +31,28 @@ export async function PATCH(request: NextRequest) {
 
   const includeFullName = hasOwn(body, "fullName");
   const includeEmail = hasOwn(body, "email");
+  const includeEmployeeId = hasOwn(body, "employeeId");
   const includePassword = hasOwn(body, "password");
   const includeThemePreference = hasOwn(body, "themePreference");
 
-  if (!includeFullName && !includeEmail && !includePassword && !includeThemePreference) {
+  if (
+    !includeFullName &&
+    !includeEmail &&
+    !includeEmployeeId &&
+    !includePassword &&
+    !includeThemePreference
+  ) {
     return NextResponse.json(
-      { error: "fullName, email, password, or themePreference is required." },
+      {
+        error: "fullName, email, employeeId, password, or themePreference is required.",
+      },
       { status: 400 },
     );
   }
 
   const fullName = body.fullName?.trim();
   const normalizedEmail = body.email?.trim().toLowerCase();
+  const normalizedEmployeeId = normalizeEmployeeId(body.employeeId ?? "");
   const password = body.password?.trim();
   const themePreference = body.themePreference;
 
@@ -68,6 +80,22 @@ export async function PATCH(request: NextRequest) {
 
     if (!EMAIL_PATTERN.test(normalizedEmail)) {
       return NextResponse.json({ error: "Enter a valid email." }, { status: 400 });
+    }
+  }
+
+  if (includeEmployeeId) {
+    if (!normalizedEmployeeId) {
+      return NextResponse.json(
+        { error: "Employee ID cannot be empty." },
+        { status: 400 },
+      );
+    }
+
+    if (!isValidEmployeeId(normalizedEmployeeId)) {
+      return NextResponse.json(
+        { error: "Employee ID must be 1-6 digits." },
+        { status: 400 },
+      );
     }
   }
 
@@ -102,12 +130,13 @@ export async function PATCH(request: NextRequest) {
     password?: string;
     user_metadata?: Record<string, string>;
   } = {};
-  const profileUpdate: Partial<Pick<Profile, "full_name" | "email" | "theme_preference">> = {};
+  const authMetadata: Record<string, string> = {};
+  const profileUpdate: Partial<
+    Pick<Profile, "full_name" | "email" | "employee_id" | "theme_preference">
+  > = {};
 
   if (fullName && fullName !== requester.full_name) {
-    authUpdate.user_metadata = {
-      full_name: fullName,
-    };
+    authMetadata.full_name = fullName;
     profileUpdate.full_name = fullName;
   }
 
@@ -115,6 +144,15 @@ export async function PATCH(request: NextRequest) {
     authUpdate.email = normalizedEmail;
     authUpdate.email_confirm = true;
     profileUpdate.email = normalizedEmail;
+  }
+
+  if (normalizedEmployeeId && normalizedEmployeeId !== (requester.employee_id ?? "")) {
+    authMetadata.employee_id = normalizedEmployeeId;
+    profileUpdate.employee_id = normalizedEmployeeId;
+  }
+
+  if (Object.keys(authMetadata).length > 0) {
+    authUpdate.user_metadata = authMetadata;
   }
 
   if (password) {
@@ -153,7 +191,9 @@ export async function PATCH(request: NextRequest) {
 
   const { data: profile, error: readError } = await supabaseAdmin
     .from("profiles")
-    .select("id, email, full_name, role, is_active, theme_preference, created_at, updated_at")
+    .select(
+      "id, email, employee_id, full_name, role, is_active, theme_preference, created_at, updated_at",
+    )
     .eq("id", requester.id)
     .maybeSingle<Profile>();
 

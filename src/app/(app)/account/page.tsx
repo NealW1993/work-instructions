@@ -17,6 +17,7 @@ export default async function AccountSettingsPage() {
       <AccountSettingsPanel
         initialFullName={profile.full_name}
         initialEmail={profile.email}
+        initialEmployeeId={profile.employee_id ?? ""}
         initialThemePreference={profile.theme_preference ?? "dark"}
       />
     </div>

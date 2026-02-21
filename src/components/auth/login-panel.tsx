@@ -8,6 +8,7 @@ import { FormEvent, useEffect, useState } from "react";
 
 import { PinInput } from "@/components/ui/pin-input";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { isValidEmployeeId, normalizeEmployeeId } from "@/lib/utils";
 
 type AuthMode = "pin" | "password" | "signup";
 
@@ -38,6 +39,7 @@ export function LoginPanel() {
 
   const [mode, setMode] = useState<AuthMode>("pin");
 
+  const [pinEmployeeId, setPinEmployeeId] = useState("");
   const [pinLoginValue, setPinLoginValue] = useState("");
 
   const [passwordEmail, setPasswordEmail] = useState("");
@@ -48,6 +50,7 @@ export function LoginPanel() {
 
   const [signupName, setSignupName] = useState("");
   const [signupEmail, setSignupEmail] = useState("");
+  const [signupEmployeeId, setSignupEmployeeId] = useState("");
   const [signupPassword, setSignupPassword] = useState("");
   const [signupPasswordConfirm, setSignupPasswordConfirm] = useState("");
   const [showSignupPassword, setShowSignupPassword] = useState(false);
@@ -127,12 +130,19 @@ export function LoginPanel() {
 
     await withBusy(async () => {
       const supabase = getSupabaseBrowserClient();
+      const normalizedEmployeeId = normalizeEmployeeId(pinEmployeeId);
+
+      if (!isValidEmployeeId(normalizedEmployeeId)) {
+        throw new Error("Employee ID must be 1-6 digits.");
+      }
+
       const response = await fetch("/api/auth/pin-login", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          employeeId: normalizedEmployeeId,
           pin: pinLoginValue,
         }),
       });
@@ -173,12 +183,18 @@ export function LoginPanel() {
         throw new Error("PIN must be exactly 6 digits.");
       }
 
+      const normalizedEmployeeId = normalizeEmployeeId(signupEmployeeId);
+      if (!isValidEmployeeId(normalizedEmployeeId)) {
+        throw new Error("Employee ID must be 1-6 digits.");
+      }
+
       const { data, error: signupError } = await supabase.auth.signUp({
         email: signupEmail.trim().toLowerCase(),
         password: signupPassword,
         options: {
           data: {
             full_name: signupName,
+            employee_id: normalizedEmployeeId,
           },
         },
       });
@@ -195,6 +211,21 @@ export function LoginPanel() {
       }
 
       if (data.session) {
+        if (!data.user?.id) {
+          throw new Error("Unable to create profile for this account.");
+        }
+
+        const { error: profileEmployeeIdError } = await supabase
+          .from("profiles")
+          .update({
+            employee_id: normalizedEmployeeId,
+          })
+          .eq("id", data.user.id);
+
+        if (profileEmployeeIdError) {
+          throw new Error(profileEmployeeIdError.message);
+        }
+
         const { error: pinError } = await supabase.rpc("set_my_pin", {
           new_pin: signupPin,
         });
@@ -305,7 +336,7 @@ export function LoginPanel() {
           Work Instructions
         </h1>
         <p className="text-sm text-slate-600 dark:text-slate-300">
-          Sign in fast with your 6-digit PIN. Password login is still available.
+          Sign in fast with Employee ID + 6-digit PIN. Password login is still available.
         </p>
         <div className="flex flex-wrap gap-2">
           {MODES.map((item) => (
@@ -344,6 +375,20 @@ export function LoginPanel() {
 
       {mode === "pin" ? (
         <form className="grid gap-3" onSubmit={handlePinLogin}>
+          <label className="grid gap-1 text-sm">
+            <span>Employee ID</span>
+            <input
+              required
+              inputMode="numeric"
+              pattern="[0-9]{1,6}"
+              maxLength={6}
+              value={pinEmployeeId}
+              onChange={(event) =>
+                setPinEmployeeId(normalizeEmployeeId(event.target.value))
+              }
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+            />
+          </label>
           <label className="grid gap-1 text-sm">
             <span>6-Digit PIN</span>
             <PinInput
@@ -528,6 +573,20 @@ export function LoginPanel() {
               type="email"
               value={signupEmail}
               onChange={(event) => setSignupEmail(event.target.value)}
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+            />
+          </label>
+          <label className="grid gap-1 text-sm">
+            <span>Employee ID</span>
+            <input
+              required
+              inputMode="numeric"
+              pattern="[0-9]{1,6}"
+              maxLength={6}
+              value={signupEmployeeId}
+              onChange={(event) =>
+                setSignupEmployeeId(normalizeEmployeeId(event.target.value))
+              }
               className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
             />
           </label>
