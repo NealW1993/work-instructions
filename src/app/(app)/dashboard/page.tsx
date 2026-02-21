@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Search } from "lucide-react";
 
+import { AccountSettingsPanel } from "@/components/account/account-settings-panel";
 import { requireAuthenticatedUser } from "@/lib/auth";
 import { canEditInstructions } from "@/lib/roles";
 import { escapeLikeQuery } from "@/lib/utils";
@@ -99,6 +100,11 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           </button>
         </form>
       </section>
+
+      <AccountSettingsPanel
+        initialFullName={profile.full_name}
+        initialEmail={profile.email}
+      />
 
       {error ? (
         <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-200">

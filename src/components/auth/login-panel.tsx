@@ -42,6 +42,7 @@ export function LoginPanel() {
 
   const [passwordEmail, setPasswordEmail] = useState("");
   const [passwordValue, setPasswordValue] = useState("");
+  const [showPasswordLogin, setShowPasswordLogin] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [showForgotTools, setShowForgotTools] = useState(false);
 
@@ -49,6 +50,8 @@ export function LoginPanel() {
   const [signupEmail, setSignupEmail] = useState("");
   const [signupPassword, setSignupPassword] = useState("");
   const [signupPasswordConfirm, setSignupPasswordConfirm] = useState("");
+  const [showSignupPassword, setShowSignupPassword] = useState(false);
+  const [showSignupPasswordConfirm, setShowSignupPasswordConfirm] = useState(false);
   const [signupPin, setSignupPin] = useState("");
   const [signupPinConfirm, setSignupPinConfirm] = useState("");
 
@@ -282,6 +285,11 @@ export function LoginPanel() {
     });
   }
 
+  const signupPasswordMismatch =
+    signupPasswordConfirm.length > 0 && signupPassword !== signupPasswordConfirm;
+  const signupPinMismatch =
+    signupPinConfirm.length > 0 && signupPin !== signupPinConfirm;
+
   return (
     <div className="grid gap-6 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/75 md:p-8">
       <div className="space-y-3">
@@ -369,13 +377,27 @@ export function LoginPanel() {
           </label>
           <label className="grid gap-1 text-sm">
             <span>Password</span>
-            <input
-              required
-              type="password"
-              value={passwordValue}
-              onChange={(event) => setPasswordValue(event.target.value)}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-            />
+            <div className="relative">
+              <input
+                required
+                type={showPasswordLogin ? "text" : "password"}
+                value={passwordValue}
+                onChange={(event) => setPasswordValue(event.target.value)}
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-11 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPasswordLogin((current) => !current)}
+                aria-label={showPasswordLogin ? "Hide password" : "Show password"}
+                className="absolute inset-y-0 right-2 flex items-center rounded-md px-1.5 text-slate-500 transition hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 dark:text-slate-400 dark:hover:text-slate-200"
+              >
+                {showPasswordLogin ? (
+                  <EyeOff size={16} aria-hidden="true" />
+                ) : (
+                  <Eye size={16} aria-hidden="true" />
+                )}
+              </button>
+            </div>
           </label>
 
           <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-300">
@@ -511,26 +533,65 @@ export function LoginPanel() {
           </label>
           <label className="grid gap-1 text-sm">
             <span>Password</span>
-            <input
-              required
-              minLength={8}
-              type="password"
-              value={signupPassword}
-              onChange={(event) => setSignupPassword(event.target.value)}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-            />
+            <div className="relative">
+              <input
+                required
+                minLength={8}
+                type={showSignupPassword ? "text" : "password"}
+                value={signupPassword}
+                onChange={(event) => setSignupPassword(event.target.value)}
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-11 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              />
+              <button
+                type="button"
+                onClick={() => setShowSignupPassword((current) => !current)}
+                aria-label={showSignupPassword ? "Hide password" : "Show password"}
+                className="absolute inset-y-0 right-2 flex items-center rounded-md px-1.5 text-slate-500 transition hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 dark:text-slate-400 dark:hover:text-slate-200"
+              >
+                {showSignupPassword ? (
+                  <EyeOff size={16} aria-hidden="true" />
+                ) : (
+                  <Eye size={16} aria-hidden="true" />
+                )}
+              </button>
+            </div>
           </label>
           <label className="grid gap-1 text-sm">
             <span>Confirm Password</span>
-            <input
-              required
-              minLength={8}
-              type="password"
-              value={signupPasswordConfirm}
-              onChange={(event) => setSignupPasswordConfirm(event.target.value)}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-            />
+            <div className="relative">
+              <input
+                required
+                minLength={8}
+                type={showSignupPasswordConfirm ? "text" : "password"}
+                value={signupPasswordConfirm}
+                onChange={(event) => setSignupPasswordConfirm(event.target.value)}
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-11 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  setShowSignupPasswordConfirm((current) => !current)
+                }
+                aria-label={
+                  showSignupPasswordConfirm
+                    ? "Hide confirm password"
+                    : "Show confirm password"
+                }
+                className="absolute inset-y-0 right-2 flex items-center rounded-md px-1.5 text-slate-500 transition hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 dark:text-slate-400 dark:hover:text-slate-200"
+              >
+                {showSignupPasswordConfirm ? (
+                  <EyeOff size={16} aria-hidden="true" />
+                ) : (
+                  <Eye size={16} aria-hidden="true" />
+                )}
+              </button>
+            </div>
           </label>
+          {signupPasswordMismatch ? (
+            <p className="text-sm text-rose-600 dark:text-rose-300">
+              Password and Confirm Password do not match.
+            </p>
+          ) : null}
           <label className="grid gap-1 text-sm">
             <span>6-Digit PIN</span>
             <PinInput
@@ -549,9 +610,14 @@ export function LoginPanel() {
               className="tracking-[0.35em]"
             />
           </label>
+          {signupPinMismatch ? (
+            <p className="text-sm text-rose-600 dark:text-rose-300">
+              PIN and Confirm PIN do not match.
+            </p>
+          ) : null}
           <button
             type="submit"
-            disabled={busy}
+            disabled={busy || signupPasswordMismatch || signupPinMismatch}
             className="mt-1 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
           >
             {busy ? "Creating account..." : "Create account"}
