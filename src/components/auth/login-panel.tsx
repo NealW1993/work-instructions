@@ -136,11 +136,9 @@ export function LoginPanel() {
 
       const payload = (await parseJsonResponse(response)) as {
         tokenHash: string;
-        email: string;
       };
 
       const { error: verifyError } = await supabase.auth.verifyOtp({
-        email: payload.email,
         token_hash: payload.tokenHash,
         type: "magiclink",
       });

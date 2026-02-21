@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 
 import { clientEnv } from "@/lib/env.client";
 import { serverEnv } from "@/lib/env.server";
+import { SUPABASE_AUTH_COOKIE_NAME } from "@/lib/supabase/constants";
 
 export async function createSupabaseServerClient() {
   const cookieStore = await cookies();
@@ -13,6 +14,9 @@ export async function createSupabaseServerClient() {
     supabaseUrl,
     clientEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     {
+      cookieOptions: {
+        name: SUPABASE_AUTH_COOKIE_NAME,
+      },
       cookies: {
         getAll() {
           return cookieStore.getAll();
