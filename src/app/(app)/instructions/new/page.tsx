@@ -18,8 +18,8 @@ export default async function NewInstructionPage() {
           New Work Instruction
         </h1>
         <p className="text-sm text-slate-600 dark:text-slate-300">
-          Use rich text formatting, attach media, and add clear descriptions for
-          photos/videos captured directly from tablets.
+          Use rich text formatting, insert inline media, and capture clear step-by-step
+          instructions.
         </p>
       </header>
       <InstructionEditor mode="create" />

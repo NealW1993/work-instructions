@@ -103,6 +103,53 @@ const MAX_MEDIA_WIDTH = 1200;
 const MAX_INLINE_IMAGE_BYTES = 4 * 1024 * 1024;
 const MAX_INLINE_VIDEO_BYTES = 14 * 1024 * 1024;
 
+function clampColorChannel(value: number) {
+  return Math.max(0, Math.min(255, Math.round(value)));
+}
+
+function toHexColor(red: number, green: number, blue: number) {
+  return `#${[red, green, blue]
+    .map((channel) => clampColorChannel(channel).toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
+function normalizeColorInputValue(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const hexMatch = value.trim().match(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/);
+  if (hexMatch) {
+    const rawHex = hexMatch[1].toLowerCase();
+    if (rawHex.length === 3) {
+      return `#${rawHex
+        .split("")
+        .map((digit) => `${digit}${digit}`)
+        .join("")}`;
+    }
+
+    if (rawHex.length === 8) {
+      return `#${rawHex.slice(0, 6)}`;
+    }
+
+    return `#${rawHex}`;
+  }
+
+  const rgbMatch = value
+    .trim()
+    .match(/^rgba?\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)(?:\s*,\s*[0-9.]+\s*)?\)$/i);
+  if (rgbMatch) {
+    const red = Number.parseFloat(rgbMatch[1]);
+    const green = Number.parseFloat(rgbMatch[2]);
+    const blue = Number.parseFloat(rgbMatch[3]);
+    if (Number.isFinite(red) && Number.isFinite(green) && Number.isFinite(blue)) {
+      return toHexColor(red, green, blue);
+    }
+  }
+
+  return null;
+}
+
 function clampMediaWidth(width: number) {
   return Math.max(MIN_MEDIA_WIDTH, Math.min(MAX_MEDIA_WIDTH, Math.round(width)));
 }
@@ -594,6 +641,9 @@ export function RichTextEditor({
   const [toolbarMessage, setToolbarMessage] = useState<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const videoInputRef = useRef<HTMLInputElement | null>(null);
+  const colorInputRef = useRef<HTMLInputElement | null>(null);
+  const selectionRangeRef = useRef<{ from: number; to: number } | null>(null);
+  const [lastPickedColor, setLastPickedColor] = useState("#dbeafe");
 
   const refreshToolbarState = useCallback(() => {
     setToolbarRefreshCounter((current) => current + 1);
@@ -662,6 +712,26 @@ export function RichTextEditor({
       editor.commands.setContent(value || "", { emitUpdate: false });
     }
   }, [editor, value]);
+
+  useEffect(() => {
+    if (!editor) {
+      return;
+    }
+
+    const syncSelection = () => {
+      const { from, to } = editor.state.selection;
+      selectionRangeRef.current = { from, to };
+    };
+
+    syncSelection();
+    editor.on("selectionUpdate", syncSelection);
+    editor.on("transaction", syncSelection);
+
+    return () => {
+      editor.off("selectionUpdate", syncSelection);
+      editor.off("transaction", syncSelection);
+    };
+  }, [editor]);
 
   const insertInlineMedia = useCallback(
     async (event: ChangeEvent<HTMLInputElement>, mediaType: "image" | "video") => {
@@ -738,7 +808,10 @@ export function RichTextEditor({
     editor.isActive(markName) || hasStoredMark(markName);
 
   const activeFontSize = (editor.getAttributes("textStyle").fontSize as string) || "16px";
-  const activeColor = (editor.getAttributes("textStyle").color as string) || "#0f172a";
+  const attributeColor = normalizeColorInputValue(
+    editor.getAttributes("textStyle").color as string | undefined,
+  );
+  const activeColor = attributeColor ?? lastPickedColor;
   const runAndRefresh = (command: () => boolean) => {
     if (!editor.isFocused) {
       editor.commands.focus("end");
@@ -746,6 +819,33 @@ export function RichTextEditor({
 
     command();
     requestAnimationFrame(refreshToolbarState);
+  };
+
+  const applyColor = (nextColor: string) => {
+    const normalizedColor = normalizeColorInputValue(nextColor);
+    if (!normalizedColor) {
+      return;
+    }
+
+    setLastPickedColor(normalizedColor);
+
+    const fallbackSelection = editor.state.selection;
+    const selection = selectionRangeRef.current ?? {
+      from: fallbackSelection.from,
+      to: fallbackSelection.to,
+    };
+
+    runAndRefresh(() =>
+      editor
+        .chain()
+        .focus()
+        .setTextSelection({
+          from: selection.from,
+          to: selection.to,
+        })
+        .setColor(normalizedColor)
+        .run(),
+    );
   };
 
   return (
@@ -895,15 +995,19 @@ export function RichTextEditor({
           ))}
         </select>
 
-        <input
-          type="color"
-          value={activeColor}
-          onChange={(event) =>
-            runAndRefresh(() => editor.chain().focus().setColor(event.target.value).run())
-          }
-          aria-label="Text color"
-          className="h-8 w-10 shrink-0 cursor-pointer rounded border border-slate-300 bg-white p-0.5 dark:border-slate-700 dark:bg-slate-950"
-        />
+        <ToolbarButton
+          ariaLabel="Text color"
+          onClick={() => {
+            const { from, to } = editor.state.selection;
+            selectionRangeRef.current = { from, to };
+            colorInputRef.current?.click();
+          }}
+        >
+          <span
+            className="h-4 w-4 rounded border border-white/40"
+            style={{ backgroundColor: activeColor }}
+          />
+        </ToolbarButton>
 
         <ToolbarButton
           ariaLabel="Insert Image"
@@ -970,6 +1074,15 @@ export function RichTextEditor({
         className="hidden"
         onChange={(event) => {
           void insertInlineMedia(event, "video");
+        }}
+      />
+      <input
+        ref={colorInputRef}
+        type="color"
+        value={activeColor}
+        className="hidden"
+        onChange={(event) => {
+          applyColor(event.target.value);
         }}
       />
 

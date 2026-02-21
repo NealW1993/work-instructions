@@ -3,7 +3,6 @@ import { notFound, redirect } from "next/navigation";
 import { InstructionEditor } from "@/components/instructions/instruction-editor";
 import { requireAuthenticatedUser } from "@/lib/auth";
 import { canEditInstructions } from "@/lib/roles";
-import type { InstructionMedia } from "@/lib/types";
 
 interface EditInstructionPageProps {
   params: Promise<{
@@ -24,7 +23,6 @@ interface EditInstructionRecord {
   revision: number;
   work_item_id: string;
   work_items: WorkItemRelation | WorkItemRelation[];
-  instruction_media: InstructionMedia[];
 }
 
 function normalizeWorkItem(
@@ -48,7 +46,7 @@ export default async function EditInstructionPage({ params }: EditInstructionPag
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, body_markdown, revision, work_item_id, work_items(id, part_number, mold_number, item_title), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
+      "id, body_markdown, revision, work_item_id, work_items(id, part_number, mold_number, item_title)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -85,7 +83,6 @@ export default async function EditInstructionPage({ params }: EditInstructionPag
           itemTitle: workItem.item_title,
           bodyMarkdown: instruction.body_markdown,
           revision: instruction.revision,
-          media: instruction.instruction_media,
         }}
       />
     </div>

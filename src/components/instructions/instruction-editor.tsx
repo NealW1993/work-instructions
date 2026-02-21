@@ -1,15 +1,12 @@
-/* eslint-disable @next/next/no-img-element */
-
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Save, Trash2, UploadCloud } from "lucide-react";
+import { Loader2, UploadCloud } from "lucide-react";
 
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
-import type { InstructionMedia } from "@/lib/types";
-import { sanitizeFileName } from "@/lib/utils";
+import { escapeLikeQuery } from "@/lib/utils";
 
 interface InstructionEditorProps {
   mode: "create" | "edit";
@@ -21,16 +18,14 @@ interface InstructionEditorProps {
     itemTitle: string;
     bodyMarkdown: string;
     revision: number;
-    media: InstructionMedia[];
   };
 }
 
-interface PendingUpload {
+interface WorkItemSearchResult {
   id: string;
-  file: File;
-  caption: string;
-  previewUrl: string;
-  mediaType: "image" | "video";
+  part_number: string;
+  mold_number: string;
+  item_title: string;
 }
 
 function looksLikeHtml(value: string): boolean {
@@ -79,202 +74,101 @@ function richTextToPlain(value: string): string {
     .trim();
 }
 
-function revokePendingUploadPreviews(uploads: PendingUpload[]) {
-  for (const upload of uploads) {
-    URL.revokeObjectURL(upload.previewUrl);
-  }
-}
+function summarizePartMold(partNumber: string, moldNumber: string) {
+  const part = partNumber.trim();
+  const mold = moldNumber.trim();
 
-const DEFAULT_PART_NUMBER = "GENERAL";
-const DEFAULT_MOLD_NUMBER = "";
+  if (part && mold) {
+    return `${part} | ${mold}`;
+  }
+
+  return part || mold || "";
+}
 
 export function InstructionEditor({ mode, initialData }: InstructionEditorProps) {
   const router = useRouter();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
+  const [partNumber, setPartNumber] = useState(initialData?.partNumber ?? "");
+  const [moldNumber, setMoldNumber] = useState(initialData?.moldNumber ?? "");
+  const [partOrMoldSearch, setPartOrMoldSearch] = useState(
+    summarizePartMold(initialData?.partNumber ?? "", initialData?.moldNumber ?? ""),
+  );
+  const [matchedWorkItems, setMatchedWorkItems] = useState<WorkItemSearchResult[]>([]);
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  const [workItemId, setWorkItemId] = useState<string | null>(
+    initialData?.workItemId ?? null,
+  );
   const [itemTitle, setItemTitle] = useState(initialData?.itemTitle ?? "");
   const [bodyMarkdown, setBodyMarkdown] = useState(
     normalizeEditorContent(initialData?.bodyMarkdown ?? ""),
   );
   const [revision, setRevision] = useState(initialData?.revision ?? 1);
-  const [selectedUploads, setSelectedUploads] = useState<PendingUpload[]>([]);
-  const [existingMedia, setExistingMedia] = useState(initialData?.media ?? []);
-  const [existingCaptionDrafts, setExistingCaptionDrafts] = useState<
-    Record<string, string>
-  >(() => {
-    const entries = initialData?.media ?? [];
-    return Object.fromEntries(entries.map((media) => [media.id, media.caption ?? ""]));
-  });
-
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => () => revokePendingUploadPreviews(selectedUploads), [selectedUploads]);
-
-  function handlePendingFiles(fileList: FileList | null) {
-    setSelectedUploads((current) => {
-      revokePendingUploadPreviews(current);
-
-      if (!fileList || fileList.length === 0) {
-        return [];
-      }
-
-      return Array.from(fileList).map((file) => ({
-        id: crypto.randomUUID(),
-        file,
-        caption: "",
-        previewUrl: URL.createObjectURL(file),
-        mediaType: file.type.startsWith("video/") ? "video" : "image",
-      }));
-    });
-  }
-
-  function updatePendingCaption(id: string, caption: string) {
-    setSelectedUploads((current) =>
-      current.map((entry) =>
-        entry.id === id
-          ? {
-              ...entry,
-              caption,
-            }
-          : entry,
-      ),
-    );
-  }
-
-  async function handleRemoveMedia(media: InstructionMedia) {
-    if (busy) {
+  useEffect(() => {
+    const trimmedQuery = partOrMoldSearch.trim();
+    if (trimmedQuery.length < 2) {
+      setMatchedWorkItems([]);
+      setSearchBusy(false);
       return;
     }
 
-    setBusy(true);
-    setError(null);
-    setMessage(null);
+    let isActive = true;
+    const timer = setTimeout(() => {
+      void (async () => {
+        setSearchBusy(true);
+        try {
+          const safeQuery = escapeLikeQuery(trimmedQuery);
+          const { data, error: searchError } = await supabase
+            .from("work_items")
+            .select("id, part_number, mold_number, item_title")
+            .or(`part_number.ilike.%${safeQuery}%,mold_number.ilike.%${safeQuery}%`)
+            .order("updated_at", { ascending: false })
+            .limit(8);
 
-    try {
-      const { error: storageError } = await supabase
-        .storage
-        .from("instruction-media")
-        .remove([media.storage_path]);
+          if (!isActive) {
+            return;
+          }
 
-      if (storageError) {
-        throw new Error(storageError.message);
-      }
+          if (searchError) {
+            throw searchError;
+          }
 
-      const { error: deleteError } = await supabase
-        .from("instruction_media")
-        .delete()
-        .eq("id", media.id);
+          setMatchedWorkItems((data ?? []) as WorkItemSearchResult[]);
+          setSearchOpen(true);
+        } catch {
+          if (!isActive) {
+            return;
+          }
 
-      if (deleteError) {
-        throw new Error(deleteError.message);
-      }
+          setMatchedWorkItems([]);
+        } finally {
+          if (isActive) {
+            setSearchBusy(false);
+          }
+        }
+      })();
+    }, 220);
 
-      setExistingMedia((current) => current.filter((entry) => entry.id !== media.id));
-      setExistingCaptionDrafts((current) => {
-        const next = { ...current };
-        delete next[media.id];
-        return next;
-      });
-      setMessage("Media deleted.");
-    } catch (caughtError) {
-      const normalizedMessage =
-        caughtError instanceof Error ? caughtError.message : "Unable to remove media";
-      setError(normalizedMessage);
-    } finally {
-      setBusy(false);
-    }
-  }
+    return () => {
+      isActive = false;
+      clearTimeout(timer);
+    };
+  }, [partOrMoldSearch, supabase]);
 
-  async function handleSaveMediaCaption(mediaId: string) {
-    if (busy) {
-      return;
-    }
-
-    const draft = (existingCaptionDrafts[mediaId] ?? "").trim();
-
-    setBusy(true);
-    setError(null);
-    setMessage(null);
-
-    try {
-      const { error: captionError } = await supabase
-        .from("instruction_media")
-        .update({
-          caption: draft || null,
-        })
-        .eq("id", mediaId);
-
-      if (captionError) {
-        throw new Error(captionError.message);
-      }
-
-      setExistingMedia((current) =>
-        current.map((entry) =>
-          entry.id === mediaId
-            ? {
-                ...entry,
-                caption: draft || null,
-              }
-            : entry,
-        ),
-      );
-      setMessage("Media description updated.");
-    } catch (caughtError) {
-      const normalizedMessage =
-        caughtError instanceof Error ? caughtError.message : "Unable to update media description";
-      setError(normalizedMessage);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function uploadNewFiles(instructionId: string, userId: string) {
-    if (selectedUploads.length === 0) {
-      return;
-    }
-
-    for (let index = 0; index < selectedUploads.length; index += 1) {
-      const upload = selectedUploads[index];
-      const file = upload.file;
-      const storagePath = `${instructionId}/${crypto.randomUUID()}-${sanitizeFileName(
-        file.name,
-      )}`;
-
-      const { error: uploadError } = await supabase
-        .storage
-        .from("instruction-media")
-        .upload(storagePath, file, {
-          cacheControl: "3600",
-          upsert: false,
-          contentType: file.type,
-        });
-
-      if (uploadError) {
-        throw new Error(uploadError.message);
-      }
-
-      const {
-        data: { publicUrl },
-      } = supabase.storage.from("instruction-media").getPublicUrl(storagePath);
-
-      const mediaType = file.type.startsWith("video/") ? "video" : "image";
-
-      const { error: mediaInsertError } = await supabase.from("instruction_media").insert({
-        instruction_id: instructionId,
-        storage_path: storagePath,
-        public_url: publicUrl,
-        media_type: mediaType,
-        caption: upload.caption.trim() || file.name,
-        sort_order: existingMedia.length + index,
-        created_by: userId,
-      });
-
-      if (mediaInsertError) {
-        throw new Error(mediaInsertError.message);
-      }
-    }
+  function handleSelectWorkItem(result: WorkItemSearchResult) {
+    setPartNumber(result.part_number);
+    setMoldNumber(result.mold_number);
+    setItemTitle(result.item_title);
+    setWorkItemId(result.id);
+    setPartOrMoldSearch(summarizePartMold(result.part_number, result.mold_number));
+    setMatchedWorkItems([]);
+    setSearchOpen(false);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -285,6 +179,13 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     setError(null);
 
     try {
+      const normalizedPartNumber = partNumber.trim();
+      const normalizedMoldNumber = moldNumber.trim();
+
+      if (!normalizedPartNumber && !normalizedMoldNumber) {
+        throw new Error("Part # or Mold # is required.");
+      }
+
       if (!itemTitle.trim()) {
         throw new Error("Work item title is required.");
       }
@@ -302,8 +203,6 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         throw new Error("You must be signed in.");
       }
 
-      const effectivePartNumber = initialData?.partNumber?.trim() || DEFAULT_PART_NUMBER;
-      const effectiveMoldNumber = initialData?.moldNumber?.trim() || DEFAULT_MOLD_NUMBER;
       const workItemPayload: {
         id?: string;
         part_number: string;
@@ -311,14 +210,14 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         item_title: string;
         created_by: string;
       } = {
-        part_number: effectivePartNumber,
-        mold_number: effectiveMoldNumber,
+        part_number: normalizedPartNumber,
+        mold_number: normalizedMoldNumber,
         item_title: itemTitle.trim(),
         created_by: user.id,
       };
 
-      if (initialData?.workItemId) {
-        workItemPayload.id = initialData.workItemId;
+      if (workItemId) {
+        workItemPayload.id = workItemId;
       }
 
       const { data: workItem, error: workItemError } = await supabase
@@ -377,12 +276,6 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         }
       }
 
-      await uploadNewFiles(instructionId, user.id);
-
-      setSelectedUploads((current) => {
-        revokePendingUploadPreviews(current);
-        return [];
-      });
       setMessage(
         mode === "create"
           ? "Instruction created successfully."
@@ -417,13 +310,102 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         onSubmit={handleSubmit}
         className="grid min-w-0 gap-4 overflow-hidden rounded-3xl border border-white/30 bg-white/75 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7"
       >
+        <div className="grid gap-2">
+          <label className="grid gap-1 text-sm">
+            <span className="font-semibold">Mold # or Part #</span>
+            <div className="relative">
+              <input
+                value={partOrMoldSearch}
+                placeholder="Type a part # or mold # to find existing records"
+                onFocus={() => {
+                  if (matchedWorkItems.length > 0) {
+                    setSearchOpen(true);
+                  }
+                }}
+                onBlur={() => {
+                  window.setTimeout(() => setSearchOpen(false), 120);
+                }}
+                onChange={(event) => {
+                  setPartOrMoldSearch(event.target.value);
+                  setSearchOpen(true);
+                }}
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+              />
+              {searchOpen ? (
+                <div className="absolute left-0 right-0 top-[calc(100%+0.4rem)] z-20 max-h-60 overflow-auto rounded-xl border border-slate-300 bg-white/95 p-1 shadow-xl backdrop-blur dark:border-slate-700 dark:bg-slate-950/95">
+                  {searchBusy ? (
+                    <p className="px-2 py-2 text-xs text-slate-500 dark:text-slate-300">
+                      Searching...
+                    </p>
+                  ) : matchedWorkItems.length === 0 ? (
+                    <p className="px-2 py-2 text-xs text-slate-500 dark:text-slate-300">
+                      No matches yet.
+                    </p>
+                  ) : (
+                    matchedWorkItems.map((result) => (
+                      <button
+                        key={result.id}
+                        type="button"
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          handleSelectWorkItem(result);
+                        }}
+                        className="grid w-full gap-0.5 rounded-lg px-2 py-1.5 text-left text-xs transition hover:bg-cyan-500/10"
+                      >
+                        <span className="font-semibold text-slate-800 dark:text-slate-100">
+                          {summarizePartMold(result.part_number, result.mold_number)}
+                        </span>
+                        <span className="text-slate-500 dark:text-slate-300">
+                          {result.item_title}
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              ) : null}
+            </div>
+          </label>
+          <p className="text-xs text-slate-500 dark:text-slate-300">
+            Selecting a match autofills the part, mold, and work item title.
+          </p>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="grid gap-1 text-sm">
+              <span className="font-semibold">Part #</span>
+              <input
+                value={partNumber}
+                placeholder="Example: PART-123"
+                onChange={(event) => {
+                  setPartNumber(event.target.value);
+                  setWorkItemId(null);
+                }}
+                className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+              />
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span className="font-semibold">Mold #</span>
+              <input
+                value={moldNumber}
+                placeholder="Example: MOLD-4"
+                onChange={(event) => {
+                  setMoldNumber(event.target.value);
+                  setWorkItemId(null);
+                }}
+                className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+              />
+            </label>
+          </div>
+        </div>
+
         <label className="grid gap-1 text-sm">
           <span className="font-semibold">Work Item Title</span>
           <input
             required
             placeholder="Example: Daily Setup Sequence"
             value={itemTitle}
-            onChange={(event) => setItemTitle(event.target.value)}
+            onChange={(event) => {
+              setItemTitle(event.target.value);
+              setWorkItemId(null);
+            }}
             className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
           />
         </label>
@@ -435,9 +417,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
             min={1}
             type="number"
             value={revision}
-            onChange={(event) =>
-              setRevision(Number.parseInt(event.target.value || "1", 10))
-            }
+            onChange={(event) => setRevision(Number.parseInt(event.target.value || "1", 10))}
             className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
           />
         </label>
@@ -449,104 +429,6 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           placeholder="Type work instructions here. Use toolbar buttons for formatting and inline media."
           minHeightClassName="min-h-72"
         />
-
-        <div className="grid gap-2">
-          <label className="text-sm font-semibold">Media Upload (Image/Video)</label>
-          <input
-            type="file"
-            accept="image/*,video/*"
-            capture="environment"
-            multiple
-            onChange={(event) => handlePendingFiles(event.target.files)}
-            className="rounded-xl border border-dashed border-slate-400 bg-white/70 px-3 py-3 text-sm dark:border-slate-600 dark:bg-slate-900/60"
-          />
-          {selectedUploads.length > 0 ? (
-            <ul className="grid gap-3 text-xs text-slate-600 dark:text-slate-300">
-              {selectedUploads.map((upload) => (
-                <li
-                  key={upload.id}
-                  className="grid gap-2 rounded-xl border border-slate-300/70 bg-white/70 p-2 dark:border-slate-700 dark:bg-slate-950/60"
-                >
-                  {upload.mediaType === "video" ? (
-                    <video
-                      src={upload.previewUrl}
-                      controls
-                      className="max-h-56 w-full rounded-lg bg-black"
-                    />
-                  ) : (
-                    <img
-                      src={upload.previewUrl}
-                      alt={upload.file.name}
-                      className="max-h-56 w-full rounded-lg object-cover"
-                    />
-                  )}
-                  <span className="font-medium">{upload.file.name}</span>
-                  <input
-                    value={upload.caption}
-                    onChange={(event) => updatePendingCaption(upload.id, event.target.value)}
-                    placeholder="Describe this image/video (optional)"
-                    className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                  />
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-
-        {existingMedia.length > 0 ? (
-          <div className="grid gap-3">
-            <p className="text-sm font-semibold">Existing Media</p>
-            <div className="grid gap-3 md:grid-cols-2">
-              {existingMedia.map((media) => (
-                <div
-                  key={media.id}
-                  className="overflow-hidden rounded-2xl border border-slate-300 bg-white dark:border-slate-700 dark:bg-slate-950"
-                >
-                  {media.media_type === "video" ? (
-                    <video src={media.public_url} controls className="max-h-64 w-full" />
-                  ) : (
-                    <img
-                      src={media.public_url}
-                      alt={media.caption ?? "Instruction media"}
-                      className="max-h-64 w-full object-cover"
-                    />
-                  )}
-                  <div className="grid gap-2 p-2 text-xs">
-                    <input
-                      value={existingCaptionDrafts[media.id] ?? ""}
-                      onChange={(event) =>
-                        setExistingCaptionDrafts((current) => ({
-                          ...current,
-                          [media.id]: event.target.value,
-                        }))
-                      }
-                      placeholder="Describe this image/video"
-                      className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                    />
-                    <div className="flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={() => void handleSaveMediaCaption(media.id)}
-                        className="inline-flex items-center gap-1 rounded-full border border-cyan-500/30 px-2 py-1 text-cyan-700 transition hover:bg-cyan-500/10 dark:text-cyan-300"
-                      >
-                        <Save size={12} />
-                        Save description
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void handleRemoveMedia(media)}
-                        className="inline-flex items-center gap-1 rounded-full border border-rose-500/30 px-2 py-1 text-rose-700 transition hover:bg-rose-500/10 dark:text-rose-300"
-                      >
-                        <Trash2 size={12} />
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
 
         <button
           type="submit"

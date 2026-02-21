@@ -110,6 +110,25 @@ h6 {
   margin-left: 1.25rem;
   margin-top: 0.75rem;
   margin-bottom: 0.75rem;
+  padding-left: 1.25rem;
+}
+
+.prose-markdown ul {
+  list-style: disc;
+}
+
+.prose-markdown ol {
+  list-style: decimal;
+}
+
+.prose-markdown ul[data-type="taskList"] {
+  margin-left: 0;
+  padding-left: 0;
+  list-style: none;
+}
+
+.prose-markdown li::marker {
+  color: currentColor;
 }
 
 .prose-markdown code {
@@ -218,6 +237,24 @@ html:not(.dark) textarea:-webkit-autofill:focus {
 .tiptap-editor-content ol {
   margin: 0.5rem 0;
   padding-left: 1.25rem;
+}
+
+.tiptap-editor-content ul {
+  list-style: disc;
+}
+
+.tiptap-editor-content ol {
+  list-style: decimal;
+}
+
+.tiptap-editor-content ul[data-type="taskList"] {
+  margin-left: 0;
+  padding-left: 0;
+  list-style: none;
+}
+
+.tiptap-editor-content li::marker {
+  color: currentColor;
 }
 
 .tiptap-editor-content blockquote {
