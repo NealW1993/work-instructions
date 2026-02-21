@@ -219,11 +219,14 @@ export function DashboardClient({
                 <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                   <div>
                     <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
-                      {item.item_title}
+                      {getPrimaryPartOrMoldLabel({
+                        part_number: item.part_number,
+                        mold_number: item.mold_number,
+                        item_title: item.item_title,
+                      })}
                     </h2>
                     <p className="text-sm text-slate-600 dark:text-slate-300">
-                      <strong>Part:</strong> {item.part_number || "N/A"} |{" "}
-                      <strong>Mold:</strong> {item.mold_number || "N/A"}
+                      {item.item_title}
                     </p>
                   </div>
                   <span className="rounded-full border border-slate-400/30 bg-slate-900/10 px-3 py-1 text-xs font-semibold dark:bg-white/10">
