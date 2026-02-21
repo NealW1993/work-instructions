@@ -9,10 +9,11 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { cn, escapeLikeQuery } from "@/lib/utils";
 
 interface InstructionEditorProps {
-  mode: "create" | "edit";
+  mode: "create" | "edit" | "fork";
   initialData?: {
-    instructionId: string;
-    workItemId: string;
+    instructionId?: string;
+    sourceInstructionId?: string;
+    workItemId?: string;
     partNumber: string;
     moldNumber: string;
     itemTitle: string;
@@ -115,7 +116,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   const [moldSearchOpen, setMoldSearchOpen] = useState(false);
 
   const [workItemId, setWorkItemId] = useState<string | null>(
-    initialData?.workItemId ?? null,
+    mode === "edit" ? (initialData?.workItemId ?? null) : null,
   );
   const [itemTitle, setItemTitle] = useState(initialData?.itemTitle ?? "");
   const [bodyMarkdown, setBodyMarkdown] = useState(
@@ -131,6 +132,20 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   const partInputRef = useRef<HTMLInputElement | null>(null);
   const moldInputRef = useRef<HTMLInputElement | null>(null);
   const itemTitleInputRef = useRef<HTMLInputElement | null>(null);
+
+  const initialForkSnapshot = useMemo(() => {
+    if (mode !== "fork" || !initialData) {
+      return null;
+    }
+
+    return {
+      partNumber: initialData.partNumber.trim(),
+      moldNumber: initialData.moldNumber.trim(),
+      itemTitle: initialData.itemTitle.trim(),
+      bodyMarkdown: normalizeEditorContent(initialData.bodyMarkdown),
+      revision: initialData.revision,
+    };
+  }, [initialData, mode]);
 
   useEffect(() => {
     const query = partNumber.trim();
@@ -265,6 +280,25 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     const normalizedPartNumber = partNumber.trim();
     const normalizedMoldNumber = moldNumber.trim();
 
+    if (mode === "fork" && initialForkSnapshot) {
+      const forkUnchanged =
+        normalizedPartNumber === initialForkSnapshot.partNumber &&
+        normalizedMoldNumber === initialForkSnapshot.moldNumber &&
+        itemTitle.trim() === initialForkSnapshot.itemTitle &&
+        bodyMarkdown === initialForkSnapshot.bodyMarkdown &&
+        revision === initialForkSnapshot.revision;
+
+      if (forkUnchanged) {
+        setMessage("No changes detected. Fork canceled.");
+        if (initialData?.sourceInstructionId) {
+          router.push(`/instructions/${initialData.sourceInstructionId}`);
+          router.refresh();
+        }
+        setBusy(false);
+        return;
+      }
+    }
+
     if (!normalizedPartNumber && !normalizedMoldNumber) {
       setPartOrMoldErrorAndFocus();
       setError("Part # or Mold # is required.");
@@ -335,37 +369,39 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         throw new Error(workItemError?.message ?? "Unable to save work item.");
       }
 
-      let duplicateCheckRequest = supabase
-        .from("work_instructions")
-        .select("id")
-        .eq("work_item_id", typedWorkItem.id)
-        .limit(1);
+      if (mode !== "fork") {
+        let duplicateCheckRequest = supabase
+          .from("work_instructions")
+          .select("id")
+          .eq("work_item_id", typedWorkItem.id)
+          .limit(1);
 
-      if (mode === "edit" && initialData?.instructionId) {
-        duplicateCheckRequest = duplicateCheckRequest.neq("id", initialData.instructionId);
-      }
+        if (mode === "edit" && initialData?.instructionId) {
+          duplicateCheckRequest = duplicateCheckRequest.neq("id", initialData.instructionId);
+        }
 
-      const { data: duplicateInstruction, error: duplicateCheckError } =
-        await duplicateCheckRequest.maybeSingle();
+        const { data: duplicateInstruction, error: duplicateCheckError } =
+          await duplicateCheckRequest.maybeSingle();
 
-      if (duplicateCheckError) {
-        throw new Error(duplicateCheckError.message);
-      }
+        if (duplicateCheckError) {
+          throw new Error(duplicateCheckError.message);
+        }
 
-      if (duplicateInstruction) {
-        setFieldErrors((current) => ({
-          ...current,
-          itemTitle: true,
-        }));
-        itemTitleInputRef.current?.focus();
-        throw new Error(
-          "A work instruction with this title already exists for this Part/Mold. Open the existing instruction to edit it.",
-        );
+        if (duplicateInstruction) {
+          setFieldErrors((current) => ({
+            ...current,
+            itemTitle: true,
+          }));
+          itemTitleInputRef.current?.focus();
+          throw new Error(
+            "A work instruction with this title already exists for this Part/Mold. Open the existing instruction to edit it.",
+          );
+        }
       }
 
       let instructionId = initialData?.instructionId ?? "";
 
-      if (mode === "create") {
+      if (mode === "create" || mode === "fork") {
         const { data: insertedInstruction, error: insertInstructionError } = await supabase
           .from("work_instructions")
           .insert({
@@ -406,9 +442,11 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       }
 
       setMessage(
-        mode === "create"
-          ? "Instruction created successfully."
-          : "Instruction updated successfully.",
+        mode === "edit"
+          ? "Instruction updated successfully."
+          : mode === "fork"
+            ? "Instruction fork created successfully."
+            : "Instruction created successfully.",
       );
 
       router.push(`/instructions/${instructionId}`);
@@ -635,7 +673,11 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
         >
           {busy ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />}
-          {mode === "create" ? "Create Instruction" : "Save Changes"}
+          {mode === "edit"
+            ? "Save Changes"
+            : mode === "fork"
+              ? "Create Fork"
+              : "Create Instruction"}
         </button>
       </form>
     </div>

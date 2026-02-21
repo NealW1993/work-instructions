@@ -6,9 +6,10 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import sanitizeHtml from "sanitize-html";
 
+import { DeleteInstructionButton } from "@/components/instructions/delete-instruction-button";
 import { PinInstructionButton } from "@/components/instructions/pin-instruction-button";
 import { requireAuthenticatedUser } from "@/lib/auth";
-import { canEditInstructions } from "@/lib/roles";
+import { canEditInstructions, isSystemAdmin } from "@/lib/roles";
 import type { InstructionMedia } from "@/lib/types";
 
 interface InstructionPageProps {
@@ -216,11 +217,22 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
             />
             {canEditInstructions(profile.role) ? (
               <Link
+                href={`/instructions/${instruction.id}/fork`}
+                className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-200"
+              >
+                Fork Instruction
+              </Link>
+            ) : null}
+            {canEditInstructions(profile.role) ? (
+              <Link
                 href={`/instructions/${instruction.id}/edit`}
                 className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-200"
               >
                 Edit Instruction
               </Link>
+            ) : null}
+            {isSystemAdmin(profile.role) ? (
+              <DeleteInstructionButton instructionId={instruction.id} />
             ) : null}
           </div>
         </div>

@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 
+import { InstructionBackButton } from "@/components/instructions/instruction-back-button";
 import { InstructionEditor } from "@/components/instructions/instruction-editor";
 import { requireAuthenticatedUser } from "@/lib/auth";
 import { canEditInstructions } from "@/lib/roles";
@@ -68,7 +69,8 @@ export default async function EditInstructionPage({ params }: EditInstructionPag
 
   return (
     <div className="grid gap-4">
-      <header>
+      <header className="grid gap-2">
+        <InstructionBackButton fallbackHref={`/instructions/${id}`} />
         <h1 className="text-3xl font-extrabold text-slate-900 dark:text-slate-100">
           Edit Instruction
         </h1>
