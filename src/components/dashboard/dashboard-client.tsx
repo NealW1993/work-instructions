@@ -291,7 +291,7 @@ export function DashboardClient({
                 Newest Work Instructions
               </h2>
               <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                The latest 5 instructions created across the system.
+                The latest 6 instructions created across the system.
               </p>
             </div>
             {newestError ? (
@@ -323,58 +323,6 @@ export function DashboardClient({
                 ))}
               </div>
             )}
-          </section>
-
-          <section className="grid gap-4">
-            {items.length === 0 ? (
-              <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-6 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-                No work instructions found.
-              </p>
-            ) : null}
-
-            {items.map((item) => (
-              <article
-                key={item.id}
-                className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-4 shadow-lg backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-5"
-              >
-                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
-                      {item.item_title}
-                    </h2>
-                    <p className="text-sm text-slate-600 dark:text-slate-300">
-                      <strong>Part:</strong> {item.part_number || "N/A"} |{" "}
-                      <strong>Mold:</strong> {item.mold_number || "N/A"}
-                    </p>
-                  </div>
-                  <span className="rounded-full border border-slate-400/30 bg-slate-900/10 px-3 py-1 text-xs font-semibold dark:bg-white/10">
-                    {item.work_instructions.length} instruction
-                    {item.work_instructions.length === 1 ? "" : "s"}
-                  </span>
-                </div>
-                <div className="grid gap-2 md:grid-cols-2">
-                  {item.work_instructions.length === 0 ? (
-                    <p className="text-sm text-slate-500 dark:text-slate-400">
-                      No instructions yet for this work item.
-                    </p>
-                  ) : (
-                    item.work_instructions.map((instruction) => (
-                      <Link
-                        key={instruction.id}
-                        href={`/instructions/${instruction.id}`}
-                        className="rounded-xl border border-slate-300/70 bg-white/70 p-3 transition hover:border-cyan-500 hover:bg-cyan-500/5 dark:border-slate-700 dark:bg-slate-950/70"
-                      >
-                        <p className="font-semibold">Revision {instruction.revision}</p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">
-                          Created {formatDate(instruction.created_at)} by{" "}
-                          {instruction.creator_name}
-                        </p>
-                      </Link>
-                    ))
-                  )}
-                </div>
-              </article>
-            ))}
           </section>
         </>
       )}

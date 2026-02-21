@@ -107,7 +107,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       "id, revision, created_at, updated_at, created_by, work_items(part_number, mold_number, item_title)",
     )
     .order("created_at", { ascending: false })
-    .limit(5);
+    .limit(6);
 
   const pinnedRequest = supabase
     .from("user_pinned_instructions")

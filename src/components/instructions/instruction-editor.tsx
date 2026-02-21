@@ -435,10 +435,10 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
       <form
         onSubmit={handleSubmit}
-        className="grid min-w-0 gap-4 overflow-hidden rounded-3xl border border-white/30 bg-white/75 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7"
+        className="grid min-w-0 gap-5 overflow-hidden rounded-3xl border border-white/30 bg-white/75 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7"
       >
-        <div className="grid gap-3 md:grid-cols-2">
-          <label className="grid gap-1 text-sm">
+        <div className="grid gap-3 md:grid-cols-2 md:gap-4">
+          <label className="grid gap-1.5 text-sm">
             <span className="font-semibold">Part #</span>
             <div className="relative">
               <input
@@ -465,7 +465,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                   }
                 }}
                 className={cn(
-                  "rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950",
+                  "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950",
                   fieldErrors.partOrMold ? "border-rose-500 ring-2 ring-rose-500/30" : "",
                 )}
               />
@@ -505,7 +505,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
             </div>
           </label>
 
-          <label className="grid gap-1 text-sm">
+          <label className="grid gap-1.5 text-sm">
             <span className="font-semibold">Mold #</span>
             <div className="relative">
               <input
@@ -532,7 +532,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                   }
                 }}
                 className={cn(
-                  "rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950",
+                  "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950",
                   fieldErrors.partOrMold ? "border-rose-500 ring-2 ring-rose-500/30" : "",
                 )}
               />
@@ -573,41 +573,43 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           </label>
         </div>
 
-        <label className="grid gap-1 text-sm">
-          <span className="font-semibold">Work Item Title</span>
-          <input
-            ref={itemTitleInputRef}
-            required
-            placeholder="Example: Daily Setup Sequence"
-            value={itemTitle}
-            onChange={(event) => {
-              setItemTitle(event.target.value);
-              setWorkItemId(null);
-              if (fieldErrors.itemTitle) {
-                setFieldErrors((current) => ({
-                  ...current,
-                  itemTitle: false,
-                }));
-              }
-            }}
-            className={cn(
-              "rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950",
-              fieldErrors.itemTitle ? "border-rose-500 ring-2 ring-rose-500/30" : "",
-            )}
-          />
-        </label>
+        <div className="grid gap-3 md:max-w-3xl md:grid-cols-[minmax(0,1fr)_140px] md:items-end md:gap-4">
+          <label className="grid gap-1.5 text-sm">
+            <span className="font-semibold">Work Item Title</span>
+            <input
+              ref={itemTitleInputRef}
+              required
+              placeholder="Example: Daily Setup Sequence"
+              value={itemTitle}
+              onChange={(event) => {
+                setItemTitle(event.target.value);
+                setWorkItemId(null);
+                if (fieldErrors.itemTitle) {
+                  setFieldErrors((current) => ({
+                    ...current,
+                    itemTitle: false,
+                  }));
+                }
+              }}
+              className={cn(
+                "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950",
+                fieldErrors.itemTitle ? "border-rose-500 ring-2 ring-rose-500/30" : "",
+              )}
+            />
+          </label>
 
-        <label className="grid max-w-[140px] min-w-0 gap-1 text-sm">
-          <span className="font-semibold">Revision</span>
-          <input
-            required
-            min={1}
-            type="number"
-            value={revision}
-            onChange={(event) => setRevision(Number.parseInt(event.target.value || "1", 10))}
-            className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-          />
-        </label>
+          <label className="grid min-w-0 gap-1.5 text-sm">
+            <span className="font-semibold">Revision</span>
+            <input
+              required
+              min={1}
+              type="number"
+              value={revision}
+              onChange={(event) => setRevision(Number.parseInt(event.target.value || "1", 10))}
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+            />
+          </label>
+        </div>
 
         <RichTextEditor
           label="Work Instructions (Rich Text)"

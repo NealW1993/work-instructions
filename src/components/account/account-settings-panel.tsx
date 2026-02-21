@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { FormEvent, useMemo, useState } from "react";
 
+import { PinInput } from "@/components/ui/pin-input";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import type { ThemePreference } from "@/lib/types";
 import { isValidEmployeeId, normalizeEmployeeId } from "@/lib/utils";
@@ -42,6 +43,9 @@ export function AccountSettingsPanel({
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [wantsPinChange, setWantsPinChange] = useState(false);
+  const [pin, setPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
 
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -52,18 +56,21 @@ export function AccountSettingsPanel({
   const normalizedEmployeeId = normalizeEmployeeId(employeeId);
   const passwordMismatch =
     wantsPasswordChange && confirmPassword.length > 0 && password !== confirmPassword;
+  const pinMismatch = wantsPinChange && confirmPin.length > 0 && pin !== confirmPin;
   const fullNameChanged = normalizedFullName !== savedFullName;
   const emailChanged = normalizedEmail !== savedEmail;
   const employeeIdChanged = normalizedEmployeeId !== savedEmployeeId;
   const themeChanged = themePreference !== savedThemePreference;
   const passwordChanged = wantsPasswordChange && password.length > 0;
+  const pinChanged = wantsPinChange && pin.length > 0;
 
   const hasChanges =
     fullNameChanged ||
     emailChanged ||
     employeeIdChanged ||
     themeChanged ||
-    passwordChanged;
+    passwordChanged ||
+    pinChanged;
 
   function applyThemeSelection(nextTheme: ThemePreference) {
     setThemePreference(nextTheme);
@@ -103,6 +110,16 @@ export function AccountSettingsPanel({
         }
       }
 
+      if (wantsPinChange) {
+        if (!/^\d{6}$/.test(pin)) {
+          throw new Error("PIN must be exactly 6 digits.");
+        }
+
+        if (pinMismatch) {
+          throw new Error("PIN and Confirm PIN must match.");
+        }
+      }
+
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -118,6 +135,7 @@ export function AccountSettingsPanel({
         themePreference?: ThemePreference;
         password?: string;
       } = {};
+      let accountUpdated = false;
 
       if (fullNameChanged) {
         payload.fullName = normalizedFullName;
@@ -139,21 +157,35 @@ export function AccountSettingsPanel({
         payload.password = password;
       }
 
-      const response = await fetch("/api/auth/account", {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify(payload),
-      });
+      if (Object.keys(payload).length > 0) {
+        const response = await fetch("/api/auth/account", {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify(payload),
+        });
 
-      const responsePayload = (await response.json().catch(() => ({}))) as {
-        error?: string;
-      };
+        const responsePayload = (await response.json().catch(() => ({}))) as {
+          error?: string;
+        };
 
-      if (!response.ok) {
-        throw new Error(responsePayload.error ?? "Unable to update account.");
+        if (!response.ok) {
+          throw new Error(responsePayload.error ?? "Unable to update account.");
+        }
+
+        accountUpdated = true;
+      }
+
+      if (pinChanged) {
+        const { error: pinError } = await supabase.rpc("set_my_pin", {
+          new_pin: pin,
+        });
+
+        if (pinError) {
+          throw new Error(pinError.message);
+        }
       }
 
       setPassword("");
@@ -161,11 +193,20 @@ export function AccountSettingsPanel({
       setWantsPasswordChange(false);
       setShowPassword(false);
       setShowConfirmPassword(false);
+      setPin("");
+      setConfirmPin("");
+      setWantsPinChange(false);
       setSavedFullName(normalizedFullName);
       setSavedEmail(normalizedEmail);
       setSavedEmployeeId(normalizedEmployeeId);
       setSavedThemePreference(themePreference);
-      setMessage("Account updated.");
+      if (accountUpdated && pinChanged) {
+        setMessage("Account and PIN updated.");
+      } else if (pinChanged) {
+        setMessage("PIN updated.");
+      } else {
+        setMessage("Account updated.");
+      }
 
       if (fullNameChanged || emailChanged || employeeIdChanged) {
         router.refresh();
@@ -186,7 +227,7 @@ export function AccountSettingsPanel({
           Account Settings
         </h2>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-          Update your full name, email, employee ID, and password.
+          Update your full name, email, employee ID, password, and PIN.
         </p>
       </div>
 
@@ -352,9 +393,60 @@ export function AccountSettingsPanel({
           </p>
         ) : null}
 
+        <div className="grid gap-1 text-sm">
+          <span>PIN</span>
+          <button
+            type="button"
+            onClick={() => {
+              if (wantsPinChange) {
+                setWantsPinChange(false);
+                setPin("");
+                setConfirmPin("");
+                return;
+              }
+
+              setWantsPinChange(true);
+            }}
+            className={`w-fit rounded-xl border px-3 py-1.5 text-sm font-semibold transition ${
+              wantsPinChange
+                ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
+                : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-900"
+            }`}
+          >
+            {wantsPinChange ? "Cancel PIN change" : "Change PIN"}
+          </button>
+        </div>
+
+        {wantsPinChange ? (
+          <>
+            <label className="grid gap-1 text-sm">
+              <span>New 6-Digit PIN</span>
+              <PinInput
+                value={pin}
+                onChange={setPin}
+                className="tracking-[0.3em]"
+              />
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span>Confirm New PIN</span>
+              <PinInput
+                value={confirmPin}
+                onChange={setConfirmPin}
+                className="tracking-[0.3em]"
+              />
+            </label>
+          </>
+        ) : null}
+
+        {pinMismatch ? (
+          <p className="text-sm text-rose-600 dark:text-rose-300">
+            PIN and Confirm PIN do not match.
+          </p>
+        ) : null}
+
         <button
           type="submit"
-          disabled={busy || passwordMismatch}
+          disabled={busy || passwordMismatch || pinMismatch}
           className="mt-1 w-fit rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
         >
           {busy ? "Saving..." : "Save account changes"}
