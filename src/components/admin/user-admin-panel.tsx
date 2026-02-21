@@ -2,9 +2,9 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import { PinInput } from "@/components/ui/pin-input";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import type { AppRole } from "@/lib/types";
-import { normalizePin } from "@/lib/utils";
 
 interface AdminUser {
   id: string;
@@ -259,13 +259,11 @@ export function UserAdminPanel() {
         </label>
         <label className="grid gap-1 text-sm">
           <span>PIN (6 digits)</span>
-          <input
+          <PinInput
             required
-            inputMode="numeric"
-            pattern="[0-9]{6}"
             value={newPin}
-            onChange={(event) => setNewPin(normalizePin(event.target.value))}
-            className="rounded-xl border border-slate-300 bg-white px-3 py-2 tracking-[0.3em] outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+            onChange={setNewPin}
+            className="tracking-[0.3em]"
           />
         </label>
         <label className="grid gap-1 text-sm md:col-span-2">
@@ -337,17 +335,15 @@ export function UserAdminPanel() {
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-2">
-                      <input
-                        inputMode="numeric"
-                        pattern="[0-9]{6}"
+                      <PinInput
                         value={pinUpdates[user.id] ?? ""}
-                        onChange={(event) =>
+                        onChange={(value) =>
                           setPinUpdates((current) => ({
                             ...current,
-                            [user.id]: normalizePin(event.target.value),
+                            [user.id]: value,
                           }))
                         }
-                        className="w-24 rounded-lg border border-slate-300 bg-white px-2 py-1 tracking-[0.25em] dark:border-slate-700 dark:bg-slate-950"
+                        className="w-28 rounded-lg px-2 py-1 tracking-[0.25em]"
                       />
                       <button
                         type="button"

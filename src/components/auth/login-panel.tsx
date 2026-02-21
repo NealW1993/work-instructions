@@ -4,14 +4,14 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useState } from "react";
 
+import { PinInput } from "@/components/ui/pin-input";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
-import { normalizePin } from "@/lib/utils";
 
 type AuthMode = "password" | "pin" | "signup" | "recover_email" | "recover_pin";
 
 const MODES: Array<{ mode: AuthMode; label: string }> = [
-  { mode: "password", label: "Password" },
   { mode: "pin", label: "PIN" },
+  { mode: "password", label: "Password" },
   { mode: "signup", label: "Create Account" },
   { mode: "recover_email", label: "Email Reset" },
   { mode: "recover_pin", label: "PIN Reset" },
@@ -34,7 +34,7 @@ export function LoginPanel() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const [mode, setMode] = useState<AuthMode>("password");
+  const [mode, setMode] = useState<AuthMode>("pin");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -92,17 +92,17 @@ export function LoginPanel() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          email,
           pin,
         }),
       });
 
       const payload = (await parseJsonResponse(response)) as {
         tokenHash: string;
+        email: string;
       };
 
       const { error: verifyError } = await supabase.auth.verifyOtp({
-        email,
+        email: payload.email,
         token_hash: payload.tokenHash,
         type: "magiclink",
       });
@@ -137,6 +137,11 @@ export function LoginPanel() {
       });
 
       if (signupError) {
+        if (signupError.message.toLowerCase().includes("already registered")) {
+          setMessage("That account already exists. Use PIN login or reset your password.");
+          setMode("pin");
+          return;
+        }
         throw new Error(signupError.message);
       }
 
@@ -208,7 +213,7 @@ export function LoginPanel() {
 
       await parseJsonResponse(response);
       setMessage("Password was reset. You can now sign in with your new password.");
-      setMode("password");
+      setMode("pin");
     });
   }
 
@@ -219,8 +224,8 @@ export function LoginPanel() {
           Work Instructions
         </h1>
         <p className="text-sm text-slate-600 dark:text-slate-300">
-          Sign in with your password or 6-digit PIN. Recover access with a reset
-          link or PIN reset.
+          Sign in fast with your 6-digit PIN. Password login is still available,
+          plus reset link and PIN reset recovery.
         </p>
         <div className="flex flex-wrap gap-2">
           {MODES.map((item) => (
@@ -292,24 +297,12 @@ export function LoginPanel() {
       {mode === "pin" ? (
         <form className="grid gap-3" onSubmit={handlePinLogin}>
           <label className="grid gap-1 text-sm">
-            <span>Email</span>
-            <input
-              required
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-            />
-          </label>
-          <label className="grid gap-1 text-sm">
             <span>6-Digit PIN</span>
-            <input
+            <PinInput
               required
-              inputMode="numeric"
-              pattern="[0-9]{6}"
               value={pin}
-              onChange={(event) => setPin(normalizePin(event.target.value))}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 tracking-[0.35em] text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              onChange={setPin}
+              className="tracking-[0.35em]"
             />
           </label>
           <button
@@ -356,13 +349,11 @@ export function LoginPanel() {
           </label>
           <label className="grid gap-1 text-sm">
             <span>6-Digit PIN</span>
-            <input
+            <PinInput
               required
-              inputMode="numeric"
-              pattern="[0-9]{6}"
               value={pin}
-              onChange={(event) => setPin(normalizePin(event.target.value))}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 tracking-[0.35em] text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              onChange={setPin}
+              className="tracking-[0.35em]"
             />
           </label>
           <button
@@ -415,13 +406,11 @@ export function LoginPanel() {
           </label>
           <label className="grid gap-1 text-sm">
             <span>6-Digit PIN</span>
-            <input
+            <PinInput
               required
-              inputMode="numeric"
-              pattern="[0-9]{6}"
               value={pin}
-              onChange={(event) => setPin(normalizePin(event.target.value))}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 tracking-[0.35em] text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              onChange={setPin}
+              className="tracking-[0.35em]"
             />
           </label>
           <label className="grid gap-1 text-sm">

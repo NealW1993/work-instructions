@@ -122,6 +122,7 @@ If Supabase Advisor reports:
 
 Run the SQL in:
 - `supabase/migrations/202602210002_advisor_fixes.sql`
+- `supabase/migrations/202602210003_pin_crypto_and_pin_only_login.sql` if you see `function gen_salt(unknown) does not exist` during signup/PIN login
 
 Copy/paste query:
 
@@ -285,6 +286,8 @@ Two options:
 ## PIN login design
 
 PIN login endpoint verifies hashed PIN against `user_security.pin_hash`, then issues a Supabase magic-link token hash through admin API. Client verifies OTP and receives normal Supabase session.
+
+PIN-only login (no email) is enabled. To prevent ambiguous PIN matches, PIN update functions reject duplicate PINs across active users.
 
 ## PostHog
 

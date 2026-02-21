@@ -14,9 +14,9 @@ export async function POST(request: Request) {
   const email = body.email?.trim().toLowerCase();
   const pin = body.pin?.trim();
 
-  if (!email || !pin || !/^\d{6}$/.test(pin)) {
+  if (!pin || !/^\d{6}$/.test(pin)) {
     return NextResponse.json(
-      { error: "Valid email and 6-digit PIN are required." },
+      { error: "Valid 6-digit PIN is required." },
       { status: 400 },
     );
   }
@@ -24,22 +24,45 @@ export async function POST(request: Request) {
   const { data: userId, error: pinError } = await supabaseAdmin.rpc(
     "verify_pin_login",
     {
-      login_email: email,
+      login_email: email ?? null,
       submitted_pin: pin,
     },
   );
 
-  if (pinError || !userId) {
+  if (pinError) {
+    return NextResponse.json({ error: pinError.message }, { status: 500 });
+  }
+
+  if (!userId) {
     return NextResponse.json(
-      { error: "Invalid email or PIN." },
+      {
+        error: email
+          ? "Invalid email or PIN."
+          : "Invalid PIN, or the PIN is shared by multiple users. Contact your system admin.",
+      },
       { status: 401 },
+    );
+  }
+
+  const { data: profile, error: profileError } = await supabaseAdmin
+    .from("profiles")
+    .select("email")
+    .eq("id", userId)
+    .maybeSingle<{ email: string }>();
+
+  const resolvedEmail = profile?.email?.trim().toLowerCase();
+
+  if (profileError || !resolvedEmail) {
+    return NextResponse.json(
+      { error: "Unable to resolve account email for PIN login." },
+      { status: 500 },
     );
   }
 
   const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink(
     {
       type: "magiclink",
-      email,
+      email: resolvedEmail,
     },
   );
 
@@ -52,5 +75,6 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     tokenHash: linkData.properties.hashed_token,
+    email: resolvedEmail,
   });
 }
