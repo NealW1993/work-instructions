@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, UploadCloud } from "lucide-react";
+import { createPortal } from "react-dom";
 
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -128,6 +129,8 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [portalReady, setPortalReady] = useState(false);
+  const [forkCanceledModalOpen, setForkCanceledModalOpen] = useState(false);
 
   const partInputRef = useRef<HTMLInputElement | null>(null);
   const moldInputRef = useRef<HTMLInputElement | null>(null);
@@ -146,6 +149,10 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       revision: initialData.revision,
     };
   }, [initialData, mode]);
+
+  useEffect(() => {
+    setPortalReady(true);
+  }, []);
 
   useEffect(() => {
     const query = partNumber.trim();
@@ -291,12 +298,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         revision === initialForkSnapshot.revision;
 
       if (forkUnchanged) {
-        window.alert("Fork canceled: no changes were made.");
-        setMessage("No changes detected. Fork canceled.");
-        if (initialData?.sourceInstructionId) {
-          router.push(`/instructions/${initialData.sourceInstructionId}`);
-          router.refresh();
-        }
+        setForkCanceledModalOpen(true);
         setBusy(false);
         return;
       }
@@ -684,6 +686,46 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
               : "Create Instruction"}
         </button>
       </form>
+
+      {forkCanceledModalOpen && portalReady
+        ? createPortal(
+            <div className="fixed inset-0 z-[110] flex items-center justify-center overflow-y-auto bg-slate-950/70 p-4 backdrop-blur-sm sm:p-6">
+              <div className="grid w-full max-w-md gap-4 rounded-2xl border border-cyan-500/35 bg-slate-950/95 p-5 shadow-2xl max-h-[calc(100vh-2rem)] overflow-y-auto">
+                <div className="grid gap-1">
+                  <h3 className="text-lg font-bold text-slate-100">Fork canceled</h3>
+                  <p className="text-sm text-slate-300">
+                    No changes were detected, so a new fork was not created.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setForkCanceledModalOpen(false)}
+                    className="rounded-xl border border-slate-600 bg-slate-900/70 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
+                  >
+                    Keep Editing
+                  </button>
+
+                  {initialData?.sourceInstructionId ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setForkCanceledModalOpen(false);
+                        router.push(`/instructions/${initialData.sourceInstructionId}`);
+                        router.refresh();
+                      }}
+                      className="rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/25"
+                    >
+                      Back to Instruction
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

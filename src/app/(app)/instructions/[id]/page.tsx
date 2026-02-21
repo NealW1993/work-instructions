@@ -8,6 +8,7 @@ import sanitizeHtml from "sanitize-html";
 
 import { DeleteInstructionButton } from "@/components/instructions/delete-instruction-button";
 import { PinInstructionButton } from "@/components/instructions/pin-instruction-button";
+import { LocalDateTime } from "@/components/ui/local-date-time";
 import { requireAuthenticatedUser } from "@/lib/auth";
 import { canEditInstructions, isSystemAdmin } from "@/lib/roles";
 import type { InstructionMedia } from "@/lib/types";
@@ -206,9 +207,9 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
             </p>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
               Created by {userMap.get(instruction.created_by) ?? "Unknown"} on{" "}
-              {new Date(instruction.created_at).toLocaleString()} | Updated by{" "}
+              <LocalDateTime value={instruction.created_at} mode="dateTime" /> | Updated by{" "}
               {userMap.get(instruction.updated_by) ?? "Unknown"} on{" "}
-              {new Date(instruction.updated_at).toLocaleString()}
+              <LocalDateTime value={instruction.updated_at} mode="dateTime" />
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">

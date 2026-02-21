@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
+import { LocalDateTime } from "@/components/ui/local-date-time";
 import { PinInput } from "@/components/ui/pin-input";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import type { AppRole } from "@/lib/types";
@@ -448,7 +449,9 @@ export function UserAdminPanel() {
                       </button>
                     </div>
                   </td>
-                  <td className="px-3 py-2">{new Date(user.created_at).toLocaleDateString()}</td>
+                  <td className="px-3 py-2">
+                    <LocalDateTime value={user.created_at} mode="date" />
+                  </td>
                 </tr>
               ))}
             </tbody>

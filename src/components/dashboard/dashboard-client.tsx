@@ -4,6 +4,8 @@ import Link from "next/link";
 import { Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { LocalDateTime } from "@/components/ui/local-date-time";
+
 export interface DashboardInstructionCardData {
   id: string;
   revision: number;
@@ -50,8 +52,17 @@ interface DashboardClientProps {
   items: DashboardWorkItemData[];
 }
 
-function formatDate(value: string) {
-  return new Date(value).toLocaleDateString();
+function formatDateForSearch(value: string) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).format(parsed);
 }
 
 function itemMatchesQuery(item: DashboardWorkItemData, normalizedQuery: string) {
@@ -73,7 +84,7 @@ function instructionMatchesQuery(
 
   const haystack =
     `revision ${instruction.revision} ${instruction.creator_name} ` +
-    `${new Date(instruction.created_at).toLocaleDateString()}`;
+    `${formatDateForSearch(instruction.created_at)}`;
 
   return haystack.toLowerCase().includes(normalizedQuery);
 }
@@ -248,7 +259,7 @@ export function DashboardClient({
                       >
                         <p className="font-semibold">Revision {instruction.revision}</p>
                         <p className="text-xs text-slate-500 dark:text-slate-400">
-                          Created {formatDate(instruction.created_at)} by{" "}
+                          Created <LocalDateTime value={instruction.created_at} mode="date" /> by{" "}
                           {instruction.creator_name}
                         </p>
                       </Link>
@@ -294,8 +305,9 @@ export function DashboardClient({
                     </p>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
                       Revision {instruction.revision} | Created{" "}
-                      {formatDate(instruction.created_at)} by {instruction.creator_name} | Pinned{" "}
-                      {formatDate(instruction.pinned_at)}
+                      <LocalDateTime value={instruction.created_at} mode="date" /> by{" "}
+                      {instruction.creator_name} | Pinned{" "}
+                      <LocalDateTime value={instruction.pinned_at} mode="date" />
                     </p>
                   </Link>
                 ))}
@@ -336,7 +348,8 @@ export function DashboardClient({
                     </p>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
                       Revision {instruction.revision} | Created{" "}
-                      {formatDate(instruction.created_at)} by {instruction.creator_name}
+                      <LocalDateTime value={instruction.created_at} mode="date" /> by{" "}
+                      {instruction.creator_name}
                     </p>
                   </Link>
                 ))}
