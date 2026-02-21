@@ -59,6 +59,7 @@ export function LoginPanel() {
   const [signupPinConfirm, setSignupPinConfirm] = useState("");
 
   const [recoveryEmail, setRecoveryEmail] = useState("");
+  const [recoveryEmployeeId, setRecoveryEmployeeId] = useState("");
   const [recoveryPin, setRecoveryPin] = useState("");
   const [temporaryPassword, setTemporaryPassword] = useState("");
   const [showTemporaryPassword, setShowTemporaryPassword] = useState(false);
@@ -281,9 +282,9 @@ export function LoginPanel() {
 
   async function generateTemporaryPassword() {
     await withBusy(async () => {
-      const normalizedEmail = getRecoveryEmail();
-      if (!normalizedEmail) {
-        throw new Error("Enter an email before using PIN recovery.");
+      const normalizedEmployeeId = normalizeEmployeeId(recoveryEmployeeId);
+      if (!isValidEmployeeId(normalizedEmployeeId)) {
+        throw new Error("Enter a valid Employee ID (1-6 digits).");
       }
 
       if (recoveryPin.length !== 6) {
@@ -296,18 +297,19 @@ export function LoginPanel() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          email: normalizedEmail,
+          employeeId: normalizedEmployeeId,
           pin: recoveryPin,
         }),
       });
 
       const payload = (await parseJsonResponse(response)) as {
         temporaryPassword: string;
+        email: string;
       };
 
       setTemporaryPassword(payload.temporaryPassword);
       setShowTemporaryPassword(false);
-      setPasswordEmail(normalizedEmail);
+      setPasswordEmail(payload.email);
       setPasswordValue(payload.temporaryPassword);
       setMode("password");
       setMessage(
@@ -475,8 +477,8 @@ export function LoginPanel() {
           {showForgotTools ? (
             <div className="mt-1 grid gap-3 rounded-2xl border border-white/20 bg-slate-900/30 p-3 text-sm">
               <p className="text-xs text-slate-300">
-                Enter your email to send a reset link, or enter email + PIN to
-                generate a temporary password you can reveal.
+                Enter your email to send a reset link, or enter Employee ID + PIN
+                to generate a temporary password you can reveal.
               </p>
               <label className="grid gap-1 text-sm">
                 <span>Recovery Email</span>
@@ -499,6 +501,19 @@ export function LoginPanel() {
 
               <div className="h-px bg-white/15" />
 
+              <label className="grid gap-1 text-sm">
+                <span>Employee ID</span>
+                <input
+                  inputMode="numeric"
+                  pattern="[0-9]{1,6}"
+                  maxLength={6}
+                  value={recoveryEmployeeId}
+                  onChange={(event) =>
+                    setRecoveryEmployeeId(normalizeEmployeeId(event.target.value))
+                  }
+                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                />
+              </label>
               <label className="grid gap-1 text-sm">
                 <span>6-Digit PIN</span>
                 <PinInput

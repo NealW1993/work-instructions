@@ -10,6 +10,34 @@ interface RequestResetBody {
   email?: string;
 }
 
+function resolveResetAppOrigin(request: Request): string {
+  const requestUrl = new URL(request.url);
+  const configuredAppUrl = serverEnv.NEXT_PUBLIC_APP_URL.trim();
+
+  if (!configuredAppUrl) {
+    return requestUrl.origin;
+  }
+
+  let configuredUrl: URL;
+  try {
+    configuredUrl = new URL(configuredAppUrl);
+  } catch {
+    return requestUrl.origin;
+  }
+
+  const configuredHost = configuredUrl.hostname.toLowerCase();
+  const requestHost = requestUrl.hostname.toLowerCase();
+  const localHosts = new Set(["localhost", "127.0.0.1", "0.0.0.0"]);
+  const isLocalDev = localHosts.has(configuredHost) || localHosts.has(requestHost);
+
+  if (!isLocalDev) {
+    return configuredUrl.origin;
+  }
+
+  const localHostname = requestHost === "0.0.0.0" ? "localhost" : requestHost;
+  return `${requestUrl.protocol}//${localHostname}:3000`;
+}
+
 export async function POST(request: Request) {
   const supabaseAdmin = getSupabaseAdminClient();
   const body = (await request.json().catch(() => ({}))) as RequestResetBody;
@@ -50,7 +78,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: tokenInsertError.message }, { status: 500 });
   }
 
-  const resetLink = `${serverEnv.NEXT_PUBLIC_APP_URL}/reset-password?token=${rawToken}&email=${encodeURIComponent(
+  const resetOrigin = resolveResetAppOrigin(request);
+  const resetLink = `${resetOrigin}/reset-password?token=${rawToken}&email=${encodeURIComponent(
     profile.email,
   )}`;
 

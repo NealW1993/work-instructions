@@ -3,9 +3,10 @@ import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import { isValidEmployeeId, normalizeEmployeeId } from "@/lib/utils";
 
 interface RecoverPasswordByPinBody {
-  email?: string;
+  employeeId?: string;
   pin?: string;
 }
 
@@ -26,12 +27,19 @@ export async function POST(request: Request) {
   const supabaseAdmin = getSupabaseAdminClient();
   const body = (await request.json().catch(() => ({}))) as RecoverPasswordByPinBody;
 
-  const email = body.email?.trim().toLowerCase();
+  const employeeId = normalizeEmployeeId(body.employeeId ?? "");
   const pin = body.pin?.trim();
 
-  if (!email || !pin) {
+  if (!employeeId || !pin) {
     return NextResponse.json(
-      { error: "Email and PIN are required." },
+      { error: "Employee ID and PIN are required." },
+      { status: 400 },
+    );
+  }
+
+  if (!isValidEmployeeId(employeeId)) {
+    return NextResponse.json(
+      { error: "Employee ID must be 1-6 digits." },
       { status: 400 },
     );
   }
@@ -46,15 +54,30 @@ export async function POST(request: Request) {
   const { data: userId, error: pinError } = await supabaseAdmin.rpc(
     "verify_pin_login",
     {
-      login_identifier: email,
+      login_identifier: employeeId,
       submitted_pin: pin,
     },
   );
 
   if (pinError || !userId) {
     return NextResponse.json(
-      { error: "Invalid email or PIN." },
+      { error: "Invalid employee ID or PIN." },
       { status: 401 },
+    );
+  }
+
+  const { data: profile, error: profileError } = await supabaseAdmin
+    .from("profiles")
+    .select("email")
+    .eq("id", userId)
+    .maybeSingle<{ email: string }>();
+
+  const resolvedEmail = profile?.email?.trim().toLowerCase();
+
+  if (profileError || !resolvedEmail) {
+    return NextResponse.json(
+      { error: "Unable to resolve account email for password recovery." },
+      { status: 500 },
     );
   }
 
@@ -73,5 +96,6 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     temporaryPassword,
+    email: resolvedEmail,
   });
 }
