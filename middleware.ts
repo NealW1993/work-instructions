@@ -9,11 +9,22 @@ export async function middleware(request: NextRequest) {
   });
 
   const supabaseUrl =
-    process.env.SUPABASE_URL_INTERNAL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+    process.env.SUPABASE_URL_INTERNAL?.trim() ??
+    process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ??
+    "";
+  const supabaseAnonKey =
+    process.env.SUPABASE_ANON_KEY?.trim() ??
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ??
+    "";
+
+  // Avoid failing every request if middleware env isn't available in Edge runtime.
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return response;
+  }
 
   const supabase = createServerClient(
     supabaseUrl,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
+    supabaseAnonKey,
     {
       cookieOptions: {
         name: SUPABASE_AUTH_COOKIE_NAME,
