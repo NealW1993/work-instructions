@@ -18,7 +18,8 @@ export default async function UserAdminPage() {
           User Administration
         </h1>
         <p className="text-sm text-slate-600 dark:text-slate-300">
-          Create users, assign role levels, and reset 6-digit PIN credentials.
+          Manage departments, create users, assign role levels, reset 6-digit PINs, and
+          delete users.
         </p>
       </header>
       <UserAdminPanel />

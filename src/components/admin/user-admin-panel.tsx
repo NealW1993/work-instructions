@@ -18,15 +18,29 @@ interface AdminUser {
   created_at: string;
 }
 
+interface AdminDepartment {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
 const ROLE_OPTIONS: AppRole[] = ["user", "admin", "system_admin"];
 
 export function UserAdminPanel() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [departments, setDepartments] = useState<AdminDepartment[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
+  const [newDepartmentName, setNewDepartmentName] = useState("");
+  const [departmentNameUpdates, setDepartmentNameUpdates] = useState<
+    Record<string, string>
+  >({});
 
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
@@ -84,9 +98,51 @@ export function UserAdminPanel() {
     }
   }, [getAuthHeaders]);
 
+  const fetchDepartments = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/departments", {
+        method: "GET",
+        headers,
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        departments?: AdminDepartment[];
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to load departments.");
+      }
+
+      setDepartments(payload.departments ?? []);
+    } catch (caughtError) {
+      const normalizedMessage =
+        caughtError instanceof Error ? caughtError.message : "Unable to load departments";
+      setError(normalizedMessage);
+    } finally {
+      setBusy(false);
+    }
+  }, [getAuthHeaders]);
+
   useEffect(() => {
-    void fetchUsers();
-  }, [fetchUsers]);
+    void (async () => {
+      await Promise.all([fetchUsers(), fetchDepartments()]);
+    })();
+  }, [fetchDepartments, fetchUsers]);
+
+  useEffect(() => {
+    void (async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      setCurrentUserId(user?.id ?? null);
+    })();
+  }, [supabase]);
 
   async function handleCreateUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -267,6 +323,165 @@ export function UserAdminPanel() {
     }
   }
 
+  async function handleCreateDepartment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const name = newDepartmentName.trim();
+      if (!name) {
+        throw new Error("Department name is required.");
+      }
+
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/departments", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ name }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to create department.");
+      }
+
+      setMessage("Department created.");
+      setNewDepartmentName("");
+      await fetchDepartments();
+    } catch (caughtError) {
+      const normalizedMessage =
+        caughtError instanceof Error ? caughtError.message : "Unable to create department";
+      setError(normalizedMessage);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateDepartment(departmentId: string) {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const rawName =
+        departmentNameUpdates[departmentId] ??
+        departments.find((department) => department.id === departmentId)?.name ??
+        "";
+      const name = rawName.trim();
+
+      if (!name) {
+        throw new Error("Department name is required.");
+      }
+
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/departments/${departmentId}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ name }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to update department.");
+      }
+
+      setMessage("Department updated.");
+      await fetchDepartments();
+    } catch (caughtError) {
+      const normalizedMessage =
+        caughtError instanceof Error ? caughtError.message : "Unable to update department";
+      setError(normalizedMessage);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteDepartment(departmentId: string, departmentName: string) {
+    const confirmed = window.confirm(
+      `Delete department "${departmentName}"?\n\nThis only works if no work instructions are assigned to it.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/departments/${departmentId}`, {
+        method: "DELETE",
+        headers,
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to delete department.");
+      }
+
+      setMessage("Department deleted.");
+      await fetchDepartments();
+    } catch (caughtError) {
+      const normalizedMessage =
+        caughtError instanceof Error ? caughtError.message : "Unable to delete department";
+      setError(normalizedMessage);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteUser(userId: string, userEmail: string) {
+    const confirmed = window.confirm(
+      `Delete user ${userEmail}?\n\nThis permanently removes their account.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/users/${userId}`, {
+        method: "DELETE",
+        headers,
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to delete user.");
+      }
+
+      setMessage("User deleted.");
+      await fetchUsers();
+    } catch (caughtError) {
+      const normalizedMessage =
+        caughtError instanceof Error ? caughtError.message : "Unable to delete user";
+      setError(normalizedMessage);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="grid gap-5">
       {message ? (
@@ -279,6 +494,74 @@ export function UserAdminPanel() {
           {error}
         </p>
       ) : null}
+
+      <div className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+        <h2 className="text-lg font-bold">Departments</h2>
+
+        <form
+          onSubmit={handleCreateDepartment}
+          className="flex flex-col gap-2 md:max-w-lg md:flex-row md:items-end"
+        >
+          <label className="grid flex-1 gap-1 text-sm">
+            <span>Department Name</span>
+            <input
+              required
+              value={newDepartmentName}
+              onChange={(event) => setNewDepartmentName(event.target.value)}
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={busy}
+            className="rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {busy ? "Working..." : "Add Department"}
+          </button>
+        </form>
+
+        {departments.length === 0 ? (
+          <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+            No departments found.
+          </p>
+        ) : (
+          <div className="grid gap-2">
+            {departments.map((department) => (
+              <div
+                key={department.id}
+                className="flex flex-col gap-2 rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-950/70 md:flex-row md:items-center"
+              >
+                <input
+                  value={departmentNameUpdates[department.id] ?? department.name}
+                  onChange={(event) =>
+                    setDepartmentNameUpdates((current) => ({
+                      ...current,
+                      [department.id]: event.target.value,
+                    }))
+                  }
+                  className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-950 md:max-w-md"
+                />
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void updateDepartment(department.id)}
+                    className="rounded-lg border border-cyan-500/30 px-3 py-1 text-cyan-700 transition hover:bg-cyan-500/10 dark:text-cyan-300"
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void deleteDepartment(department.id, department.name)}
+                    className="rounded-lg border border-rose-500/40 px-3 py-1 text-rose-700 transition hover:bg-rose-500/10 dark:text-rose-300"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       <form
         onSubmit={handleCreateUser}
@@ -370,6 +653,7 @@ export function UserAdminPanel() {
                 <th className="px-3 py-2">Role</th>
                 <th className="px-3 py-2">PIN Reset</th>
                 <th className="px-3 py-2">Created</th>
+                <th className="px-3 py-2">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -451,6 +735,21 @@ export function UserAdminPanel() {
                   </td>
                   <td className="px-3 py-2">
                     <LocalDateTime value={user.created_at} mode="date" />
+                  </td>
+                  <td className="px-3 py-2">
+                    <button
+                      type="button"
+                      disabled={busy || currentUserId === user.id}
+                      onClick={() => void deleteUser(user.id, user.email)}
+                      className="rounded-lg border border-rose-500/40 px-2 py-1 text-rose-700 transition hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-40 dark:text-rose-300"
+                      title={
+                        currentUserId === user.id
+                          ? "You cannot delete your own account."
+                          : undefined
+                      }
+                    >
+                      Delete User
+                    </button>
                   </td>
                 </tr>
               ))}

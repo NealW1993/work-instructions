@@ -3,6 +3,13 @@ export type ThemePreference = "light" | "dark";
 
 export type MediaType = "image" | "video";
 
+export interface Department {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Profile {
   id: string;
   email: string;
@@ -20,6 +27,7 @@ export interface WorkItem {
   part_number: string;
   mold_number: string | null;
   item_title: string;
+  department_id: string;
   created_by: string;
   created_at: string;
   updated_at: string;

@@ -15,6 +15,7 @@ interface InstructionEditorProps {
     instructionId?: string;
     sourceInstructionId?: string;
     workItemId?: string;
+    departmentId?: string;
     partNumber: string;
     moldNumber: string;
     itemTitle: string;
@@ -25,18 +26,34 @@ interface InstructionEditorProps {
 
 interface WorkItemSearchResult {
   id: string;
+  department_id: string;
   part_number: string;
   mold_number: string;
   item_title: string;
+  departments:
+    | {
+        name: string;
+      }
+    | Array<{
+        name: string;
+      }>
+    | null;
+}
+
+interface DepartmentOption {
+  id: string;
+  name: string;
 }
 
 interface FieldErrors {
+  department: boolean;
   partOrMold: boolean;
   itemTitle: boolean;
   body: boolean;
 }
 
 const DEFAULT_FIELD_ERRORS: FieldErrors = {
+  department: false,
   partOrMold: false,
   itemTitle: false,
   body: false,
@@ -103,9 +120,27 @@ function normalizeSubmissionError(error: unknown) {
   return error instanceof Error ? error.message : "Save failed";
 }
 
+function getDepartmentNameFromRelation(
+  relation: WorkItemSearchResult["departments"],
+): string {
+  if (!relation) {
+    return "Unknown";
+  }
+
+  if (Array.isArray(relation)) {
+    return relation[0]?.name ?? "Unknown";
+  }
+
+  return relation.name;
+}
+
 export function InstructionEditor({ mode, initialData }: InstructionEditorProps) {
   const router = useRouter();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+
+  const [departments, setDepartments] = useState<DepartmentOption[]>([]);
+  const [departmentsBusy, setDepartmentsBusy] = useState(false);
+  const [departmentId, setDepartmentId] = useState(initialData?.departmentId ?? "");
 
   const [partNumber, setPartNumber] = useState(initialData?.partNumber ?? "");
   const [moldNumber, setMoldNumber] = useState(initialData?.moldNumber ?? "");
@@ -142,6 +177,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     }
 
     return {
+      departmentId: initialData.departmentId ?? "",
       partNumber: initialData.partNumber.trim(),
       moldNumber: initialData.moldNumber.trim(),
       itemTitle: initialData.itemTitle.trim(),
@@ -153,6 +189,52 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   useEffect(() => {
     setPortalReady(true);
   }, []);
+
+  useEffect(() => {
+    let isActive = true;
+    setDepartmentsBusy(true);
+
+    void (async () => {
+      try {
+        const { data, error: departmentsError } = await supabase
+          .from("departments")
+          .select("id, name")
+          .order("name", { ascending: true });
+
+        if (!isActive) {
+          return;
+        }
+
+        if (departmentsError) {
+          throw departmentsError;
+        }
+
+        const resolvedDepartments = (data ?? []) as DepartmentOption[];
+        setDepartments(resolvedDepartments);
+      } catch {
+        if (!isActive) {
+          return;
+        }
+        setDepartments([]);
+      } finally {
+        if (isActive) {
+          setDepartmentsBusy(false);
+        }
+      }
+    })();
+
+    return () => {
+      isActive = false;
+    };
+  }, [supabase]);
+
+  useEffect(() => {
+    if (departmentId || departments.length === 0) {
+      return;
+    }
+
+    setDepartmentId(departments[0].id);
+  }, [departmentId, departments]);
 
   useEffect(() => {
     const query = partNumber.trim();
@@ -170,7 +252,9 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           const safeQuery = escapeLikeQuery(query);
           const { data, error: searchError } = await supabase
             .from("work_items")
-            .select("id, part_number, mold_number, item_title, work_instructions!inner(id)")
+            .select(
+              "id, department_id, part_number, mold_number, item_title, departments(name), work_instructions!inner(id)",
+            )
             .ilike("part_number", `%${safeQuery}%`)
             .eq("work_instructions.is_archived", false)
             .order("updated_at", { ascending: false })
@@ -221,7 +305,9 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           const safeQuery = escapeLikeQuery(query);
           const { data, error: searchError } = await supabase
             .from("work_items")
-            .select("id, part_number, mold_number, item_title, work_instructions!inner(id)")
+            .select(
+              "id, department_id, part_number, mold_number, item_title, departments(name), work_instructions!inner(id)",
+            )
             .ilike("mold_number", `%${safeQuery}%`)
             .eq("work_instructions.is_archived", false)
             .order("updated_at", { ascending: false })
@@ -257,6 +343,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   }, [moldNumber, supabase]);
 
   function applySuggestedWorkItem(result: WorkItemSearchResult) {
+    setDepartmentId(result.department_id);
     setPartNumber(result.part_number);
     setMoldNumber(result.mold_number);
     setItemTitle(result.item_title);
@@ -265,6 +352,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     setMoldSearchOpen(false);
     setFieldErrors((current) => ({
       ...current,
+      department: false,
       partOrMold: false,
       itemTitle: false,
     }));
@@ -288,9 +376,11 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
     const normalizedPartNumber = partNumber.trim();
     const normalizedMoldNumber = moldNumber.trim();
+    const normalizedDepartmentId = departmentId.trim();
 
     if (mode === "fork" && initialForkSnapshot) {
       const forkUnchanged =
+        normalizedDepartmentId === initialForkSnapshot.departmentId &&
         normalizedPartNumber === initialForkSnapshot.partNumber &&
         normalizedMoldNumber === initialForkSnapshot.moldNumber &&
         itemTitle.trim() === initialForkSnapshot.itemTitle &&
@@ -302,6 +392,16 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         setBusy(false);
         return;
       }
+    }
+
+    if (!normalizedDepartmentId) {
+      setFieldErrors((current) => ({
+        ...current,
+        department: true,
+      }));
+      setError("Department is required.");
+      setBusy(false);
+      return;
     }
 
     if (!normalizedPartNumber && !normalizedMoldNumber) {
@@ -345,11 +445,13 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
       const workItemPayload: {
         id?: string;
+        department_id: string;
         part_number: string;
         mold_number: string;
         item_title: string;
         created_by: string;
       } = {
+        department_id: normalizedDepartmentId,
         part_number: normalizedPartNumber,
         mold_number: normalizedMoldNumber,
         item_title: itemTitle.trim(),
@@ -363,7 +465,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       const { data: workItem, error: workItemError } = await supabase
         .from("work_items")
         .upsert(workItemPayload, {
-          onConflict: "part_number,mold_number,item_title",
+          onConflict: "part_number,mold_number,item_title,department_id",
         })
         .select("id")
         .single();
@@ -538,6 +640,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                           {result.part_number}
                         </span>
                         <span className="text-slate-500 dark:text-slate-300">
+                          {getDepartmentNameFromRelation(result.departments)} |{" "}
                           {summarizePartMold(result.part_number, result.mold_number)} |{" "}
                           {result.item_title}
                         </span>
@@ -605,6 +708,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                           {result.mold_number || "N/A"}
                         </span>
                         <span className="text-slate-500 dark:text-slate-300">
+                          {getDepartmentNameFromRelation(result.departments)} |{" "}
                           {summarizePartMold(result.part_number, result.mold_number)} |{" "}
                           {result.item_title}
                         </span>
@@ -617,7 +721,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           </label>
         </div>
 
-        <div className="grid gap-3 md:max-w-3xl md:grid-cols-[minmax(0,1fr)_140px] md:items-end md:gap-4">
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_140px] md:items-end md:gap-4">
           <label className="grid gap-1.5 text-sm">
             <span className="font-semibold">Work Item Title</span>
             <input
@@ -640,6 +744,40 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                 fieldErrors.itemTitle ? "border-rose-500 ring-2 ring-rose-500/30" : "",
               )}
             />
+          </label>
+
+          <label className="grid gap-1.5 text-sm">
+            <span className="font-semibold">Department</span>
+            <select
+              required
+              value={departmentId}
+              onChange={(event) => {
+                setDepartmentId(event.target.value);
+                setWorkItemId(null);
+                if (fieldErrors.department) {
+                  setFieldErrors((current) => ({
+                    ...current,
+                    department: false,
+                  }));
+                }
+              }}
+              className={cn(
+                "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 disabled:cursor-not-allowed dark:border-slate-700 dark:bg-slate-950",
+                fieldErrors.department ? "border-rose-500 ring-2 ring-rose-500/30" : "",
+              )}
+              disabled={departmentsBusy || departments.length === 0}
+            >
+              {departmentsBusy ? (
+                <option value="">Loading...</option>
+              ) : departments.length === 0 ? (
+                <option value="">No departments configured</option>
+              ) : null}
+              {departments.map((department) => (
+                <option key={department.id} value={department.id}>
+                  {department.name}
+                </option>
+              ))}
+            </select>
           </label>
 
           <label className="grid min-w-0 gap-1.5 text-sm">

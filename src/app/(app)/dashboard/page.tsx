@@ -13,7 +13,13 @@ interface DashboardPageProps {
   }>;
 }
 
+interface DashboardDepartmentRelation {
+  name: string;
+}
+
 interface DashboardInstructionWorkItem {
+  department_id: string;
+  departments: DashboardDepartmentRelation | DashboardDepartmentRelation[] | null;
   part_number: string;
   mold_number: string;
   item_title: string;
@@ -43,6 +49,8 @@ interface DashboardPinnedInstructionRow {
 
 interface DashboardWorkItemRow {
   id: string;
+  department_id: string;
+  departments: DashboardDepartmentRelation | DashboardDepartmentRelation[] | null;
   part_number: string;
   mold_number: string;
   item_title: string;
@@ -66,6 +74,20 @@ function normalizeWorkItem(
   }
 
   return relation;
+}
+
+function normalizeDepartmentName(
+  relation: DashboardDepartmentRelation | DashboardDepartmentRelation[] | null | undefined,
+) {
+  if (!relation) {
+    return "Unknown";
+  }
+
+  if (Array.isArray(relation)) {
+    return relation[0]?.name ?? "Unknown";
+  }
+
+  return relation.name;
 }
 
 function normalizeInstruction(
@@ -96,7 +118,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const searchRequest = supabase
     .from("work_items")
     .select(
-      "id, part_number, mold_number, item_title, updated_at, work_instructions!inner(id, revision, created_at, updated_at, created_by)",
+      "id, department_id, departments(name), part_number, mold_number, item_title, updated_at, work_instructions!inner(id, revision, created_at, updated_at, created_by)",
     )
     .eq("work_instructions.is_archived", false)
     .order("updated_at", { ascending: false })
@@ -105,7 +127,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const newestRequest = supabase
     .from("work_instructions")
     .select(
-      "id, revision, created_at, updated_at, created_by, work_items(part_number, mold_number, item_title)",
+      "id, revision, created_at, updated_at, created_by, work_items(department_id, departments(name), part_number, mold_number, item_title)",
     )
     .eq("is_archived", false)
     .order("created_at", { ascending: false })
@@ -114,18 +136,29 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const pinnedRequest = supabase
     .from("user_pinned_instructions")
     .select(
-      "created_at, work_instructions!inner(id, revision, created_at, updated_at, created_by, is_archived, work_items(part_number, mold_number, item_title))",
+      "created_at, work_instructions!inner(id, revision, created_at, updated_at, created_by, is_archived, work_items(department_id, departments(name), part_number, mold_number, item_title))",
     )
     .eq("user_id", profile.id)
     .eq("work_instructions.is_archived", false)
     .order("created_at", { ascending: false })
     .limit(25);
 
+  const departmentsRequest = supabase
+    .from("departments")
+    .select("id, name")
+    .order("name", { ascending: true });
+
   const [
     { data: searchData, error: searchError },
     { data: newestData, error: newestError },
     { data: pinnedData, error: pinnedError },
-  ] = await Promise.all([searchRequest, newestRequest, pinnedRequest]);
+    { data: departmentsData },
+  ] = await Promise.all([
+    searchRequest,
+    newestRequest,
+    pinnedRequest,
+    departmentsRequest,
+  ]);
 
   const rawItems = (searchData ?? []) as DashboardWorkItemRow[];
   const rawNewest = (newestData ?? []) as DashboardInstructionRow[];
@@ -161,9 +194,18 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   );
 
   const items: DashboardWorkItemData[] = rawItems.map((item) => ({
-    ...item,
+    id: item.id,
+    department_id: item.department_id,
+    department_name: normalizeDepartmentName(item.departments),
+    part_number: item.part_number,
+    mold_number: item.mold_number,
+    item_title: item.item_title,
+    updated_at: item.updated_at,
     work_instructions: (item.work_instructions ?? []).map((instruction) => ({
-      ...instruction,
+      id: instruction.id,
+      revision: instruction.revision,
+      created_at: instruction.created_at,
+      updated_at: instruction.updated_at,
       creator_name: creatorNameMap.get(instruction.created_by) ?? "Unknown",
     })),
   }));
@@ -181,7 +223,13 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         created_at: instruction.created_at,
         updated_at: instruction.updated_at,
         creator_name: creatorNameMap.get(instruction.created_by) ?? "Unknown",
-        workItem,
+        workItem: {
+          department_id: workItem.department_id,
+          department_name: normalizeDepartmentName(workItem.departments),
+          part_number: workItem.part_number,
+          mold_number: workItem.mold_number,
+          item_title: workItem.item_title,
+        },
       };
     })
     .filter((instruction): instruction is DashboardInstructionCardData => instruction !== null);
@@ -204,7 +252,13 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         created_at: instruction.created_at,
         updated_at: instruction.updated_at,
         creator_name: creatorNameMap.get(instruction.created_by) ?? "Unknown",
-        workItem,
+        workItem: {
+          department_id: workItem.department_id,
+          department_name: normalizeDepartmentName(workItem.departments),
+          part_number: workItem.part_number,
+          mold_number: workItem.mold_number,
+          item_title: workItem.item_title,
+        },
         pinned_at: row.created_at,
       };
     })
@@ -223,6 +277,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       pinnedInstructions={pinnedInstructions}
       newestInstructions={newestInstructions}
       items={items}
+      departmentOptions={(departmentsData ?? []) as Array<{ id: string; name: string }>}
     />
   );
 }

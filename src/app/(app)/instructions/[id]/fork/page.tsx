@@ -13,6 +13,7 @@ interface ForkInstructionPageProps {
 
 interface WorkItemRelation {
   id: string;
+  department_id: string;
   part_number: string;
   mold_number: string;
   item_title: string;
@@ -46,7 +47,9 @@ export default async function ForkInstructionPage({ params }: ForkInstructionPag
 
   const { data, error } = await supabase
     .from("work_instructions")
-    .select("id, is_archived, body_markdown, revision, work_items(id, part_number, mold_number, item_title)")
+    .select(
+      "id, is_archived, body_markdown, revision, work_items(id, department_id, part_number, mold_number, item_title)",
+    )
     .eq("id", id)
     .eq("is_archived", false)
     .maybeSingle();
@@ -85,6 +88,7 @@ export default async function ForkInstructionPage({ params }: ForkInstructionPag
         mode="fork"
         initialData={{
           sourceInstructionId: instruction.id,
+          departmentId: workItem.department_id,
           partNumber: workItem.part_number,
           moldNumber: workItem.mold_number,
           itemTitle: workItem.item_title,

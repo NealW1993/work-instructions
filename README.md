@@ -15,6 +15,8 @@ Internal work-instructions software built with React (Next.js), TypeScript, Supa
 - Work instruction data model:
   - Search by `Part Number` or `Mold Number`
   - Each part/mold work item can have multiple instructions
+  - Each work item/instruction is assigned to a department
+  - Dashboard department filter + department instruction counts
   - Markdown steps + markdown notes
   - Inline image/video inserts upload to Supabase Storage bucket `instruction-media` (tablet camera compatible)
 - Security:
@@ -52,6 +54,8 @@ Internal work-instructions software built with React (Next.js), TypeScript, Supa
 - `supabase/seeds/001_promote_system_admin.sql`: manual system-admin promotion helper
 - `supabase/migrations/202602210007_employee_id_login_requirements.sql`: employee ID constraints + PIN lookup updates
 - `supabase/seeds/002_backfill_employee_ids.sql`: helper seed to assign employee IDs to existing users
+- `supabase/migrations/202602230009_departments_and_work_item_assignment.sql`: departments table + work item department assignment
+- `supabase/seeds/003_departments.sql`: helper seed to add baseline departments
 - `docker-compose.yml`: app + Mailpit local stack
 
 ## Prerequisites
@@ -99,6 +103,10 @@ Reset DB + apply migration + run seed:
 npm run supabase:reset
 ```
 
+Local reset seeds are configured in `supabase/config.toml` and include:
+- `supabase/seeds/001_promote_system_admin.sql`
+- `supabase/seeds/003_departments.sql`
+
 ## 3) Apply Supabase schema + policies to hosted Supabase (optional)
 
 Run SQL in Supabase SQL Editor:
@@ -106,10 +114,11 @@ Run SQL in Supabase SQL Editor:
 1. Execute migrations in order from `supabase/migrations/`
 2. Optional: run `supabase/seeds/001_promote_system_admin.sql` after replacing email
 3. Optional: run `supabase/seeds/002_backfill_employee_ids.sql` after replacing values
+4. Optional: run `supabase/seeds/003_departments.sql` after customizing department names
 
 What this migration creates:
 
-- Tables: `profiles`, `user_security`, `work_items`, `work_instructions`, `instruction_media`, `password_reset_tokens`
+- Tables: `profiles`, `user_security`, `departments`, `work_items`, `work_instructions`, `instruction_media`, `password_reset_tokens`
 - Enum roles and media types
 - Triggers for profile creation from `auth.users`
 - PIN helpers: `set_my_pin`, `set_user_pin`, `verify_pin_login`
@@ -258,10 +267,12 @@ Two options:
 
 `system_admin` can open **User Admin** page to:
 
+- Add, rename, and delete departments
 - Create users (with role, employee ID, password, and PIN)
 - Change role (`user`, `admin`, `system_admin`)
 - Update employee ID
 - Reset user PIN
+- Delete users (cannot delete own account or last system admin)
 
 ## Instruction authoring flow
 
@@ -269,6 +280,7 @@ Two options:
 
 - Create instructions
 - Edit instructions
+- Assign department on create/edit/fork
 - Upload image/video media
 - Capture from tablet camera (file input uses `capture="environment"`)
 

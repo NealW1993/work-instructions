@@ -34,12 +34,28 @@ interface InstructionRecord {
         part_number: string;
         mold_number: string;
         item_title: string;
+        departments:
+          | {
+              name: string;
+            }
+          | Array<{
+              name: string;
+            }>
+          | null;
       }
     | Array<{
         id: string;
         part_number: string;
         mold_number: string;
         item_title: string;
+        departments:
+          | {
+              name: string;
+            }
+          | Array<{
+              name: string;
+            }>
+          | null;
       }>;
   instruction_media: InstructionMedia[];
 }
@@ -129,6 +145,28 @@ function getWorkItem(relation: InstructionRecord["work_items"]) {
   return relation;
 }
 
+function getDepartmentName(
+  relation:
+    | {
+        name: string;
+      }
+    | Array<{
+        name: string;
+      }>
+    | null
+    | undefined,
+) {
+  if (!relation) {
+    return "Unknown";
+  }
+
+  if (Array.isArray(relation)) {
+    return relation[0]?.name ?? "Unknown";
+  }
+
+  return relation.name;
+}
+
 function renderInstructionContent(value: string) {
   if (!value.trim()) {
     return null;
@@ -157,7 +195,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, is_archived, body_markdown, revision, created_at, updated_at, created_by, updated_by, work_items(id, part_number, mold_number, item_title), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
+      "id, is_archived, body_markdown, revision, created_at, updated_at, created_by, updated_by, work_items(id, part_number, mold_number, item_title, departments(name)), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
     )
     .eq("id", id)
     .eq("is_archived", false)
@@ -173,6 +211,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
 
   const instruction = data as InstructionRecord;
   const workItem = getWorkItem(instruction.work_items);
+  const departmentName = getDepartmentName(workItem?.departments);
 
   if (!workItem) {
     notFound();
@@ -202,7 +241,8 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
             </h1>
             <p className="text-sm text-slate-600 dark:text-slate-300">
               Part: <strong>{workItem.part_number}</strong> | Mold:{" "}
-              <strong>{workItem.mold_number || "N/A"}</strong> | Revision{" "}
+              <strong>{workItem.mold_number || "N/A"}</strong> | Department:{" "}
+              <strong>{departmentName}</strong> | Revision{" "}
               <strong>{instruction.revision}</strong>
             </p>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
