@@ -122,7 +122,6 @@ interface DepartmentInsight {
 interface DashboardWidgetDefinition {
   id: DashboardWidgetId;
   title: string;
-  description: string;
 }
 
 interface DashboardClientProps {
@@ -168,37 +167,30 @@ const WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
   {
     id: "finder",
     title: "Find Work Instructions",
-    description: "Search by part/mold and filter by department.",
   },
   {
     id: "pinned",
     title: "Your Pinned Instructions",
-    description: "Quick access to instructions you pinned.",
   },
   {
     id: "newest",
     title: "Newest Work Instructions",
-    description: "Latest instructions across the system.",
   },
   {
     id: "department_activity",
     title: "Department Activity",
-    description: "Instruction volume by department.",
   },
   {
     id: "recent_updates",
     title: "Recently Updated Work Items",
-    description: "What changed most recently.",
   },
   {
     id: "my_impact",
     title: "My Impact Snapshot",
-    description: "Your authored and liked stats.",
   },
   {
     id: "system_history",
     title: "System History",
-    description: "Recent activity across instructions and teams.",
   },
 ];
 
@@ -2150,9 +2142,6 @@ export function DashboardClient({
               <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
                 Build Your Workspace
               </h1>
-              <p className="text-sm text-slate-600 dark:text-slate-300">
-                Pick a layout preset, then drag, resize, and toggle widgets to match how you work.
-              </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -2288,9 +2277,6 @@ export function DashboardClient({
                           <div>
                             <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
                               {definition.title}
-                            </p>
-                            <p className="text-xs text-slate-600 dark:text-slate-300">
-                              {definition.description}
                             </p>
                           </div>
                           <span
@@ -2447,9 +2433,6 @@ export function DashboardClient({
                       <h2 className="break-words text-xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
                         {definition.title}
                       </h2>
-                      <p className="break-words text-xs text-slate-600 dark:text-slate-300">
-                        {definition.description}
-                      </p>
                     </div>
                   </div>
 
