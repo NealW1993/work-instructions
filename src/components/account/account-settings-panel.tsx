@@ -531,18 +531,9 @@ export function AccountSettingsPanel({
     <>
       <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
         <div className="grid gap-3">
-          <div>
-            <h2 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
-              Account Settings
-            </h2>
-            <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-              Update your full name, email, theme, icon color, and PIN.
-            </p>
-          </div>
-
           <div className="w-fit rounded-xl border border-cyan-500/35 bg-cyan-500/10 px-4 py-2.5">
             <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-200">
-              Total Time Signed In
+              All-Time Total Usage
             </p>
             <p className="mt-0.5 font-mono text-xl font-extrabold text-cyan-900 dark:text-cyan-100">
               {totalSignedInLabel}
@@ -589,9 +580,6 @@ export function AccountSettingsPanel({
             >
               {savedEmployeeId || "N/A"}
             </div>
-            <span className="text-xs text-slate-500 dark:text-slate-400">
-              Employee ID is managed by system admins in User Admin.
-            </span>
           </label>
 
           <fieldset className="grid gap-1 text-sm">

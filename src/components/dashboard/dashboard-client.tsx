@@ -12,6 +12,7 @@ import {
   Save,
   Search,
   ThumbsUp,
+  Undo2,
   X,
 } from "lucide-react";
 import {
@@ -144,6 +145,8 @@ interface DashboardClientProps {
 
 const DEFAULT_DEPARTMENT_COLOR = "#0EA5E9";
 const DASHBOARD_HISTORY_GUARD_STATE_KEY = "__dashboardLayoutUnsavedGuard";
+const DASHBOARD_RETURN_STATE_KEY = "__dashboardInstructionReturnState";
+const DASHBOARD_RETURN_STATE_MAX_AGE_MS = 1000 * 60 * 30;
 const CELEBRATION_CONFETTI_COLORS = [
   "#22D3EE",
   "#60A5FA",
@@ -151,6 +154,15 @@ const CELEBRATION_CONFETTI_COLORS = [
   "#F59E0B",
   "#FB7185",
 ];
+const SYSTEM_HISTORY_ROW_LIMIT_OPTIONS = [15, 30, 45, 60] as const;
+
+interface DashboardInstructionReturnState {
+  query: string;
+  selectedDepartmentId: string;
+  scrollX: number;
+  scrollY: number;
+  savedAt: number;
+}
 
 const WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
   {
@@ -277,31 +289,43 @@ function getLabelWithDepartment(workItem: DashboardWorkItemSummary) {
   return `${getPrimaryPartOrMoldLabel(workItem)} | ${workItem.department_name}`;
 }
 
+function cloneWidgetLayout(layout: DashboardWidgetLayoutItem[]) {
+  return layout.map((entry) => ({ ...entry }));
+}
+
+function shouldCaptureInstructionReturnState(pathname: string) {
+  if (!pathname.startsWith("/instructions/")) {
+    return false;
+  }
+
+  return !pathname.startsWith("/instructions/new") && !pathname.startsWith("/instructions/archived");
+}
+
 function getWidgetSpanClass(size: DashboardWidgetSize) {
   switch (size) {
     case "compact":
-      return "col-span-12 lg:col-span-4";
+      return "col-span-12 md:col-span-6 lg:col-span-4";
     case "wide":
       return "col-span-12 lg:col-span-8";
     case "full":
       return "col-span-12";
     case "standard":
     default:
-      return "col-span-12 lg:col-span-6";
+      return "col-span-12 md:col-span-6 lg:col-span-6";
   }
 }
 
 function getPresetPreviewSpanClass(size: DashboardWidgetSize) {
   switch (size) {
     case "compact":
-      return "col-span-1";
-    case "standard":
       return "col-span-2";
-    case "wide":
+    case "standard":
       return "col-span-3";
+    case "wide":
+      return "col-span-4";
     case "full":
     default:
-      return "col-span-4";
+      return "col-span-6";
   }
 }
 
@@ -339,25 +363,28 @@ interface ImpactKpiCardProps {
   label: string;
   value: ReactNode;
   onOpen: () => void;
+  compact?: boolean;
 }
 
-function ImpactKpiCard({ label, value, onOpen }: ImpactKpiCardProps) {
+function ImpactKpiCard({ label, value, onOpen, compact = false }: ImpactKpiCardProps) {
   return (
     <button
       type="button"
       onClick={onOpen}
-      className="group grid w-full gap-1 rounded-xl border border-slate-300/70 bg-white/70 p-3 text-left transition hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/50 dark:hover:border-cyan-500/50 dark:hover:bg-cyan-500/10"
+      className="group grid min-w-0 w-full gap-1 rounded-xl border border-slate-300/70 bg-white/70 p-3 text-left transition hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/50 dark:hover:border-cyan-500/50 dark:hover:bg-cyan-500/10"
     >
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+      <div className="mb-1 flex min-w-0 flex-wrap items-start justify-between gap-1.5">
+        <p className="min-w-0 break-words text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
           {label}
         </p>
-        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-cyan-700 dark:text-cyan-300">
-          Drill down
-          <Info size={12} className="text-cyan-600 dark:text-cyan-300" />
+        <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold text-cyan-700 dark:text-cyan-300">
+          {compact ? "Details" : "Drill down"}
+          {!compact ? <Info size={12} className="text-cyan-600 dark:text-cyan-300" /> : null}
         </span>
       </div>
-      <p className="text-2xl font-extrabold text-slate-900 dark:text-slate-100">{value}</p>
+      <p className="min-w-0 break-words text-2xl font-extrabold text-slate-900 dark:text-slate-100">
+        {value}
+      </p>
     </button>
   );
 }
@@ -394,11 +421,15 @@ export function DashboardClient({
   } | null>(null);
   const suppressNextPopStateRef = useRef(false);
   const navigationBypassRef = useRef(false);
+  const returnStateAppliedRef = useRef(false);
   const [query, setQuery] = useState(initialQuery);
   const [selectedDepartmentId, setSelectedDepartmentId] = useState("all");
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [draggedWidgetId, setDraggedWidgetId] = useState<DashboardWidgetId | null>(null);
   const [dragOverWidgetId, setDragOverWidgetId] = useState<DashboardWidgetId | null>(null);
+  const [savedWidgetLayout, setSavedWidgetLayout] = useState<DashboardWidgetLayoutItem[]>(() =>
+    normalizeDashboardLayout(initialDashboardLayout),
+  );
   const [widgetLayout, setWidgetLayout] = useState<DashboardWidgetLayoutItem[]>(() =>
     normalizeDashboardLayout(initialDashboardLayout),
   );
@@ -410,6 +441,9 @@ export function DashboardClient({
   const [impactDrilldownKey, setImpactDrilldownKey] = useState<ImpactDrilldownKey | null>(null);
   const [departmentDrilldownDepartmentId, setDepartmentDrilldownDepartmentId] =
     useState<string | null>(null);
+  const [systemHistoryRowLimit, setSystemHistoryRowLimit] = useState<number>(
+    SYSTEM_HISTORY_ROW_LIMIT_OPTIONS[0],
+  );
   const [activeLikeCelebration, setActiveLikeCelebration] =
     useState<DashboardLikeCelebrationData | null>(() =>
       (likeCelebration?.newLikesCount ?? 0) > 0 ? likeCelebration : null,
@@ -433,6 +467,26 @@ export function DashboardClient({
   const normalizedQuery = query.trim().toLowerCase();
   const isSearching = normalizedQuery.length > 0;
 
+  const persistInstructionReturnState = useCallback(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const payload: DashboardInstructionReturnState = {
+      query,
+      selectedDepartmentId,
+      scrollX: window.scrollX,
+      scrollY: window.scrollY,
+      savedAt: Date.now(),
+    };
+
+    try {
+      window.sessionStorage.setItem(DASHBOARD_RETURN_STATE_KEY, JSON.stringify(payload));
+    } catch {
+      // Persisting this hint is best-effort and should not block navigation.
+    }
+  }, [query, selectedDepartmentId]);
+
   useEffect(() => {
     if (!searchInputRef.current || !initialQuery) {
       return;
@@ -445,6 +499,72 @@ export function DashboardClient({
 
   useEffect(() => {
     setPortalReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (returnStateAppliedRef.current) {
+      return;
+    }
+
+    returnStateAppliedRef.current = true;
+
+    let parsed: DashboardInstructionReturnState | null = null;
+    try {
+      const rawState = window.sessionStorage.getItem(DASHBOARD_RETURN_STATE_KEY);
+      if (!rawState) {
+        return;
+      }
+
+      const candidate = JSON.parse(rawState) as Partial<DashboardInstructionReturnState>;
+      if (
+        typeof candidate.query === "string" &&
+        typeof candidate.selectedDepartmentId === "string" &&
+        typeof candidate.scrollX === "number" &&
+        typeof candidate.scrollY === "number" &&
+        typeof candidate.savedAt === "number"
+      ) {
+        parsed = {
+          query: candidate.query,
+          selectedDepartmentId: candidate.selectedDepartmentId,
+          scrollX: candidate.scrollX,
+          scrollY: candidate.scrollY,
+          savedAt: candidate.savedAt,
+        };
+      }
+    } catch {
+      window.sessionStorage.removeItem(DASHBOARD_RETURN_STATE_KEY);
+      return;
+    }
+
+    if (!parsed) {
+      window.sessionStorage.removeItem(DASHBOARD_RETURN_STATE_KEY);
+      return;
+    }
+
+    if (Date.now() - parsed.savedAt > DASHBOARD_RETURN_STATE_MAX_AGE_MS) {
+      window.sessionStorage.removeItem(DASHBOARD_RETURN_STATE_KEY);
+      return;
+    }
+
+    setQuery(parsed.query);
+    setSelectedDepartmentId(parsed.selectedDepartmentId || "all");
+    window.sessionStorage.removeItem(DASHBOARD_RETURN_STATE_KEY);
+
+    const applyScroll = () => {
+      window.scrollTo({
+        left: parsed.scrollX,
+        top: parsed.scrollY,
+        behavior: "auto",
+      });
+    };
+
+    applyScroll();
+    window.requestAnimationFrame(() => {
+      applyScroll();
+      window.requestAnimationFrame(() => {
+        applyScroll();
+      });
+    });
   }, []);
 
   useEffect(() => {
@@ -476,7 +596,9 @@ export function DashboardClient({
       return;
     }
 
-    setWidgetLayout(normalizeDashboardLayout(initialDashboardLayout));
+    const normalizedLayout = normalizeDashboardLayout(initialDashboardLayout);
+    setSavedWidgetLayout(cloneWidgetLayout(normalizedLayout));
+    setWidgetLayout(cloneWidgetLayout(normalizedLayout));
     setLayoutDirty(false);
   }, [initialDashboardLayout]);
 
@@ -672,6 +794,54 @@ export function DashboardClient({
     };
   }, []);
 
+  useEffect(() => {
+    const handleInstructionNavigationCapture = (event: MouseEvent) => {
+      if (layoutDirtyRef.current || event.defaultPrevented || event.button !== 0) {
+        return;
+      }
+
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        return;
+      }
+
+      const target = event.target as Element | null;
+      const anchor = target?.closest("a[href]");
+      if (!(anchor instanceof HTMLAnchorElement)) {
+        return;
+      }
+
+      if (anchor.target && anchor.target !== "_self") {
+        return;
+      }
+
+      if (anchor.hasAttribute("download")) {
+        return;
+      }
+
+      let destination: URL;
+      try {
+        destination = new URL(anchor.href, window.location.href);
+      } catch {
+        return;
+      }
+
+      if (destination.origin !== window.location.origin) {
+        return;
+      }
+
+      if (!shouldCaptureInstructionReturnState(destination.pathname)) {
+        return;
+      }
+
+      persistInstructionReturnState();
+    };
+
+    document.addEventListener("click", handleInstructionNavigationCapture, true);
+    return () => {
+      document.removeEventListener("click", handleInstructionNavigationCapture, true);
+    };
+  }, [persistInstructionReturnState]);
+
   const scheduleRealtimeRefresh = useCallback(() => {
     if (
       typeof window === "undefined" ||
@@ -775,6 +945,19 @@ export function DashboardClient({
 
     return [...orderedInsights, ...orphanInsights];
   }, [departmentOptions, items]);
+
+  useEffect(() => {
+    if (selectedDepartmentId === "all") {
+      return;
+    }
+
+    const departmentStillExists = departmentInsights.some(
+      (department) => department.id === selectedDepartmentId,
+    );
+    if (!departmentStillExists) {
+      setSelectedDepartmentId("all");
+    }
+  }, [departmentInsights, selectedDepartmentId]);
 
   const totalInstructionCount = useMemo(() => {
     return departmentInsights.reduce((sum, entry) => sum + entry.instructionCount, 0);
@@ -1182,6 +1365,7 @@ export function DashboardClient({
         throw new Error(payload.error ?? "Unable to save dashboard layout.");
       }
 
+      setSavedWidgetLayout(cloneWidgetLayout(widgetLayout));
       setLayoutDirty(false);
     } catch (caughtError) {
       const normalizedMessage =
@@ -1269,6 +1453,12 @@ export function DashboardClient({
     applyLayoutPreset(DEFAULT_DASHBOARD_LAYOUT_PRESET_ID);
   }
 
+  function discardDashboardLayoutChanges() {
+    setWidgetLayout(cloneWidgetLayout(savedWidgetLayout));
+    setLayoutDirty(false);
+    setLayoutError(null);
+  }
+
   function closeNavigationModal() {
     pendingNavigationRef.current = null;
     setNavigationModalOpen(false);
@@ -1319,6 +1509,17 @@ export function DashboardClient({
         router.back();
       });
       return;
+    }
+
+    if (navigation.kind === "internal-link") {
+      try {
+        const destination = new URL(navigation.href, window.location.href);
+        if (shouldCaptureInstructionReturnState(destination.pathname)) {
+          persistInstructionReturnState();
+        }
+      } catch {
+        // If URL parsing fails, continue with navigation without return-state capture.
+      }
     }
 
     window.location.assign(navigation.href);
@@ -1431,8 +1632,21 @@ export function DashboardClient({
                   spellCheck={false}
                   placeholder="Start typing (example: P, PG, PN-4401, Mold-23B)"
                   onChange={(event) => setQuery(event.target.value)}
-                  className="w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-3 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                  className="w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-10 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
                 />
+                {query.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuery("");
+                      searchInputRef.current?.focus();
+                    }}
+                    aria-label="Clear search"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-200"
+                  >
+                    <X size={14} />
+                  </button>
+                ) : null}
               </div>
             </label>
 
@@ -1783,61 +1997,95 @@ export function DashboardClient({
     }
 
     if (widgetId === "system_history") {
-      return filteredSystemHistoryEvents.length === 0 ? (
-        <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-          No recent system activity for {selectedDepartmentName}.
-        </p>
-      ) : (
+      const visibleHistoryEvents = filteredSystemHistoryEvents.slice(0, systemHistoryRowLimit);
+
+      return (
         <div className="grid gap-2">
-          {filteredSystemHistoryEvents.map((event) => (
-            <Link
-              key={event.id}
-              href={`/instructions/${event.instruction_id}`}
-              style={{
-                borderColor: colorWithAlpha(event.workItem.department_color, 0.45),
-                backgroundColor: colorWithAlpha(event.workItem.department_color, 0.12),
-                boxShadow: `inset 4px 0 0 ${colorWithAlpha(event.workItem.department_color, 0.9)}`,
-              }}
-              className="grid gap-1 rounded-xl border p-3 transition hover:brightness-105"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-200">
-                  {event.action_label}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-slate-600 dark:text-slate-300">
+              Showing {visibleHistoryEvents.length} of {filteredSystemHistoryEvents.length} events
+            </p>
+            <label className="inline-flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+              <span>Display</span>
+              <select
+                value={systemHistoryRowLimit}
+                onChange={(event) => {
+                  const nextLimit = Number.parseInt(event.target.value, 10);
+                  if (Number.isFinite(nextLimit) && nextLimit > 0) {
+                    setSystemHistoryRowLimit(nextLimit);
+                  }
+                }}
+                className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+              >
+                {SYSTEM_HISTORY_ROW_LIMIT_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option} rows
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          {visibleHistoryEvents.length === 0 ? (
+            <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+              No recent system activity for {selectedDepartmentName}.
+            </p>
+          ) : (
+            visibleHistoryEvents.map((event) => (
+              <Link
+                key={event.id}
+                href={`/instructions/${event.instruction_id}`}
+                style={{
+                  borderColor: colorWithAlpha(event.workItem.department_color, 0.45),
+                  backgroundColor: colorWithAlpha(event.workItem.department_color, 0.12),
+                  boxShadow: `inset 4px 0 0 ${colorWithAlpha(event.workItem.department_color, 0.9)}`,
+                }}
+                className="grid gap-1 rounded-xl border p-3 transition hover:brightness-105"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-200">
+                    {event.action_label}
+                  </p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    <LocalDateTime value={event.occurred_at} mode="dateTime" />
+                  </p>
+                </div>
+                <p className="font-semibold text-slate-900 dark:text-slate-100">
+                  {getLabelWithDepartment(event.workItem)}
                 </p>
+                <p className="text-xs text-slate-600 dark:text-slate-300">{event.detail}</p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  <LocalDateTime value={event.occurred_at} mode="dateTime" />
+                  By {event.actor_name}
                 </p>
-              </div>
-              <p className="font-semibold text-slate-900 dark:text-slate-100">
-                {getLabelWithDepartment(event.workItem)}
-              </p>
-              <p className="text-xs text-slate-600 dark:text-slate-300">{event.detail}</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                By {event.actor_name}
-              </p>
-            </Link>
-          ))}
+              </Link>
+            ))
+          )}
         </div>
       );
     }
 
+    const isMyImpactCompact = (widgetLayoutById.get("my_impact")?.size ?? "standard") === "compact";
+
     return (
       <div className="grid gap-3">
-        <div className="grid gap-2 md:grid-cols-2">
+        <div className={cn("grid gap-2", isMyImpactCompact ? "grid-cols-1" : "md:grid-cols-2")}>
           <ImpactKpiCard
             label="Authored Instructions"
             value={myInstructionEntries.length}
             onOpen={() => setImpactDrilldownKey("authored")}
+            compact={isMyImpactCompact}
           />
           <ImpactKpiCard
             label="Departments Touched"
             value={myDepartmentCount}
             onOpen={() => setImpactDrilldownKey("departments")}
+            compact={isMyImpactCompact}
           />
           <ImpactKpiCard
             label="Total Likes"
             value={totalAuthoredLikes}
             onOpen={() => setImpactDrilldownKey("likes")}
+            compact={isMyImpactCompact}
           />
           <ImpactKpiCard
             label="Most Recent Authored"
@@ -1851,6 +2099,7 @@ export function DashboardClient({
               )
             }
             onOpen={() => setImpactDrilldownKey("recent")}
+            compact={isMyImpactCompact}
           />
         </div>
 
@@ -1926,6 +2175,18 @@ export function DashboardClient({
                 {layoutSaving ? "Saving..." : "Save Layout"}
               </button>
 
+              {layoutDirty ? (
+                <button
+                  type="button"
+                  onClick={discardDashboardLayoutChanges}
+                  disabled={layoutSaving}
+                  className="inline-flex items-center gap-2 rounded-xl border border-amber-500/45 bg-amber-500/15 px-3 py-2 text-xs font-semibold text-amber-800 transition hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-70 dark:text-amber-200"
+                >
+                  <Undo2 size={14} />
+                  Discard Changes
+                </button>
+              ) : null}
+
               <button
                 type="button"
                 onClick={resetDashboardLayout}
@@ -1973,7 +2234,7 @@ export function DashboardClient({
                           : "border-slate-300/70 bg-white/80 hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/70",
                       )}
                     >
-                      <div className="grid min-h-12 grid-cols-4 gap-1 rounded-lg border border-slate-300/70 bg-slate-100/80 p-1 dark:border-slate-700 dark:bg-slate-950/60">
+                      <div className="grid min-h-12 grid-cols-6 gap-1 rounded-lg border border-slate-300/70 bg-slate-100/80 p-1 dark:border-slate-700 dark:bg-slate-950/60">
                         {preset.layout
                           .filter((entry) => entry.visible)
                           .slice(0, 6)
@@ -2150,15 +2411,31 @@ export function DashboardClient({
                 }}
                 className={cn(
                   getWidgetSpanClass(widget.size),
-                  "rounded-3xl border border-white/30 bg-white/80 p-4 shadow-xl backdrop-blur-xl transition dark:border-white/10 dark:bg-slate-900/70 md:p-5",
+                  "relative min-w-0 overflow-hidden rounded-3xl border border-white/30 bg-white/80 p-4 shadow-xl backdrop-blur-xl transition dark:border-white/10 dark:bg-slate-900/70 md:p-5",
                   isDragging ? "scale-[0.99] opacity-70" : "",
                   isDragOverTarget
                     ? "ring-2 ring-cyan-400/80 ring-offset-2 ring-offset-transparent"
                     : "",
                 )}
               >
-                <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                  <div className="flex items-start gap-2">
+                <button
+                  type="button"
+                  onClick={() => toggleWidget(widget.id)}
+                  aria-label={`Remove ${definition.title} widget`}
+                  className="absolute right-4 top-4 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border border-rose-500/40 bg-rose-500/10 text-rose-700 transition hover:bg-rose-500/20 dark:text-rose-200"
+                >
+                  <X size={12} />
+                </button>
+
+                <div
+                  className={cn(
+                    "mb-4 flex flex-col gap-3 pr-10",
+                    widget.size === "compact"
+                      ? "xl:flex-row xl:items-start xl:justify-between"
+                      : "md:flex-row md:items-start md:justify-between",
+                  )}
+                >
+                  <div className="flex min-w-0 items-start gap-2">
                     <button
                       type="button"
                       aria-label={`Drag to reorder ${definition.title}`}
@@ -2166,17 +2443,17 @@ export function DashboardClient({
                     >
                       <GripVertical size={14} />
                     </button>
-                    <div>
-                      <h2 className="text-xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
+                    <div className="min-w-0">
+                      <h2 className="break-words text-xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
                         {definition.title}
                       </h2>
-                      <p className="text-xs text-slate-600 dark:text-slate-300">
+                      <p className="break-words text-xs text-slate-600 dark:text-slate-300">
                         {definition.description}
                       </p>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <label className="inline-flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300">
                       <span>Size</span>
                       <select
@@ -2196,15 +2473,6 @@ export function DashboardClient({
                         ))}
                       </select>
                     </label>
-
-                    <button
-                      type="button"
-                      onClick={() => toggleWidget(widget.id)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-rose-500/40 bg-rose-500/10 px-2.5 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/20 dark:text-rose-200"
-                    >
-                      <X size={12} />
-                      Remove
-                    </button>
                   </div>
                 </div>
 

@@ -78,8 +78,7 @@ export default async function ForkInstructionPage({ params }: ForkInstructionPag
             Fork Instruction
           </h1>
           <p className="text-sm text-slate-600 dark:text-slate-300">
-            Create a copy of this instruction. Change part, mold, title, revision, or steps
-            as needed.
+            Create a copy of this instruction to edit without affecting the original.
           </p>
         </div>
       </header>

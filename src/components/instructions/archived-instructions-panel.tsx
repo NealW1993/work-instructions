@@ -171,9 +171,6 @@ export function ArchivedInstructionsPanel({
             <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
               Archived Work Instructions
             </h1>
-            <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-              Restore archived instructions back to the active dashboard.
-            </p>
           </div>
           <Link
             href="/dashboard"

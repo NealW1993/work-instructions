@@ -1012,7 +1012,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
               <input
                 ref={partInputRef}
                 value={partNumber}
-                placeholder="Example: PART-123"
+                placeholder="Example: SK-12345"
                 onFocus={() => {
                   if (partSuggestions.length > 0) {
                     setPartSearchOpen(true);
@@ -1080,7 +1080,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
               <input
                 ref={moldInputRef}
                 value={moldNumber}
-                placeholder="Example: MOLD-4"
+                placeholder="Example: FAL-11"
                 onFocus={() => {
                   if (moldSuggestions.length > 0) {
                     setMoldSearchOpen(true);
@@ -1148,7 +1148,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
             <span className="font-semibold">Work Item Title</span>
             <input
               ref={itemTitleInputRef}
-              placeholder="Example: Daily Setup Sequence"
+              placeholder="Example: Pouring Procedure"
               value={itemTitle}
               onChange={(event) => {
                 setItemTitle(event.target.value);
@@ -1225,7 +1225,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         </div>
 
         <RichTextEditor
-          label="Work Instructions (Rich Text)"
+          label="Work Instructions"
           value={bodyMarkdown}
           onChange={(nextValue) => {
             setBodyMarkdown(nextValue);

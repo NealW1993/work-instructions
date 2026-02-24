@@ -61,13 +61,6 @@ interface DashboardInstructionLikeRow {
   work_instructions: DashboardInstructionRow | DashboardInstructionRow[] | null;
 }
 
-interface DashboardHistoryPinRow {
-  created_at: string;
-  instruction_id: string;
-  user_id: string;
-  work_instructions: DashboardInstructionRow | DashboardInstructionRow[] | null;
-}
-
 interface DashboardWorkItemRow {
   id: string;
   department_id: string;
@@ -230,15 +223,6 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     .order("updated_at", { ascending: false })
     .limit(120);
 
-  const historyPinsRequest = supabase
-    .from("user_pinned_instructions")
-    .select(
-      "created_at, instruction_id, user_id, work_instructions!inner(id, revision, last_change_summary, created_at, updated_at, created_by, updated_by, is_archived, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title))",
-    )
-    .eq("work_instructions.is_archived", false)
-    .order("created_at", { ascending: false })
-    .limit(120);
-
   const departmentsRequest = supabase
     .from("departments")
     .select("id, name, color_hex")
@@ -251,7 +235,6 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     { data: pinnedData, error: pinnedError },
     { data: authoredLikesData },
     { data: historyInstructionsData },
-    { data: historyPinsData },
     { data: departmentsData },
   ] = await Promise.all([
     searchRequest,
@@ -259,7 +242,6 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     pinnedRequest,
     authoredLikesRequest,
     historyInstructionsRequest,
-    historyPinsRequest,
     departmentsRequest,
   ]);
 
@@ -268,7 +250,6 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const rawPinned = (pinnedData ?? []) as DashboardPinnedInstructionRow[];
   const rawAuthoredLikes = (authoredLikesData ?? []) as DashboardInstructionLikeRow[];
   const rawHistoryInstructions = (historyInstructionsData ?? []) as DashboardInstructionRow[];
-  const rawHistoryPins = (historyPinsData ?? []) as DashboardHistoryPinRow[];
 
   const profileIds = new Set<string>();
   for (const item of rawItems) {
@@ -298,14 +279,6 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   for (const instruction of rawHistoryInstructions) {
     profileIds.add(instruction.created_by);
     profileIds.add(instruction.updated_by);
-  }
-  for (const pinRow of rawHistoryPins) {
-    profileIds.add(pinRow.user_id);
-    const instruction = normalizeInstruction(pinRow.work_instructions);
-    if (instruction) {
-      profileIds.add(instruction.created_by);
-      profileIds.add(instruction.updated_by);
-    }
   }
 
   const profileIdList = Array.from(profileIds);
@@ -496,31 +469,6 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       detail: formatHistoryInstructionUpdateDetail(instruction),
       instruction_id: instruction.id,
       workItem: resolvedWorkItem,
-    });
-  }
-
-  for (const row of rawHistoryPins) {
-    const instruction = normalizeInstruction(row.work_instructions);
-    const workItem = instruction ? normalizeWorkItem(instruction.work_items) : null;
-    if (!instruction || !workItem) {
-      continue;
-    }
-
-    systemHistoryEvents.push({
-      id: `pinned:${row.user_id}:${row.instruction_id}:${row.created_at}`,
-      occurred_at: row.created_at,
-      action_label: "Instruction Pinned",
-      actor_name: profileNameMap.get(row.user_id) ?? "Unknown",
-      detail: `Pinned revision ${instruction.revision}.`,
-      instruction_id: instruction.id,
-      workItem: {
-        department_id: workItem.department_id,
-        department_name: normalizeDepartmentName(workItem.departments),
-        department_color: normalizeDepartmentColor(workItem.departments),
-        part_number: workItem.part_number,
-        mold_number: workItem.mold_number,
-        item_title: workItem.item_title,
-      },
     });
   }
 
