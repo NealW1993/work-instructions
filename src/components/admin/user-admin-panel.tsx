@@ -1,12 +1,13 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { LocalDateTime } from "@/components/ui/local-date-time";
 import { PinInput } from "@/components/ui/pin-input";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import type { AppRole } from "@/lib/types";
-import { isValidEmployeeId, normalizeEmployeeId } from "@/lib/utils";
+import { cn, isValidEmployeeId, normalizeEmployeeId } from "@/lib/utils";
 
 interface AdminUser {
   id: string;
@@ -25,7 +26,46 @@ interface AdminDepartment {
   updated_at: string;
 }
 
+interface CreateUserFieldErrors {
+  fullName: boolean;
+  email: boolean;
+  employeeId: boolean;
+  password: boolean;
+  pin: boolean;
+}
+
+type ConfirmDialogState =
+  | {
+      kind: "delete-user";
+      userId: string;
+      title: string;
+      description: string;
+      confirmLabel: string;
+    }
+  | {
+      kind: "delete-department";
+      departmentId: string;
+      title: string;
+      description: string;
+      confirmLabel: string;
+    };
+
 const ROLE_OPTIONS: AppRole[] = ["user", "admin", "system_admin"];
+
+const DEFAULT_CREATE_USER_FIELD_ERRORS: CreateUserFieldErrors = {
+  fullName: false,
+  email: false,
+  employeeId: false,
+  password: false,
+  pin: false,
+};
+
+function getInputClass(hasError: boolean) {
+  return cn(
+    "rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950",
+    hasError ? "border-rose-500 ring-2 ring-rose-500/30" : "",
+  );
+}
 
 export function UserAdminPanel() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
@@ -38,8 +78,12 @@ export function UserAdminPanel() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const [newDepartmentName, setNewDepartmentName] = useState("");
+  const [newDepartmentNameHasError, setNewDepartmentNameHasError] = useState(false);
   const [departmentNameUpdates, setDepartmentNameUpdates] = useState<
     Record<string, string>
+  >({});
+  const [departmentNameUpdateErrors, setDepartmentNameUpdateErrors] = useState<
+    Record<string, boolean>
   >({});
 
   const [newName, setNewName] = useState("");
@@ -48,10 +92,15 @@ export function UserAdminPanel() {
   const [newPassword, setNewPassword] = useState("");
   const [newPin, setNewPin] = useState("");
   const [newRole, setNewRole] = useState<AppRole>("user");
+  const [createUserFieldErrors, setCreateUserFieldErrors] = useState<CreateUserFieldErrors>(
+    DEFAULT_CREATE_USER_FIELD_ERRORS,
+  );
 
   const [pinUpdates, setPinUpdates] = useState<Record<string, string>>({});
   const [roleUpdates, setRoleUpdates] = useState<Record<string, AppRole>>({});
   const [employeeIdUpdates, setEmployeeIdUpdates] = useState<Record<string, string>>({});
+  const [portalReady, setPortalReady] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
 
   const getAuthHeaders = useCallback(async () => {
     const {
@@ -129,6 +178,10 @@ export function UserAdminPanel() {
   }, [getAuthHeaders]);
 
   useEffect(() => {
+    setPortalReady(true);
+  }, []);
+
+  useEffect(() => {
     void (async () => {
       await Promise.all([fetchUsers(), fetchDepartments()]);
     })();
@@ -149,15 +202,38 @@ export function UserAdminPanel() {
     setBusy(true);
     setError(null);
     setMessage(null);
+    setCreateUserFieldErrors(DEFAULT_CREATE_USER_FIELD_ERRORS);
 
     try {
-      if (newPin.length !== 6) {
-        throw new Error("PIN must be exactly 6 digits.");
+      const normalizedName = newName.trim();
+      const normalizedEmail = newEmail.trim().toLowerCase();
+      const normalizedEmployeeId = normalizeEmployeeId(newEmployeeId);
+      const normalizedPassword = newPassword.trim();
+      const normalizedPin = newPin.trim();
+
+      if (!normalizedName) {
+        setCreateUserFieldErrors((current) => ({ ...current, fullName: true }));
+        throw new Error("Full Name is required.");
       }
 
-      const normalizedEmployeeId = normalizeEmployeeId(newEmployeeId);
+      if (!normalizedEmail) {
+        setCreateUserFieldErrors((current) => ({ ...current, email: true }));
+        throw new Error("Email is required.");
+      }
+
       if (!isValidEmployeeId(normalizedEmployeeId)) {
+        setCreateUserFieldErrors((current) => ({ ...current, employeeId: true }));
         throw new Error("Employee ID must be 1-6 digits.");
+      }
+
+      if (normalizedPassword.length < 8) {
+        setCreateUserFieldErrors((current) => ({ ...current, password: true }));
+        throw new Error("Password must be at least 8 characters.");
+      }
+
+      if (!/^\d{6}$/.test(normalizedPin)) {
+        setCreateUserFieldErrors((current) => ({ ...current, pin: true }));
+        throw new Error("PIN must be exactly 6 digits.");
       }
 
       const headers = await getAuthHeaders();
@@ -165,11 +241,11 @@ export function UserAdminPanel() {
         method: "POST",
         headers,
         body: JSON.stringify({
-          fullName: newName,
-          email: newEmail,
+          fullName: normalizedName,
+          email: normalizedEmail,
           employeeId: normalizedEmployeeId,
-          password: newPassword,
-          pin: newPin,
+          password: normalizedPassword,
+          pin: normalizedPin,
           role: newRole,
         }),
       });
@@ -328,10 +404,12 @@ export function UserAdminPanel() {
     setBusy(true);
     setError(null);
     setMessage(null);
+    setNewDepartmentNameHasError(false);
 
     try {
       const name = newDepartmentName.trim();
       if (!name) {
+        setNewDepartmentNameHasError(true);
         throw new Error("Department name is required.");
       }
 
@@ -366,6 +444,10 @@ export function UserAdminPanel() {
     setBusy(true);
     setError(null);
     setMessage(null);
+    setDepartmentNameUpdateErrors((current) => ({
+      ...current,
+      [departmentId]: false,
+    }));
 
     try {
       const rawName =
@@ -375,6 +457,10 @@ export function UserAdminPanel() {
       const name = rawName.trim();
 
       if (!name) {
+        setDepartmentNameUpdateErrors((current) => ({
+          ...current,
+          [departmentId]: true,
+        }));
         throw new Error("Department name is required.");
       }
 
@@ -393,7 +479,9 @@ export function UserAdminPanel() {
         throw new Error(payload.error ?? "Unable to update department.");
       }
 
-      setMessage("Department updated.");
+      setMessage(
+        "Department renamed. Associated work instructions now show the new department name.",
+      );
       await fetchDepartments();
     } catch (caughtError) {
       const normalizedMessage =
@@ -404,15 +492,7 @@ export function UserAdminPanel() {
     }
   }
 
-  async function deleteDepartment(departmentId: string, departmentName: string) {
-    const confirmed = window.confirm(
-      `Delete department "${departmentName}"?\n\nThis only works if no work instructions are assigned to it.`,
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
+  async function performDeleteDepartment(departmentId: string) {
     setBusy(true);
     setError(null);
     setMessage(null);
@@ -433,6 +513,7 @@ export function UserAdminPanel() {
       }
 
       setMessage("Department deleted.");
+      setConfirmDialog(null);
       await fetchDepartments();
     } catch (caughtError) {
       const normalizedMessage =
@@ -443,15 +524,7 @@ export function UserAdminPanel() {
     }
   }
 
-  async function deleteUser(userId: string, userEmail: string) {
-    const confirmed = window.confirm(
-      `Delete user ${userEmail}?\n\nThis permanently removes their account.`,
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
+  async function performDeleteUser(userId: string) {
     setBusy(true);
     setError(null);
     setMessage(null);
@@ -472,6 +545,7 @@ export function UserAdminPanel() {
       }
 
       setMessage("User deleted.");
+      setConfirmDialog(null);
       await fetchUsers();
     } catch (caughtError) {
       const normalizedMessage =
@@ -480,6 +554,19 @@ export function UserAdminPanel() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function confirmDialogAction() {
+    if (!confirmDialog) {
+      return;
+    }
+
+    if (confirmDialog.kind === "delete-user") {
+      await performDeleteUser(confirmDialog.userId);
+      return;
+    }
+
+    await performDeleteDepartment(confirmDialog.departmentId);
   }
 
   return (
@@ -497,18 +584,26 @@ export function UserAdminPanel() {
 
       <div className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
         <h2 className="text-lg font-bold">Departments</h2>
+        <p className="text-xs text-slate-500 dark:text-slate-300">
+          Departments can always be renamed, even when instructions already use them.
+        </p>
 
         <form
+          noValidate
           onSubmit={handleCreateDepartment}
           className="flex flex-col gap-2 md:max-w-lg md:flex-row md:items-end"
         >
           <label className="grid flex-1 gap-1 text-sm">
             <span>Department Name</span>
             <input
-              required
               value={newDepartmentName}
-              onChange={(event) => setNewDepartmentName(event.target.value)}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+              onChange={(event) => {
+                setNewDepartmentName(event.target.value);
+                if (newDepartmentNameHasError && event.target.value.trim()) {
+                  setNewDepartmentNameHasError(false);
+                }
+              }}
+              className={getInputClass(newDepartmentNameHasError)}
             />
           </label>
           <button
@@ -533,13 +628,25 @@ export function UserAdminPanel() {
               >
                 <input
                   value={departmentNameUpdates[department.id] ?? department.name}
-                  onChange={(event) =>
+                  onChange={(event) => {
                     setDepartmentNameUpdates((current) => ({
                       ...current,
                       [department.id]: event.target.value,
-                    }))
-                  }
-                  className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-950 md:max-w-md"
+                    }));
+
+                    if (departmentNameUpdateErrors[department.id] && event.target.value.trim()) {
+                      setDepartmentNameUpdateErrors((current) => ({
+                        ...current,
+                        [department.id]: false,
+                      }));
+                    }
+                  }}
+                  className={cn(
+                    "w-full rounded-lg border border-slate-300 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-950 md:max-w-md",
+                    departmentNameUpdateErrors[department.id]
+                      ? "border-rose-500 ring-2 ring-rose-500/30"
+                      : "",
+                  )}
                 />
                 <div className="flex flex-wrap gap-2">
                   <button
@@ -551,7 +658,16 @@ export function UserAdminPanel() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => void deleteDepartment(department.id, department.name)}
+                    onClick={() =>
+                      setConfirmDialog({
+                        kind: "delete-department",
+                        departmentId: department.id,
+                        title: `Delete department "${department.name}"?`,
+                        description:
+                          "This only works when no work instructions are assigned to it. If this department is in use, keep it and rename it.",
+                        confirmLabel: "Delete Department",
+                      })
+                    }
                     className="rounded-lg border border-rose-500/40 px-3 py-1 text-rose-700 transition hover:bg-rose-500/10 dark:text-rose-300"
                   >
                     Delete
@@ -564,6 +680,7 @@ export function UserAdminPanel() {
       </div>
 
       <form
+        noValidate
         onSubmit={handleCreateUser}
         className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:grid-cols-2 md:p-7"
       >
@@ -571,52 +688,76 @@ export function UserAdminPanel() {
         <label className="grid gap-1 text-sm">
           <span>Full Name</span>
           <input
-            required
             value={newName}
-            onChange={(event) => setNewName(event.target.value)}
-            className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+            onChange={(event) => {
+              setNewName(event.target.value);
+              if (createUserFieldErrors.fullName && event.target.value.trim()) {
+                setCreateUserFieldErrors((current) => ({ ...current, fullName: false }));
+              }
+            }}
+            className={getInputClass(createUserFieldErrors.fullName)}
           />
         </label>
         <label className="grid gap-1 text-sm">
           <span>Email</span>
           <input
-            required
             type="email"
             value={newEmail}
-            onChange={(event) => setNewEmail(event.target.value)}
-            className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+            onChange={(event) => {
+              setNewEmail(event.target.value);
+              if (createUserFieldErrors.email && event.target.value.trim()) {
+                setCreateUserFieldErrors((current) => ({ ...current, email: false }));
+              }
+            }}
+            className={getInputClass(createUserFieldErrors.email)}
           />
         </label>
         <label className="grid gap-1 text-sm">
           <span>Employee ID</span>
           <input
-            required
             inputMode="numeric"
             pattern="[0-9]{1,6}"
             maxLength={6}
             value={newEmployeeId}
-            onChange={(event) => setNewEmployeeId(normalizeEmployeeId(event.target.value))}
-            className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+            onChange={(event) => {
+              const normalized = normalizeEmployeeId(event.target.value);
+              setNewEmployeeId(normalized);
+              if (createUserFieldErrors.employeeId && normalized) {
+                setCreateUserFieldErrors((current) => ({ ...current, employeeId: false }));
+              }
+            }}
+            className={getInputClass(createUserFieldErrors.employeeId)}
           />
         </label>
         <label className="grid gap-1 text-sm">
           <span>Password</span>
           <input
-            required
             minLength={8}
             type="password"
             value={newPassword}
-            onChange={(event) => setNewPassword(event.target.value)}
-            className="rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+            onChange={(event) => {
+              setNewPassword(event.target.value);
+              if (createUserFieldErrors.password && event.target.value.trim()) {
+                setCreateUserFieldErrors((current) => ({ ...current, password: false }));
+              }
+            }}
+            className={getInputClass(createUserFieldErrors.password)}
           />
         </label>
         <label className="grid gap-1 text-sm">
           <span>PIN (6 digits)</span>
           <PinInput
-            required
             value={newPin}
-            onChange={setNewPin}
-            className="tracking-[0.3em]"
+            onChange={(value) => {
+              setNewPin(value);
+              if (createUserFieldErrors.pin && value) {
+                setCreateUserFieldErrors((current) => ({ ...current, pin: false }));
+              }
+            }}
+            className={cn(
+              "tracking-[0.3em]",
+              createUserFieldErrors.pin ? "border-rose-500 ring-2 ring-rose-500/30" : "",
+            )}
           />
         </label>
         <label className="grid gap-1 text-sm md:col-span-2">
@@ -740,7 +881,15 @@ export function UserAdminPanel() {
                     <button
                       type="button"
                       disabled={busy || currentUserId === user.id}
-                      onClick={() => void deleteUser(user.id, user.email)}
+                      onClick={() =>
+                        setConfirmDialog({
+                          kind: "delete-user",
+                          userId: user.id,
+                          title: `Delete user ${user.email}?`,
+                          description: "This permanently removes their account.",
+                          confirmLabel: "Delete User",
+                        })
+                      }
                       className="rounded-lg border border-rose-500/40 px-2 py-1 text-rose-700 transition hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-40 dark:text-rose-300"
                       title={
                         currentUserId === user.id
@@ -757,6 +906,38 @@ export function UserAdminPanel() {
           </table>
         </div>
       </div>
+
+      {confirmDialog && portalReady
+        ? createPortal(
+            <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+              <div className="grid w-full max-w-md gap-4 rounded-2xl border border-rose-500/40 bg-slate-950/95 p-5 shadow-2xl">
+                <div className="grid gap-1">
+                  <h3 className="text-lg font-bold text-slate-100">{confirmDialog.title}</h3>
+                  <p className="text-sm text-slate-300">{confirmDialog.description}</p>
+                </div>
+
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDialog(null)}
+                    className="rounded-xl border border-slate-600 bg-slate-900/70 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void confirmDialogAction()}
+                    className="rounded-xl border border-rose-500/45 bg-rose-500/15 px-4 py-2 text-sm font-semibold text-rose-100 transition hover:bg-rose-500/25 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {busy ? "Working..." : confirmDialog.confirmLabel}
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

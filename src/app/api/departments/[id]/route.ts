@@ -133,7 +133,7 @@ export async function DELETE(
     return NextResponse.json(
       {
         error:
-          "Department is assigned to existing work instructions. Reassign those items before deleting this department.",
+          "Department is assigned to existing work instructions. You can still rename it, but you must reassign those items before deleting.",
       },
       { status: 409 },
     );

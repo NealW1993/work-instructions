@@ -49,6 +49,7 @@ interface FieldErrors {
   department: boolean;
   partOrMold: boolean;
   itemTitle: boolean;
+  revision: boolean;
   body: boolean;
 }
 
@@ -56,6 +57,7 @@ const DEFAULT_FIELD_ERRORS: FieldErrors = {
   department: false,
   partOrMold: false,
   itemTitle: false,
+  revision: false,
   body: false,
 };
 
@@ -422,6 +424,16 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       return;
     }
 
+    if (!Number.isInteger(revision) || revision < 1) {
+      setFieldErrors((current) => ({
+        ...current,
+        revision: true,
+      }));
+      setError("Revision must be a whole number greater than or equal to 1.");
+      setBusy(false);
+      return;
+    }
+
     if (!richTextToPlain(bodyMarkdown)) {
       setFieldErrors((current) => ({
         ...current,
@@ -580,6 +592,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       ) : null}
 
       <form
+        noValidate
         onSubmit={handleSubmit}
         className="grid min-w-0 gap-5 overflow-hidden rounded-3xl border border-white/30 bg-white/75 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7"
       >
@@ -726,7 +739,6 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
             <span className="font-semibold">Work Item Title</span>
             <input
               ref={itemTitleInputRef}
-              required
               placeholder="Example: Daily Setup Sequence"
               value={itemTitle}
               onChange={(event) => {
@@ -749,7 +761,6 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           <label className="grid gap-1.5 text-sm">
             <span className="font-semibold">Department</span>
             <select
-              required
               value={departmentId}
               onChange={(event) => {
                 setDepartmentId(event.target.value);
@@ -783,12 +794,22 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           <label className="grid min-w-0 gap-1.5 text-sm">
             <span className="font-semibold">Revision</span>
             <input
-              required
               min={1}
               type="number"
               value={revision}
-              onChange={(event) => setRevision(Number.parseInt(event.target.value || "1", 10))}
-              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+              onChange={(event) => {
+                setRevision(Number.parseInt(event.target.value || "0", 10));
+                if (fieldErrors.revision) {
+                  setFieldErrors((current) => ({
+                    ...current,
+                    revision: false,
+                  }));
+                }
+              }}
+              className={cn(
+                "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950",
+                fieldErrors.revision ? "border-rose-500 ring-2 ring-rose-500/30" : "",
+              )}
             />
           </label>
         </div>
