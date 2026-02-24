@@ -104,7 +104,7 @@ const DEFAULT_MEDIA_WIDTH = 520;
 const MIN_MEDIA_WIDTH = 180;
 const MAX_MEDIA_WIDTH = 1200;
 const MAX_INLINE_IMAGE_BYTES = 4 * 1024 * 1024;
-const MAX_INLINE_VIDEO_BYTES = 14 * 1024 * 1024;
+const MAX_INLINE_VIDEO_BYTES = 1024 * 1024 * 1024;
 
 function clampColorChannel(value: number) {
   return Math.max(0, Math.min(255, Math.round(value)));
@@ -323,13 +323,19 @@ function MediaNodeView({ node, selected, updateAttributes }: NodeViewProps) {
           contentEditable={false}
           data-drag-handle
           onMouseDown={(event) => event.preventDefault()}
-          className="absolute left-2 top-2 z-10 inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/40 bg-slate-950/70 text-white opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100"
+          className="pointer-events-none absolute left-2 top-2 z-20 inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/40 bg-slate-950/70 text-white opacity-0 transition group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
         >
           <GripVertical size={14} />
         </button>
 
         {mediaType === "video" ? (
-          <video src={src} controls className="block h-auto w-full bg-black" />
+          <video
+            src={src}
+            controls
+            contentEditable={false}
+            preload="metadata"
+            className="block h-auto w-full bg-black"
+          />
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={src} alt={alt || "Inline media"} className="block h-auto w-full" />
@@ -337,7 +343,7 @@ function MediaNodeView({ node, selected, updateAttributes }: NodeViewProps) {
 
         <div
           contentEditable={false}
-          className="absolute bottom-2 right-2 flex items-center gap-1 rounded-md border border-white/40 bg-slate-950/70 p-1 text-white opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100"
+          className="pointer-events-none absolute right-2 top-2 z-20 flex items-center gap-1 rounded-md border border-white/40 bg-slate-950/70 p-1 text-white opacity-0 transition group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
         >
           <button
             type="button"
@@ -820,8 +826,10 @@ export function RichTextEditor({
           if (!inserted) {
             setToolbarMessage(`Unable to insert ${file.name}.`);
           }
-        } catch {
-          setToolbarMessage(`Unable to read ${file.name}.`);
+        } catch (caughtError) {
+          const message =
+            caughtError instanceof Error ? caughtError.message : `Unable to read ${file.name}.`;
+          setToolbarMessage(message);
         }
       }
 
