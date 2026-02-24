@@ -1,7 +1,7 @@
 import Link from "next/link";
 
-import { SignOutButton } from "@/components/layout/sign-out-button";
-import { canEditInstructions, isSystemAdmin, roleLabel } from "@/lib/roles";
+import { UserAccountMenu } from "@/components/layout/user-account-menu";
+import { canEditInstructions, isSystemAdmin } from "@/lib/roles";
 import type { Profile } from "@/lib/types";
 
 export function AppHeader({ profile }: { profile: Profile }) {
@@ -16,9 +16,6 @@ export function AppHeader({ profile }: { profile: Profile }) {
             </p>
             <p className="text-base font-bold text-slate-900 dark:text-slate-100">
               {profile.full_name}
-              <span className="ml-2 rounded-full bg-slate-900 px-2 py-0.5 text-xs text-white dark:bg-slate-200 dark:text-slate-900">
-                {roleLabel(profile.role)}
-              </span>
             </p>
           </div>
         </div>
@@ -37,12 +34,6 @@ export function AppHeader({ profile }: { profile: Profile }) {
               New Instruction
             </Link>
           ) : null}
-          <Link
-            href="/account"
-            className="rounded-full px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-900/10 dark:text-slate-100 dark:hover:bg-white/10"
-          >
-            Account Settings
-          </Link>
           {isSystemAdmin(profile.role) ? (
             <Link
               href="/instructions/archived"
@@ -59,7 +50,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
               User Admin
             </Link>
           ) : null}
-          <SignOutButton />
+          <UserAccountMenu profile={profile} />
         </nav>
       </div>
     </header>

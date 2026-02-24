@@ -20,6 +20,7 @@ export interface Profile {
   role: AppRole;
   is_active: boolean;
   theme_preference?: ThemePreference;
+  dashboard_layout?: unknown;
   created_at: string;
   updated_at: string;
 }

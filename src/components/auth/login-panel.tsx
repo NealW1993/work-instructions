@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 
 import { PinInput } from "@/components/ui/pin-input";
+import { setSessionStartNow } from "@/lib/session-timer";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isValidEmployeeId, normalizeEmployeeId } from "@/lib/utils";
 
@@ -121,6 +122,7 @@ export function LoginPanel() {
         window.localStorage.removeItem(REMEMBER_EMAIL_KEY);
       }
 
+      setSessionStartNow();
       router.push("/dashboard");
       router.refresh();
     });
@@ -161,6 +163,7 @@ export function LoginPanel() {
         throw new Error(verifyError.message);
       }
 
+      setSessionStartNow();
       router.push("/dashboard");
       router.refresh();
     });
@@ -248,6 +251,7 @@ export function LoginPanel() {
         setMessage(
           "Account created. If your email matches SYSTEM_ADMIN_EMAIL and no system admin exists yet, this account was promoted automatically.",
         );
+        setSessionStartNow();
         router.push("/dashboard");
         router.refresh();
         return;

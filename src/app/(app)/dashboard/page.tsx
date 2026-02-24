@@ -219,6 +219,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       revision: instruction.revision,
       created_at: instruction.created_at,
       updated_at: instruction.updated_at,
+      creator_id: instruction.created_by,
       creator_name: creatorNameMap.get(instruction.created_by) ?? "Unknown",
     })),
   }));
@@ -293,6 +294,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       pinnedInstructions={pinnedInstructions}
       newestInstructions={newestInstructions}
       items={items}
+      currentUserId={profile.id}
+      initialDashboardLayout={profile.dashboard_layout ?? null}
       departmentOptions={
         (departmentsData ?? []) as Array<{
           id: string;
