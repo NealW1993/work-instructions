@@ -45,6 +45,14 @@ export function AppHeader({ profile }: { profile: Profile }) {
           </Link>
           {isSystemAdmin(profile.role) ? (
             <Link
+              href="/instructions/archived"
+              className="rounded-full px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-900/10 dark:text-slate-100 dark:hover:bg-white/10"
+            >
+              Archived
+            </Link>
+          ) : null}
+          {isSystemAdmin(profile.role) ? (
+            <Link
               href="/admin/users"
               className="rounded-full px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-900/10 dark:text-slate-100 dark:hover:bg-white/10"
             >

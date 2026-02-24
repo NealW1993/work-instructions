@@ -5,7 +5,7 @@ import type {
   DashboardWorkItemData,
 } from "@/components/dashboard/dashboard-client";
 import { requireAuthenticatedUser } from "@/lib/auth";
-import { canEditInstructions } from "@/lib/roles";
+import { canEditInstructions, isSystemAdmin } from "@/lib/roles";
 
 interface DashboardPageProps {
   searchParams: Promise<{
@@ -270,6 +270,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   return (
     <DashboardClient
       canEdit={canEditInstructions(profile.role)}
+      isSystemAdmin={isSystemAdmin(profile.role)}
       initialQuery={initialQuery}
       searchError={searchError?.message ?? null}
       newestError={newestError?.message ?? null}

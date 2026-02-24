@@ -55,6 +55,7 @@ interface DepartmentInsight {
 
 interface DashboardClientProps {
   canEdit: boolean;
+  isSystemAdmin: boolean;
   initialQuery: string;
   searchError: string | null;
   newestError: string | null;
@@ -123,6 +124,7 @@ function getLabelWithDepartment(workItem: DashboardWorkItemSummary) {
 
 export function DashboardClient({
   canEdit,
+  isSystemAdmin,
   initialQuery,
   searchError,
   newestError,
@@ -254,14 +256,24 @@ export function DashboardClient({
               Search updates instantly by part number or mold number.
             </p>
           </div>
-          {canEdit ? (
-            <Link
-              href="/instructions/new"
-              className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110"
-            >
-              Create Instruction
-            </Link>
-          ) : null}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {isSystemAdmin ? (
+              <Link
+                href="/instructions/archived"
+                className="inline-flex items-center justify-center rounded-xl border border-slate-400/35 bg-slate-900/10 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-900/15 dark:text-slate-200 dark:hover:bg-white/10"
+              >
+                Archived Instructions
+              </Link>
+            ) : null}
+            {canEdit ? (
+              <Link
+                href="/instructions/new"
+                className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110"
+              >
+                Create Instruction
+              </Link>
+            ) : null}
+          </div>
         </div>
 
         <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_260px]">
