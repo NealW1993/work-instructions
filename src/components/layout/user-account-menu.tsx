@@ -18,6 +18,18 @@ interface UserAccountMenuProps {
   profile: Profile;
 }
 
+const ICON_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
+const DEFAULT_ICON_COLOR = "#0EA5E9";
+
+function resolveIconColor(value: string | undefined) {
+  if (!value) {
+    return DEFAULT_ICON_COLOR;
+  }
+
+  const normalized = value.trim().toUpperCase();
+  return ICON_COLOR_PATTERN.test(normalized) ? normalized : DEFAULT_ICON_COLOR;
+}
+
 function getInitials(value: string) {
   const parts = value
     .trim()
@@ -44,6 +56,7 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
   const [sessionElapsedLabel, setSessionElapsedLabel] = useState("00:00:00");
 
   const initials = useMemo(() => getInitials(profile.full_name), [profile.full_name]);
+  const iconColor = useMemo(() => resolveIconColor(profile.icon_color), [profile.icon_color]);
 
   const touchServerSession = useCallback(
     async (endSession: boolean) => {
@@ -129,7 +142,10 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
         aria-expanded={open}
         className="inline-flex items-center gap-2 rounded-full border border-slate-300/70 bg-white/80 px-3 py-1.5 text-sm font-semibold text-slate-800 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-100 dark:hover:bg-slate-900"
       >
-        <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-blue-700 text-xs font-extrabold text-white">
+        <span
+          className="inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-extrabold text-white"
+          style={{ backgroundColor: iconColor }}
+        >
           {initials}
         </span>
         <span className="max-w-[150px] truncate">{profile.full_name}</span>

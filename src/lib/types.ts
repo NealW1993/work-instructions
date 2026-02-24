@@ -20,6 +20,7 @@ export interface Profile {
   role: AppRole;
   is_active: boolean;
   theme_preference?: ThemePreference;
+  icon_color?: string;
   dashboard_layout?: unknown;
   authored_likes_seen_at?: string;
   total_signed_in_seconds?: number;

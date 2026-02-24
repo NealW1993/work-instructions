@@ -19,6 +19,7 @@ export default async function AccountSettingsPage() {
         initialEmail={profile.email}
         initialEmployeeId={profile.employee_id ?? ""}
         initialThemePreference={profile.theme_preference ?? "dark"}
+        initialIconColor={profile.icon_color ?? "#0EA5E9"}
         initialTotalSignedInSeconds={profile.total_signed_in_seconds ?? 0}
       />
     </div>

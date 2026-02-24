@@ -23,6 +23,41 @@ import type { ThemePreference } from "@/lib/types";
 import { isValidEmployeeId, normalizeEmployeeId } from "@/lib/utils";
 
 const ACCOUNT_HISTORY_GUARD_STATE_KEY = "__accountSettingsUnsavedGuard";
+const ICON_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
+const DEFAULT_ICON_COLOR = "#0EA5E9";
+const ICON_COLOR_OPTIONS = [
+  "#0EA5E9",
+  "#2563EB",
+  "#7C3AED",
+  "#DB2777",
+  "#DC2626",
+  "#EA580C",
+  "#16A34A",
+  "#0D9488",
+  "#4B5563",
+  "#111827",
+] as const;
+
+function normalizeIconColor(value: string) {
+  return value.trim().toUpperCase();
+}
+
+function getInitials(value: string) {
+  const parts = value
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (parts.length === 0) {
+    return "U";
+  }
+
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+
+  return `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase();
+}
 
 type PendingNavigation =
   | {
@@ -42,6 +77,7 @@ interface AccountSettingsPanelProps {
   initialEmail: string;
   initialEmployeeId: string;
   initialThemePreference: ThemePreference;
+  initialIconColor: string;
   initialTotalSignedInSeconds: number;
 }
 
@@ -50,6 +86,7 @@ export function AccountSettingsPanel({
   initialEmail,
   initialEmployeeId,
   initialThemePreference,
+  initialIconColor,
   initialTotalSignedInSeconds,
 }: AccountSettingsPanelProps) {
   const router = useRouter();
@@ -61,12 +98,18 @@ export function AccountSettingsPanel({
   const [savedEmployeeId, setSavedEmployeeId] = useState(initialEmployeeId);
   const [savedThemePreference, setSavedThemePreference] =
     useState<ThemePreference>(initialThemePreference);
+  const [savedIconColor, setSavedIconColor] = useState(
+    normalizeIconColor(initialIconColor || DEFAULT_ICON_COLOR),
+  );
 
   const [fullName, setFullName] = useState(initialFullName);
   const [email, setEmail] = useState(initialEmail);
   const [employeeId, setEmployeeId] = useState(initialEmployeeId);
   const [themePreference, setThemePreference] =
     useState<ThemePreference>(initialThemePreference);
+  const [iconColor, setIconColor] = useState(
+    normalizeIconColor(initialIconColor || DEFAULT_ICON_COLOR),
+  );
   const [wantsPasswordChange, setWantsPasswordChange] = useState(false);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -95,6 +138,7 @@ export function AccountSettingsPanel({
   const normalizedFullName = fullName.trim();
   const normalizedEmail = email.trim().toLowerCase();
   const normalizedEmployeeId = normalizeEmployeeId(employeeId);
+  const normalizedIconColor = normalizeIconColor(iconColor);
   const passwordMismatch =
     wantsPasswordChange && confirmPassword.length > 0 && password !== confirmPassword;
   const pinMismatch = wantsPinChange && confirmPin.length > 0 && pin !== confirmPin;
@@ -102,6 +146,7 @@ export function AccountSettingsPanel({
   const emailChanged = normalizedEmail !== savedEmail;
   const employeeIdChanged = normalizedEmployeeId !== savedEmployeeId;
   const themeChanged = themePreference !== savedThemePreference;
+  const iconColorChanged = normalizedIconColor !== savedIconColor;
   const passwordChanged = wantsPasswordChange && password.length > 0;
   const pinChanged = wantsPinChange && pin.length > 0;
 
@@ -110,8 +155,10 @@ export function AccountSettingsPanel({
     emailChanged ||
     employeeIdChanged ||
     themeChanged ||
+    iconColorChanged ||
     passwordChanged ||
     pinChanged;
+  const iconInitials = getInitials(normalizedFullName || savedFullName);
 
   const releaseHistoryGuard = useCallback(() => {
     if (!historyGuardActiveRef.current) {
@@ -394,6 +441,10 @@ export function AccountSettingsPanel({
         throw new Error("Employee ID must be 1-6 digits.");
       }
 
+      if (!ICON_COLOR_PATTERN.test(normalizedIconColor)) {
+        throw new Error("Icon color must be a valid hex value like #0EA5E9.");
+      }
+
       if (wantsPasswordChange) {
         if (password.length < 8) {
           throw new Error("Password must be at least 8 characters.");
@@ -427,6 +478,7 @@ export function AccountSettingsPanel({
         email?: string;
         employeeId?: string;
         themePreference?: ThemePreference;
+        iconColor?: string;
         password?: string;
       } = {};
       let accountUpdated = false;
@@ -445,6 +497,10 @@ export function AccountSettingsPanel({
 
       if (themeChanged) {
         payload.themePreference = themePreference;
+      }
+
+      if (iconColorChanged) {
+        payload.iconColor = normalizedIconColor;
       }
 
       if (wantsPasswordChange && password) {
@@ -494,6 +550,7 @@ export function AccountSettingsPanel({
       setSavedEmail(normalizedEmail);
       setSavedEmployeeId(normalizedEmployeeId);
       setSavedThemePreference(themePreference);
+      setSavedIconColor(normalizedIconColor);
 
       if (accountUpdated && pinChanged) {
         setMessage("Account and PIN updated.");
@@ -503,7 +560,7 @@ export function AccountSettingsPanel({
         setMessage("Account updated.");
       }
 
-      if (fullNameChanged || emailChanged || employeeIdChanged) {
+      if (fullNameChanged || emailChanged || employeeIdChanged || iconColorChanged) {
         router.refresh();
       }
     } catch (caughtError) {
@@ -524,7 +581,7 @@ export function AccountSettingsPanel({
               Account Settings
             </h2>
             <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-              Update your full name, email, employee ID, password, and PIN.
+              Update your full name, email, employee ID, theme, icon color, password, and PIN.
             </p>
           </div>
 
@@ -607,6 +664,55 @@ export function AccountSettingsPanel({
               >
                 Light
               </button>
+            </div>
+          </fieldset>
+
+          <fieldset className="grid gap-2 text-sm">
+            <legend>Icon Color</legend>
+            <div className="flex flex-wrap gap-2">
+              {ICON_COLOR_OPTIONS.map((presetColor) => (
+                <button
+                  key={presetColor}
+                  type="button"
+                  onClick={() => setIconColor(presetColor)}
+                  aria-label={`Set icon color to ${presetColor}`}
+                  className={`h-8 w-8 rounded-full border transition ${
+                    normalizedIconColor === presetColor
+                      ? "border-slate-900 ring-2 ring-cyan-500/40 dark:border-slate-100"
+                      : "border-slate-300 dark:border-slate-700"
+                  }`}
+                  style={{ backgroundColor: presetColor }}
+                />
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="color"
+                value={ICON_COLOR_PATTERN.test(normalizedIconColor) ? normalizedIconColor : DEFAULT_ICON_COLOR}
+                onChange={(event) => setIconColor(normalizeIconColor(event.target.value))}
+                className="h-10 w-12 cursor-pointer rounded-lg border border-slate-300 bg-transparent p-1 dark:border-slate-700"
+              />
+              <input
+                value={iconColor}
+                maxLength={7}
+                onChange={(event) =>
+                  setIconColor(normalizeIconColor(event.target.value.slice(0, 7)))
+                }
+                className="w-28 rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-sm uppercase text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                placeholder="#0EA5E9"
+              />
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                Pick a preset or enter a hex code.
+              </span>
+            </div>
+            <div className="inline-flex w-fit items-center gap-2 rounded-xl border border-slate-300/80 bg-white/75 px-3 py-2 dark:border-slate-700 dark:bg-slate-950/60">
+              <span
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-xs font-extrabold text-white"
+                style={{ backgroundColor: ICON_COLOR_PATTERN.test(normalizedIconColor) ? normalizedIconColor : DEFAULT_ICON_COLOR }}
+              >
+                {iconInitials}
+              </span>
+              <span className="text-xs text-slate-600 dark:text-slate-300">Profile icon preview</span>
             </div>
           </fieldset>
 

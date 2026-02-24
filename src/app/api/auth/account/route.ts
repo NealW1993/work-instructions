@@ -11,9 +11,20 @@ interface UpdateAccountBody {
   employeeId?: string;
   password?: string;
   themePreference?: ThemePreference;
+  iconColor?: string;
 }
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const ICON_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
+const DEFAULT_ICON_COLOR = "#0EA5E9";
+
+function normalizeIconColor(value: string | undefined) {
+  if (!value) {
+    return "";
+  }
+
+  return value.trim().toUpperCase();
+}
 
 function hasOwn<T extends object>(value: T, key: keyof UpdateAccountBody): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
@@ -34,17 +45,20 @@ export async function PATCH(request: NextRequest) {
   const includeEmployeeId = hasOwn(body, "employeeId");
   const includePassword = hasOwn(body, "password");
   const includeThemePreference = hasOwn(body, "themePreference");
+  const includeIconColor = hasOwn(body, "iconColor");
 
   if (
     !includeFullName &&
     !includeEmail &&
     !includeEmployeeId &&
     !includePassword &&
-    !includeThemePreference
+    !includeThemePreference &&
+    !includeIconColor
   ) {
     return NextResponse.json(
       {
-        error: "fullName, email, employeeId, password, or themePreference is required.",
+        error:
+          "fullName, email, employeeId, password, themePreference, or iconColor is required.",
       },
       { status: 400 },
     );
@@ -55,6 +69,7 @@ export async function PATCH(request: NextRequest) {
   const normalizedEmployeeId = normalizeEmployeeId(body.employeeId ?? "");
   const password = body.password?.trim();
   const themePreference = body.themePreference;
+  const normalizedIconColor = normalizeIconColor(body.iconColor);
 
   if (includeFullName && !fullName) {
     return NextResponse.json(
@@ -124,6 +139,22 @@ export async function PATCH(request: NextRequest) {
     }
   }
 
+  if (includeIconColor) {
+    if (!normalizedIconColor) {
+      return NextResponse.json(
+        { error: "Icon color cannot be empty." },
+        { status: 400 },
+      );
+    }
+
+    if (!ICON_COLOR_PATTERN.test(normalizedIconColor)) {
+      return NextResponse.json(
+        { error: "Icon color must be a valid hex color like #0EA5E9." },
+        { status: 400 },
+      );
+    }
+  }
+
   const authUpdate: {
     email?: string;
     email_confirm?: boolean;
@@ -132,7 +163,7 @@ export async function PATCH(request: NextRequest) {
   } = {};
   const authMetadata: Record<string, string> = {};
   const profileUpdate: Partial<
-    Pick<Profile, "full_name" | "email" | "employee_id" | "theme_preference">
+    Pick<Profile, "full_name" | "email" | "employee_id" | "theme_preference" | "icon_color">
   > = {};
 
   if (fullName && fullName !== requester.full_name) {
@@ -167,6 +198,14 @@ export async function PATCH(request: NextRequest) {
     profileUpdate.theme_preference = themePreference;
   }
 
+  if (
+    includeIconColor &&
+    normalizedIconColor &&
+    normalizedIconColor !== (requester.icon_color ?? DEFAULT_ICON_COLOR)
+  ) {
+    profileUpdate.icon_color = normalizedIconColor;
+  }
+
   if (Object.keys(authUpdate).length > 0) {
     const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(
       requester.id,
@@ -192,7 +231,7 @@ export async function PATCH(request: NextRequest) {
   const { data: profile, error: readError } = await supabaseAdmin
     .from("profiles")
     .select(
-      "id, email, employee_id, full_name, role, is_active, theme_preference, created_at, updated_at",
+      "id, email, employee_id, full_name, role, is_active, theme_preference, icon_color, created_at, updated_at",
     )
     .eq("id", requester.id)
     .maybeSingle<Profile>();
