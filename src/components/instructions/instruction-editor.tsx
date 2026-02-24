@@ -678,15 +678,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       return;
     }
 
-    navigateWithGuardReleased(() => {
-      if (navigation.kind === "external-link") {
-        window.location.assign(navigation.href);
-        return;
-      }
-
-      const destination = new URL(navigation.href, window.location.href);
-      router.push(`${destination.pathname}${destination.search}${destination.hash}`);
-    });
+    window.location.assign(navigation.href);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {

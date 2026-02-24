@@ -7,6 +7,7 @@ import remarkGfm from "remark-gfm";
 import sanitizeHtml from "sanitize-html";
 
 import { DeleteInstructionButton } from "@/components/instructions/delete-instruction-button";
+import { LikeInstructionButton } from "@/components/instructions/like-instruction-button";
 import { PinInstructionButton } from "@/components/instructions/pin-instruction-button";
 import { LocalDateTime } from "@/components/ui/local-date-time";
 import { requireAuthenticatedUser } from "@/lib/auth";
@@ -222,12 +223,28 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
     .select("id, full_name")
     .in("id", [instruction.created_by, instruction.updated_by]);
 
-  const { data: pinnedInstruction } = await supabase
-    .from("user_pinned_instructions")
-    .select("instruction_id")
-    .eq("user_id", profile.id)
-    .eq("instruction_id", instruction.id)
-    .maybeSingle();
+  const [
+    { data: pinnedInstruction },
+    { data: likedInstruction },
+    { count: instructionLikeCount },
+  ] = await Promise.all([
+    supabase
+      .from("user_pinned_instructions")
+      .select("instruction_id")
+      .eq("user_id", profile.id)
+      .eq("instruction_id", instruction.id)
+      .maybeSingle(),
+    supabase
+      .from("instruction_likes")
+      .select("instruction_id")
+      .eq("user_id", profile.id)
+      .eq("instruction_id", instruction.id)
+      .maybeSingle(),
+    supabase
+      .from("instruction_likes")
+      .select("*", { count: "exact", head: true })
+      .eq("instruction_id", instruction.id),
+  ]);
 
   const userMap = new Map((users ?? []).map((entry) => [entry.id, entry.full_name]));
 
@@ -253,6 +270,12 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <LikeInstructionButton
+              instructionId={instruction.id}
+              userId={profile.id}
+              initialLiked={Boolean(likedInstruction)}
+              initialLikeCount={instructionLikeCount ?? 0}
+            />
             <PinInstructionButton
               instructionId={instruction.id}
               userId={profile.id}

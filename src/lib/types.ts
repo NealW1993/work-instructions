@@ -21,6 +21,7 @@ export interface Profile {
   is_active: boolean;
   theme_preference?: ThemePreference;
   dashboard_layout?: unknown;
+  authored_likes_seen_at?: string;
   created_at: string;
   updated_at: string;
 }

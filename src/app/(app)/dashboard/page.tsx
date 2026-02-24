@@ -1,6 +1,8 @@
 import { DashboardClient } from "@/components/dashboard/dashboard-client";
 import type {
   DashboardInstructionCardData,
+  DashboardLikeCelebrationData,
+  DashboardLikedInstructionCardData,
   DashboardPinnedInstructionCardData,
   DashboardWorkItemData,
 } from "@/components/dashboard/dashboard-client";
@@ -45,6 +47,13 @@ interface DashboardWorkItemInstructionRow {
 
 interface DashboardPinnedInstructionRow {
   created_at: string;
+  work_instructions: DashboardInstructionRow | DashboardInstructionRow[] | null;
+}
+
+interface DashboardInstructionLikeRow {
+  created_at: string;
+  instruction_id: string;
+  user_id: string;
   work_instructions: DashboardInstructionRow | DashboardInstructionRow[] | null;
 }
 
@@ -115,6 +124,29 @@ function normalizeInstruction(
   return relation;
 }
 
+function getPrimaryPartOrMoldLabel(partNumber: string, moldNumber: string) {
+  const normalizedMold = moldNumber?.trim();
+  if (normalizedMold) {
+    return `Mold # ${normalizedMold}`;
+  }
+
+  const normalizedPart = partNumber?.trim();
+  if (normalizedPart) {
+    return `Part # ${normalizedPart}`;
+  }
+
+  return "Part # N/A";
+}
+
+function toTimestamp(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function buildCreatorNameMap(
   users: Array<{ id: string; full_name: string }> | null,
 ) {
@@ -154,6 +186,17 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     .order("created_at", { ascending: false })
     .limit(25);
 
+  const authoredLikesRequest = supabase
+    .from("instruction_likes")
+    .select(
+      "created_at, instruction_id, user_id, work_instructions!inner(id, revision, created_at, updated_at, created_by, is_archived, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title))",
+    )
+    .eq("work_instructions.created_by", profile.id)
+    .eq("work_instructions.is_archived", false)
+    .neq("user_id", profile.id)
+    .order("created_at", { ascending: false })
+    .limit(250);
+
   const departmentsRequest = supabase
     .from("departments")
     .select("id, name, color_hex")
@@ -164,17 +207,20 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     { data: searchData, error: searchError },
     { data: newestData, error: newestError },
     { data: pinnedData, error: pinnedError },
+    { data: authoredLikesData },
     { data: departmentsData },
   ] = await Promise.all([
     searchRequest,
     newestRequest,
     pinnedRequest,
+    authoredLikesRequest,
     departmentsRequest,
   ]);
 
   const rawItems = (searchData ?? []) as DashboardWorkItemRow[];
   const rawNewest = (newestData ?? []) as DashboardInstructionRow[];
   const rawPinned = (pinnedData ?? []) as DashboardPinnedInstructionRow[];
+  const rawAuthoredLikes = (authoredLikesData ?? []) as DashboardInstructionLikeRow[];
 
   const creatorIds = new Set<string>();
   for (const item of rawItems) {
@@ -187,6 +233,12 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   }
   for (const pinnedRow of rawPinned) {
     const instruction = normalizeInstruction(pinnedRow.work_instructions);
+    if (instruction) {
+      creatorIds.add(instruction.created_by);
+    }
+  }
+  for (const likeRow of rawAuthoredLikes) {
+    const instruction = normalizeInstruction(likeRow.work_instructions);
     if (instruction) {
       creatorIds.add(instruction.created_by);
     }
@@ -283,6 +335,142 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         instruction !== null,
     );
 
+  const likedInstructionsById = new Map<string, DashboardLikedInstructionCardData>();
+  for (const row of rawAuthoredLikes) {
+    const instruction = normalizeInstruction(row.work_instructions);
+    if (!instruction) {
+      continue;
+    }
+
+    const workItem = normalizeWorkItem(instruction.work_items);
+    if (!workItem) {
+      continue;
+    }
+
+    const existing = likedInstructionsById.get(instruction.id);
+    if (existing) {
+      existing.likes_count += 1;
+
+      const existingTimestamp = toTimestamp(existing.latest_liked_at) ?? 0;
+      const rowTimestamp = toTimestamp(row.created_at) ?? 0;
+      if (rowTimestamp > existingTimestamp) {
+        existing.latest_liked_at = row.created_at;
+      }
+      continue;
+    }
+
+    likedInstructionsById.set(instruction.id, {
+      id: instruction.id,
+      revision: instruction.revision,
+      created_at: instruction.created_at,
+      updated_at: instruction.updated_at,
+      creator_name: creatorNameMap.get(instruction.created_by) ?? "Unknown",
+      workItem: {
+        department_id: workItem.department_id,
+        department_name: normalizeDepartmentName(workItem.departments),
+        department_color: normalizeDepartmentColor(workItem.departments),
+        part_number: workItem.part_number,
+        mold_number: workItem.mold_number,
+        item_title: workItem.item_title,
+      },
+      likes_count: 1,
+      latest_liked_at: row.created_at,
+    });
+  }
+
+  const likedInstructions = [...likedInstructionsById.values()].sort((a, b) => {
+    const aTimestamp = toTimestamp(a.latest_liked_at) ?? 0;
+    const bTimestamp = toTimestamp(b.latest_liked_at) ?? 0;
+    return bTimestamp - aTimestamp;
+  });
+
+  const seenLikesAtTimestamp = toTimestamp(profile.authored_likes_seen_at ?? null);
+  const newLikeRows =
+    seenLikesAtTimestamp === null
+      ? []
+      : rawAuthoredLikes.filter((row) => {
+          const rowTimestamp = toTimestamp(row.created_at);
+          return rowTimestamp !== null && rowTimestamp > seenLikesAtTimestamp;
+        });
+
+  const likeHighlightByInstruction = new Map<
+    string,
+    {
+      instructionId: string;
+      label: string;
+      newLikesCount: number;
+      latestLikedAt: string;
+    }
+  >();
+
+  for (const row of newLikeRows) {
+    const instruction = normalizeInstruction(row.work_instructions);
+    if (!instruction) {
+      continue;
+    }
+
+    const workItem = normalizeWorkItem(instruction.work_items);
+    if (!workItem) {
+      continue;
+    }
+
+    const existing = likeHighlightByInstruction.get(instruction.id);
+    if (existing) {
+      existing.newLikesCount += 1;
+      const existingTimestamp = toTimestamp(existing.latestLikedAt) ?? 0;
+      const rowTimestamp = toTimestamp(row.created_at) ?? 0;
+      if (rowTimestamp > existingTimestamp) {
+        existing.latestLikedAt = row.created_at;
+      }
+      continue;
+    }
+
+    likeHighlightByInstruction.set(instruction.id, {
+      instructionId: instruction.id,
+      label: `${getPrimaryPartOrMoldLabel(workItem.part_number, workItem.mold_number)} | ${normalizeDepartmentName(workItem.departments)}`,
+      newLikesCount: 1,
+      latestLikedAt: row.created_at,
+    });
+  }
+
+  const likeCelebration: DashboardLikeCelebrationData | null =
+    newLikeRows.length === 0
+      ? null
+      : {
+          newLikesCount: newLikeRows.length,
+          latestNewLikeAt: newLikeRows[0]?.created_at ?? new Date().toISOString(),
+          highlights: [...likeHighlightByInstruction.values()]
+            .sort((a, b) => {
+              if (b.newLikesCount !== a.newLikesCount) {
+                return b.newLikesCount - a.newLikesCount;
+              }
+
+              const aTimestamp = toTimestamp(a.latestLikedAt) ?? 0;
+              const bTimestamp = toTimestamp(b.latestLikedAt) ?? 0;
+              return bTimestamp - aTimestamp;
+            })
+            .map((highlight) => ({
+              instructionId: highlight.instructionId,
+              label: highlight.label,
+              newLikesCount: highlight.newLikesCount,
+            })),
+        };
+
+  const latestAuthoredLikeAt = rawAuthoredLikes[0]?.created_at ?? null;
+  const latestAuthoredLikeTimestamp = toTimestamp(latestAuthoredLikeAt);
+  const seenAuthoredLikeTimestamp = toTimestamp(profile.authored_likes_seen_at ?? null);
+  if (
+    latestAuthoredLikeAt &&
+    latestAuthoredLikeTimestamp !== null &&
+    (seenAuthoredLikeTimestamp === null ||
+      latestAuthoredLikeTimestamp > seenAuthoredLikeTimestamp)
+  ) {
+    await supabase
+      .from("profiles")
+      .update({ authored_likes_seen_at: latestAuthoredLikeAt })
+      .eq("id", profile.id);
+  }
+
   return (
     <DashboardClient
       canEdit={canEditInstructions(profile.role)}
@@ -292,6 +480,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       newestError={newestError?.message ?? null}
       pinnedError={pinnedError?.message ?? null}
       pinnedInstructions={pinnedInstructions}
+      likedInstructions={likedInstructions}
+      likeCelebration={likeCelebration}
       newestInstructions={newestInstructions}
       items={items}
       currentUserId={profile.id}

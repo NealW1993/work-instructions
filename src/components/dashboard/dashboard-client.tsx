@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Save,
   Search,
+  ThumbsUp,
   X,
 } from "lucide-react";
 import {
@@ -48,6 +49,24 @@ export interface DashboardInstructionCardData {
 export interface DashboardPinnedInstructionCardData
   extends DashboardInstructionCardData {
   pinned_at: string;
+}
+
+export interface DashboardLikedInstructionCardData
+  extends DashboardInstructionCardData {
+  likes_count: number;
+  latest_liked_at: string;
+}
+
+export interface DashboardLikeCelebrationHighlight {
+  instructionId: string;
+  label: string;
+  newLikesCount: number;
+}
+
+export interface DashboardLikeCelebrationData {
+  newLikesCount: number;
+  latestNewLikeAt: string;
+  highlights: DashboardLikeCelebrationHighlight[];
 }
 
 export interface DashboardWorkItemInstructionData {
@@ -110,6 +129,8 @@ interface DashboardClientProps {
   newestError: string | null;
   pinnedError: string | null;
   pinnedInstructions: DashboardPinnedInstructionCardData[];
+  likedInstructions: DashboardLikedInstructionCardData[];
+  likeCelebration: DashboardLikeCelebrationData | null;
   newestInstructions: DashboardInstructionCardData[];
   items: DashboardWorkItemData[];
   departmentOptions: DashboardDepartmentOption[];
@@ -119,6 +140,13 @@ interface DashboardClientProps {
 
 const DEFAULT_DEPARTMENT_COLOR = "#0EA5E9";
 const DASHBOARD_HISTORY_GUARD_STATE_KEY = "__dashboardLayoutUnsavedGuard";
+const CELEBRATION_CONFETTI_COLORS = [
+  "#22D3EE",
+  "#60A5FA",
+  "#34D399",
+  "#F59E0B",
+  "#FB7185",
+];
 
 const WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
   {
@@ -159,7 +187,7 @@ const WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
   {
     id: "my_impact",
     title: "My Impact Snapshot",
-    description: "Your authored and pinned stats.",
+    description: "Your authored and liked stats.",
     defaultVisible: true,
     defaultSize: "compact",
   },
@@ -210,6 +238,11 @@ function colorToRgb(colorHex: string) {
 function colorWithAlpha(colorHex: string, alpha: number) {
   const { red, green, blue } = colorToRgb(colorHex);
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
+
+function pseudoRandom(seed: number) {
+  const value = Math.sin(seed * 12.9898) * 43758.5453;
+  return value - Math.floor(value);
 }
 
 function itemMatchesQuery(item: DashboardWorkItemData, normalizedQuery: string) {
@@ -324,7 +357,7 @@ type DashboardPendingNavigation =
       href: string;
     };
 
-type ImpactDrilldownKey = "authored" | "departments" | "pins" | "recent";
+type ImpactDrilldownKey = "authored" | "departments" | "likes" | "recent";
 
 interface ImpactDrilldownEntry {
   id: string;
@@ -369,6 +402,8 @@ export function DashboardClient({
   newestError,
   pinnedError,
   pinnedInstructions,
+  likedInstructions,
+  likeCelebration,
   newestInstructions,
   items,
   departmentOptions,
@@ -399,7 +434,21 @@ export function DashboardClient({
   const [portalReady, setPortalReady] = useState(false);
   const [navigationModalOpen, setNavigationModalOpen] = useState(false);
   const [impactDrilldownKey, setImpactDrilldownKey] = useState<ImpactDrilldownKey | null>(null);
+  const [likeCelebrationOpen, setLikeCelebrationOpen] = useState(
+    (likeCelebration?.newLikesCount ?? 0) > 0,
+  );
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+  const celebrationConfettiPieces = useMemo(
+    () =>
+      Array.from({ length: 72 }, (_, index) => ({
+        id: index,
+        left: pseudoRandom(index + 1) * 100,
+        delay: pseudoRandom(index + 41) * 1.4,
+        duration: 2.8 + pseudoRandom(index + 97) * 1.9,
+        rotation: pseudoRandom(index + 173) * 360,
+      })),
+    [],
+  );
 
   const normalizedQuery = query.trim().toLowerCase();
   const isSearching = normalizedQuery.length > 0;
@@ -417,6 +466,22 @@ export function DashboardClient({
   useEffect(() => {
     setPortalReady(true);
   }, []);
+
+  useEffect(() => {
+    if ((likeCelebration?.newLikesCount ?? 0) <= 0) {
+      setLikeCelebrationOpen(false);
+      return;
+    }
+
+    setLikeCelebrationOpen(true);
+    const timer = window.setTimeout(() => {
+      setLikeCelebrationOpen(false);
+    }, 7000);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [likeCelebration?.latestNewLikeAt, likeCelebration?.newLikesCount]);
 
   useEffect(() => {
     layoutDirtyRef.current = layoutDirty;
@@ -633,6 +698,11 @@ export function DashboardClient({
       )
       .on(
         "postgres_changes",
+        { event: "*", schema: "public", table: "instruction_likes" },
+        () => scheduleRealtimeRefresh(),
+      )
+      .on(
+        "postgres_changes",
         { event: "*", schema: "public", table: "departments" },
         () => scheduleRealtimeRefresh(),
       )
@@ -818,6 +888,12 @@ export function DashboardClient({
       .slice(0, 3);
   }, [myInstructionEntries]);
 
+  const totalAuthoredLikes = useMemo(
+    () =>
+      likedInstructions.reduce((sum, instruction) => sum + instruction.likes_count, 0),
+    [likedInstructions],
+  );
+
   const authoredDrilldownEntries = useMemo<ImpactDrilldownEntry[]>(() => {
     return [...myInstructionEntries]
       .sort((a, b) => {
@@ -867,11 +943,11 @@ export function DashboardClient({
       }));
   }, [myInstructionEntries]);
 
-  const pinsDrilldownEntries = useMemo<ImpactDrilldownEntry[]>(() => {
-    return [...pinnedInstructions]
+  const likesDrilldownEntries = useMemo<ImpactDrilldownEntry[]>(() => {
+    return [...likedInstructions]
       .sort((a, b) => {
-        const aTime = new Date(a.pinned_at).getTime();
-        const bTime = new Date(b.pinned_at).getTime();
+        const aTime = new Date(a.latest_liked_at).getTime();
+        const bTime = new Date(b.latest_liked_at).getTime();
         return bTime - aTime;
       })
       .slice(0, 12)
@@ -879,12 +955,12 @@ export function DashboardClient({
         id: instruction.id,
         href: `/instructions/${instruction.id}`,
         label: getLabelWithDepartment(instruction.workItem),
-        detail: `Revision ${instruction.revision} | Pinned ${new Date(
-          instruction.pinned_at,
+        detail: `${instruction.likes_count} like${instruction.likes_count === 1 ? "" : "s"} | Latest ${new Date(
+          instruction.latest_liked_at,
         ).toLocaleDateString()}`,
         color: instruction.workItem.department_color,
       }));
-  }, [pinnedInstructions]);
+  }, [likedInstructions]);
 
   const recentDrilldownEntries = useMemo<ImpactDrilldownEntry[]>(() => {
     if (!myLatestEntry) {
@@ -927,12 +1003,12 @@ export function DashboardClient({
       };
     }
 
-    if (impactDrilldownKey === "pins") {
+    if (impactDrilldownKey === "likes") {
       return {
-        title: "Pinned Instructions",
-        description: "Your most recently pinned active instructions.",
-        entries: pinsDrilldownEntries,
-        emptyMessage: "No pinned instructions yet.",
+        title: "Instructions You Were Liked For",
+        description: "Active authored instructions that received likes.",
+        entries: likesDrilldownEntries,
+        emptyMessage: "No likes received yet.",
       };
     }
 
@@ -946,7 +1022,7 @@ export function DashboardClient({
     authoredDrilldownEntries,
     departmentsDrilldownEntries,
     impactDrilldownKey,
-    pinsDrilldownEntries,
+    likesDrilldownEntries,
     recentDrilldownEntries,
   ]);
 
@@ -1118,15 +1194,7 @@ export function DashboardClient({
       return;
     }
 
-    navigateWithGuardReleased(() => {
-      if (navigation.kind === "external-link") {
-        window.location.assign(navigation.href);
-        return;
-      }
-
-      const destination = new URL(navigation.href, window.location.href);
-      router.push(`${destination.pathname}${destination.search}${destination.hash}`);
-    });
+    window.location.assign(navigation.href);
   }
 
   useEffect(() => {
@@ -1574,9 +1642,9 @@ export function DashboardClient({
             onOpen={() => setImpactDrilldownKey("departments")}
           />
           <ImpactKpiCard
-            label="Total Pins"
-            value={pinnedInstructions.length}
-            onOpen={() => setImpactDrilldownKey("pins")}
+            label="Total Likes"
+            value={totalAuthoredLikes}
+            onOpen={() => setImpactDrilldownKey("likes")}
           />
           <ImpactKpiCard
             label="Most Recent Authored"
@@ -1914,6 +1982,78 @@ export function DashboardClient({
         </div>
       )}
       </div>
+
+      {portalReady &&
+      likeCelebrationOpen &&
+      likeCelebration &&
+      likeCelebration.newLikesCount > 0
+        ? createPortal(
+            <div className="fixed inset-0 z-[113] flex items-center justify-center overflow-hidden bg-slate-950/65 p-4 backdrop-blur-sm sm:p-6">
+              <div className="pointer-events-none absolute inset-0">
+                {celebrationConfettiPieces.map((piece) => (
+                  <span
+                    key={piece.id}
+                    className="dashboard-like-celebration-piece"
+                    style={{
+                      left: `${piece.left}%`,
+                      animationDelay: `${piece.delay}s`,
+                      animationDuration: `${piece.duration}s`,
+                      transform: `rotate(${piece.rotation}deg)`,
+                      backgroundColor:
+                        CELEBRATION_CONFETTI_COLORS[
+                          piece.id % CELEBRATION_CONFETTI_COLORS.length
+                        ],
+                    }}
+                  />
+                ))}
+              </div>
+
+              <div className="relative z-[1] grid w-full max-w-lg gap-4 rounded-3xl border border-cyan-400/45 bg-slate-950/95 p-6 text-center shadow-2xl">
+                <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full border border-cyan-300/50 bg-cyan-500/20">
+                  <ThumbsUp
+                    size={40}
+                    className="dashboard-like-celebration-thumb text-cyan-200"
+                  />
+                </div>
+
+                <div className="grid gap-1">
+                  <h3 className="text-2xl font-extrabold text-slate-50">
+                    You got {likeCelebration.newLikesCount} new like
+                    {likeCelebration.newLikesCount === 1 ? "" : "s"}.
+                  </h3>
+                  <p className="text-sm text-cyan-100">
+                    Your teammates are appreciating your work instructions.
+                  </p>
+                </div>
+
+                {likeCelebration.highlights.length > 0 ? (
+                  <div className="grid gap-2 rounded-2xl border border-cyan-500/35 bg-cyan-500/10 p-3 text-left">
+                    {likeCelebration.highlights.slice(0, 3).map((highlight) => (
+                      <p key={highlight.instructionId} className="text-sm text-cyan-50">
+                        <span className="font-semibold">{highlight.label}</span>
+                        <span className="text-cyan-200">
+                          {" "}
+                          +{highlight.newLikesCount}
+                        </span>
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
+
+                <div className="flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => setLikeCelebrationOpen(false)}
+                    className="rounded-xl border border-cyan-400/45 bg-cyan-500/20 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/30"
+                  >
+                    Nice
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
 
       {navigationModalOpen && portalReady
         ? createPortal(
