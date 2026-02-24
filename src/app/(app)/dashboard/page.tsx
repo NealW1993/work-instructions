@@ -34,6 +34,7 @@ interface DashboardInstructionRow {
   created_at: string;
   updated_at: string;
   created_by: string;
+  updated_by: string;
   work_items: DashboardInstructionWorkItem | DashboardInstructionWorkItem[];
 }
 
@@ -43,6 +44,7 @@ interface DashboardWorkItemInstructionRow {
   created_at: string;
   updated_at: string;
   created_by: string;
+  updated_by: string;
 }
 
 interface DashboardPinnedInstructionRow {
@@ -161,7 +163,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const searchRequest = supabase
     .from("work_items")
     .select(
-      "id, department_id, departments(name, color_hex), part_number, mold_number, item_title, updated_at, work_instructions!inner(id, revision, created_at, updated_at, created_by)",
+      "id, department_id, departments(name, color_hex), part_number, mold_number, item_title, updated_at, work_instructions!inner(id, revision, created_at, updated_at, created_by, updated_by)",
     )
     .eq("work_instructions.is_archived", false)
     .order("updated_at", { ascending: false })
@@ -170,7 +172,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const newestRequest = supabase
     .from("work_instructions")
     .select(
-      "id, revision, created_at, updated_at, created_by, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title)",
+      "id, revision, created_at, updated_at, created_by, updated_by, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title)",
     )
     .eq("is_archived", false)
     .order("created_at", { ascending: false })
@@ -179,7 +181,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const pinnedRequest = supabase
     .from("user_pinned_instructions")
     .select(
-      "created_at, work_instructions!inner(id, revision, created_at, updated_at, created_by, is_archived, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title))",
+      "created_at, work_instructions!inner(id, revision, created_at, updated_at, created_by, updated_by, is_archived, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title))",
     )
     .eq("user_id", profile.id)
     .eq("work_instructions.is_archived", false)
@@ -189,7 +191,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const authoredLikesRequest = supabase
     .from("instruction_likes")
     .select(
-      "created_at, instruction_id, user_id, work_instructions!inner(id, revision, created_at, updated_at, created_by, is_archived, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title))",
+      "created_at, instruction_id, user_id, work_instructions!inner(id, revision, created_at, updated_at, created_by, updated_by, is_archived, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title))",
     )
     .eq("work_instructions.created_by", profile.id)
     .eq("work_instructions.is_archived", false)
@@ -222,39 +224,43 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const rawPinned = (pinnedData ?? []) as DashboardPinnedInstructionRow[];
   const rawAuthoredLikes = (authoredLikesData ?? []) as DashboardInstructionLikeRow[];
 
-  const creatorIds = new Set<string>();
+  const profileIds = new Set<string>();
   for (const item of rawItems) {
     for (const instruction of item.work_instructions ?? []) {
-      creatorIds.add(instruction.created_by);
+      profileIds.add(instruction.created_by);
+      profileIds.add(instruction.updated_by);
     }
   }
   for (const instruction of rawNewest) {
-    creatorIds.add(instruction.created_by);
+    profileIds.add(instruction.created_by);
+    profileIds.add(instruction.updated_by);
   }
   for (const pinnedRow of rawPinned) {
     const instruction = normalizeInstruction(pinnedRow.work_instructions);
     if (instruction) {
-      creatorIds.add(instruction.created_by);
+      profileIds.add(instruction.created_by);
+      profileIds.add(instruction.updated_by);
     }
   }
   for (const likeRow of rawAuthoredLikes) {
     const instruction = normalizeInstruction(likeRow.work_instructions);
     if (instruction) {
-      creatorIds.add(instruction.created_by);
+      profileIds.add(instruction.created_by);
+      profileIds.add(instruction.updated_by);
     }
   }
 
-  const creatorIdList = Array.from(creatorIds);
-  const { data: creators } =
-    creatorIdList.length > 0
+  const profileIdList = Array.from(profileIds);
+  const { data: profiles } =
+    profileIdList.length > 0
       ? await supabase
           .from("profiles")
           .select("id, full_name")
-          .in("id", creatorIdList)
+          .in("id", profileIdList)
       : { data: null };
 
-  const creatorNameMap = buildCreatorNameMap(
-    (creators ?? []) as Array<{ id: string; full_name: string }>,
+  const profileNameMap = buildCreatorNameMap(
+    (profiles ?? []) as Array<{ id: string; full_name: string }>,
   );
 
   const items: DashboardWorkItemData[] = rawItems.map((item) => ({
@@ -272,7 +278,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       created_at: instruction.created_at,
       updated_at: instruction.updated_at,
       creator_id: instruction.created_by,
-      creator_name: creatorNameMap.get(instruction.created_by) ?? "Unknown",
+      creator_name: profileNameMap.get(instruction.created_by) ?? "Unknown",
+      updater_id: instruction.updated_by,
+      updater_name: profileNameMap.get(instruction.updated_by) ?? "Unknown",
     })),
   }));
 
@@ -288,7 +296,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         revision: instruction.revision,
         created_at: instruction.created_at,
         updated_at: instruction.updated_at,
-        creator_name: creatorNameMap.get(instruction.created_by) ?? "Unknown",
+        creator_name: profileNameMap.get(instruction.created_by) ?? "Unknown",
         workItem: {
           department_id: workItem.department_id,
           department_name: normalizeDepartmentName(workItem.departments),
@@ -318,7 +326,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         revision: instruction.revision,
         created_at: instruction.created_at,
         updated_at: instruction.updated_at,
-        creator_name: creatorNameMap.get(instruction.created_by) ?? "Unknown",
+        creator_name: profileNameMap.get(instruction.created_by) ?? "Unknown",
         workItem: {
           department_id: workItem.department_id,
           department_name: normalizeDepartmentName(workItem.departments),
@@ -364,7 +372,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       revision: instruction.revision,
       created_at: instruction.created_at,
       updated_at: instruction.updated_at,
-      creator_name: creatorNameMap.get(instruction.created_by) ?? "Unknown",
+      creator_name: profileNameMap.get(instruction.created_by) ?? "Unknown",
       workItem: {
         department_id: workItem.department_id,
         department_name: normalizeDepartmentName(workItem.departments),
@@ -387,7 +395,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const seenLikesAtTimestamp = toTimestamp(profile.authored_likes_seen_at ?? null);
   const newLikeRows =
     seenLikesAtTimestamp === null
-      ? []
+      ? rawAuthoredLikes
       : rawAuthoredLikes.filter((row) => {
           const rowTimestamp = toTimestamp(row.created_at);
           return rowTimestamp !== null && rowTimestamp > seenLikesAtTimestamp;

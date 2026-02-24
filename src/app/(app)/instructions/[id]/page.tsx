@@ -7,6 +7,7 @@ import remarkGfm from "remark-gfm";
 import sanitizeHtml from "sanitize-html";
 
 import { DeleteInstructionButton } from "@/components/instructions/delete-instruction-button";
+import { InstructionBackButton } from "@/components/instructions/instruction-back-button";
 import { LikeInstructionButton } from "@/components/instructions/like-instruction-button";
 import { PinInstructionButton } from "@/components/instructions/pin-instruction-button";
 import { LocalDateTime } from "@/components/ui/local-date-time";
@@ -250,6 +251,8 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
 
   return (
     <article className="grid gap-5">
+      <InstructionBackButton fallbackHref="/dashboard" />
+
       <header className="rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>

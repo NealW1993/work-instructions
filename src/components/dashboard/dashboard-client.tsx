@@ -76,6 +76,8 @@ export interface DashboardWorkItemInstructionData {
   updated_at: string;
   creator_id: string;
   creator_name: string;
+  updater_id: string;
+  updater_name: string;
 }
 
 export interface DashboardWorkItemData extends DashboardWorkItemSummary {
@@ -264,7 +266,7 @@ function instructionMatchesQuery(
   }
 
   const haystack =
-    `revision ${instruction.revision} ${instruction.creator_name} ` +
+    `revision ${instruction.revision} ${instruction.creator_name} ${instruction.updater_name} ` +
     `${formatDateForSearch(instruction.created_at)}`;
 
   return haystack.toLowerCase().includes(normalizedQuery);
@@ -367,6 +369,13 @@ interface ImpactDrilldownEntry {
   color: string;
 }
 
+interface DrilldownPanelData {
+  title: string;
+  description: string;
+  entries: ImpactDrilldownEntry[];
+  emptyMessage: string;
+}
+
 interface ImpactKpiCardProps {
   label: string;
   value: ReactNode;
@@ -434,6 +443,8 @@ export function DashboardClient({
   const [portalReady, setPortalReady] = useState(false);
   const [navigationModalOpen, setNavigationModalOpen] = useState(false);
   const [impactDrilldownKey, setImpactDrilldownKey] = useState<ImpactDrilldownKey | null>(null);
+  const [departmentDrilldownDepartmentId, setDepartmentDrilldownDepartmentId] =
+    useState<string | null>(null);
   const [likeCelebrationOpen, setLikeCelebrationOpen] = useState(
     (likeCelebration?.newLikesCount ?? 0) > 0,
   );
@@ -980,7 +991,7 @@ export function DashboardClient({
     ];
   }, [myLatestEntry]);
 
-  const activeImpactDrilldown = useMemo(() => {
+  const activeImpactDrilldown = useMemo<DrilldownPanelData | null>(() => {
     if (!impactDrilldownKey) {
       return null;
     }
@@ -1025,6 +1036,44 @@ export function DashboardClient({
     likesDrilldownEntries,
     recentDrilldownEntries,
   ]);
+
+  const activeDepartmentDrilldown = useMemo<DrilldownPanelData | null>(() => {
+    if (!departmentDrilldownDepartmentId) {
+      return null;
+    }
+
+    const department = departmentInsights.find(
+      (entry) => entry.id === departmentDrilldownDepartmentId,
+    );
+    if (!department) {
+      return null;
+    }
+
+    const entries: ImpactDrilldownEntry[] = flattenedInstructionEntries
+      .filter((entry) => entry.workItem.department_id === department.id)
+      .sort((a, b) => {
+        const aTime = new Date(a.instruction.updated_at).getTime();
+        const bTime = new Date(b.instruction.updated_at).getTime();
+        return bTime - aTime;
+      })
+      .slice(0, 24)
+      .map((entry) => ({
+        id: entry.instruction.id,
+        href: `/instructions/${entry.instruction.id}`,
+        label: getLabelWithDepartment(entry.workItem),
+        detail: `Revision ${entry.instruction.revision} | Updated by ${entry.instruction.updater_name} on ${new Date(
+          entry.instruction.updated_at,
+        ).toLocaleDateString()}`,
+        color: entry.workItem.department_color,
+      }));
+
+    return {
+      title: `${department.name} Activity`,
+      description: "Latest active instruction updates for this department.",
+      entries,
+      emptyMessage: "No active instructions in this department.",
+    };
+  }, [departmentDrilldownDepartmentId, departmentInsights, flattenedInstructionEntries]);
 
   const widgetDefinitionsById = useMemo(
     () => new Map(WIDGET_DEFINITIONS.map((widget) => [widget.id, widget])),
@@ -1150,6 +1199,7 @@ export function DashboardClient({
 
   function openNavigationModal(nextNavigation: DashboardPendingNavigation) {
     setImpactDrilldownKey(null);
+    setDepartmentDrilldownDepartmentId(null);
     pendingNavigationRef.current = nextNavigation;
     setNavigationModalOpen(true);
   }
@@ -1198,7 +1248,7 @@ export function DashboardClient({
   }
 
   useEffect(() => {
-    if (!navigationModalOpen && !impactDrilldownKey) {
+    if (!navigationModalOpen && !impactDrilldownKey && !departmentDrilldownDepartmentId) {
       return;
     }
 
@@ -1209,6 +1259,11 @@ export function DashboardClient({
 
       if (impactDrilldownKey) {
         setImpactDrilldownKey(null);
+        return;
+      }
+
+      if (departmentDrilldownDepartmentId) {
+        setDepartmentDrilldownDepartmentId(null);
         return;
       }
 
@@ -1236,7 +1291,7 @@ export function DashboardClient({
     return () => {
       document.removeEventListener("keydown", handleEscape);
     };
-  }, [impactDrilldownKey, navigationModalOpen]);
+  }, [departmentDrilldownDepartmentId, impactDrilldownKey, navigationModalOpen]);
 
   function getMostRecentInstructionForItem(item: DashboardWorkItemData) {
     return [...item.work_instructions].sort((a, b) => {
@@ -1548,17 +1603,27 @@ export function DashboardClient({
             const widthPercent = (entry.instructionCount / maxInstructionCount) * 100;
 
             return (
-              <div
+              <button
+                type="button"
                 key={entry.id}
-                className="rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50"
+                onClick={() => {
+                  setImpactDrilldownKey(null);
+                  setDepartmentDrilldownDepartmentId(entry.id);
+                }}
+                className="group rounded-xl border border-slate-300/70 bg-white/70 p-3 text-left transition hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/50 dark:hover:border-cyan-500/50 dark:hover:bg-cyan-500/10"
               >
                 <div className="mb-1 flex items-center justify-between gap-2">
                   <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
                     {entry.name}
                   </p>
-                  <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">
-                    {entry.instructionCount}
-                  </p>
+                  <div className="text-right">
+                    <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                      {entry.instructionCount}
+                    </p>
+                    <p className="text-[11px] font-semibold text-cyan-700 dark:text-cyan-300">
+                      Drill down
+                    </p>
+                  </div>
                 </div>
                 <div className="h-2 rounded-full bg-slate-300/40 dark:bg-slate-700/50">
                   <div
@@ -1569,7 +1634,7 @@ export function DashboardClient({
                     }}
                   />
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
@@ -1605,17 +1670,29 @@ export function DashboardClient({
                     </p>
                   </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Updated <LocalDateTime value={item.updated_at} mode="dateTime" />
+                    Updated{" "}
+                    <LocalDateTime
+                      value={mostRecentInstruction?.updated_at ?? item.updated_at}
+                      mode="dateTime"
+                    />
                   </p>
                 </div>
 
                 {mostRecentInstruction ? (
-                  <Link
-                    href={`/instructions/${mostRecentInstruction.id}`}
-                    className="mt-2 inline-flex items-center rounded-lg border border-cyan-500/35 bg-cyan-500/10 px-2.5 py-1 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-200"
-                  >
-                    Open latest revision ({mostRecentInstruction.revision})
-                  </Link>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Link
+                      href={`/instructions/${mostRecentInstruction.id}`}
+                      className="inline-flex items-center rounded-lg border border-cyan-500/35 bg-cyan-500/10 px-2.5 py-1 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-200"
+                    >
+                      Open latest revision ({mostRecentInstruction.revision})
+                    </Link>
+                    <p className="text-xs text-slate-600 dark:text-slate-300">
+                      Updated by{" "}
+                      <span className="font-semibold text-slate-800 dark:text-slate-100">
+                        {mostRecentInstruction.updater_name}
+                      </span>
+                    </p>
+                  </div>
                 ) : (
                   <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
                     No active instructions for this work item.
@@ -2122,6 +2199,57 @@ export function DashboardClient({
                         key={entry.id}
                         href={entry.href}
                         onClick={() => setImpactDrilldownKey(null)}
+                        style={{
+                          borderColor: colorWithAlpha(entry.color, 0.5),
+                          backgroundColor: colorWithAlpha(entry.color, 0.14),
+                        }}
+                        className="rounded-xl border p-3 transition hover:brightness-110"
+                      >
+                        <p className="font-semibold text-slate-100">{entry.label}</p>
+                        <p className="text-xs text-slate-300">{entry.detail}</p>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+
+      {activeDepartmentDrilldown && portalReady
+        ? createPortal(
+            <div className="fixed inset-0 z-[112] flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm sm:p-6">
+              <div className="grid w-full max-w-2xl gap-4 rounded-2xl border border-cyan-500/35 bg-slate-950/95 p-5 shadow-2xl">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-100">
+                      {activeDepartmentDrilldown.title}
+                    </h3>
+                    <p className="text-sm text-slate-300">
+                      {activeDepartmentDrilldown.description}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setDepartmentDrilldownDepartmentId(null)}
+                    className="rounded-xl border border-slate-600 bg-slate-900/70 px-3 py-1.5 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
+                  >
+                    Close
+                  </button>
+                </div>
+
+                {activeDepartmentDrilldown.entries.length === 0 ? (
+                  <p className="rounded-xl border border-slate-700 bg-slate-900/60 p-4 text-sm text-slate-300">
+                    {activeDepartmentDrilldown.emptyMessage}
+                  </p>
+                ) : (
+                  <div className="grid max-h-[55vh] gap-2 overflow-y-auto pr-1">
+                    {activeDepartmentDrilldown.entries.map((entry) => (
+                      <Link
+                        key={entry.id}
+                        href={entry.href}
+                        onClick={() => setDepartmentDrilldownDepartmentId(null)}
                         style={{
                           borderColor: colorWithAlpha(entry.color, 0.5),
                           backgroundColor: colorWithAlpha(entry.color, 0.14),
