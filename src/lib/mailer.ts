@@ -34,30 +34,6 @@ function escapeHtml(value: string) {
     .replaceAll("'", "&#39;");
 }
 
-export async function sendPasswordResetEmail(options: {
-  to: string;
-  fullName: string;
-  resetLink: string;
-}) {
-  const mailer = getTransporter();
-
-  await mailer.sendMail({
-    from: serverEnv.SMTP_FROM,
-    to: options.to,
-    subject: "Work Instructions Password Reset",
-    text: `Hi ${options.fullName},\n\nUse the link below to reset your password:\n${options.resetLink}\n\nThis link expires in 60 minutes.`,
-    html: `
-      <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111;">
-        <h2>Password Reset</h2>
-        <p>Hi ${options.fullName},</p>
-        <p>Use the link below to reset your password:</p>
-        <p><a href="${options.resetLink}">${options.resetLink}</a></p>
-        <p>This link expires in 60 minutes.</p>
-      </div>
-    `,
-  });
-}
-
 export async function sendAnonymousFeedbackEmail(options: {
   to: string;
   message: string;

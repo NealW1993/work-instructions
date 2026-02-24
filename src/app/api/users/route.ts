@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
 
 import { getRequestProfile } from "@/lib/api-auth";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -9,7 +10,6 @@ interface CreateUserBody {
   fullName?: string;
   email?: string;
   employeeId?: string;
-  password?: string;
   pin?: string;
   role?: AppRole;
 }
@@ -74,13 +74,12 @@ export async function POST(request: NextRequest) {
   const fullName = body.fullName?.trim();
   const email = body.email?.trim().toLowerCase();
   const employeeId = normalizeEmployeeId(body.employeeId ?? "");
-  const password = body.password?.trim();
   const pin = body.pin?.trim();
   const role = body.role;
 
-  if (!fullName || !email || !employeeId || !password || !pin || !role) {
+  if (!fullName || !email || !employeeId || !pin || !role) {
     return NextResponse.json(
-      { error: "fullName, email, employeeId, password, pin, and role are required." },
+      { error: "fullName, email, employeeId, pin, and role are required." },
       { status: 400 },
     );
   }
@@ -96,13 +95,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (password.length < 8) {
-    return NextResponse.json(
-      { error: "Password must be at least 8 characters." },
-      { status: 400 },
-    );
-  }
-
   if (!/^\d{6}$/.test(pin)) {
     return NextResponse.json(
       { error: "PIN must be exactly 6 digits." },
@@ -110,10 +102,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const generatedPassword = `WI-${randomUUID()}!`;
+
   const { data: createdUser, error: createError } = await supabaseAdmin.auth.admin.createUser(
     {
       email,
-      password,
+      password: generatedPassword,
       email_confirm: true,
       user_metadata: {
         full_name: fullName,

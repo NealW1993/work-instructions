@@ -1,6 +1,5 @@
 "use client";
 
-import { Eye, EyeOff } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import {
@@ -20,7 +19,6 @@ import {
 } from "@/lib/session-timer";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import type { ThemePreference } from "@/lib/types";
-import { isValidEmployeeId, normalizeEmployeeId } from "@/lib/utils";
 
 const ACCOUNT_HISTORY_GUARD_STATE_KEY = "__accountSettingsUnsavedGuard";
 const ICON_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
@@ -95,7 +93,7 @@ export function AccountSettingsPanel({
 
   const [savedFullName, setSavedFullName] = useState(initialFullName);
   const [savedEmail, setSavedEmail] = useState(initialEmail.toLowerCase());
-  const [savedEmployeeId, setSavedEmployeeId] = useState(initialEmployeeId);
+  const [savedEmployeeId] = useState(initialEmployeeId);
   const [savedThemePreference, setSavedThemePreference] =
     useState<ThemePreference>(initialThemePreference);
   const [savedIconColor, setSavedIconColor] = useState(
@@ -104,17 +102,11 @@ export function AccountSettingsPanel({
 
   const [fullName, setFullName] = useState(initialFullName);
   const [email, setEmail] = useState(initialEmail);
-  const [employeeId, setEmployeeId] = useState(initialEmployeeId);
   const [themePreference, setThemePreference] =
     useState<ThemePreference>(initialThemePreference);
   const [iconColor, setIconColor] = useState(
     normalizeIconColor(initialIconColor || DEFAULT_ICON_COLOR),
   );
-  const [wantsPasswordChange, setWantsPasswordChange] = useState(false);
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [wantsPinChange, setWantsPinChange] = useState(false);
   const [pin, setPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
@@ -137,26 +129,19 @@ export function AccountSettingsPanel({
 
   const normalizedFullName = fullName.trim();
   const normalizedEmail = email.trim().toLowerCase();
-  const normalizedEmployeeId = normalizeEmployeeId(employeeId);
   const normalizedIconColor = normalizeIconColor(iconColor);
-  const passwordMismatch =
-    wantsPasswordChange && confirmPassword.length > 0 && password !== confirmPassword;
   const pinMismatch = wantsPinChange && confirmPin.length > 0 && pin !== confirmPin;
   const fullNameChanged = normalizedFullName !== savedFullName;
   const emailChanged = normalizedEmail !== savedEmail;
-  const employeeIdChanged = normalizedEmployeeId !== savedEmployeeId;
   const themeChanged = themePreference !== savedThemePreference;
   const iconColorChanged = normalizedIconColor !== savedIconColor;
-  const passwordChanged = wantsPasswordChange && password.length > 0;
   const pinChanged = wantsPinChange && pin.length > 0;
 
   const hasChanges =
     fullNameChanged ||
     emailChanged ||
-    employeeIdChanged ||
     themeChanged ||
     iconColorChanged ||
-    passwordChanged ||
     pinChanged;
   const iconInitials = getInitials(normalizedFullName || savedFullName);
 
@@ -437,22 +422,8 @@ export function AccountSettingsPanel({
         throw new Error("Email cannot be empty.");
       }
 
-      if (!isValidEmployeeId(normalizedEmployeeId)) {
-        throw new Error("Employee ID must be 1-6 digits.");
-      }
-
       if (!ICON_COLOR_PATTERN.test(normalizedIconColor)) {
         throw new Error("Icon color must be a valid hex value like #0EA5E9.");
-      }
-
-      if (wantsPasswordChange) {
-        if (password.length < 8) {
-          throw new Error("Password must be at least 8 characters.");
-        }
-
-        if (passwordMismatch) {
-          throw new Error("Password and Confirm Password must match.");
-        }
       }
 
       if (wantsPinChange) {
@@ -476,10 +447,8 @@ export function AccountSettingsPanel({
       const payload: {
         fullName?: string;
         email?: string;
-        employeeId?: string;
         themePreference?: ThemePreference;
         iconColor?: string;
-        password?: string;
       } = {};
       let accountUpdated = false;
 
@@ -491,20 +460,12 @@ export function AccountSettingsPanel({
         payload.email = normalizedEmail;
       }
 
-      if (employeeIdChanged) {
-        payload.employeeId = normalizedEmployeeId;
-      }
-
       if (themeChanged) {
         payload.themePreference = themePreference;
       }
 
       if (iconColorChanged) {
         payload.iconColor = normalizedIconColor;
-      }
-
-      if (wantsPasswordChange && password) {
-        payload.password = password;
       }
 
       if (Object.keys(payload).length > 0) {
@@ -538,17 +499,11 @@ export function AccountSettingsPanel({
         }
       }
 
-      setPassword("");
-      setConfirmPassword("");
-      setWantsPasswordChange(false);
-      setShowPassword(false);
-      setShowConfirmPassword(false);
       setPin("");
       setConfirmPin("");
       setWantsPinChange(false);
       setSavedFullName(normalizedFullName);
       setSavedEmail(normalizedEmail);
-      setSavedEmployeeId(normalizedEmployeeId);
       setSavedThemePreference(themePreference);
       setSavedIconColor(normalizedIconColor);
 
@@ -560,7 +515,7 @@ export function AccountSettingsPanel({
         setMessage("Account updated.");
       }
 
-      if (fullNameChanged || emailChanged || employeeIdChanged || iconColorChanged) {
+      if (fullNameChanged || emailChanged || iconColorChanged) {
         router.refresh();
       }
     } catch (caughtError) {
@@ -581,7 +536,7 @@ export function AccountSettingsPanel({
               Account Settings
             </h2>
             <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-              Update your full name, email, employee ID, theme, icon color, password, and PIN.
+              Update your full name, email, theme, icon color, and PIN.
             </p>
           </div>
 
@@ -628,15 +583,15 @@ export function AccountSettingsPanel({
           </label>
           <label className="grid gap-1 text-sm">
             <span>Employee ID</span>
-            <input
-              required
-              inputMode="numeric"
-              pattern="[0-9]{1,6}"
-              maxLength={6}
-              value={employeeId}
-              onChange={(event) => setEmployeeId(normalizeEmployeeId(event.target.value))}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-            />
+            <div
+              aria-readonly="true"
+              className="rounded-xl border border-slate-300/80 bg-slate-100 px-3 py-2 text-slate-600 select-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+            >
+              {savedEmployeeId || "N/A"}
+            </div>
+            <span className="text-xs text-slate-500 dark:text-slate-400">
+              Employee ID is managed by system admins in User Admin.
+            </span>
           </label>
 
           <fieldset className="grid gap-1 text-sm">
@@ -717,96 +672,6 @@ export function AccountSettingsPanel({
           </fieldset>
 
           <div className="grid gap-1 text-sm">
-            <span>Password</span>
-            <button
-              type="button"
-              onClick={() => {
-                if (wantsPasswordChange) {
-                  setWantsPasswordChange(false);
-                  setPassword("");
-                  setConfirmPassword("");
-                  setShowPassword(false);
-                  setShowConfirmPassword(false);
-                  return;
-                }
-
-                setWantsPasswordChange(true);
-              }}
-              className={`w-fit rounded-xl border px-3 py-1.5 text-sm font-semibold transition ${
-                wantsPasswordChange
-                  ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
-                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-900"
-              }`}
-            >
-              {wantsPasswordChange ? "Cancel password change" : "Change password"}
-            </button>
-          </div>
-
-          {wantsPasswordChange ? (
-            <>
-              <label className="grid gap-1 text-sm">
-                <span>New Password</span>
-                <div className="relative">
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    autoComplete="new-password"
-                    name="account_new_password"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-11 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((current) => !current)}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
-                    className="absolute inset-y-0 right-2 flex items-center rounded-md px-1.5 text-slate-500 transition hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 dark:text-slate-400 dark:hover:text-slate-200"
-                  >
-                    {showPassword ? (
-                      <EyeOff size={16} aria-hidden="true" />
-                    ) : (
-                      <Eye size={16} aria-hidden="true" />
-                    )}
-                  </button>
-                </div>
-              </label>
-
-              <label className="grid gap-1 text-sm">
-                <span>Confirm New Password</span>
-                <div className="relative">
-                  <input
-                    type={showConfirmPassword ? "text" : "password"}
-                    autoComplete="new-password"
-                    name="account_confirm_new_password"
-                    value={confirmPassword}
-                    onChange={(event) => setConfirmPassword(event.target.value)}
-                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 pr-11 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirmPassword((current) => !current)}
-                    aria-label={
-                      showConfirmPassword ? "Hide confirm password" : "Show confirm password"
-                    }
-                    className="absolute inset-y-0 right-2 flex items-center rounded-md px-1.5 text-slate-500 transition hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 dark:text-slate-400 dark:hover:text-slate-200"
-                  >
-                    {showConfirmPassword ? (
-                      <EyeOff size={16} aria-hidden="true" />
-                    ) : (
-                      <Eye size={16} aria-hidden="true" />
-                    )}
-                  </button>
-                </div>
-              </label>
-            </>
-          ) : null}
-
-          {passwordMismatch ? (
-            <p className="text-sm text-rose-600 dark:text-rose-300">
-              Password and Confirm Password do not match.
-            </p>
-          ) : null}
-
-          <div className="grid gap-1 text-sm">
             <span>PIN</span>
             <button
               type="button"
@@ -859,7 +724,7 @@ export function AccountSettingsPanel({
 
           <button
             type="submit"
-            disabled={busy || passwordMismatch || pinMismatch}
+            disabled={busy || pinMismatch}
             className="mt-1 w-fit rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
           >
             {busy ? "Saving..." : "Save account changes"}

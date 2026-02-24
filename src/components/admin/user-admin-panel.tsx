@@ -33,7 +33,6 @@ interface CreateUserFieldErrors {
   fullName: boolean;
   email: boolean;
   employeeId: boolean;
-  password: boolean;
   pin: boolean;
 }
 
@@ -59,7 +58,6 @@ const DEFAULT_CREATE_USER_FIELD_ERRORS: CreateUserFieldErrors = {
   fullName: false,
   email: false,
   employeeId: false,
-  password: false,
   pin: false,
 };
 
@@ -139,7 +137,6 @@ export function UserAdminPanel() {
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [newEmployeeId, setNewEmployeeId] = useState("");
-  const [newPassword, setNewPassword] = useState("");
   const [newPin, setNewPin] = useState("");
   const [newRole, setNewRole] = useState<AppRole>("user");
   const [createUserFieldErrors, setCreateUserFieldErrors] = useState<CreateUserFieldErrors>(
@@ -428,7 +425,6 @@ export function UserAdminPanel() {
       const normalizedName = newName.trim();
       const normalizedEmail = newEmail.trim().toLowerCase();
       const normalizedEmployeeId = normalizeEmployeeId(newEmployeeId);
-      const normalizedPassword = newPassword.trim();
       const normalizedPin = newPin.trim();
 
       if (!normalizedName) {
@@ -446,11 +442,6 @@ export function UserAdminPanel() {
         throw new Error("Employee ID must be 1-6 digits.");
       }
 
-      if (normalizedPassword.length < 8) {
-        setCreateUserFieldErrors((current) => ({ ...current, password: true }));
-        throw new Error("Password must be at least 8 characters.");
-      }
-
       if (!/^\d{6}$/.test(normalizedPin)) {
         setCreateUserFieldErrors((current) => ({ ...current, pin: true }));
         throw new Error("PIN must be exactly 6 digits.");
@@ -464,7 +455,6 @@ export function UserAdminPanel() {
           fullName: normalizedName,
           email: normalizedEmail,
           employeeId: normalizedEmployeeId,
-          password: normalizedPassword,
           pin: normalizedPin,
           role: newRole,
         }),
@@ -482,7 +472,6 @@ export function UserAdminPanel() {
       setNewName("");
       setNewEmail("");
       setNewEmployeeId("");
-      setNewPassword("");
       setNewPin("");
       setNewRole("user");
       await fetchUsers();
@@ -1203,21 +1192,6 @@ export function UserAdminPanel() {
               }
             }}
             className={getInputClass(createUserFieldErrors.employeeId)}
-          />
-        </label>
-        <label className="grid gap-1 text-sm">
-          <span>Password</span>
-          <input
-            minLength={8}
-            type="password"
-            value={newPassword}
-            onChange={(event) => {
-              setNewPassword(event.target.value);
-              if (createUserFieldErrors.password && event.target.value.trim()) {
-                setCreateUserFieldErrors((current) => ({ ...current, password: false }));
-              }
-            }}
-            className={getInputClass(createUserFieldErrors.password)}
           />
         </label>
         <label className="grid gap-1 text-sm">

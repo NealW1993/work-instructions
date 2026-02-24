@@ -4,6 +4,7 @@ import type {
   DashboardLikeCelebrationData,
   DashboardLikedInstructionCardData,
   DashboardPinnedInstructionCardData,
+  DashboardSystemHistoryEventData,
   DashboardWorkItemData,
 } from "@/components/dashboard/dashboard-client";
 import { requireAuthenticatedUser } from "@/lib/auth";
@@ -53,6 +54,13 @@ interface DashboardPinnedInstructionRow {
 }
 
 interface DashboardInstructionLikeRow {
+  created_at: string;
+  instruction_id: string;
+  user_id: string;
+  work_instructions: DashboardInstructionRow | DashboardInstructionRow[] | null;
+}
+
+interface DashboardHistoryPinRow {
   created_at: string;
   instruction_id: string;
   user_id: string;
@@ -199,6 +207,33 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     .order("created_at", { ascending: false })
     .limit(250);
 
+  const historyInstructionsRequest = supabase
+    .from("work_instructions")
+    .select(
+      "id, revision, created_at, updated_at, created_by, updated_by, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title)",
+    )
+    .eq("is_archived", false)
+    .order("updated_at", { ascending: false })
+    .limit(120);
+
+  const historyLikesRequest = supabase
+    .from("instruction_likes")
+    .select(
+      "created_at, instruction_id, user_id, work_instructions!inner(id, revision, created_at, updated_at, created_by, updated_by, is_archived, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title))",
+    )
+    .eq("work_instructions.is_archived", false)
+    .order("created_at", { ascending: false })
+    .limit(120);
+
+  const historyPinsRequest = supabase
+    .from("user_pinned_instructions")
+    .select(
+      "created_at, instruction_id, user_id, work_instructions!inner(id, revision, created_at, updated_at, created_by, updated_by, is_archived, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title))",
+    )
+    .eq("work_instructions.is_archived", false)
+    .order("created_at", { ascending: false })
+    .limit(120);
+
   const departmentsRequest = supabase
     .from("departments")
     .select("id, name, color_hex")
@@ -210,12 +245,18 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     { data: newestData, error: newestError },
     { data: pinnedData, error: pinnedError },
     { data: authoredLikesData },
+    { data: historyInstructionsData },
+    { data: historyLikesData },
+    { data: historyPinsData },
     { data: departmentsData },
   ] = await Promise.all([
     searchRequest,
     newestRequest,
     pinnedRequest,
     authoredLikesRequest,
+    historyInstructionsRequest,
+    historyLikesRequest,
+    historyPinsRequest,
     departmentsRequest,
   ]);
 
@@ -223,6 +264,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const rawNewest = (newestData ?? []) as DashboardInstructionRow[];
   const rawPinned = (pinnedData ?? []) as DashboardPinnedInstructionRow[];
   const rawAuthoredLikes = (authoredLikesData ?? []) as DashboardInstructionLikeRow[];
+  const rawHistoryInstructions = (historyInstructionsData ?? []) as DashboardInstructionRow[];
+  const rawHistoryLikes = (historyLikesData ?? []) as DashboardInstructionLikeRow[];
+  const rawHistoryPins = (historyPinsData ?? []) as DashboardHistoryPinRow[];
 
   const profileIds = new Set<string>();
   for (const item of rawItems) {
@@ -244,6 +288,26 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   }
   for (const likeRow of rawAuthoredLikes) {
     const instruction = normalizeInstruction(likeRow.work_instructions);
+    if (instruction) {
+      profileIds.add(instruction.created_by);
+      profileIds.add(instruction.updated_by);
+    }
+  }
+  for (const instruction of rawHistoryInstructions) {
+    profileIds.add(instruction.created_by);
+    profileIds.add(instruction.updated_by);
+  }
+  for (const likeRow of rawHistoryLikes) {
+    profileIds.add(likeRow.user_id);
+    const instruction = normalizeInstruction(likeRow.work_instructions);
+    if (instruction) {
+      profileIds.add(instruction.created_by);
+      profileIds.add(instruction.updated_by);
+    }
+  }
+  for (const pinRow of rawHistoryPins) {
+    profileIds.add(pinRow.user_id);
+    const instruction = normalizeInstruction(pinRow.work_instructions);
     if (instruction) {
       profileIds.add(instruction.created_by);
       profileIds.add(instruction.updated_by);
@@ -392,6 +456,111 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     return bTimestamp - aTimestamp;
   });
 
+  const systemHistoryEvents: DashboardSystemHistoryEventData[] = [];
+
+  for (const instruction of rawHistoryInstructions) {
+    const workItem = normalizeWorkItem(instruction.work_items);
+    if (!workItem) {
+      continue;
+    }
+
+    const resolvedWorkItem = {
+      department_id: workItem.department_id,
+      department_name: normalizeDepartmentName(workItem.departments),
+      department_color: normalizeDepartmentColor(workItem.departments),
+      part_number: workItem.part_number,
+      mold_number: workItem.mold_number,
+      item_title: workItem.item_title,
+    };
+
+    systemHistoryEvents.push({
+      id: `created:${instruction.id}:${instruction.created_at}`,
+      occurred_at: instruction.created_at,
+      action_label: "Instruction Created",
+      actor_name: profileNameMap.get(instruction.created_by) ?? "Unknown",
+      detail: `Revision ${instruction.revision} created.`,
+      instruction_id: instruction.id,
+      workItem: resolvedWorkItem,
+    });
+
+    const createdTimestamp = toTimestamp(instruction.created_at) ?? 0;
+    const updatedTimestamp = toTimestamp(instruction.updated_at) ?? 0;
+    const shouldIncludeUpdateEvent =
+      updatedTimestamp > createdTimestamp + 1000 ||
+      instruction.updated_by !== instruction.created_by ||
+      instruction.revision > 1;
+
+    if (!shouldIncludeUpdateEvent) {
+      continue;
+    }
+
+    systemHistoryEvents.push({
+      id: `updated:${instruction.id}:${instruction.updated_at}`,
+      occurred_at: instruction.updated_at,
+      action_label: "Instruction Updated",
+      actor_name: profileNameMap.get(instruction.updated_by) ?? "Unknown",
+      detail: `Revision ${instruction.revision} updated.`,
+      instruction_id: instruction.id,
+      workItem: resolvedWorkItem,
+    });
+  }
+
+  for (const row of rawHistoryLikes) {
+    const instruction = normalizeInstruction(row.work_instructions);
+    const workItem = instruction ? normalizeWorkItem(instruction.work_items) : null;
+    if (!instruction || !workItem) {
+      continue;
+    }
+
+    systemHistoryEvents.push({
+      id: `liked:${row.user_id}:${row.instruction_id}:${row.created_at}`,
+      occurred_at: row.created_at,
+      action_label: "Instruction Liked",
+      actor_name: profileNameMap.get(row.user_id) ?? "Unknown",
+      detail: `Liked revision ${instruction.revision}.`,
+      instruction_id: instruction.id,
+      workItem: {
+        department_id: workItem.department_id,
+        department_name: normalizeDepartmentName(workItem.departments),
+        department_color: normalizeDepartmentColor(workItem.departments),
+        part_number: workItem.part_number,
+        mold_number: workItem.mold_number,
+        item_title: workItem.item_title,
+      },
+    });
+  }
+
+  for (const row of rawHistoryPins) {
+    const instruction = normalizeInstruction(row.work_instructions);
+    const workItem = instruction ? normalizeWorkItem(instruction.work_items) : null;
+    if (!instruction || !workItem) {
+      continue;
+    }
+
+    systemHistoryEvents.push({
+      id: `pinned:${row.user_id}:${row.instruction_id}:${row.created_at}`,
+      occurred_at: row.created_at,
+      action_label: "Instruction Pinned",
+      actor_name: profileNameMap.get(row.user_id) ?? "Unknown",
+      detail: `Pinned revision ${instruction.revision}.`,
+      instruction_id: instruction.id,
+      workItem: {
+        department_id: workItem.department_id,
+        department_name: normalizeDepartmentName(workItem.departments),
+        department_color: normalizeDepartmentColor(workItem.departments),
+        part_number: workItem.part_number,
+        mold_number: workItem.mold_number,
+        item_title: workItem.item_title,
+      },
+    });
+  }
+
+  systemHistoryEvents.sort((a, b) => {
+    const aTimestamp = toTimestamp(a.occurred_at) ?? 0;
+    const bTimestamp = toTimestamp(b.occurred_at) ?? 0;
+    return bTimestamp - aTimestamp;
+  });
+
   const seenLikesAtTimestamp = toTimestamp(profile.authored_likes_seen_at ?? null);
   const newLikeRows =
     seenLikesAtTimestamp === null
@@ -464,21 +633,6 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             })),
         };
 
-  const latestAuthoredLikeAt = rawAuthoredLikes[0]?.created_at ?? null;
-  const latestAuthoredLikeTimestamp = toTimestamp(latestAuthoredLikeAt);
-  const seenAuthoredLikeTimestamp = toTimestamp(profile.authored_likes_seen_at ?? null);
-  if (
-    latestAuthoredLikeAt &&
-    latestAuthoredLikeTimestamp !== null &&
-    (seenAuthoredLikeTimestamp === null ||
-      latestAuthoredLikeTimestamp > seenAuthoredLikeTimestamp)
-  ) {
-    await supabase
-      .from("profiles")
-      .update({ authored_likes_seen_at: latestAuthoredLikeAt })
-      .eq("id", profile.id);
-  }
-
   return (
     <DashboardClient
       canEdit={canEditInstructions(profile.role)}
@@ -492,6 +646,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       likeCelebration={likeCelebration}
       newestInstructions={newestInstructions}
       items={items}
+      systemHistoryEvents={systemHistoryEvents.slice(0, 36)}
       currentUserId={profile.id}
       initialDashboardLayout={profile.dashboard_layout ?? null}
       departmentOptions={

@@ -25,6 +25,15 @@ import {
 import { createPortal } from "react-dom";
 
 import { LocalDateTime } from "@/components/ui/local-date-time";
+import {
+  DEFAULT_DASHBOARD_LAYOUT_PRESET_ID,
+  DASHBOARD_LAYOUT_PRESETS,
+  type DashboardWidgetId,
+  type DashboardWidgetLayoutItem,
+  type DashboardWidgetSize,
+  findMatchingDashboardLayoutPreset,
+  normalizeDashboardLayout,
+} from "@/lib/dashboard-layout";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { cn } from "@/lib/utils";
 
@@ -92,6 +101,16 @@ interface DashboardDepartmentOption {
   color_hex: string | null;
 }
 
+export interface DashboardSystemHistoryEventData {
+  id: string;
+  occurred_at: string;
+  action_label: string;
+  actor_name: string;
+  detail: string;
+  instruction_id: string;
+  workItem: DashboardWorkItemSummary;
+}
+
 interface DepartmentInsight {
   id: string;
   name: string;
@@ -99,28 +118,10 @@ interface DepartmentInsight {
   instructionCount: number;
 }
 
-type DashboardWidgetId =
-  | "finder"
-  | "pinned"
-  | "newest"
-  | "department_activity"
-  | "recent_updates"
-  | "my_impact";
-
-type DashboardWidgetSize = "compact" | "standard" | "wide" | "full";
-
-interface DashboardWidgetLayoutItem {
-  id: DashboardWidgetId;
-  visible: boolean;
-  size: DashboardWidgetSize;
-}
-
 interface DashboardWidgetDefinition {
   id: DashboardWidgetId;
   title: string;
   description: string;
-  defaultVisible: boolean;
-  defaultSize: DashboardWidgetSize;
 }
 
 interface DashboardClientProps {
@@ -135,6 +136,7 @@ interface DashboardClientProps {
   likeCelebration: DashboardLikeCelebrationData | null;
   newestInstructions: DashboardInstructionCardData[];
   items: DashboardWorkItemData[];
+  systemHistoryEvents: DashboardSystemHistoryEventData[];
   departmentOptions: DashboardDepartmentOption[];
   currentUserId: string;
   initialDashboardLayout: unknown;
@@ -155,53 +157,38 @@ const WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
     id: "finder",
     title: "Find Work Instructions",
     description: "Search by part/mold and filter by department.",
-    defaultVisible: true,
-    defaultSize: "full",
   },
   {
     id: "pinned",
     title: "Your Pinned Instructions",
     description: "Quick access to instructions you pinned.",
-    defaultVisible: true,
-    defaultSize: "standard",
   },
   {
     id: "newest",
     title: "Newest Work Instructions",
     description: "Latest instructions across the system.",
-    defaultVisible: true,
-    defaultSize: "standard",
   },
   {
     id: "department_activity",
     title: "Department Activity",
     description: "Instruction volume by department.",
-    defaultVisible: true,
-    defaultSize: "standard",
   },
   {
     id: "recent_updates",
     title: "Recently Updated Work Items",
     description: "What changed most recently.",
-    defaultVisible: true,
-    defaultSize: "wide",
   },
   {
     id: "my_impact",
     title: "My Impact Snapshot",
     description: "Your authored and liked stats.",
-    defaultVisible: true,
-    defaultSize: "compact",
+  },
+  {
+    id: "system_history",
+    title: "System History",
+    description: "Recent activity across instructions and teams.",
   },
 ];
-
-const DEFAULT_WIDGET_LAYOUT: DashboardWidgetLayoutItem[] = WIDGET_DEFINITIONS.map(
-  (widget) => ({
-    id: widget.id,
-    visible: widget.defaultVisible,
-    size: widget.defaultSize,
-  }),
-);
 
 const WIDGET_SIZE_OPTIONS: Array<{ value: DashboardWidgetSize; label: string }> = [
   { value: "compact", label: "Compact" },
@@ -290,89 +277,6 @@ function getLabelWithDepartment(workItem: DashboardWorkItemSummary) {
   return `${getPrimaryPartOrMoldLabel(workItem)} | ${workItem.department_name}`;
 }
 
-function buildCelebrationHighlightsFromLikes(
-  likedInstructions: DashboardLikedInstructionCardData[],
-  newLikeBudget: number,
-) {
-  if (newLikeBudget <= 0) {
-    return [] as DashboardLikeCelebrationHighlight[];
-  }
-
-  const sorted = [...likedInstructions].sort((a, b) => {
-    const aTime = new Date(a.latest_liked_at).getTime();
-    const bTime = new Date(b.latest_liked_at).getTime();
-    return bTime - aTime;
-  });
-
-  const highlights: DashboardLikeCelebrationHighlight[] = [];
-  let remaining = newLikeBudget;
-
-  for (const instruction of sorted) {
-    if (remaining <= 0) {
-      break;
-    }
-
-    const contribution = Math.min(
-      Math.max(1, instruction.likes_count),
-      remaining,
-    );
-    highlights.push({
-      instructionId: instruction.id,
-      label: getLabelWithDepartment(instruction.workItem),
-      newLikesCount: contribution,
-    });
-    remaining -= contribution;
-
-    if (highlights.length >= 3) {
-      break;
-    }
-  }
-
-  return highlights;
-}
-
-function isWidgetId(value: string): value is DashboardWidgetId {
-  return WIDGET_DEFINITIONS.some((widget) => widget.id === value);
-}
-
-function isWidgetSize(value: string): value is DashboardWidgetSize {
-  return WIDGET_SIZE_OPTIONS.some((option) => option.value === value);
-}
-
-function normalizeWidgetLayout(value: unknown): DashboardWidgetLayoutItem[] {
-  if (!Array.isArray(value)) {
-    return [...DEFAULT_WIDGET_LAYOUT];
-  }
-
-  const parsed: DashboardWidgetLayoutItem[] = [];
-  const seenIds = new Set<DashboardWidgetId>();
-
-  for (const entry of value) {
-    if (!entry || typeof entry !== "object") {
-      continue;
-    }
-
-    const candidate = entry as Record<string, unknown>;
-    const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
-    const visible = typeof candidate.visible === "boolean" ? candidate.visible : null;
-    const size = typeof candidate.size === "string" ? candidate.size.trim() : "";
-
-    if (!isWidgetId(id) || seenIds.has(id) || visible === null || !isWidgetSize(size)) {
-      continue;
-    }
-
-    parsed.push({
-      id,
-      visible,
-      size,
-    });
-    seenIds.add(id);
-  }
-
-  const missingDefaults = DEFAULT_WIDGET_LAYOUT.filter((entry) => !seenIds.has(entry.id));
-  return parsed.length > 0 ? [...parsed, ...missingDefaults] : [...DEFAULT_WIDGET_LAYOUT];
-}
-
 function getWidgetSpanClass(size: DashboardWidgetSize) {
   switch (size) {
     case "compact":
@@ -384,6 +288,20 @@ function getWidgetSpanClass(size: DashboardWidgetSize) {
     case "standard":
     default:
       return "col-span-12 lg:col-span-6";
+  }
+}
+
+function getPresetPreviewSpanClass(size: DashboardWidgetSize) {
+  switch (size) {
+    case "compact":
+      return "col-span-1";
+    case "standard":
+      return "col-span-2";
+    case "wide":
+      return "col-span-3";
+    case "full":
+    default:
+      return "col-span-4";
   }
 }
 
@@ -456,6 +374,7 @@ export function DashboardClient({
   likeCelebration,
   newestInstructions,
   items,
+  systemHistoryEvents,
   departmentOptions,
   currentUserId,
   initialDashboardLayout,
@@ -476,7 +395,7 @@ export function DashboardClient({
   const [draggedWidgetId, setDraggedWidgetId] = useState<DashboardWidgetId | null>(null);
   const [dragOverWidgetId, setDragOverWidgetId] = useState<DashboardWidgetId | null>(null);
   const [widgetLayout, setWidgetLayout] = useState<DashboardWidgetLayoutItem[]>(() =>
-    normalizeWidgetLayout(initialDashboardLayout),
+    normalizeDashboardLayout(initialDashboardLayout),
   );
   const [layoutDirty, setLayoutDirty] = useState(false);
   const [layoutSaving, setLayoutSaving] = useState(false);
@@ -552,7 +471,7 @@ export function DashboardClient({
       return;
     }
 
-    setWidgetLayout(normalizeWidgetLayout(initialDashboardLayout));
+    setWidgetLayout(normalizeDashboardLayout(initialDashboardLayout));
     setLayoutDirty(false);
   }, [initialDashboardLayout]);
 
@@ -883,6 +802,16 @@ export function DashboardClient({
     );
   }, [newestInstructions, selectedDepartmentId]);
 
+  const filteredSystemHistoryEvents = useMemo(() => {
+    if (selectedDepartmentId === "all") {
+      return systemHistoryEvents;
+    }
+
+    return systemHistoryEvents.filter(
+      (event) => event.workItem.department_id === selectedDepartmentId,
+    );
+  }, [selectedDepartmentId, systemHistoryEvents]);
+
   const visibleWidgets = useMemo(
     () => widgetLayout.filter((widget) => widget.visible),
     [widgetLayout],
@@ -951,67 +880,47 @@ export function DashboardClient({
   );
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const storageKey = `dashboard-liked-seen-total:${currentUserId}`;
-    const serverCelebrationCount = likeCelebration?.newLikesCount ?? 0;
-
-    if (serverCelebrationCount > 0) {
+    if ((likeCelebration?.newLikesCount ?? 0) > 0) {
       setActiveLikeCelebration(likeCelebration);
-      window.localStorage.setItem(storageKey, String(totalAuthoredLikes));
       return;
-    }
-
-    const rawSeenValue = window.localStorage.getItem(storageKey);
-    const parsedSeenTotal =
-      rawSeenValue === null ? Number.NaN : Number.parseInt(rawSeenValue, 10);
-    const hasSeenBaseline = Number.isFinite(parsedSeenTotal);
-
-    if (!hasSeenBaseline) {
-      if (totalAuthoredLikes > 0) {
-        setActiveLikeCelebration({
-          newLikesCount: totalAuthoredLikes,
-          latestNewLikeAt: new Date().toISOString(),
-          highlights: buildCelebrationHighlightsFromLikes(
-            likedInstructions,
-            totalAuthoredLikes,
-          ),
-        });
-      } else {
-        setActiveLikeCelebration(null);
-      }
-
-      window.localStorage.setItem(storageKey, String(totalAuthoredLikes));
-      return;
-    }
-
-    if (totalAuthoredLikes > parsedSeenTotal) {
-      const newLikeCount = totalAuthoredLikes - parsedSeenTotal;
-      setActiveLikeCelebration({
-        newLikesCount: newLikeCount,
-        latestNewLikeAt: new Date().toISOString(),
-        highlights: buildCelebrationHighlightsFromLikes(
-          likedInstructions,
-          newLikeCount,
-        ),
-      });
-      window.localStorage.setItem(storageKey, String(totalAuthoredLikes));
-      return;
-    }
-
-    if (totalAuthoredLikes < parsedSeenTotal) {
-      window.localStorage.setItem(storageKey, String(totalAuthoredLikes));
     }
 
     setActiveLikeCelebration(null);
-  }, [
-    currentUserId,
-    likeCelebration,
-    likedInstructions,
-    totalAuthoredLikes,
-  ]);
+  }, [likeCelebration]);
+
+  useEffect(() => {
+    if ((activeLikeCelebration?.newLikesCount ?? 0) <= 0) {
+      return;
+    }
+
+    const seenAt = activeLikeCelebration?.latestNewLikeAt;
+    if (!seenAt) {
+      return;
+    }
+
+    void (async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!session?.access_token) {
+          return;
+        }
+
+        await fetch("/api/instruction-likes/mark-seen", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ seenAt }),
+        });
+      } catch {
+        // This acknowledgement is best-effort and should never block dashboard usage.
+      }
+    })();
+  }, [activeLikeCelebration?.latestNewLikeAt, activeLikeCelebration?.newLikesCount, supabase]);
 
   const authoredDrilldownEntries = useMemo<ImpactDrilldownEntry[]>(() => {
     return [...myInstructionEntries]
@@ -1191,6 +1100,10 @@ export function DashboardClient({
     () => new Map(widgetLayout.map((widget) => [widget.id, widget])),
     [widgetLayout],
   );
+  const activeLayoutPresetId = useMemo(
+    () => findMatchingDashboardLayoutPreset(widgetLayout)?.id ?? null,
+    [widgetLayout],
+  );
 
   const getAuthHeaders = useCallback(async () => {
     const {
@@ -1279,7 +1192,7 @@ export function DashboardClient({
       const sourceIndex = current.findIndex((widget) => widget.id === sourceId);
       const targetIndex = current.findIndex((widget) => widget.id === targetId);
 
-      if (sourceIndex < 0 || targetIndex < 0) {
+      if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) {
         return current;
       }
 
@@ -1294,10 +1207,26 @@ export function DashboardClient({
     });
   }
 
+  function applyLayoutPreset(presetId: string) {
+    const preset = DASHBOARD_LAYOUT_PRESETS.find((entry) => entry.id === presetId);
+    if (!preset) {
+      return;
+    }
+
+    setWidgetLayout((current) => {
+      const currentPresetId = findMatchingDashboardLayoutPreset(current)?.id;
+      if (currentPresetId === preset.id) {
+        return current;
+      }
+
+      setLayoutDirty(true);
+      setLayoutError(null);
+      return preset.layout.map((entry) => ({ ...entry }));
+    });
+  }
+
   function resetDashboardLayout() {
-    setWidgetLayout([...DEFAULT_WIDGET_LAYOUT]);
-    setLayoutDirty(true);
-    setLayoutError(null);
+    applyLayoutPreset(DEFAULT_DASHBOARD_LAYOUT_PRESET_ID);
   }
 
   function closeNavigationModal() {
@@ -1813,6 +1742,45 @@ export function DashboardClient({
       );
     }
 
+    if (widgetId === "system_history") {
+      return filteredSystemHistoryEvents.length === 0 ? (
+        <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+          No recent system activity for {selectedDepartmentName}.
+        </p>
+      ) : (
+        <div className="grid gap-2">
+          {filteredSystemHistoryEvents.map((event) => (
+            <Link
+              key={event.id}
+              href={`/instructions/${event.instruction_id}`}
+              style={{
+                borderColor: colorWithAlpha(event.workItem.department_color, 0.45),
+                backgroundColor: colorWithAlpha(event.workItem.department_color, 0.12),
+                boxShadow: `inset 4px 0 0 ${colorWithAlpha(event.workItem.department_color, 0.9)}`,
+              }}
+              className="grid gap-1 rounded-xl border p-3 transition hover:brightness-105"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-200">
+                  {event.action_label}
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  <LocalDateTime value={event.occurred_at} mode="dateTime" />
+                </p>
+              </div>
+              <p className="font-semibold text-slate-900 dark:text-slate-100">
+                {getLabelWithDepartment(event.workItem)}
+              </p>
+              <p className="text-xs text-slate-600 dark:text-slate-300">{event.detail}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                By {event.actor_name}
+              </p>
+            </Link>
+          ))}
+        </div>
+      );
+    }
+
     return (
       <div className="grid gap-3">
         <div className="grid gap-2 md:grid-cols-2">
@@ -1883,193 +1851,231 @@ export function DashboardClient({
   return (
     <>
       <div className="grid gap-5">
-      <section className="rounded-3xl border border-white/30 bg-white/80 p-4 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-5">
-        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div className="space-y-1">
-            <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-300">
-              <BarChart3 size={14} />
-              Dashboard Studio
-            </p>
-            <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
-              Build Your Workspace
-            </h1>
-            <p className="text-sm text-slate-600 dark:text-slate-300">
-              Add, remove, resize, and drag widgets to match how you work.
-            </p>
+        <section className="rounded-3xl border border-white/30 bg-white/80 p-4 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-5">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div className="space-y-1">
+              <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-300">
+                <BarChart3 size={14} />
+                Dashboard Studio
+              </p>
+              <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
+                Build Your Workspace
+              </h1>
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                Pick a layout preset, then drag, resize, and toggle widgets to match how you work.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCustomizeOpen((current) => !current)}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-300/70 bg-white/70 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-900"
+              >
+                <LayoutGrid size={14} />
+                {customizeOpen ? "Close Customize" : "Customize Widgets"}
+              </button>
+
+              <button
+                type="button"
+                disabled={layoutSaving || !layoutDirty}
+                onClick={() => void saveDashboardLayout()}
+                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-3 py-2 text-xs font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                <Save size={14} />
+                {layoutSaving ? "Saving..." : "Save Layout"}
+              </button>
+
+              <button
+                type="button"
+                onClick={resetDashboardLayout}
+                disabled={layoutSaving}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-300/70 bg-white/70 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-70 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-900"
+              >
+                <RefreshCw size={14} />
+                Reset Defaults
+              </button>
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setCustomizeOpen((current) => !current)}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-300/70 bg-white/70 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-900"
-            >
-              <LayoutGrid size={14} />
-              {customizeOpen ? "Close Customize" : "Customize Widgets"}
-            </button>
-
-            <button
-              type="button"
-              disabled={layoutSaving || !layoutDirty}
-              onClick={() => void saveDashboardLayout()}
-              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-3 py-2 text-xs font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              <Save size={14} />
-              {layoutSaving ? "Saving..." : "Save Layout"}
-            </button>
-
-            <button
-              type="button"
-              onClick={resetDashboardLayout}
-              disabled={layoutSaving}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-300/70 bg-white/70 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-70 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-900"
-            >
-              <RefreshCw size={14} />
-              Reset Defaults
-            </button>
-          </div>
-        </div>
-
-        {layoutDirty ? (
-          <p className="mt-3 text-xs font-semibold text-amber-700 dark:text-amber-200">
-            You have unsaved layout changes.
-          </p>
-        ) : (
-          <p className="mt-3 text-xs text-slate-600 dark:text-slate-300">
-            Layout is saved for this user account.
-          </p>
-        )}
-
-        {layoutError ? (
-          <p className="mt-3 rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-700 dark:text-rose-200">
-            {layoutError}
-          </p>
-        ) : null}
-
-        {customizeOpen ? (
-          <div className="mt-4 grid gap-2 rounded-2xl border border-slate-300/70 bg-white/65 p-3 dark:border-slate-700 dark:bg-slate-900/50">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-              Widget Library
+          {layoutDirty ? (
+            <p className="mt-3 text-xs font-semibold text-amber-700 dark:text-amber-200">
+              You have unsaved layout changes.
             </p>
-            <div className="grid gap-2 md:grid-cols-2">
-              {widgetLayout.map((widget) => {
+          ) : (
+            <p className="mt-3 text-xs text-slate-600 dark:text-slate-300">
+              Layout is saved for this user account.
+            </p>
+          )}
+
+          {layoutError ? (
+            <p className="mt-3 rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-700 dark:text-rose-200">
+              {layoutError}
+            </p>
+          ) : null}
+
+          {customizeOpen ? (
+            <div className="mt-4 grid gap-2 rounded-2xl border border-slate-300/70 bg-white/65 p-3 dark:border-slate-700 dark:bg-slate-900/50">
+              <div className="grid gap-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                  Layout Presets
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {DASHBOARD_LAYOUT_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => applyLayoutPreset(preset.id)}
+                      className={cn(
+                        "grid gap-2 rounded-xl border p-2 text-left transition",
+                        activeLayoutPresetId === preset.id
+                          ? "border-cyan-500/50 bg-cyan-500/10"
+                          : "border-slate-300/70 bg-white/80 hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/70",
+                      )}
+                    >
+                      <div className="grid min-h-12 grid-cols-4 gap-1 rounded-lg border border-slate-300/70 bg-slate-100/80 p-1 dark:border-slate-700 dark:bg-slate-950/60">
+                        {preset.layout
+                          .filter((entry) => entry.visible)
+                          .slice(0, 6)
+                          .map((entry, index) => (
+                            <span
+                              key={`${preset.id}-${entry.id}-${index}`}
+                              className={cn(
+                                getPresetPreviewSpanClass(entry.size),
+                                "h-2 rounded-sm bg-cyan-500/70 dark:bg-cyan-400/70",
+                              )}
+                            />
+                          ))}
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                          {preset.label}
+                        </p>
+                        <span
+                          className={cn(
+                            "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                            activeLayoutPresetId === preset.id
+                              ? "bg-cyan-500/20 text-cyan-800 dark:text-cyan-200"
+                              : "bg-slate-500/20 text-slate-700 dark:text-slate-300",
+                          )}
+                        >
+                          {activeLayoutPresetId === preset.id ? "Active" : "Select"}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid gap-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                  Widget Library
+                </p>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {widgetLayout.map((widget) => {
+                    const definition = widgetDefinitionsById.get(widget.id);
+                    if (!definition) {
+                      return null;
+                    }
+
+                    return (
+                      <article
+                        key={widget.id}
+                        className="grid gap-2 rounded-xl border border-slate-300/70 bg-white/80 p-3 dark:border-slate-700 dark:bg-slate-900/70"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                              {definition.title}
+                            </p>
+                            <p className="text-xs text-slate-600 dark:text-slate-300">
+                              {definition.description}
+                            </p>
+                          </div>
+                          <span
+                            className={cn(
+                              "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                              widget.visible
+                                ? "bg-emerald-500/20 text-emerald-800 dark:text-emerald-200"
+                                : "bg-slate-500/20 text-slate-700 dark:text-slate-300",
+                            )}
+                          >
+                            {widget.visible ? "Visible" : "Hidden"}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => toggleWidget(widget.id)}
+                            className={cn(
+                              "inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-semibold transition",
+                              widget.visible
+                                ? "border-rose-500/40 bg-rose-500/10 text-rose-700 hover:bg-rose-500/20 dark:text-rose-200"
+                                : "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-200",
+                            )}
+                          >
+                            {widget.visible ? <X size={12} /> : <Plus size={12} />}
+                            {widget.visible ? "Remove" : "Add"}
+                          </button>
+
+                          <select
+                            value={widget.size}
+                            onChange={(event) =>
+                              updateWidgetSize(
+                                widget.id,
+                                event.target.value as DashboardWidgetSize,
+                              )
+                            }
+                            className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                          >
+                            {WIDGET_SIZE_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Tip: drag visible widgets by the grip icon to reorder.
+                </p>
+              </div>
+            </div>
+          ) : hiddenWidgets.length > 0 ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <p className="text-xs text-slate-600 dark:text-slate-300">Hidden widgets:</p>
+              {hiddenWidgets.map((widget) => {
                 const definition = widgetDefinitionsById.get(widget.id);
                 if (!definition) {
                   return null;
                 }
 
                 return (
-                  <article
+                  <button
                     key={widget.id}
-                    className="grid gap-2 rounded-xl border border-slate-300/70 bg-white/80 p-3 dark:border-slate-700 dark:bg-slate-900/70"
+                    type="button"
+                    onClick={() => toggleWidget(widget.id)}
+                    className="inline-flex items-center gap-1 rounded-full border border-emerald-500/35 bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-500/20 dark:text-emerald-200"
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                          {definition.title}
-                        </p>
-                        <p className="text-xs text-slate-600 dark:text-slate-300">
-                          {definition.description}
-                        </p>
-                      </div>
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                          widget.visible
-                            ? "bg-emerald-500/20 text-emerald-800 dark:text-emerald-200"
-                            : "bg-slate-500/20 text-slate-700 dark:text-slate-300"
-                        }`}
-                      >
-                        {widget.visible ? "Visible" : "Hidden"}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={() => toggleWidget(widget.id)}
-                        className={cn(
-                          "inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-semibold transition",
-                          widget.visible
-                            ? "border-rose-500/40 bg-rose-500/10 text-rose-700 hover:bg-rose-500/20 dark:text-rose-200"
-                            : "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-200",
-                        )}
-                      >
-                        {widget.visible ? <X size={12} /> : <Plus size={12} />}
-                        {widget.visible ? "Remove" : "Add"}
-                      </button>
-
-                      <select
-                        value={widget.size}
-                        onChange={(event) =>
-                          updateWidgetSize(
-                            widget.id,
-                            event.target.value as DashboardWidgetSize,
-                          )
-                        }
-                        className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                      >
-                        {WIDGET_SIZE_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </article>
+                    <Plus size={12} />
+                    {definition.title}
+                  </button>
                 );
               })}
             </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Tip: drag any visible widget card by its grip icon to reorder.
-            </p>
-          </div>
-        ) : hiddenWidgets.length > 0 ? (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <p className="text-xs text-slate-600 dark:text-slate-300">Hidden widgets:</p>
-            {hiddenWidgets.map((widget) => {
-              const definition = widgetDefinitionsById.get(widget.id);
-              if (!definition) {
-                return null;
-              }
-
-              return (
-                <button
-                  key={widget.id}
-                  type="button"
-                  onClick={() => toggleWidget(widget.id)}
-                  className="inline-flex items-center gap-1 rounded-full border border-emerald-500/35 bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-500/20 dark:text-emerald-200"
-                >
-                  <Plus size={12} />
-                  {definition.title}
-                </button>
-              );
-            })}
-          </div>
-        ) : null}
-      </section>
-
-      {visibleWidgets.length === 0 ? (
-        <section className="rounded-3xl border border-slate-300/70 bg-white/80 p-6 text-center shadow-xl backdrop-blur-xl dark:border-slate-700 dark:bg-slate-900/70">
-          <p className="text-sm text-slate-600 dark:text-slate-300">
-            No widgets are visible right now.
-          </p>
-          <button
-            type="button"
-            onClick={() => setCustomizeOpen(true)}
-            className="mt-3 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110"
-          >
-            <LayoutGrid size={15} />
-            Open Widget Library
-          </button>
+          ) : null}
         </section>
-      ) : (
+
         <div className="grid grid-cols-12 gap-4">
           {visibleWidgets.map((widget) => {
             const definition = widgetDefinitionsById.get(widget.id);
             if (!definition) {
               return null;
             }
-
             const isDragging = draggedWidgetId === widget.id;
             const isDragOverTarget =
               dragOverWidgetId === widget.id && draggedWidgetId !== widget.id;
@@ -2106,7 +2112,9 @@ export function DashboardClient({
                   getWidgetSpanClass(widget.size),
                   "rounded-3xl border border-white/30 bg-white/80 p-4 shadow-xl backdrop-blur-xl transition dark:border-white/10 dark:bg-slate-900/70 md:p-5",
                   isDragging ? "scale-[0.99] opacity-70" : "",
-                  isDragOverTarget ? "ring-2 ring-cyan-400/80 ring-offset-2 ring-offset-transparent" : "",
+                  isDragOverTarget
+                    ? "ring-2 ring-cyan-400/80 ring-offset-2 ring-offset-transparent"
+                    : "",
                 )}
               >
                 <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -2165,7 +2173,6 @@ export function DashboardClient({
             );
           })}
         </div>
-      )}
       </div>
 
       {portalReady &&
