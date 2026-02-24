@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ChevronDown, Clock3, LogOut, Settings } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { usePostHog } from "posthog-js/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
@@ -38,11 +38,25 @@ function getInitials(value: string) {
 export function UserAccountMenu({ profile }: UserAccountMenuProps) {
   const router = useRouter();
   const posthog = usePostHog();
+  const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
   const [sessionElapsedLabel, setSessionElapsedLabel] = useState("00:00:00");
 
   const initials = useMemo(() => getInitials(profile.full_name), [profile.full_name]);
+
+  const touchServerSession = useCallback(
+    async (endSession: boolean) => {
+      const { error: touchError } = await supabase.rpc("touch_user_session", {
+        end_session: endSession,
+      });
+
+      if (touchError) {
+        throw touchError;
+      }
+    },
+    [supabase],
+  );
 
   useEffect(() => {
     const startedAt = ensureSessionStartTime();
@@ -58,6 +72,12 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
       window.clearInterval(timer);
     };
   }, []);
+
+  useEffect(() => {
+    void touchServerSession(false).catch(() => {
+      // Session time sync is best-effort and should never block page usage.
+    });
+  }, [touchServerSession]);
 
   useEffect(() => {
     if (!open) {
@@ -89,7 +109,10 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
   }, [open]);
 
   async function handleSignOut() {
-    const supabase = getSupabaseBrowserClient();
+    await touchServerSession(true).catch(() => {
+      // Do not block sign-out if a session telemetry call fails.
+    });
+
     await supabase.auth.signOut();
     clearSessionStart();
     posthog?.reset();

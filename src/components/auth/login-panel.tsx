@@ -123,6 +123,13 @@ export function LoginPanel() {
       }
 
       setSessionStartNow();
+      await supabase
+        .rpc("touch_user_session", {
+          end_session: false,
+        })
+        .catch(() => {
+          // Session tracking is best-effort and should not block login.
+        });
       router.push("/dashboard");
       router.refresh();
     });
@@ -164,6 +171,13 @@ export function LoginPanel() {
       }
 
       setSessionStartNow();
+      await supabase
+        .rpc("touch_user_session", {
+          end_session: false,
+        })
+        .catch(() => {
+          // Session tracking is best-effort and should not block login.
+        });
       router.push("/dashboard");
       router.refresh();
     });
@@ -252,6 +266,13 @@ export function LoginPanel() {
           "Account created. If your email matches SYSTEM_ADMIN_EMAIL and no system admin exists yet, this account was promoted automatically.",
         );
         setSessionStartNow();
+        await supabase
+          .rpc("touch_user_session", {
+            end_session: false,
+          })
+          .catch(() => {
+            // Session tracking is best-effort and should not block login.
+          });
         router.push("/dashboard");
         router.refresh();
         return;

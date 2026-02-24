@@ -1,7 +1,7 @@
 "use client";
 
 import { useTheme } from "next-themes";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 import type { ThemePreference } from "@/lib/types";
 
@@ -10,13 +10,17 @@ interface ThemePreferenceSyncProps {
 }
 
 export function ThemePreferenceSync({ themePreference }: ThemePreferenceSyncProps) {
-  const { theme, setTheme } = useTheme();
+  const { setTheme } = useTheme();
+  const lastAppliedThemePreferenceRef = useRef<ThemePreference | null>(null);
 
   useEffect(() => {
-    if (theme !== themePreference) {
-      setTheme(themePreference);
+    if (lastAppliedThemePreferenceRef.current === themePreference) {
+      return;
     }
-  }, [setTheme, theme, themePreference]);
+
+    lastAppliedThemePreferenceRef.current = themePreference;
+    setTheme(themePreference);
+  }, [setTheme, themePreference]);
 
   return null;
 }

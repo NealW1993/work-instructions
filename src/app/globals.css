@@ -2,12 +2,12 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --background: #eef4ff;
-  --surface: #ffffffcc;
+  --background: #eef0f4;
+  --surface: #f9fafccc;
   --surface-strong: #ffffff;
-  --foreground: #0f172a;
-  --muted: #4b5563;
-  --ring: #0ea5e9;
+  --foreground: #3d4150;
+  --muted: #73798a;
+  --ring: #3f6ed8;
 }
 
 .dark {
@@ -49,9 +49,9 @@ html.dark {
 
 body {
   background:
-    radial-gradient(circle at 12% 14%, rgba(14, 165, 233, 0.11) 0%, transparent 46%),
-    radial-gradient(circle at 86% 10%, rgba(37, 99, 235, 0.09) 0%, transparent 38%),
-    linear-gradient(180deg, #f7fbff 0%, #edf4ff 100%),
+    radial-gradient(circle at 12% 14%, rgba(61, 65, 80, 0.08) 0%, transparent 46%),
+    radial-gradient(circle at 86% 10%, rgba(115, 121, 138, 0.08) 0%, transparent 40%),
+    linear-gradient(180deg, #f5f6f9 0%, #eceff4 100%),
     var(--background);
   color: var(--foreground);
   font-family: var(--font-body), "Segoe UI", sans-serif;
@@ -193,8 +193,9 @@ h6 {
 html:not(.dark) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]),
 html:not(.dark) textarea,
 html:not(.dark) select {
-  background-color: #ffffff !important;
-  color: #0f172a !important;
+  background-color: #f7f8fb !important;
+  color: #3d4150 !important;
+  border-color: #afb3bd !important;
 }
 
 html:not(.dark) h1,
@@ -203,17 +204,24 @@ html:not(.dark) h3,
 html:not(.dark) h4,
 html:not(.dark) h5,
 html:not(.dark) h6 {
-  color: #0f172a !important;
+  color: #3d4150 !important;
 }
 
 html:not(.dark) label,
 html:not(.dark) legend {
-  color: #0f172a !important;
+  color: #4a5060 !important;
 }
 
 html:not(.dark) input::placeholder,
 html:not(.dark) textarea::placeholder {
-  color: #64748b !important;
+  color: #858b9a !important;
+}
+
+html:not(.dark) input:focus,
+html:not(.dark) textarea:focus,
+html:not(.dark) select:focus {
+  border-color: #5268c8 !important;
+  box-shadow: 0 0 0 1px rgba(82, 104, 200, 0.2) !important;
 }
 
 html:not(.dark) input:-webkit-autofill,
@@ -222,9 +230,9 @@ html:not(.dark) input:-webkit-autofill:focus,
 html:not(.dark) textarea:-webkit-autofill,
 html:not(.dark) textarea:-webkit-autofill:hover,
 html:not(.dark) textarea:-webkit-autofill:focus {
-  -webkit-text-fill-color: #0f172a !important;
-  box-shadow: 0 0 0 1000px #ffffff inset !important;
-  caret-color: #0f172a !important;
+  -webkit-text-fill-color: #3d4150 !important;
+  box-shadow: 0 0 0 1000px #f7f8fb inset !important;
+  caret-color: #3d4150 !important;
   transition: background-color 9999s ease-in-out 0s;
 }
 
