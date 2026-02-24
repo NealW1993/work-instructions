@@ -292,6 +292,12 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     setPortalReady(true);
   }, []);
 
+  useEffect(() => {
+    if (mode === "create") {
+      void router.prefetch("/dashboard");
+    }
+  }, [mode, router]);
+
   const releaseHistoryGuard = useCallback(() => {
     if (!historyGuardActiveRef.current) {
       return;
@@ -336,6 +342,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       }
 
       setNavigationModalOpen(false);
+      pendingNavigationRef.current = null;
       setPendingNavigation(null);
       return;
     }
@@ -382,8 +389,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
       window.history.pushState({ [HISTORY_GUARD_STATE_KEY]: true }, "", window.location.href);
       historyGuardActiveRef.current = true;
-      setPendingNavigation({ kind: "history-back" });
-      setNavigationModalOpen(true);
+      openNavigationModal({ kind: "history-back" });
     };
 
     window.addEventListener("popstate", handlePopState);
@@ -434,12 +440,10 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       event.preventDefault();
 
       if (destination.origin === window.location.origin) {
-        setPendingNavigation({ kind: "internal-link", href: destination.href });
+        openNavigationModal({ kind: "internal-link", href: destination.href });
       } else {
-        setPendingNavigation({ kind: "external-link", href: destination.href });
+        openNavigationModal({ kind: "external-link", href: destination.href });
       }
-
-      setNavigationModalOpen(true);
     };
 
     document.addEventListener("click", handleDocumentNavigation, true);
@@ -627,8 +631,15 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   }
 
   function closeNavigationModal() {
+    pendingNavigationRef.current = null;
     setNavigationModalOpen(false);
     setPendingNavigation(null);
+  }
+
+  function openNavigationModal(nextNavigation: PendingNavigation) {
+    pendingNavigationRef.current = nextNavigation;
+    setPendingNavigation(nextNavigation);
+    setNavigationModalOpen(true);
   }
 
   function handleCancelNavigationAway() {
@@ -656,16 +667,14 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     closeNavigationModal();
 
     if (navigation.kind === "history-back") {
-      if (window.history.length <= 2) {
-        navigateWithGuardReleased(() => {
+      navigateWithGuardReleased(() => {
+        if (window.history.length <= 2) {
           router.push("/dashboard");
-        });
-        return;
-      }
+          return;
+        }
 
-      suppressNextPopStateRef.current = true;
-      historyGuardActiveRef.current = false;
-      window.history.go(-2);
+        router.back();
+      });
       return;
     }
 

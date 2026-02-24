@@ -21,6 +21,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 
 import { LocalDateTime } from "@/components/ui/local-date-time";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -117,6 +118,7 @@ interface DashboardClientProps {
 }
 
 const DEFAULT_DEPARTMENT_COLOR = "#0EA5E9";
+const DASHBOARD_HISTORY_GUARD_STATE_KEY = "__dashboardLayoutUnsavedGuard";
 
 const WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
   {
@@ -309,29 +311,53 @@ function getWidgetSpanClass(size: DashboardWidgetSize) {
   }
 }
 
+type DashboardPendingNavigation =
+  | {
+      kind: "history-back";
+    }
+  | {
+      kind: "internal-link";
+      href: string;
+    }
+  | {
+      kind: "external-link";
+      href: string;
+    };
+
+type ImpactDrilldownKey = "authored" | "departments" | "pins" | "recent";
+
+interface ImpactDrilldownEntry {
+  id: string;
+  href: string;
+  label: string;
+  detail: string;
+  color: string;
+}
+
 interface ImpactKpiCardProps {
   label: string;
   value: ReactNode;
-  tooltip: string;
+  onOpen: () => void;
 }
 
-function ImpactKpiCard({ label, value, tooltip }: ImpactKpiCardProps) {
+function ImpactKpiCard({ label, value, onOpen }: ImpactKpiCardProps) {
   return (
-    <div
-      className="group relative rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50"
-      title={tooltip}
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group grid w-full gap-1 rounded-xl border border-slate-300/70 bg-white/70 p-3 text-left transition hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/50 dark:hover:border-cyan-500/50 dark:hover:bg-cyan-500/10"
     >
-      <div className="mb-1 inline-flex items-center gap-1">
+      <div className="mb-1 flex items-center justify-between gap-2">
         <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
           {label}
         </p>
-        <Info size={12} className="text-slate-400 dark:text-slate-500" />
+        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-cyan-700 dark:text-cyan-300">
+          Drill down
+          <Info size={12} className="text-cyan-600 dark:text-cyan-300" />
+        </span>
       </div>
       <p className="text-2xl font-extrabold text-slate-900 dark:text-slate-100">{value}</p>
-      <div className="pointer-events-none absolute left-3 top-1 z-20 max-w-[230px] -translate-y-2 rounded-md border border-cyan-500/35 bg-slate-950/95 px-2 py-1 text-[11px] text-cyan-100 opacity-0 transition-all group-hover:-translate-y-1 group-hover:opacity-100">
-        {tooltip}
-      </div>
-    </div>
+    </button>
   );
 }
 
@@ -354,6 +380,11 @@ export function DashboardClient({
   const realtimeRefreshTimeoutRef = useRef<number | null>(null);
   const layoutDirtyRef = useRef(false);
   const customizeOpenRef = useRef(false);
+  const pendingNavigationRef = useRef<DashboardPendingNavigation | null>(null);
+  const navigationModalOpenRef = useRef(false);
+  const historyGuardActiveRef = useRef(false);
+  const suppressNextPopStateRef = useRef(false);
+  const navigationBypassRef = useRef(false);
   const [query, setQuery] = useState(initialQuery);
   const [selectedDepartmentId, setSelectedDepartmentId] = useState("all");
   const [customizeOpen, setCustomizeOpen] = useState(false);
@@ -365,6 +396,9 @@ export function DashboardClient({
   const [layoutDirty, setLayoutDirty] = useState(false);
   const [layoutSaving, setLayoutSaving] = useState(false);
   const [layoutError, setLayoutError] = useState<string | null>(null);
+  const [portalReady, setPortalReady] = useState(false);
+  const [navigationModalOpen, setNavigationModalOpen] = useState(false);
+  const [impactDrilldownKey, setImpactDrilldownKey] = useState<ImpactDrilldownKey | null>(null);
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
   const normalizedQuery = query.trim().toLowerCase();
@@ -379,6 +413,10 @@ export function DashboardClient({
     const cursorPosition = searchInputRef.current.value.length;
     searchInputRef.current.setSelectionRange(cursorPosition, cursorPosition);
   }, [initialQuery]);
+
+  useEffect(() => {
+    setPortalReady(true);
+  }, []);
 
   useEffect(() => {
     layoutDirtyRef.current = layoutDirty;
@@ -396,6 +434,163 @@ export function DashboardClient({
     setWidgetLayout(normalizeWidgetLayout(initialDashboardLayout));
     setLayoutDirty(false);
   }, [initialDashboardLayout]);
+
+  useEffect(() => {
+    navigationModalOpenRef.current = navigationModalOpen;
+  }, [navigationModalOpen]);
+
+  const releaseHistoryGuard = useCallback(() => {
+    if (!historyGuardActiveRef.current) {
+      return;
+    }
+
+    suppressNextPopStateRef.current = true;
+    historyGuardActiveRef.current = false;
+    window.history.back();
+  }, []);
+
+  const navigateWithGuardReleased = useCallback(
+    (navigate: () => void) => {
+      if (historyGuardActiveRef.current) {
+        releaseHistoryGuard();
+        window.setTimeout(() => {
+          navigate();
+        }, 0);
+        return;
+      }
+
+      navigate();
+    },
+    [releaseHistoryGuard],
+  );
+
+  useEffect(() => {
+    if (!layoutDirty) {
+      if (historyGuardActiveRef.current) {
+        releaseHistoryGuard();
+      }
+
+      pendingNavigationRef.current = null;
+      setNavigationModalOpen(false);
+      navigationBypassRef.current = false;
+      return;
+    }
+
+    if (!historyGuardActiveRef.current) {
+      window.history.pushState(
+        { [DASHBOARD_HISTORY_GUARD_STATE_KEY]: true },
+        "",
+        window.location.href,
+      );
+      historyGuardActiveRef.current = true;
+    }
+  }, [layoutDirty, releaseHistoryGuard]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!layoutDirtyRef.current || navigationBypassRef.current) {
+        return;
+      }
+
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      if (suppressNextPopStateRef.current) {
+        suppressNextPopStateRef.current = false;
+        return;
+      }
+
+      if (!layoutDirtyRef.current || navigationBypassRef.current) {
+        historyGuardActiveRef.current = false;
+        return;
+      }
+
+      if (navigationModalOpenRef.current) {
+        window.history.pushState(
+          { [DASHBOARD_HISTORY_GUARD_STATE_KEY]: true },
+          "",
+          window.location.href,
+        );
+        historyGuardActiveRef.current = true;
+        return;
+      }
+
+      window.history.pushState(
+        { [DASHBOARD_HISTORY_GUARD_STATE_KEY]: true },
+        "",
+        window.location.href,
+      );
+      historyGuardActiveRef.current = true;
+      openNavigationModal({ kind: "history-back" });
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleDocumentNavigation = (event: MouseEvent) => {
+      if (!layoutDirtyRef.current || navigationBypassRef.current) {
+        return;
+      }
+
+      if (event.defaultPrevented || event.button !== 0) {
+        return;
+      }
+
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        return;
+      }
+
+      const target = event.target as Element | null;
+      const anchor = target?.closest("a[href]");
+      if (!(anchor instanceof HTMLAnchorElement)) {
+        return;
+      }
+
+      if (anchor.target && anchor.target !== "_self") {
+        return;
+      }
+
+      if (anchor.hasAttribute("download")) {
+        return;
+      }
+
+      let destination: URL;
+      try {
+        destination = new URL(anchor.href, window.location.href);
+      } catch {
+        return;
+      }
+
+      if (destination.href === window.location.href) {
+        return;
+      }
+
+      event.preventDefault();
+      if (destination.origin === window.location.origin) {
+        openNavigationModal({ kind: "internal-link", href: destination.href });
+      } else {
+        openNavigationModal({ kind: "external-link", href: destination.href });
+      }
+    };
+
+    document.addEventListener("click", handleDocumentNavigation, true);
+    return () => {
+      document.removeEventListener("click", handleDocumentNavigation, true);
+    };
+  }, []);
 
   const scheduleRealtimeRefresh = useCallback(() => {
     if (
@@ -623,6 +818,138 @@ export function DashboardClient({
       .slice(0, 3);
   }, [myInstructionEntries]);
 
+  const authoredDrilldownEntries = useMemo<ImpactDrilldownEntry[]>(() => {
+    return [...myInstructionEntries]
+      .sort((a, b) => {
+        const aTime = new Date(a.instruction.created_at).getTime();
+        const bTime = new Date(b.instruction.created_at).getTime();
+        return bTime - aTime;
+      })
+      .slice(0, 12)
+      .map((entry) => ({
+        id: entry.instruction.id,
+        href: `/instructions/${entry.instruction.id}`,
+        label: getLabelWithDepartment(entry.workItem),
+        detail: `Revision ${entry.instruction.revision} | Created ${new Date(
+          entry.instruction.created_at,
+        ).toLocaleDateString()}`,
+        color: entry.workItem.department_color,
+      }));
+  }, [myInstructionEntries]);
+
+  const departmentsDrilldownEntries = useMemo<ImpactDrilldownEntry[]>(() => {
+    const latestByDepartment = new Map<
+      string,
+      {
+        entry: (typeof myInstructionEntries)[number];
+        timestamp: number;
+      }
+    >();
+
+    for (const entry of myInstructionEntries) {
+      const timestamp = new Date(entry.instruction.created_at).getTime();
+      const existing = latestByDepartment.get(entry.workItem.department_id);
+
+      if (!existing || timestamp > existing.timestamp) {
+        latestByDepartment.set(entry.workItem.department_id, { entry, timestamp });
+      }
+    }
+
+    return [...latestByDepartment.values()]
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, 12)
+      .map(({ entry }) => ({
+        id: entry.instruction.id,
+        href: `/instructions/${entry.instruction.id}`,
+        label: getLabelWithDepartment(entry.workItem),
+        detail: `Latest authored item for ${entry.workItem.department_name} | Revision ${entry.instruction.revision}`,
+        color: entry.workItem.department_color,
+      }));
+  }, [myInstructionEntries]);
+
+  const pinsDrilldownEntries = useMemo<ImpactDrilldownEntry[]>(() => {
+    return [...pinnedInstructions]
+      .sort((a, b) => {
+        const aTime = new Date(a.pinned_at).getTime();
+        const bTime = new Date(b.pinned_at).getTime();
+        return bTime - aTime;
+      })
+      .slice(0, 12)
+      .map((instruction) => ({
+        id: instruction.id,
+        href: `/instructions/${instruction.id}`,
+        label: getLabelWithDepartment(instruction.workItem),
+        detail: `Revision ${instruction.revision} | Pinned ${new Date(
+          instruction.pinned_at,
+        ).toLocaleDateString()}`,
+        color: instruction.workItem.department_color,
+      }));
+  }, [pinnedInstructions]);
+
+  const recentDrilldownEntries = useMemo<ImpactDrilldownEntry[]>(() => {
+    if (!myLatestEntry) {
+      return [];
+    }
+
+    return [
+      {
+        id: myLatestEntry.instruction.id,
+        href: `/instructions/${myLatestEntry.instruction.id}`,
+        label: getLabelWithDepartment(myLatestEntry.workItem),
+        detail: `Revision ${myLatestEntry.instruction.revision} | Created ${new Date(
+          myLatestEntry.instruction.created_at,
+        ).toLocaleDateString()}`,
+        color: myLatestEntry.workItem.department_color,
+      },
+    ];
+  }, [myLatestEntry]);
+
+  const activeImpactDrilldown = useMemo(() => {
+    if (!impactDrilldownKey) {
+      return null;
+    }
+
+    if (impactDrilldownKey === "authored") {
+      return {
+        title: "Authored Instructions",
+        description: "Latest active instructions you authored.",
+        entries: authoredDrilldownEntries,
+        emptyMessage: "No authored instructions yet.",
+      };
+    }
+
+    if (impactDrilldownKey === "departments") {
+      return {
+        title: "Departments Touched",
+        description: "Latest authored instruction per department.",
+        entries: departmentsDrilldownEntries,
+        emptyMessage: "No department activity yet.",
+      };
+    }
+
+    if (impactDrilldownKey === "pins") {
+      return {
+        title: "Pinned Instructions",
+        description: "Your most recently pinned active instructions.",
+        entries: pinsDrilldownEntries,
+        emptyMessage: "No pinned instructions yet.",
+      };
+    }
+
+    return {
+      title: "Most Recent Authored",
+      description: "Your latest authored active instruction.",
+      entries: recentDrilldownEntries,
+      emptyMessage: "No authored instructions yet.",
+    };
+  }, [
+    authoredDrilldownEntries,
+    departmentsDrilldownEntries,
+    impactDrilldownKey,
+    pinsDrilldownEntries,
+    recentDrilldownEntries,
+  ]);
+
   const widgetDefinitionsById = useMemo(
     () => new Map(WIDGET_DEFINITIONS.map((widget) => [widget.id, widget])),
     [],
@@ -739,6 +1066,109 @@ export function DashboardClient({
     setLayoutDirty(true);
     setLayoutError(null);
   }
+
+  function closeNavigationModal() {
+    pendingNavigationRef.current = null;
+    setNavigationModalOpen(false);
+  }
+
+  function openNavigationModal(nextNavigation: DashboardPendingNavigation) {
+    setImpactDrilldownKey(null);
+    pendingNavigationRef.current = nextNavigation;
+    setNavigationModalOpen(true);
+  }
+
+  function handleCancelNavigationAway() {
+    if (
+      pendingNavigationRef.current?.kind === "history-back" &&
+      layoutDirtyRef.current &&
+      !historyGuardActiveRef.current
+    ) {
+      window.history.pushState(
+        { [DASHBOARD_HISTORY_GUARD_STATE_KEY]: true },
+        "",
+        window.location.href,
+      );
+      historyGuardActiveRef.current = true;
+    }
+
+    navigationBypassRef.current = false;
+    closeNavigationModal();
+  }
+
+  function handleConfirmNavigationAway() {
+    const navigation = pendingNavigationRef.current;
+    if (!navigation) {
+      closeNavigationModal();
+      return;
+    }
+
+    navigationBypassRef.current = true;
+    closeNavigationModal();
+
+    if (navigation.kind === "history-back") {
+      navigateWithGuardReleased(() => {
+        if (window.history.length <= 2) {
+          router.push("/dashboard");
+          return;
+        }
+
+        router.back();
+      });
+      return;
+    }
+
+    navigateWithGuardReleased(() => {
+      if (navigation.kind === "external-link") {
+        window.location.assign(navigation.href);
+        return;
+      }
+
+      const destination = new URL(navigation.href, window.location.href);
+      router.push(`${destination.pathname}${destination.search}${destination.hash}`);
+    });
+  }
+
+  useEffect(() => {
+    if (!navigationModalOpen && !impactDrilldownKey) {
+      return;
+    }
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+      if (impactDrilldownKey) {
+        setImpactDrilldownKey(null);
+        return;
+      }
+
+      if (navigationModalOpen) {
+        if (
+          pendingNavigationRef.current?.kind === "history-back" &&
+          layoutDirtyRef.current &&
+          !historyGuardActiveRef.current
+        ) {
+          window.history.pushState(
+            { [DASHBOARD_HISTORY_GUARD_STATE_KEY]: true },
+            "",
+            window.location.href,
+          );
+          historyGuardActiveRef.current = true;
+        }
+
+        navigationBypassRef.current = false;
+        pendingNavigationRef.current = null;
+        setNavigationModalOpen(false);
+      }
+    };
+
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [impactDrilldownKey, navigationModalOpen]);
 
   function getMostRecentInstructionForItem(item: DashboardWorkItemData) {
     return [...item.work_instructions].sort((a, b) => {
@@ -1136,17 +1566,17 @@ export function DashboardClient({
           <ImpactKpiCard
             label="Authored Instructions"
             value={myInstructionEntries.length}
-            tooltip="Total active instructions authored by you."
+            onOpen={() => setImpactDrilldownKey("authored")}
           />
           <ImpactKpiCard
             label="Departments Touched"
             value={myDepartmentCount}
-            tooltip="Number of unique departments where you authored at least one instruction."
+            onOpen={() => setImpactDrilldownKey("departments")}
           />
           <ImpactKpiCard
             label="Total Pins"
             value={pinnedInstructions.length}
-            tooltip="Active instructions you pinned for quick access."
+            onOpen={() => setImpactDrilldownKey("pins")}
           />
           <ImpactKpiCard
             label="Most Recent Authored"
@@ -1159,7 +1589,7 @@ export function DashboardClient({
                 "N/A"
               )
             }
-            tooltip="Date of the latest active instruction you authored."
+            onOpen={() => setImpactDrilldownKey("recent")}
           />
         </div>
 
@@ -1198,7 +1628,8 @@ export function DashboardClient({
   const hiddenWidgets = widgetLayout.filter((widget) => !widget.visible);
 
   return (
-    <div className="grid gap-5">
+    <>
+      <div className="grid gap-5">
       <section className="rounded-3xl border border-white/30 bg-white/80 p-4 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-5">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div className="space-y-1">
@@ -1482,6 +1913,92 @@ export function DashboardClient({
           })}
         </div>
       )}
-    </div>
+      </div>
+
+      {navigationModalOpen && portalReady
+        ? createPortal(
+            <div className="fixed inset-0 z-[111] flex items-center justify-center overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
+              <div className="grid w-full max-w-md gap-4 rounded-2xl border border-amber-500/45 bg-slate-950/95 p-5 shadow-2xl">
+                <div className="grid gap-1">
+                  <h3 className="text-lg font-bold text-slate-100">
+                    Discard unsaved dashboard layout?
+                  </h3>
+                  <p className="text-sm text-slate-300">
+                    You have unsaved widget layout changes. Leaving now will discard those
+                    updates.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCancelNavigationAway}
+                    className="rounded-xl border border-slate-600 bg-slate-900/70 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
+                  >
+                    Keep Editing
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmNavigationAway}
+                    className="rounded-xl border border-amber-500/45 bg-amber-500/20 px-4 py-2 text-sm font-semibold text-amber-100 transition hover:bg-amber-500/30"
+                  >
+                    Leave Without Saving
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+
+      {activeImpactDrilldown && portalReady
+        ? createPortal(
+            <div className="fixed inset-0 z-[112] flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm sm:p-6">
+              <div className="grid w-full max-w-2xl gap-4 rounded-2xl border border-cyan-500/35 bg-slate-950/95 p-5 shadow-2xl">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-100">
+                      {activeImpactDrilldown.title}
+                    </h3>
+                    <p className="text-sm text-slate-300">{activeImpactDrilldown.description}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setImpactDrilldownKey(null)}
+                    className="rounded-xl border border-slate-600 bg-slate-900/70 px-3 py-1.5 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
+                  >
+                    Close
+                  </button>
+                </div>
+
+                {activeImpactDrilldown.entries.length === 0 ? (
+                  <p className="rounded-xl border border-slate-700 bg-slate-900/60 p-4 text-sm text-slate-300">
+                    {activeImpactDrilldown.emptyMessage}
+                  </p>
+                ) : (
+                  <div className="grid max-h-[55vh] gap-2 overflow-y-auto pr-1">
+                    {activeImpactDrilldown.entries.map((entry) => (
+                      <Link
+                        key={entry.id}
+                        href={entry.href}
+                        onClick={() => setImpactDrilldownKey(null)}
+                        style={{
+                          borderColor: colorWithAlpha(entry.color, 0.5),
+                          backgroundColor: colorWithAlpha(entry.color, 0.14),
+                        }}
+                        className="rounded-xl border p-3 transition hover:brightness-110"
+                      >
+                        <p className="font-semibold text-slate-100">{entry.label}</p>
+                        <p className="text-xs text-slate-300">{entry.detail}</p>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
   );
 }
