@@ -2,7 +2,6 @@
 
 import { Eye, EyeOff } from "lucide-react";
 import Image from "next/image";
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 
@@ -416,7 +415,7 @@ export function LoginPanel() {
           width={420}
           height={100}
           priority
-          className="h-10 w-auto opacity-95"
+          className="mx-auto h-10 w-auto opacity-95"
         />
         <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
           Work Instructions
@@ -787,14 +786,9 @@ export function LoginPanel() {
         </form>
       ) : null}
 
-      <div className="text-xs text-slate-500 dark:text-slate-400">
+      <p className="text-xs text-slate-500 dark:text-slate-400">
         Need help? Ask your system admin to reset your role or PIN.
-        <div>
-          <Link href="/dashboard" className="underline">
-            Continue to dashboard
-          </Link>
-        </div>
-      </div>
+      </p>
 
       <div className="mt-1 flex flex-wrap items-center justify-between gap-2 border-t border-slate-300/70 pt-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
         <p>2026 Omni Technologies, all rights reserved.</p>
