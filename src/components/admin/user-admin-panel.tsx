@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { GripVertical } from "lucide-react";
 
@@ -129,6 +129,12 @@ export function UserAdminPanel() {
   const [departmentOrderDirty, setDepartmentOrderDirty] = useState(false);
   const [draggedDepartmentId, setDraggedDepartmentId] = useState<string | null>(null);
   const [dragOverDepartmentId, setDragOverDepartmentId] = useState<string | null>(null);
+  const [editingDepartmentOrderId, setEditingDepartmentOrderId] = useState<string | null>(
+    null,
+  );
+  const [editingDepartmentOrderValue, setEditingDepartmentOrderValue] = useState("");
+  const usersRefreshTimeoutRef = useRef<number | null>(null);
+  const departmentsRefreshTimeoutRef = useRef<number | null>(null);
 
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
@@ -216,6 +222,8 @@ export function UserAdminPanel() {
       setDepartmentOrderDirty(false);
       setDraggedDepartmentId(null);
       setDragOverDepartmentId(null);
+      setEditingDepartmentOrderId(null);
+      setEditingDepartmentOrderValue("");
       setDepartmentNameUpdates(() => {
         const next: Record<string, string> = {};
         for (const department of resolvedDepartments) {
@@ -260,6 +268,65 @@ export function UserAdminPanel() {
     })();
   }, [supabase]);
 
+  const scheduleUsersRefresh = useCallback(() => {
+    if (typeof window === "undefined" || usersRefreshTimeoutRef.current !== null) {
+      return;
+    }
+
+    usersRefreshTimeoutRef.current = window.setTimeout(() => {
+      usersRefreshTimeoutRef.current = null;
+      void fetchUsers();
+    }, 450);
+  }, [fetchUsers]);
+
+  const scheduleDepartmentsRefresh = useCallback(() => {
+    if (
+      typeof window === "undefined" ||
+      departmentsRefreshTimeoutRef.current !== null ||
+      departmentOrderDirty
+    ) {
+      return;
+    }
+
+    departmentsRefreshTimeoutRef.current = window.setTimeout(() => {
+      departmentsRefreshTimeoutRef.current = null;
+      void fetchDepartments();
+    }, 450);
+  }, [departmentOrderDirty, fetchDepartments]);
+
+  useEffect(() => {
+    const usersChannel = supabase
+      .channel("admin-users-live")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "profiles" },
+        () => scheduleUsersRefresh(),
+      )
+      .subscribe();
+
+    const departmentsChannel = supabase
+      .channel("admin-departments-live")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "departments" },
+        () => scheduleDepartmentsRefresh(),
+      )
+      .subscribe();
+
+    return () => {
+      if (usersRefreshTimeoutRef.current !== null) {
+        window.clearTimeout(usersRefreshTimeoutRef.current);
+        usersRefreshTimeoutRef.current = null;
+      }
+      if (departmentsRefreshTimeoutRef.current !== null) {
+        window.clearTimeout(departmentsRefreshTimeoutRef.current);
+        departmentsRefreshTimeoutRef.current = null;
+      }
+      void supabase.removeChannel(usersChannel);
+      void supabase.removeChannel(departmentsChannel);
+    };
+  }, [scheduleDepartmentsRefresh, scheduleUsersRefresh, supabase]);
+
   function getNextDepartmentColor() {
     const usedColors = new Set(
       departments
@@ -299,6 +366,55 @@ export function UserAdminPanel() {
     });
 
     setDepartmentOrderDirty(true);
+  }
+
+  function moveDepartmentToIndex(sourceDepartmentId: string, targetIndex: number) {
+    setDepartments((current) => {
+      const sourceIndex = current.findIndex((department) => department.id === sourceDepartmentId);
+      if (sourceIndex < 0) {
+        return current;
+      }
+
+      const boundedTargetIndex = Math.max(0, Math.min(targetIndex, current.length - 1));
+      if (sourceIndex === boundedTargetIndex) {
+        return current;
+      }
+
+      const next = [...current];
+      const [movedDepartment] = next.splice(sourceIndex, 1);
+      if (!movedDepartment) {
+        return current;
+      }
+
+      next.splice(boundedTargetIndex, 0, movedDepartment);
+      return next;
+    });
+    setDepartmentOrderDirty(true);
+  }
+
+  function startDepartmentOrderEdit(departmentId: string, currentOrder: number) {
+    if (busy) {
+      return;
+    }
+
+    setEditingDepartmentOrderId(departmentId);
+    setEditingDepartmentOrderValue(String(currentOrder));
+  }
+
+  function cancelDepartmentOrderEdit() {
+    setEditingDepartmentOrderId(null);
+    setEditingDepartmentOrderValue("");
+  }
+
+  function commitDepartmentOrderEdit(departmentId: string) {
+    const parsedOrder = Number.parseInt(editingDepartmentOrderValue, 10);
+    if (!Number.isFinite(parsedOrder) || parsedOrder < 1) {
+      cancelDepartmentOrderEdit();
+      return;
+    }
+
+    moveDepartmentToIndex(departmentId, parsedOrder - 1);
+    cancelDepartmentOrderEdit();
   }
 
   async function handleCreateUser(event: FormEvent<HTMLFormElement>) {
@@ -764,7 +880,8 @@ export function UserAdminPanel() {
           </button>
         </div>
         <p className="text-xs text-slate-500 dark:text-slate-300">
-          Drag and drop to reorder. This order controls all department dropdowns across the app.
+          Drag and drop to reorder, or double-click the order number to type a position.
+          Press Enter to move. Esc or blur cancels.
         </p>
 
         <form
@@ -886,7 +1003,42 @@ export function UserAdminPanel() {
                 >
                   <div className="flex items-center gap-1 text-slate-500 dark:text-slate-300">
                     <GripVertical size={16} />
-                    <span className="w-6 text-center text-xs font-semibold">{index + 1}</span>
+                    {editingDepartmentOrderId === department.id ? (
+                      <input
+                        autoFocus
+                        inputMode="numeric"
+                        value={editingDepartmentOrderValue}
+                        onChange={(event) =>
+                          setEditingDepartmentOrderValue(
+                            event.target.value.replace(/\D/g, "").slice(0, 3),
+                          )
+                        }
+                        onBlur={cancelDepartmentOrderEdit}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            commitDepartmentOrderEdit(department.id);
+                            return;
+                          }
+
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            cancelDepartmentOrderEdit();
+                          }
+                        }}
+                        className="w-10 rounded-md border border-cyan-500/45 bg-white px-1 py-0.5 text-center text-xs font-semibold text-slate-900 outline-none ring-2 ring-cyan-500/20 dark:bg-slate-950 dark:text-slate-100"
+                        aria-label={`Order for ${department.name}`}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        onDoubleClick={() => startDepartmentOrderEdit(department.id, index + 1)}
+                        className="w-6 rounded px-0.5 text-center text-xs font-semibold transition hover:bg-white/20"
+                        title="Double-click to type order"
+                      >
+                        {index + 1}
+                      </button>
+                    )}
                   </div>
 
                   <div className="grid flex-1 gap-2 md:grid-cols-[minmax(0,1fr)_220px]">

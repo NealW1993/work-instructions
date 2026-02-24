@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   BarChart3,
   GripVertical,
+  Info,
   LayoutGrid,
   Plus,
   RefreshCw,
@@ -11,7 +13,14 @@ import {
   Search,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { LocalDateTime } from "@/components/ui/local-date-time";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -300,6 +309,32 @@ function getWidgetSpanClass(size: DashboardWidgetSize) {
   }
 }
 
+interface ImpactKpiCardProps {
+  label: string;
+  value: ReactNode;
+  tooltip: string;
+}
+
+function ImpactKpiCard({ label, value, tooltip }: ImpactKpiCardProps) {
+  return (
+    <div
+      className="group relative rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50"
+      title={tooltip}
+    >
+      <div className="mb-1 inline-flex items-center gap-1">
+        <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          {label}
+        </p>
+        <Info size={12} className="text-slate-400 dark:text-slate-500" />
+      </div>
+      <p className="text-2xl font-extrabold text-slate-900 dark:text-slate-100">{value}</p>
+      <div className="pointer-events-none absolute left-3 top-1 z-20 max-w-[230px] -translate-y-2 rounded-md border border-cyan-500/35 bg-slate-950/95 px-2 py-1 text-[11px] text-cyan-100 opacity-0 transition-all group-hover:-translate-y-1 group-hover:opacity-100">
+        {tooltip}
+      </div>
+    </div>
+  );
+}
+
 export function DashboardClient({
   canEdit,
   isSystemAdmin,
@@ -314,7 +349,11 @@ export function DashboardClient({
   currentUserId,
   initialDashboardLayout,
 }: DashboardClientProps) {
+  const router = useRouter();
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const realtimeRefreshTimeoutRef = useRef<number | null>(null);
+  const layoutDirtyRef = useRef(false);
+  const customizeOpenRef = useRef(false);
   const [query, setQuery] = useState(initialQuery);
   const [selectedDepartmentId, setSelectedDepartmentId] = useState("all");
   const [customizeOpen, setCustomizeOpen] = useState(false);
@@ -342,9 +381,76 @@ export function DashboardClient({
   }, [initialQuery]);
 
   useEffect(() => {
+    layoutDirtyRef.current = layoutDirty;
+  }, [layoutDirty]);
+
+  useEffect(() => {
+    customizeOpenRef.current = customizeOpen;
+  }, [customizeOpen]);
+
+  useEffect(() => {
+    if (layoutDirtyRef.current) {
+      return;
+    }
+
     setWidgetLayout(normalizeWidgetLayout(initialDashboardLayout));
     setLayoutDirty(false);
   }, [initialDashboardLayout]);
+
+  const scheduleRealtimeRefresh = useCallback(() => {
+    if (
+      typeof window === "undefined" ||
+      layoutDirtyRef.current ||
+      customizeOpenRef.current ||
+      realtimeRefreshTimeoutRef.current !== null
+    ) {
+      return;
+    }
+
+    realtimeRefreshTimeoutRef.current = window.setTimeout(() => {
+      realtimeRefreshTimeoutRef.current = null;
+      router.refresh();
+    }, 450);
+  }, [router]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel(`dashboard-live-${currentUserId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "work_items" },
+        () => scheduleRealtimeRefresh(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "work_instructions" },
+        () => scheduleRealtimeRefresh(),
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "user_pinned_instructions",
+          filter: `user_id=eq.${currentUserId}`,
+        },
+        () => scheduleRealtimeRefresh(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "departments" },
+        () => scheduleRealtimeRefresh(),
+      )
+      .subscribe();
+
+    return () => {
+      if (realtimeRefreshTimeoutRef.current !== null) {
+        window.clearTimeout(realtimeRefreshTimeoutRef.current);
+        realtimeRefreshTimeoutRef.current = null;
+      }
+      void supabase.removeChannel(channel);
+    };
+  }, [currentUserId, scheduleRealtimeRefresh, supabase]);
 
   const departmentInsights = useMemo(() => {
     const countsByDepartmentId = new Map<string, number>();
@@ -521,6 +627,10 @@ export function DashboardClient({
     () => new Map(WIDGET_DEFINITIONS.map((widget) => [widget.id, widget])),
     [],
   );
+  const widgetLayoutById = useMemo(
+    () => new Map(widgetLayout.map((widget) => [widget.id, widget])),
+    [widgetLayout],
+  );
 
   const getAuthHeaders = useCallback(async () => {
     const {
@@ -640,9 +750,17 @@ export function DashboardClient({
 
   function renderWidgetContent(widgetId: DashboardWidgetId) {
     if (widgetId === "finder") {
+      const finderSize = widgetLayoutById.get("finder")?.size ?? "full";
+      const isFinderCompact = finderSize === "compact";
+
       return (
         <div className="grid gap-4">
-          <div className="flex flex-wrap items-center justify-end gap-2">
+          <div
+            className={cn(
+              "flex flex-wrap items-center gap-2",
+              isFinderCompact ? "justify-start" : "justify-end",
+            )}
+          >
             {isSystemAdmin ? (
               <Link
                 href="/instructions/archived"
@@ -661,9 +779,16 @@ export function DashboardClient({
             ) : null}
           </div>
 
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_260px]">
+          <div
+            className={cn(
+              "grid gap-3",
+              isFinderCompact ? "grid-cols-1" : "md:grid-cols-[minmax(0,1fr)_260px]",
+            )}
+          >
             <label className="grid gap-1 text-sm">
-              <span className="font-semibold">Part Number or Mold Number</span>
+              <span className="font-semibold">
+                {isFinderCompact ? "Part Number or Mold" : "Part Number or Mold Number"}
+              </span>
               <div className="relative">
                 <Search
                   size={16}
@@ -1008,42 +1133,34 @@ export function DashboardClient({
     return (
       <div className="grid gap-3">
         <div className="grid gap-2 md:grid-cols-2">
-          <div className="rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50">
-            <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Authored Instructions
-            </p>
-            <p className="text-2xl font-extrabold text-slate-900 dark:text-slate-100">
-              {myInstructionEntries.length}
-            </p>
-          </div>
-          <div className="rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50">
-            <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Departments Touched
-            </p>
-            <p className="text-2xl font-extrabold text-slate-900 dark:text-slate-100">
-              {myDepartmentCount}
-            </p>
-          </div>
-          <div className="rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50">
-            <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Total Pins
-            </p>
-            <p className="text-2xl font-extrabold text-slate-900 dark:text-slate-100">
-              {pinnedInstructions.length}
-            </p>
-          </div>
-          <div className="rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50">
-            <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Most Recent Authored
-            </p>
-            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-              {myLatestEntry ? (
-                <LocalDateTime value={myLatestEntry.instruction.created_at} mode="date" />
+          <ImpactKpiCard
+            label="Authored Instructions"
+            value={myInstructionEntries.length}
+            tooltip="Total active instructions authored by you."
+          />
+          <ImpactKpiCard
+            label="Departments Touched"
+            value={myDepartmentCount}
+            tooltip="Number of unique departments where you authored at least one instruction."
+          />
+          <ImpactKpiCard
+            label="Total Pins"
+            value={pinnedInstructions.length}
+            tooltip="Active instructions you pinned for quick access."
+          />
+          <ImpactKpiCard
+            label="Most Recent Authored"
+            value={
+              myLatestEntry ? (
+                <span className="text-xl font-bold">
+                  <LocalDateTime value={myLatestEntry.instruction.created_at} mode="date" />
+                </span>
               ) : (
                 "N/A"
-              )}
-            </p>
-          </div>
+              )
+            }
+            tooltip="Date of the latest active instruction you authored."
+          />
         </div>
 
         {myRecentEntries.length > 0 ? (
