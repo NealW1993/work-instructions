@@ -9,6 +9,7 @@ import { LocalDateTime } from "@/components/ui/local-date-time";
 interface DashboardWorkItemSummary {
   department_id: string;
   department_name: string;
+  department_color: string;
   part_number: string;
   mold_number: string;
   item_title: string;
@@ -45,11 +46,13 @@ export interface DashboardWorkItemData extends DashboardWorkItemSummary {
 interface DashboardDepartmentOption {
   id: string;
   name: string;
+  color_hex: string | null;
 }
 
 interface DepartmentInsight {
   id: string;
   name: string;
+  color_hex: string;
   instructionCount: number;
 }
 
@@ -66,6 +69,8 @@ interface DashboardClientProps {
   departmentOptions: DashboardDepartmentOption[];
 }
 
+const DEFAULT_DEPARTMENT_COLOR = "#0EA5E9";
+
 function formatDateForSearch(value: string) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
@@ -77,6 +82,25 @@ function formatDateForSearch(value: string) {
     month: "numeric",
     day: "numeric",
   }).format(parsed);
+}
+
+function normalizeDepartmentColor(value: string | null | undefined) {
+  const normalized = (value ?? "").trim().toUpperCase();
+  return /^#[0-9A-F]{6}$/.test(normalized) ? normalized : DEFAULT_DEPARTMENT_COLOR;
+}
+
+function colorToRgb(colorHex: string) {
+  const normalized = normalizeDepartmentColor(colorHex);
+  return {
+    red: Number.parseInt(normalized.slice(1, 3), 16),
+    green: Number.parseInt(normalized.slice(3, 5), 16),
+    blue: Number.parseInt(normalized.slice(5, 7), 16),
+  };
+}
+
+function colorWithAlpha(colorHex: string, alpha: number) {
+  const { red, green, blue } = colorToRgb(colorHex);
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
 
 function itemMatchesQuery(item: DashboardWorkItemData, normalizedQuery: string) {
@@ -152,30 +176,47 @@ export function DashboardClient({
   }, [initialQuery]);
 
   const departmentInsights = useMemo(() => {
-    const insights = new Map<string, DepartmentInsight>();
+    const countsByDepartmentId = new Map<string, number>();
+    const fallbackDepartmentMetadata = new Map<
+      string,
+      {
+        name: string;
+        colorHex: string;
+      }
+    >();
 
-    for (const option of departmentOptions) {
-      insights.set(option.id, {
-        id: option.id,
-        name: option.name,
-        instructionCount: 0,
+    for (const item of items) {
+      countsByDepartmentId.set(
+        item.department_id,
+        (countsByDepartmentId.get(item.department_id) ?? 0) + item.work_instructions.length,
+      );
+
+      fallbackDepartmentMetadata.set(item.department_id, {
+        name: item.department_name,
+        colorHex: normalizeDepartmentColor(item.department_color),
       });
     }
 
-    for (const item of items) {
-      const existing = insights.get(item.department_id);
-      if (existing) {
-        existing.instructionCount += item.work_instructions.length;
-      } else {
-        insights.set(item.department_id, {
-          id: item.department_id,
-          name: item.department_name,
-          instructionCount: item.work_instructions.length,
-        });
-      }
-    }
+    const orderedInsights: DepartmentInsight[] = departmentOptions.map((option) => ({
+      id: option.id,
+      name: option.name,
+      color_hex: normalizeDepartmentColor(option.color_hex),
+      instructionCount: countsByDepartmentId.get(option.id) ?? 0,
+    }));
 
-    return Array.from(insights.values()).sort((a, b) => a.name.localeCompare(b.name));
+    const knownDepartmentIds = new Set(departmentOptions.map((option) => option.id));
+    const orphanInsights = Array.from(countsByDepartmentId.keys())
+      .filter((departmentId) => !knownDepartmentIds.has(departmentId))
+      .map((departmentId) => ({
+        id: departmentId,
+        name: fallbackDepartmentMetadata.get(departmentId)?.name ?? "Unknown",
+        color_hex:
+          fallbackDepartmentMetadata.get(departmentId)?.colorHex ?? DEFAULT_DEPARTMENT_COLOR,
+        instructionCount: countsByDepartmentId.get(departmentId) ?? 0,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    return [...orderedInsights, ...orphanInsights];
   }, [departmentOptions, items]);
 
   const totalInstructionCount = useMemo(() => {
@@ -334,10 +375,20 @@ export function DashboardClient({
                 key={department.id}
                 type="button"
                 onClick={() => setSelectedDepartmentId(department.id)}
+                style={{
+                  borderColor: colorWithAlpha(
+                    department.color_hex,
+                    selectedDepartmentId === department.id ? 0.75 : 0.4,
+                  ),
+                  backgroundColor: colorWithAlpha(
+                    department.color_hex,
+                    selectedDepartmentId === department.id ? 0.22 : 0.11,
+                  ),
+                }}
                 className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
                   selectedDepartmentId === department.id
-                    ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-800 dark:text-cyan-200"
-                    : "border-slate-400/30 bg-slate-900/10 dark:bg-white/10"
+                    ? "text-slate-900 dark:text-slate-100"
+                    : "text-slate-700 dark:text-slate-200"
                 }`}
               >
                 {department.name} ({department.instructionCount})
@@ -374,7 +425,12 @@ export function DashboardClient({
             filteredItems.map((item) => (
               <article
                 key={item.id}
-                className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-4 shadow-lg backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-5"
+                style={{
+                  borderColor: colorWithAlpha(item.department_color, 0.45),
+                  backgroundColor: colorWithAlpha(item.department_color, 0.12),
+                  boxShadow: `inset 4px 0 0 ${colorWithAlpha(item.department_color, 0.9)}`,
+                }}
+                className="grid gap-3 rounded-3xl border p-4 shadow-lg backdrop-blur-xl md:p-5"
               >
                 <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                   <div>
@@ -385,7 +441,13 @@ export function DashboardClient({
                       {item.item_title}
                     </p>
                   </div>
-                  <span className="rounded-full border border-slate-400/30 bg-slate-900/10 px-3 py-1 text-xs font-semibold dark:bg-white/10">
+                  <span
+                    style={{
+                      borderColor: colorWithAlpha(item.department_color, 0.45),
+                      backgroundColor: colorWithAlpha(item.department_color, 0.2),
+                    }}
+                    className="rounded-full border px-3 py-1 text-xs font-semibold text-slate-900 dark:text-slate-100"
+                  >
                     {item.work_instructions.length} instruction
                     {item.work_instructions.length === 1 ? "" : "s"}
                   </span>
@@ -400,7 +462,11 @@ export function DashboardClient({
                       <Link
                         key={instruction.id}
                         href={`/instructions/${instruction.id}`}
-                        className="rounded-xl border border-slate-300/70 bg-white/70 p-3 transition hover:border-cyan-500 hover:bg-cyan-500/5 dark:border-slate-700 dark:bg-slate-950/70"
+                        style={{
+                          borderColor: colorWithAlpha(item.department_color, 0.45),
+                          backgroundColor: colorWithAlpha(item.department_color, 0.18),
+                        }}
+                        className="rounded-xl border p-3 transition hover:brightness-105"
                       >
                         <p className="font-semibold">Revision {instruction.revision}</p>
                         <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -440,7 +506,18 @@ export function DashboardClient({
                   <Link
                     key={instruction.id}
                     href={`/instructions/${instruction.id}`}
-                    className="rounded-xl border border-slate-300/70 bg-white/70 p-3 transition hover:border-cyan-500 hover:bg-cyan-500/5 dark:border-slate-700 dark:bg-slate-950/70"
+                    style={{
+                      borderColor: colorWithAlpha(instruction.workItem.department_color, 0.45),
+                      backgroundColor: colorWithAlpha(
+                        instruction.workItem.department_color,
+                        0.14,
+                      ),
+                      boxShadow: `inset 4px 0 0 ${colorWithAlpha(
+                        instruction.workItem.department_color,
+                        0.85,
+                      )}`,
+                    }}
+                    className="rounded-xl border p-3 transition hover:brightness-105"
                   >
                     <p className="font-semibold">
                       {getLabelWithDepartment(instruction.workItem)}
@@ -483,7 +560,18 @@ export function DashboardClient({
                   <Link
                     key={instruction.id}
                     href={`/instructions/${instruction.id}`}
-                    className="rounded-xl border border-slate-300/70 bg-white/70 p-3 transition hover:border-cyan-500 hover:bg-cyan-500/5 dark:border-slate-700 dark:bg-slate-950/70"
+                    style={{
+                      borderColor: colorWithAlpha(instruction.workItem.department_color, 0.45),
+                      backgroundColor: colorWithAlpha(
+                        instruction.workItem.department_color,
+                        0.14,
+                      ),
+                      boxShadow: `inset 4px 0 0 ${colorWithAlpha(
+                        instruction.workItem.department_color,
+                        0.85,
+                      )}`,
+                    }}
+                    className="rounded-xl border p-3 transition hover:brightness-105"
                   >
                     <p className="font-semibold">
                       {getLabelWithDepartment(instruction.workItem)}

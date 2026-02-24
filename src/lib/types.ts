@@ -6,6 +6,8 @@ export type MediaType = "image" | "video";
 export interface Department {
   id: string;
   name: string;
+  sort_order: number;
+  color_hex: string;
   created_at: string;
   updated_at: string;
 }

@@ -5,10 +5,16 @@ import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 interface UpdateDepartmentBody {
   name?: string;
+  colorHex?: string;
 }
 
 function normalizeDepartmentName(value: string) {
   return value.trim().replace(/\s+/g, " ");
+}
+
+function normalizeColorHex(value: string) {
+  const normalized = value.trim().toUpperCase();
+  return /^#[0-9A-F]{6}$/.test(normalized) ? normalized : null;
 }
 
 async function requireSystemAdmin(request: NextRequest) {
@@ -44,18 +50,13 @@ export async function PATCH(
   }
 
   const body = (await request.json().catch(() => ({}))) as UpdateDepartmentBody;
-  const name = normalizeDepartmentName(body.name ?? "");
-
-  if (!name) {
-    return NextResponse.json({ error: "Department name is required." }, { status: 400 });
-  }
 
   const { id } = await context.params;
   const supabaseAdmin = getSupabaseAdminClient();
 
   const { data: existingDepartment, error: existingDepartmentError } = await supabaseAdmin
     .from("departments")
-    .select("id")
+    .select("id, name, color_hex")
     .eq("id", id)
     .maybeSingle();
 
@@ -70,11 +71,31 @@ export async function PATCH(
     return NextResponse.json({ error: "Department not found." }, { status: 404 });
   }
 
+  const normalizedName =
+    body.name === undefined
+      ? existingDepartment.name
+      : normalizeDepartmentName(body.name);
+  const normalizedColorHex =
+    body.colorHex === undefined
+      ? normalizeColorHex(existingDepartment.color_hex)
+      : normalizeColorHex(body.colorHex);
+
+  if (!normalizedName) {
+    return NextResponse.json({ error: "Department name is required." }, { status: 400 });
+  }
+
+  if (!normalizedColorHex) {
+    return NextResponse.json(
+      { error: "Department color must be a valid hex value like #0EA5E9." },
+      { status: 400 },
+    );
+  }
+
   const { data, error } = await supabaseAdmin
     .from("departments")
-    .update({ name })
+    .update({ name: normalizedName, color_hex: normalizedColorHex })
     .eq("id", id)
-    .select("id, name, created_at, updated_at")
+    .select("id, name, sort_order, color_hex, created_at, updated_at")
     .maybeSingle();
 
   if (error?.code === "23505") {

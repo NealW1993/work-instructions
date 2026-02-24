@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, UploadCloud } from "lucide-react";
 import { createPortal } from "react-dom";
@@ -45,6 +45,28 @@ interface DepartmentOption {
   name: string;
 }
 
+interface EditorSnapshot {
+  departmentId: string;
+  partNumber: string;
+  moldNumber: string;
+  itemTitle: string;
+  bodyMarkdown: string;
+  revision: number;
+}
+
+type PendingNavigation =
+  | {
+      kind: "history-back";
+    }
+  | {
+      kind: "internal-link";
+      href: string;
+    }
+  | {
+      kind: "external-link";
+      href: string;
+    };
+
 interface FieldErrors {
   department: boolean;
   partOrMold: boolean;
@@ -60,6 +82,8 @@ const DEFAULT_FIELD_ERRORS: FieldErrors = {
   revision: false,
   body: false,
 };
+
+const HISTORY_GUARD_STATE_KEY = "__instructionEditorUnsavedGuard";
 
 function looksLikeHtml(value: string): boolean {
   return /<\/?[a-z][\s\S]*>/i.test(value);
@@ -122,6 +146,39 @@ function normalizeSubmissionError(error: unknown) {
   return error instanceof Error ? error.message : "Save failed";
 }
 
+function normalizeSnapshotValue(value: string) {
+  return value.trim();
+}
+
+function buildSnapshot(data: {
+  departmentId: string;
+  partNumber: string;
+  moldNumber: string;
+  itemTitle: string;
+  bodyMarkdown: string;
+  revision: number;
+}): EditorSnapshot {
+  return {
+    departmentId: normalizeSnapshotValue(data.departmentId),
+    partNumber: normalizeSnapshotValue(data.partNumber),
+    moldNumber: normalizeSnapshotValue(data.moldNumber),
+    itemTitle: normalizeSnapshotValue(data.itemTitle),
+    bodyMarkdown: normalizeEditorContent(data.bodyMarkdown),
+    revision: data.revision,
+  };
+}
+
+function snapshotsAreEqual(a: EditorSnapshot, b: EditorSnapshot) {
+  return (
+    a.departmentId === b.departmentId &&
+    a.partNumber === b.partNumber &&
+    a.moldNumber === b.moldNumber &&
+    a.itemTitle === b.itemTitle &&
+    a.bodyMarkdown === b.bodyMarkdown &&
+    a.revision === b.revision
+  );
+}
+
 function getDepartmentNameFromRelation(
   relation: WorkItemSearchResult["departments"],
 ): string {
@@ -143,6 +200,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   const [departments, setDepartments] = useState<DepartmentOption[]>([]);
   const [departmentsBusy, setDepartmentsBusy] = useState(false);
   const [departmentId, setDepartmentId] = useState(initialData?.departmentId ?? "");
+  const [departmentTouched, setDepartmentTouched] = useState(false);
 
   const [partNumber, setPartNumber] = useState(initialData?.partNumber ?? "");
   const [moldNumber, setMoldNumber] = useState(initialData?.moldNumber ?? "");
@@ -168,28 +226,226 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   const [error, setError] = useState<string | null>(null);
   const [portalReady, setPortalReady] = useState(false);
   const [forkCanceledModalOpen, setForkCanceledModalOpen] = useState(false);
+  const [navigationModalOpen, setNavigationModalOpen] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null);
 
   const partInputRef = useRef<HTMLInputElement | null>(null);
   const moldInputRef = useRef<HTMLInputElement | null>(null);
   const itemTitleInputRef = useRef<HTMLInputElement | null>(null);
+  const hasUnsavedChangesRef = useRef(false);
+  const navigationModalOpenRef = useRef(false);
+  const historyGuardActiveRef = useRef(false);
+  const suppressNextPopStateRef = useRef(false);
+  const pendingNavigationRef = useRef<PendingNavigation | null>(null);
+  const navigationBypassRef = useRef(false);
 
-  const initialForkSnapshot = useMemo(() => {
-    if (mode !== "fork" || !initialData) {
-      return null;
+  const initialSnapshot = useMemo(
+    () =>
+      buildSnapshot({
+        departmentId: initialData?.departmentId ?? "",
+        partNumber: initialData?.partNumber ?? "",
+        moldNumber: initialData?.moldNumber ?? "",
+        itemTitle: initialData?.itemTitle ?? "",
+        bodyMarkdown: initialData?.bodyMarkdown ?? "",
+        revision: initialData?.revision ?? 1,
+      }),
+    [initialData],
+  );
+
+  const currentSnapshot = useMemo(
+    () =>
+      buildSnapshot({
+        departmentId,
+        partNumber,
+        moldNumber,
+        itemTitle,
+        bodyMarkdown,
+        revision,
+      }),
+    [bodyMarkdown, departmentId, itemTitle, moldNumber, partNumber, revision],
+  );
+
+  const createModeHasMeaningfulChanges = useMemo(() => {
+    const hasContentChanges =
+      currentSnapshot.partNumber.length > 0 ||
+      currentSnapshot.moldNumber.length > 0 ||
+      currentSnapshot.itemTitle.length > 0 ||
+      currentSnapshot.revision !== initialSnapshot.revision ||
+      richTextToPlain(currentSnapshot.bodyMarkdown).length > 0;
+
+    const hasDepartmentChange = departmentTouched
+      ? currentSnapshot.departmentId !== initialSnapshot.departmentId
+      : false;
+
+    return hasContentChanges || hasDepartmentChange;
+  }, [currentSnapshot, departmentTouched, initialSnapshot.departmentId, initialSnapshot.revision]);
+
+  const hasUnsavedChanges = useMemo(() => {
+    if (mode === "create") {
+      return createModeHasMeaningfulChanges;
     }
 
-    return {
-      departmentId: initialData.departmentId ?? "",
-      partNumber: initialData.partNumber.trim(),
-      moldNumber: initialData.moldNumber.trim(),
-      itemTitle: initialData.itemTitle.trim(),
-      bodyMarkdown: normalizeEditorContent(initialData.bodyMarkdown),
-      revision: initialData.revision,
-    };
-  }, [initialData, mode]);
+    return !snapshotsAreEqual(currentSnapshot, initialSnapshot);
+  }, [createModeHasMeaningfulChanges, currentSnapshot, initialSnapshot, mode]);
 
   useEffect(() => {
     setPortalReady(true);
+  }, []);
+
+  const releaseHistoryGuard = useCallback(() => {
+    if (!historyGuardActiveRef.current) {
+      return;
+    }
+
+    suppressNextPopStateRef.current = true;
+    historyGuardActiveRef.current = false;
+    window.history.back();
+  }, []);
+
+  const navigateWithGuardReleased = useCallback(
+    (navigate: () => void) => {
+      if (historyGuardActiveRef.current) {
+        releaseHistoryGuard();
+        window.setTimeout(() => {
+          navigate();
+        }, 0);
+        return;
+      }
+
+      navigate();
+    },
+    [releaseHistoryGuard],
+  );
+
+  useEffect(() => {
+    hasUnsavedChangesRef.current = hasUnsavedChanges;
+  }, [hasUnsavedChanges]);
+
+  useEffect(() => {
+    navigationModalOpenRef.current = navigationModalOpen;
+  }, [navigationModalOpen]);
+
+  useEffect(() => {
+    pendingNavigationRef.current = pendingNavigation;
+  }, [pendingNavigation]);
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) {
+      if (historyGuardActiveRef.current) {
+        releaseHistoryGuard();
+      }
+
+      setNavigationModalOpen(false);
+      setPendingNavigation(null);
+      return;
+    }
+
+    if (!historyGuardActiveRef.current) {
+      window.history.pushState({ [HISTORY_GUARD_STATE_KEY]: true }, "", window.location.href);
+      historyGuardActiveRef.current = true;
+    }
+  }, [hasUnsavedChanges, releaseHistoryGuard]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!hasUnsavedChangesRef.current || navigationBypassRef.current) {
+        return;
+      }
+
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      if (suppressNextPopStateRef.current) {
+        suppressNextPopStateRef.current = false;
+        return;
+      }
+
+      if (!hasUnsavedChangesRef.current || navigationBypassRef.current) {
+        historyGuardActiveRef.current = false;
+        return;
+      }
+
+      if (navigationModalOpenRef.current) {
+        window.history.pushState({ [HISTORY_GUARD_STATE_KEY]: true }, "", window.location.href);
+        historyGuardActiveRef.current = true;
+        return;
+      }
+
+      window.history.pushState({ [HISTORY_GUARD_STATE_KEY]: true }, "", window.location.href);
+      historyGuardActiveRef.current = true;
+      setPendingNavigation({ kind: "history-back" });
+      setNavigationModalOpen(true);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleDocumentNavigation = (event: MouseEvent) => {
+      if (!hasUnsavedChangesRef.current || navigationBypassRef.current) {
+        return;
+      }
+
+      if (event.defaultPrevented || event.button !== 0) {
+        return;
+      }
+
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        return;
+      }
+
+      const target = event.target as Element | null;
+      const anchor = target?.closest("a[href]");
+      if (!(anchor instanceof HTMLAnchorElement)) {
+        return;
+      }
+
+      if (anchor.target && anchor.target !== "_self") {
+        return;
+      }
+
+      if (anchor.hasAttribute("download")) {
+        return;
+      }
+
+      let destination: URL;
+      try {
+        destination = new URL(anchor.href, window.location.href);
+      } catch {
+        return;
+      }
+
+      if (destination.href === window.location.href) {
+        return;
+      }
+
+      event.preventDefault();
+
+      if (destination.origin === window.location.origin) {
+        setPendingNavigation({ kind: "internal-link", href: destination.href });
+      } else {
+        setPendingNavigation({ kind: "external-link", href: destination.href });
+      }
+
+      setNavigationModalOpen(true);
+    };
+
+    document.addEventListener("click", handleDocumentNavigation, true);
+    return () => {
+      document.removeEventListener("click", handleDocumentNavigation, true);
+    };
   }, []);
 
   useEffect(() => {
@@ -201,6 +457,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         const { data, error: departmentsError } = await supabase
           .from("departments")
           .select("id, name")
+          .order("sort_order", { ascending: true })
           .order("name", { ascending: true });
 
         if (!isActive) {
@@ -345,6 +602,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   }, [moldNumber, supabase]);
 
   function applySuggestedWorkItem(result: WorkItemSearchResult) {
+    setDepartmentTouched(true);
     setDepartmentId(result.department_id);
     setPartNumber(result.part_number);
     setMoldNumber(result.mold_number);
@@ -368,6 +626,60 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     partInputRef.current?.focus();
   }
 
+  function closeNavigationModal() {
+    setNavigationModalOpen(false);
+    setPendingNavigation(null);
+  }
+
+  function handleCancelNavigationAway() {
+    if (
+      pendingNavigationRef.current?.kind === "history-back" &&
+      hasUnsavedChangesRef.current &&
+      !historyGuardActiveRef.current
+    ) {
+      window.history.pushState({ [HISTORY_GUARD_STATE_KEY]: true }, "", window.location.href);
+      historyGuardActiveRef.current = true;
+    }
+
+    navigationBypassRef.current = false;
+    closeNavigationModal();
+  }
+
+  function handleConfirmNavigationAway() {
+    const navigation = pendingNavigationRef.current;
+    if (!navigation) {
+      closeNavigationModal();
+      return;
+    }
+
+    navigationBypassRef.current = true;
+    closeNavigationModal();
+
+    if (navigation.kind === "history-back") {
+      if (window.history.length <= 2) {
+        navigateWithGuardReleased(() => {
+          router.push("/dashboard");
+        });
+        return;
+      }
+
+      suppressNextPopStateRef.current = true;
+      historyGuardActiveRef.current = false;
+      window.history.go(-2);
+      return;
+    }
+
+    navigateWithGuardReleased(() => {
+      if (navigation.kind === "external-link") {
+        window.location.assign(navigation.href);
+        return;
+      }
+
+      const destination = new URL(navigation.href, window.location.href);
+      router.push(`${destination.pathname}${destination.search}${destination.hash}`);
+    });
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -380,20 +692,10 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     const normalizedMoldNumber = moldNumber.trim();
     const normalizedDepartmentId = departmentId.trim();
 
-    if (mode === "fork" && initialForkSnapshot) {
-      const forkUnchanged =
-        normalizedDepartmentId === initialForkSnapshot.departmentId &&
-        normalizedPartNumber === initialForkSnapshot.partNumber &&
-        normalizedMoldNumber === initialForkSnapshot.moldNumber &&
-        itemTitle.trim() === initialForkSnapshot.itemTitle &&
-        bodyMarkdown === initialForkSnapshot.bodyMarkdown &&
-        revision === initialForkSnapshot.revision;
-
-      if (forkUnchanged) {
-        setForkCanceledModalOpen(true);
-        setBusy(false);
-        return;
-      }
+    if (mode === "fork" && snapshotsAreEqual(currentSnapshot, initialSnapshot)) {
+      setForkCanceledModalOpen(true);
+      setBusy(false);
+      return;
     }
 
     if (!normalizedDepartmentId) {
@@ -569,10 +871,14 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
             : "Instruction created successfully.",
       );
 
-      router.push(`/instructions/${instructionId}`);
-      router.refresh();
+      navigationBypassRef.current = true;
+      navigateWithGuardReleased(() => {
+        router.push(`/instructions/${instructionId}`);
+        router.refresh();
+      });
     } catch (caughtError) {
       setError(normalizeSubmissionError(caughtError));
+      navigationBypassRef.current = false;
     } finally {
       setBusy(false);
     }
@@ -763,6 +1069,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
             <select
               value={departmentId}
               onChange={(event) => {
+                setDepartmentTouched(true);
                 setDepartmentId(event.target.value);
                 setWorkItemId(null);
                 if (fieldErrors.department) {
@@ -846,6 +1153,40 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         </button>
       </form>
 
+      {navigationModalOpen && portalReady
+        ? createPortal(
+            <div className="fixed inset-0 z-[111] flex items-center justify-center overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
+              <div className="grid w-full max-w-md gap-4 rounded-2xl border border-amber-500/45 bg-slate-950/95 p-5 shadow-2xl">
+                <div className="grid gap-1">
+                  <h3 className="text-lg font-bold text-slate-100">Discard unsaved changes?</h3>
+                  <p className="text-sm text-slate-300">
+                    You have unsaved changes. If you leave this page now, your updates will be
+                    lost.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCancelNavigationAway}
+                    className="rounded-xl border border-slate-600 bg-slate-900/70 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
+                  >
+                    Keep Editing
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmNavigationAway}
+                    className="rounded-xl border border-amber-500/45 bg-amber-500/20 px-4 py-2 text-sm font-semibold text-amber-100 transition hover:bg-amber-500/30"
+                  >
+                    Leave Without Saving
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+
       {forkCanceledModalOpen && portalReady
         ? createPortal(
             <div className="fixed inset-0 z-[110] flex items-center justify-center overflow-y-auto bg-slate-950/70 p-4 backdrop-blur-sm sm:p-6">
@@ -871,8 +1212,11 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                       type="button"
                       onClick={() => {
                         setForkCanceledModalOpen(false);
-                        router.push(`/instructions/${initialData.sourceInstructionId}`);
-                        router.refresh();
+                        navigationBypassRef.current = true;
+                        navigateWithGuardReleased(() => {
+                          router.push(`/instructions/${initialData.sourceInstructionId}`);
+                          router.refresh();
+                        });
                       }}
                       className="rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/25"
                     >
