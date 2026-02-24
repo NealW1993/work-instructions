@@ -290,6 +290,47 @@ function getLabelWithDepartment(workItem: DashboardWorkItemSummary) {
   return `${getPrimaryPartOrMoldLabel(workItem)} | ${workItem.department_name}`;
 }
 
+function buildCelebrationHighlightsFromLikes(
+  likedInstructions: DashboardLikedInstructionCardData[],
+  newLikeBudget: number,
+) {
+  if (newLikeBudget <= 0) {
+    return [] as DashboardLikeCelebrationHighlight[];
+  }
+
+  const sorted = [...likedInstructions].sort((a, b) => {
+    const aTime = new Date(a.latest_liked_at).getTime();
+    const bTime = new Date(b.latest_liked_at).getTime();
+    return bTime - aTime;
+  });
+
+  const highlights: DashboardLikeCelebrationHighlight[] = [];
+  let remaining = newLikeBudget;
+
+  for (const instruction of sorted) {
+    if (remaining <= 0) {
+      break;
+    }
+
+    const contribution = Math.min(
+      Math.max(1, instruction.likes_count),
+      remaining,
+    );
+    highlights.push({
+      instructionId: instruction.id,
+      label: getLabelWithDepartment(instruction.workItem),
+      newLikesCount: contribution,
+    });
+    remaining -= contribution;
+
+    if (highlights.length >= 3) {
+      break;
+    }
+  }
+
+  return highlights;
+}
+
 function isWidgetId(value: string): value is DashboardWidgetId {
   return WIDGET_DEFINITIONS.some((widget) => widget.id === value);
 }
@@ -445,8 +486,12 @@ export function DashboardClient({
   const [impactDrilldownKey, setImpactDrilldownKey] = useState<ImpactDrilldownKey | null>(null);
   const [departmentDrilldownDepartmentId, setDepartmentDrilldownDepartmentId] =
     useState<string | null>(null);
+  const [activeLikeCelebration, setActiveLikeCelebration] =
+    useState<DashboardLikeCelebrationData | null>(() =>
+      (likeCelebration?.newLikesCount ?? 0) > 0 ? likeCelebration : null,
+    );
   const [likeCelebrationOpen, setLikeCelebrationOpen] = useState(
-    (likeCelebration?.newLikesCount ?? 0) > 0,
+    (activeLikeCelebration?.newLikesCount ?? 0) > 0,
   );
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const celebrationConfettiPieces = useMemo(
@@ -479,7 +524,7 @@ export function DashboardClient({
   }, []);
 
   useEffect(() => {
-    if ((likeCelebration?.newLikesCount ?? 0) <= 0) {
+    if ((activeLikeCelebration?.newLikesCount ?? 0) <= 0) {
       setLikeCelebrationOpen(false);
       return;
     }
@@ -492,7 +537,7 @@ export function DashboardClient({
     return () => {
       window.clearTimeout(timer);
     };
-  }, [likeCelebration?.latestNewLikeAt, likeCelebration?.newLikesCount]);
+  }, [activeLikeCelebration?.latestNewLikeAt, activeLikeCelebration?.newLikesCount]);
 
   useEffect(() => {
     layoutDirtyRef.current = layoutDirty;
@@ -904,6 +949,69 @@ export function DashboardClient({
       likedInstructions.reduce((sum, instruction) => sum + instruction.likes_count, 0),
     [likedInstructions],
   );
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const storageKey = `dashboard-liked-seen-total:${currentUserId}`;
+    const serverCelebrationCount = likeCelebration?.newLikesCount ?? 0;
+
+    if (serverCelebrationCount > 0) {
+      setActiveLikeCelebration(likeCelebration);
+      window.localStorage.setItem(storageKey, String(totalAuthoredLikes));
+      return;
+    }
+
+    const rawSeenValue = window.localStorage.getItem(storageKey);
+    const parsedSeenTotal =
+      rawSeenValue === null ? Number.NaN : Number.parseInt(rawSeenValue, 10);
+    const hasSeenBaseline = Number.isFinite(parsedSeenTotal);
+
+    if (!hasSeenBaseline) {
+      if (totalAuthoredLikes > 0) {
+        setActiveLikeCelebration({
+          newLikesCount: totalAuthoredLikes,
+          latestNewLikeAt: new Date().toISOString(),
+          highlights: buildCelebrationHighlightsFromLikes(
+            likedInstructions,
+            totalAuthoredLikes,
+          ),
+        });
+      } else {
+        setActiveLikeCelebration(null);
+      }
+
+      window.localStorage.setItem(storageKey, String(totalAuthoredLikes));
+      return;
+    }
+
+    if (totalAuthoredLikes > parsedSeenTotal) {
+      const newLikeCount = totalAuthoredLikes - parsedSeenTotal;
+      setActiveLikeCelebration({
+        newLikesCount: newLikeCount,
+        latestNewLikeAt: new Date().toISOString(),
+        highlights: buildCelebrationHighlightsFromLikes(
+          likedInstructions,
+          newLikeCount,
+        ),
+      });
+      window.localStorage.setItem(storageKey, String(totalAuthoredLikes));
+      return;
+    }
+
+    if (totalAuthoredLikes < parsedSeenTotal) {
+      window.localStorage.setItem(storageKey, String(totalAuthoredLikes));
+    }
+
+    setActiveLikeCelebration(null);
+  }, [
+    currentUserId,
+    likeCelebration,
+    likedInstructions,
+    totalAuthoredLikes,
+  ]);
 
   const authoredDrilldownEntries = useMemo<ImpactDrilldownEntry[]>(() => {
     return [...myInstructionEntries]
@@ -2062,8 +2170,8 @@ export function DashboardClient({
 
       {portalReady &&
       likeCelebrationOpen &&
-      likeCelebration &&
-      likeCelebration.newLikesCount > 0
+      activeLikeCelebration &&
+      activeLikeCelebration.newLikesCount > 0
         ? createPortal(
             <div className="fixed inset-0 z-[113] flex items-center justify-center overflow-hidden bg-slate-950/65 p-4 backdrop-blur-sm sm:p-6">
               <div className="pointer-events-none absolute inset-0">
@@ -2095,17 +2203,17 @@ export function DashboardClient({
 
                 <div className="grid gap-1">
                   <h3 className="text-2xl font-extrabold text-slate-50">
-                    You got {likeCelebration.newLikesCount} new like
-                    {likeCelebration.newLikesCount === 1 ? "" : "s"}.
+                    You got {activeLikeCelebration.newLikesCount} new like
+                    {activeLikeCelebration.newLikesCount === 1 ? "" : "s"}.
                   </h3>
                   <p className="text-sm text-cyan-100">
                     Your teammates are appreciating your work instructions.
                   </p>
                 </div>
 
-                {likeCelebration.highlights.length > 0 ? (
+                {activeLikeCelebration.highlights.length > 0 ? (
                   <div className="grid gap-2 rounded-2xl border border-cyan-500/35 bg-cyan-500/10 p-3 text-left">
-                    {likeCelebration.highlights.slice(0, 3).map((highlight) => (
+                    {activeLikeCelebration.highlights.slice(0, 3).map((highlight) => (
                       <p key={highlight.instructionId} className="text-sm text-cyan-50">
                         <span className="font-semibold">{highlight.label}</span>
                         <span className="text-cyan-200">
