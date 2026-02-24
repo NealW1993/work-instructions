@@ -43,7 +43,7 @@ import {
 } from "lucide-react";
 import {
   type ChangeEvent,
-  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -105,6 +105,7 @@ const MIN_MEDIA_WIDTH = 180;
 const MAX_MEDIA_WIDTH = 1200;
 const MAX_INLINE_IMAGE_BYTES = 4 * 1024 * 1024;
 const MAX_INLINE_VIDEO_BYTES = 1024 * 1024 * 1024;
+const TAB_INDENT_CONTENT = "\u00a0\u00a0\u00a0\u00a0";
 
 function clampColorChannel(value: number) {
   return Math.max(0, Math.min(255, Math.round(value)));
@@ -276,26 +277,46 @@ function MediaNodeView({ node, selected, updateAttributes }: NodeViewProps) {
     updateAttributes({ align: nextAlign });
   };
 
-  const startResize = (event: ReactMouseEvent<HTMLButtonElement>) => {
+  const startResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
 
+    const pointerId = event.pointerId;
+    const resizeHandleElement = event.currentTarget;
     const startX = event.clientX;
     const startWidth = width;
 
-    const handleMouseMove = (moveEvent: MouseEvent) => {
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== pointerId) {
+        return;
+      }
+
+      moveEvent.preventDefault();
       const deltaX = moveEvent.clientX - startX;
       const nextWidth = clampMediaWidth(startWidth + deltaX);
       updateAttributes({ width: nextWidth });
     };
 
-    const handleMouseUp = () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
+    const handlePointerEnd = (endEvent: PointerEvent) => {
+      if (endEvent.pointerId !== pointerId) {
+        return;
+      }
+
+      if (resizeHandleElement.hasPointerCapture(pointerId)) {
+        resizeHandleElement.releasePointerCapture(pointerId);
+      }
+
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerEnd);
+      window.removeEventListener("pointercancel", handlePointerEnd);
     };
 
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
+    resizeHandleElement.setPointerCapture(pointerId);
+    window.addEventListener("pointermove", handlePointerMove, {
+      passive: false,
+    });
+    window.addEventListener("pointerup", handlePointerEnd);
+    window.addEventListener("pointercancel", handlePointerEnd);
   };
 
   const alignClassName =
@@ -354,11 +375,11 @@ function MediaNodeView({ node, selected, updateAttributes }: NodeViewProps) {
               setAlign("left");
             }}
             className={cn(
-              "inline-flex h-6 w-6 items-center justify-center rounded",
+              "inline-flex h-8 w-8 items-center justify-center rounded",
               align === "left" ? "bg-cyan-500/60" : "hover:bg-white/20",
             )}
           >
-            <AlignLeft size={12} />
+            <AlignLeft size={14} />
           </button>
           <button
             type="button"
@@ -369,11 +390,11 @@ function MediaNodeView({ node, selected, updateAttributes }: NodeViewProps) {
               setAlign("center");
             }}
             className={cn(
-              "inline-flex h-6 w-6 items-center justify-center rounded",
+              "inline-flex h-8 w-8 items-center justify-center rounded",
               align === "center" ? "bg-cyan-500/60" : "hover:bg-white/20",
             )}
           >
-            <AlignCenter size={12} />
+            <AlignCenter size={14} />
           </button>
           <button
             type="button"
@@ -384,22 +405,29 @@ function MediaNodeView({ node, selected, updateAttributes }: NodeViewProps) {
               setAlign("right");
             }}
             className={cn(
-              "inline-flex h-6 w-6 items-center justify-center rounded",
+              "inline-flex h-8 w-8 items-center justify-center rounded",
               align === "right" ? "bg-cyan-500/60" : "hover:bg-white/20",
             )}
           >
-            <AlignRight size={12} />
-          </button>
-          <button
-            type="button"
-            aria-label="Resize media"
-            title="Resize media"
-            onMouseDown={startResize}
-            className="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-white/20"
-          >
-            <MoveDiagonal2 size={12} />
+            <AlignRight size={14} />
           </button>
         </div>
+
+        <button
+          type="button"
+          contentEditable={false}
+          aria-label="Resize media"
+          title="Drag left or right to resize"
+          onPointerDown={startResize}
+          className={cn(
+            "pointer-events-none absolute -right-4 top-1/2 z-30 inline-flex h-11 w-11 -translate-y-1/2 touch-none items-center justify-center rounded-full border border-white/55 bg-slate-950/80 text-white opacity-0 shadow-lg transition",
+            selected
+              ? "pointer-events-auto opacity-100"
+              : "group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100",
+          )}
+        >
+          <MoveDiagonal2 size={16} />
+        </button>
       </div>
     </NodeViewWrapper>
   );
@@ -447,6 +475,41 @@ const FontSize = Extension.create({
         () =>
         ({ chain }) =>
           chain().setMark("textStyle", { fontSize: null }).removeEmptyTextStyle().run(),
+    };
+  },
+});
+
+const TabIndent = Extension.create({
+  name: "tabIndent",
+
+  addKeyboardShortcuts() {
+    return {
+      Tab: () => {
+        const editor = this.editor;
+
+        if (editor.isActive("listItem")) {
+          return editor.commands.sinkListItem("listItem");
+        }
+
+        if (editor.isActive("taskItem")) {
+          return editor.commands.sinkListItem("taskItem");
+        }
+
+        return editor.commands.insertContent(TAB_INDENT_CONTENT);
+      },
+      "Shift-Tab": () => {
+        const editor = this.editor;
+
+        if (editor.isActive("listItem")) {
+          return editor.commands.liftListItem("listItem");
+        }
+
+        if (editor.isActive("taskItem")) {
+          return editor.commands.liftListItem("taskItem");
+        }
+
+        return false;
+      },
     };
   },
 });
@@ -686,6 +749,7 @@ export function RichTextEditor({
       Placeholder.configure({
         placeholder: placeholder ?? "Start typing...",
       }),
+      TabIndent,
       FontSize,
       ResizableImage,
       ResizableVideo,
