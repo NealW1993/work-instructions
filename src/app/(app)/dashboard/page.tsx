@@ -32,6 +32,7 @@ interface DashboardInstructionWorkItem {
 interface DashboardInstructionRow {
   id: string;
   revision: number;
+  last_change_summary: string | null;
   created_at: string;
   updated_at: string;
   created_by: string;
@@ -157,6 +158,19 @@ function toTimestamp(value: string | null | undefined) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function formatHistoryInstructionUpdateDetail(instruction: DashboardInstructionRow) {
+  const summary = instruction.last_change_summary?.trim();
+  if (summary) {
+    return summary;
+  }
+
+  if (instruction.revision > 1) {
+    return `Revision ${instruction.revision} updated.`;
+  }
+
+  return "Instruction content updated.";
+}
+
 function buildCreatorNameMap(
   users: Array<{ id: string; full_name: string }> | null,
 ) {
@@ -180,7 +194,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const newestRequest = supabase
     .from("work_instructions")
     .select(
-      "id, revision, created_at, updated_at, created_by, updated_by, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title)",
+      "id, revision, last_change_summary, created_at, updated_at, created_by, updated_by, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title)",
     )
     .eq("is_archived", false)
     .order("created_at", { ascending: false })
@@ -189,7 +203,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const pinnedRequest = supabase
     .from("user_pinned_instructions")
     .select(
-      "created_at, work_instructions!inner(id, revision, created_at, updated_at, created_by, updated_by, is_archived, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title))",
+      "created_at, work_instructions!inner(id, revision, last_change_summary, created_at, updated_at, created_by, updated_by, is_archived, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title))",
     )
     .eq("user_id", profile.id)
     .eq("work_instructions.is_archived", false)
@@ -199,7 +213,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const authoredLikesRequest = supabase
     .from("instruction_likes")
     .select(
-      "created_at, instruction_id, user_id, work_instructions!inner(id, revision, created_at, updated_at, created_by, updated_by, is_archived, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title))",
+      "created_at, instruction_id, user_id, work_instructions!inner(id, revision, last_change_summary, created_at, updated_at, created_by, updated_by, is_archived, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title))",
     )
     .eq("work_instructions.created_by", profile.id)
     .eq("work_instructions.is_archived", false)
@@ -210,25 +224,16 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const historyInstructionsRequest = supabase
     .from("work_instructions")
     .select(
-      "id, revision, created_at, updated_at, created_by, updated_by, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title)",
+      "id, revision, last_change_summary, created_at, updated_at, created_by, updated_by, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title)",
     )
     .eq("is_archived", false)
     .order("updated_at", { ascending: false })
     .limit(120);
 
-  const historyLikesRequest = supabase
-    .from("instruction_likes")
-    .select(
-      "created_at, instruction_id, user_id, work_instructions!inner(id, revision, created_at, updated_at, created_by, updated_by, is_archived, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title))",
-    )
-    .eq("work_instructions.is_archived", false)
-    .order("created_at", { ascending: false })
-    .limit(120);
-
   const historyPinsRequest = supabase
     .from("user_pinned_instructions")
     .select(
-      "created_at, instruction_id, user_id, work_instructions!inner(id, revision, created_at, updated_at, created_by, updated_by, is_archived, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title))",
+      "created_at, instruction_id, user_id, work_instructions!inner(id, revision, last_change_summary, created_at, updated_at, created_by, updated_by, is_archived, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title))",
     )
     .eq("work_instructions.is_archived", false)
     .order("created_at", { ascending: false })
@@ -246,7 +251,6 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     { data: pinnedData, error: pinnedError },
     { data: authoredLikesData },
     { data: historyInstructionsData },
-    { data: historyLikesData },
     { data: historyPinsData },
     { data: departmentsData },
   ] = await Promise.all([
@@ -255,7 +259,6 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     pinnedRequest,
     authoredLikesRequest,
     historyInstructionsRequest,
-    historyLikesRequest,
     historyPinsRequest,
     departmentsRequest,
   ]);
@@ -265,7 +268,6 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const rawPinned = (pinnedData ?? []) as DashboardPinnedInstructionRow[];
   const rawAuthoredLikes = (authoredLikesData ?? []) as DashboardInstructionLikeRow[];
   const rawHistoryInstructions = (historyInstructionsData ?? []) as DashboardInstructionRow[];
-  const rawHistoryLikes = (historyLikesData ?? []) as DashboardInstructionLikeRow[];
   const rawHistoryPins = (historyPinsData ?? []) as DashboardHistoryPinRow[];
 
   const profileIds = new Set<string>();
@@ -296,14 +298,6 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   for (const instruction of rawHistoryInstructions) {
     profileIds.add(instruction.created_by);
     profileIds.add(instruction.updated_by);
-  }
-  for (const likeRow of rawHistoryLikes) {
-    profileIds.add(likeRow.user_id);
-    const instruction = normalizeInstruction(likeRow.work_instructions);
-    if (instruction) {
-      profileIds.add(instruction.created_by);
-      profileIds.add(instruction.updated_by);
-    }
   }
   for (const pinRow of rawHistoryPins) {
     profileIds.add(pinRow.user_id);
@@ -499,34 +493,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       occurred_at: instruction.updated_at,
       action_label: "Instruction Updated",
       actor_name: profileNameMap.get(instruction.updated_by) ?? "Unknown",
-      detail: `Revision ${instruction.revision} updated.`,
+      detail: formatHistoryInstructionUpdateDetail(instruction),
       instruction_id: instruction.id,
       workItem: resolvedWorkItem,
-    });
-  }
-
-  for (const row of rawHistoryLikes) {
-    const instruction = normalizeInstruction(row.work_instructions);
-    const workItem = instruction ? normalizeWorkItem(instruction.work_items) : null;
-    if (!instruction || !workItem) {
-      continue;
-    }
-
-    systemHistoryEvents.push({
-      id: `liked:${row.user_id}:${row.instruction_id}:${row.created_at}`,
-      occurred_at: row.created_at,
-      action_label: "Instruction Liked",
-      actor_name: profileNameMap.get(row.user_id) ?? "Unknown",
-      detail: `Liked revision ${instruction.revision}.`,
-      instruction_id: instruction.id,
-      workItem: {
-        department_id: workItem.department_id,
-        department_name: normalizeDepartmentName(workItem.departments),
-        department_color: normalizeDepartmentColor(workItem.departments),
-        part_number: workItem.part_number,
-        mold_number: workItem.mold_number,
-        item_title: workItem.item_title,
-      },
     });
   }
 

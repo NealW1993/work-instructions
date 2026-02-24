@@ -168,6 +168,95 @@ function buildSnapshot(data: {
   };
 }
 
+function extractInlineMediaSources(content: string) {
+  const normalizedContent = normalizeEditorContent(content);
+  const sources = new Set<string>();
+  const mediaPattern = /<(img|video)\b[^>]*\bsrc=(["'])(.*?)\2[^>]*>/gi;
+
+  let match = mediaPattern.exec(normalizedContent);
+  while (match) {
+    const source = match[3]?.trim();
+    if (source) {
+      sources.add(source);
+    }
+
+    match = mediaPattern.exec(normalizedContent);
+  }
+
+  return sources;
+}
+
+function buildInstructionUpdateSummary(params: {
+  previousBody: string;
+  nextBody: string;
+  previousRevision: number;
+  nextRevision: number;
+}) {
+  const previousNormalized = normalizeEditorContent(params.previousBody);
+  const nextNormalized = normalizeEditorContent(params.nextBody);
+  const summaryParts: string[] = [];
+
+  const previousPlainText = richTextToPlain(previousNormalized).replace(/\s+/g, " ").trim();
+  const nextPlainText = richTextToPlain(nextNormalized).replace(/\s+/g, " ").trim();
+  if (previousPlainText !== nextPlainText) {
+    summaryParts.push("Instruction steps updated");
+  }
+
+  const previousMediaSources = extractInlineMediaSources(previousNormalized);
+  const nextMediaSources = extractInlineMediaSources(nextNormalized);
+
+  let addedMediaCount = 0;
+  for (const source of nextMediaSources) {
+    if (!previousMediaSources.has(source)) {
+      addedMediaCount += 1;
+    }
+  }
+
+  let removedMediaCount = 0;
+  for (const source of previousMediaSources) {
+    if (!nextMediaSources.has(source)) {
+      removedMediaCount += 1;
+    }
+  }
+
+  if (addedMediaCount > 0) {
+    summaryParts.push(`Media added (+${addedMediaCount})`);
+  }
+  if (removedMediaCount > 0) {
+    summaryParts.push(`Media removed (-${removedMediaCount})`);
+  }
+
+  if (
+    previousMediaSources.size > 0 &&
+    previousNormalized !== nextNormalized &&
+    addedMediaCount === 0 &&
+    removedMediaCount === 0
+  ) {
+    summaryParts.push("Media formatting updated");
+  }
+
+  if (params.previousRevision !== params.nextRevision) {
+    summaryParts.push(
+      `Revision changed (${params.previousRevision} -> ${params.nextRevision})`,
+    );
+  }
+
+  if (summaryParts.length === 0) {
+    summaryParts.push("Instruction details updated");
+  }
+
+  return `${summaryParts.join("; ")}.`;
+}
+
+function buildInstructionCreateSummary(body: string, revision: number) {
+  const mediaCount = extractInlineMediaSources(body).size;
+  if (mediaCount === 0) {
+    return `Revision ${revision} created.`;
+  }
+
+  return `Revision ${revision} created with ${mediaCount} media item${mediaCount === 1 ? "" : "s"}.`;
+}
+
 function snapshotsAreEqual(a: EditorSnapshot, b: EditorSnapshot) {
   return (
     a.departmentId === b.departmentId &&
@@ -823,6 +912,17 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       }
 
       let instructionId = initialData?.instructionId ?? "";
+      const previousBodyForSummary = initialData?.bodyMarkdown ?? "";
+      const previousRevisionForSummary = initialData?.revision ?? revision;
+      const changeSummary =
+        mode === "edit"
+          ? buildInstructionUpdateSummary({
+              previousBody: previousBodyForSummary,
+              nextBody: bodyMarkdown,
+              previousRevision: previousRevisionForSummary,
+              nextRevision: revision,
+            })
+          : buildInstructionCreateSummary(bodyMarkdown, revision);
 
       if (mode === "create" || mode === "fork") {
         const { data: insertedInstruction, error: insertInstructionError } = await supabase
@@ -832,6 +932,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
             body_markdown: bodyMarkdown,
             notes_markdown: "",
             revision,
+            last_change_summary: changeSummary,
             created_by: user.id,
             updated_by: user.id,
           })
@@ -855,6 +956,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
             body_markdown: bodyMarkdown,
             notes_markdown: "",
             revision,
+            last_change_summary: changeSummary,
             updated_by: user.id,
           })
           .eq("id", instructionId);

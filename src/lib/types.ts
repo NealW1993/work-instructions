@@ -46,6 +46,7 @@ export interface WorkInstruction {
   body_markdown: string;
   notes_markdown: string;
   revision: number;
+  last_change_summary?: string | null;
   is_archived: boolean;
   created_by: string;
   updated_by: string;

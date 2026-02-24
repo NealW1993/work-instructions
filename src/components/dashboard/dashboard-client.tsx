@@ -387,6 +387,11 @@ export function DashboardClient({
   const pendingNavigationRef = useRef<DashboardPendingNavigation | null>(null);
   const navigationModalOpenRef = useRef(false);
   const historyGuardActiveRef = useRef(false);
+  const guardScrollRestoreRef = useRef<{
+    x: number;
+    y: number;
+    scrollRestoration: ScrollRestoration;
+  } | null>(null);
   const suppressNextPopStateRef = useRef(false);
   const navigationBypassRef = useRef(false);
   const [query, setQuery] = useState(initialQuery);
@@ -479,15 +484,49 @@ export function DashboardClient({
     navigationModalOpenRef.current = navigationModalOpen;
   }, [navigationModalOpen]);
 
+  const restoreGuardScrollPosition = useCallback(() => {
+    const pendingRestore = guardScrollRestoreRef.current;
+    if (!pendingRestore) {
+      return;
+    }
+
+    const applyScroll = () => {
+      window.scrollTo({
+        left: pendingRestore.x,
+        top: pendingRestore.y,
+        behavior: "auto",
+      });
+    };
+
+    applyScroll();
+    window.requestAnimationFrame(() => {
+      applyScroll();
+      window.requestAnimationFrame(() => {
+        applyScroll();
+        window.history.scrollRestoration = pendingRestore.scrollRestoration;
+        guardScrollRestoreRef.current = null;
+      });
+    });
+  }, []);
+
   const releaseHistoryGuard = useCallback(() => {
     if (!historyGuardActiveRef.current) {
       return;
     }
 
+    guardScrollRestoreRef.current = {
+      x: window.scrollX,
+      y: window.scrollY,
+      scrollRestoration: window.history.scrollRestoration,
+    };
+    window.history.scrollRestoration = "manual";
     suppressNextPopStateRef.current = true;
     historyGuardActiveRef.current = false;
     window.history.back();
-  }, []);
+    window.setTimeout(() => {
+      restoreGuardScrollPosition();
+    }, 0);
+  }, [restoreGuardScrollPosition]);
 
   const navigateWithGuardReleased = useCallback(
     (navigate: () => void) => {
@@ -546,6 +585,7 @@ export function DashboardClient({
     const handlePopState = () => {
       if (suppressNextPopStateRef.current) {
         suppressNextPopStateRef.current = false;
+        restoreGuardScrollPosition();
         return;
       }
 
@@ -577,7 +617,7 @@ export function DashboardClient({
     return () => {
       window.removeEventListener("popstate", handlePopState);
     };
-  }, []);
+  }, [restoreGuardScrollPosition]);
 
   useEffect(() => {
     const handleDocumentNavigation = (event: MouseEvent) => {
