@@ -68,6 +68,11 @@ export function LoginPanel() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState("");
+  const [feedbackBusy, setFeedbackBusy] = useState(false);
+  const [feedbackStatus, setFeedbackStatus] = useState<string | null>(null);
+  const [feedbackError, setFeedbackError] = useState<string | null>(null);
 
   useEffect(() => {
     const savedEmail = window.localStorage.getItem(REMEMBER_EMAIL_KEY);
@@ -79,6 +84,23 @@ export function LoginPanel() {
       setRememberMe(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (!feedbackOpen) {
+      return;
+    }
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setFeedbackOpen(false);
+      }
+    };
+
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [feedbackOpen]);
 
   async function withBusy(action: () => Promise<void>) {
     setBusy(true);
@@ -123,13 +145,13 @@ export function LoginPanel() {
       }
 
       setSessionStartNow();
-      await supabase
-        .rpc("touch_user_session", {
-          end_session: false,
-        })
-        .catch(() => {
-          // Session tracking is best-effort and should not block login.
-        });
+      const { error: touchSessionError } = await supabase.rpc("touch_user_session", {
+        end_session: false,
+      });
+      if (touchSessionError) {
+        // Session tracking is best-effort and should not block login.
+        console.warn("Unable to sync session start:", touchSessionError.message);
+      }
       router.push("/dashboard");
       router.refresh();
     });
@@ -171,13 +193,13 @@ export function LoginPanel() {
       }
 
       setSessionStartNow();
-      await supabase
-        .rpc("touch_user_session", {
-          end_session: false,
-        })
-        .catch(() => {
-          // Session tracking is best-effort and should not block login.
-        });
+      const { error: touchSessionError } = await supabase.rpc("touch_user_session", {
+        end_session: false,
+      });
+      if (touchSessionError) {
+        // Session tracking is best-effort and should not block login.
+        console.warn("Unable to sync session start:", touchSessionError.message);
+      }
       router.push("/dashboard");
       router.refresh();
     });
@@ -266,13 +288,13 @@ export function LoginPanel() {
           "Account created. If your email matches SYSTEM_ADMIN_EMAIL and no system admin exists yet, this account was promoted automatically.",
         );
         setSessionStartNow();
-        await supabase
-          .rpc("touch_user_session", {
-            end_session: false,
-          })
-          .catch(() => {
-            // Session tracking is best-effort and should not block login.
-          });
+        const { error: touchSessionError } = await supabase.rpc("touch_user_session", {
+          end_session: false,
+        });
+        if (touchSessionError) {
+          // Session tracking is best-effort and should not block login.
+          console.warn("Unable to sync session start:", touchSessionError.message);
+        }
         router.push("/dashboard");
         router.refresh();
         return;
@@ -341,6 +363,43 @@ export function LoginPanel() {
         "Temporary password generated. Sign in with it, then change your password.",
       );
     });
+  }
+
+  async function handleSubmitFeedback(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const normalizedMessage = feedbackMessage.trim();
+    if (!normalizedMessage) {
+      setFeedbackError("Please enter feedback before sending.");
+      setFeedbackStatus(null);
+      return;
+    }
+
+    setFeedbackBusy(true);
+    setFeedbackError(null);
+    setFeedbackStatus(null);
+
+    try {
+      const response = await fetch("/api/auth/feedback", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: normalizedMessage,
+        }),
+      });
+
+      await parseJsonResponse(response);
+      setFeedbackStatus("Feedback sent anonymously. Thank you.");
+      setFeedbackMessage("");
+    } catch (caughtError) {
+      const normalizedError =
+        caughtError instanceof Error ? caughtError.message : "Unable to send feedback.";
+      setFeedbackError(normalizedError);
+    } finally {
+      setFeedbackBusy(false);
+    }
   }
 
   const signupPasswordMismatch =
@@ -736,6 +795,78 @@ export function LoginPanel() {
           </Link>
         </div>
       </div>
+
+      <div className="mt-1 flex flex-wrap items-center justify-between gap-2 border-t border-slate-300/70 pt-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+        <p>2026 Omni Technologies, all rights reserved.</p>
+        <button
+          type="button"
+          onClick={() => {
+            setFeedbackOpen(true);
+            setFeedbackError(null);
+            setFeedbackStatus(null);
+          }}
+          className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+        >
+          Leave Feedback
+        </button>
+      </div>
+
+      {feedbackOpen ? (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+          <div className="grid w-full max-w-lg gap-3 rounded-2xl border border-cyan-500/35 bg-white p-4 shadow-2xl dark:bg-slate-950">
+            <div className="grid gap-1">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">
+                Leave Anonymous Feedback
+              </h3>
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                This will email your feedback anonymously to the system admin.
+              </p>
+            </div>
+
+            {feedbackStatus ? (
+              <p className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-2 text-sm text-emerald-700 dark:text-emerald-200">
+                {feedbackStatus}
+              </p>
+            ) : null}
+            {feedbackError ? (
+              <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-2 text-sm text-rose-700 dark:text-rose-200">
+                {feedbackError}
+              </p>
+            ) : null}
+
+            <form className="grid gap-3" onSubmit={handleSubmitFeedback}>
+              <label className="grid gap-1 text-sm">
+                <span>Feedback</span>
+                <textarea
+                  value={feedbackMessage}
+                  onChange={(event) => setFeedbackMessage(event.target.value)}
+                  rows={6}
+                  maxLength={4000}
+                  placeholder="What should we improve?"
+                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                />
+              </label>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFeedbackOpen(false)}
+                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+                >
+                  Close
+                </button>
+                <button
+                  type="submit"
+                  disabled={feedbackBusy}
+                  className="rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {feedbackBusy ? "Sending..." : "Send Feedback"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

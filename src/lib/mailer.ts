@@ -25,6 +25,15 @@ function getTransporter() {
   return transporter;
 }
 
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 export async function sendPasswordResetEmail(options: {
   to: string;
   fullName: string;
@@ -44,6 +53,32 @@ export async function sendPasswordResetEmail(options: {
         <p>Use the link below to reset your password:</p>
         <p><a href="${options.resetLink}">${options.resetLink}</a></p>
         <p>This link expires in 60 minutes.</p>
+      </div>
+    `,
+  });
+}
+
+export async function sendAnonymousFeedbackEmail(options: {
+  to: string;
+  message: string;
+}) {
+  const mailer = getTransporter();
+  const submittedAt = new Date().toISOString();
+  const safeMessage = escapeHtml(options.message);
+
+  await mailer.sendMail({
+    from: serverEnv.SMTP_FROM,
+    to: options.to,
+    subject: "Anonymous Work Instructions Feedback",
+    text:
+      "Anonymous feedback received from the login page.\n\n" +
+      `Submitted at (UTC): ${submittedAt}\n\n` +
+      options.message,
+    html: `
+      <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111;">
+        <h2>Anonymous Login Feedback</h2>
+        <p><strong>Submitted at (UTC):</strong> ${submittedAt}</p>
+        <p style="white-space:pre-wrap;">${safeMessage}</p>
       </div>
     `,
   });

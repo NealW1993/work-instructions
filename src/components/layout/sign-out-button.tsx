@@ -14,13 +14,16 @@ export function SignOutButton() {
   async function handleSignOut() {
     const supabase = getSupabaseBrowserClient();
 
-    await supabase
-      .rpc("touch_user_session", {
+    try {
+      const { error: touchSessionError } = await supabase.rpc("touch_user_session", {
         end_session: true,
-      })
-      .catch(() => {
-        // Do not block sign-out on session telemetry failures.
       });
+      if (touchSessionError) {
+        console.warn("Unable to finalize session telemetry:", touchSessionError.message);
+      }
+    } catch {
+      // Do not block sign-out on session telemetry failures.
+    }
 
     await supabase.auth.signOut();
     clearSessionStart();

@@ -313,14 +313,6 @@ export function AccountSettingsPanel({
     };
   }, [navigationModalOpen]);
 
-  useEffect(() => {
-    return () => {
-      if (themePreference !== savedThemePreference) {
-        setTheme(savedThemePreference);
-      }
-    };
-  }, [savedThemePreference, setTheme, themePreference]);
-
   function closeNavigationModal() {
     pendingNavigationRef.current = null;
     setNavigationModalOpen(false);
@@ -511,7 +503,7 @@ export function AccountSettingsPanel({
         setMessage("Account updated.");
       }
 
-      if (fullNameChanged || emailChanged || employeeIdChanged || themeChanged) {
+      if (fullNameChanged || emailChanged || employeeIdChanged) {
         router.refresh();
       }
     } catch (caughtError) {
