@@ -297,6 +297,52 @@ html:not(.dark) textarea:-webkit-autofill:focus {
   transition: background-color 9999s ease-in-out 0s;
 }
 
+/* Keep the login shell visually stable even if the global light overrides are active. */
+html:not(.dark) .auth-login-shell h1,
+html:not(.dark) .auth-login-shell h2,
+html:not(.dark) .auth-login-shell h3,
+html:not(.dark) .auth-login-shell h4,
+html:not(.dark) .auth-login-shell h5,
+html:not(.dark) .auth-login-shell h6 {
+  color: #f8fafc !important;
+}
+
+html:not(.dark) .auth-login-shell label,
+html:not(.dark) .auth-login-shell legend {
+  color: #e2e8f0 !important;
+}
+
+html:not(.dark) .auth-login-shell input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]),
+html:not(.dark) .auth-login-shell textarea,
+html:not(.dark) .auth-login-shell select {
+  background-color: rgba(2, 6, 23, 0.65) !important;
+  color: #f8fafc !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+html:not(.dark) .auth-login-shell input::placeholder,
+html:not(.dark) .auth-login-shell textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+html:not(.dark) .auth-login-shell input:focus,
+html:not(.dark) .auth-login-shell textarea:focus,
+html:not(.dark) .auth-login-shell select:focus {
+  border-color: rgba(226, 232, 240, 0.65) !important;
+  box-shadow: 0 0 0 1px rgba(226, 232, 240, 0.35) !important;
+}
+
+html:not(.dark) .auth-login-shell input:-webkit-autofill,
+html:not(.dark) .auth-login-shell input:-webkit-autofill:hover,
+html:not(.dark) .auth-login-shell input:-webkit-autofill:focus,
+html:not(.dark) .auth-login-shell textarea:-webkit-autofill,
+html:not(.dark) .auth-login-shell textarea:-webkit-autofill:hover,
+html:not(.dark) .auth-login-shell textarea:-webkit-autofill:focus {
+  -webkit-text-fill-color: #f8fafc !important;
+  box-shadow: 0 0 0 1000px rgba(2, 6, 23, 0.65) inset !important;
+  caret-color: #f8fafc !important;
+}
+
 .tiptap-editor-content.ProseMirror {
   outline: none;
 }

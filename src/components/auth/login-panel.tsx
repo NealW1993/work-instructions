@@ -265,14 +265,13 @@ export function LoginPanel() {
         />
       </div>
       <div className="pointer-events-none fixed inset-0 -z-10 bg-slate-950/58" />
-      <div className="relative z-10 mx-auto w-full max-w-3xl rounded-[2rem] border border-white/20 bg-slate-950/32 p-5 text-slate-100 shadow-2xl shadow-black/45 backdrop-blur-2xl md:p-8">
+      <div className="auth-login-shell relative z-10 mx-auto w-full max-w-3xl rounded-[2rem] border border-white/20 bg-slate-950/32 p-5 text-slate-100 shadow-2xl shadow-black/45 backdrop-blur-2xl md:p-8">
         <div className="grid gap-2 text-center">
           <h1 className="text-4xl font-extrabold leading-tight text-white md:text-6xl">
-            Fast, visual work instructions that you create.
+            Fast, visual work instructions.
           </h1>
-          <p className="text-lg font-semibold text-slate-100 md:text-xl">Work Instructions</p>
           <p className="text-base text-slate-200/90">
-            Sign in with Employee ID and 6-digit PIN.
+            Made by you. For you.
           </p>
         </div>
 

@@ -6,6 +6,7 @@ import { usePostHog } from "posthog-js/react";
 
 import { clearSessionStart, getSessionStartTime } from "@/lib/session-timer";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { persistActiveThemePreference } from "@/lib/theme-client";
 
 export function SignOutButton() {
   const router = useRouter();
@@ -48,6 +49,7 @@ export function SignOutButton() {
     await supabase.auth.signOut();
     clearSessionStart();
     posthog?.reset();
+    persistActiveThemePreference();
     router.push("/login");
     router.refresh();
   }

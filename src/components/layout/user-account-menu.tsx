@@ -14,6 +14,7 @@ import {
   getSessionStartTime,
 } from "@/lib/session-timer";
 import type { Profile } from "@/lib/types";
+import { persistActiveThemePreference } from "@/lib/theme-client";
 
 interface UserAccountMenuProps {
   profile: Profile;
@@ -179,6 +180,7 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
     await supabase.auth.signOut();
     clearSessionStart();
     posthog?.reset();
+    persistActiveThemePreference();
     setOpen(false);
     router.push("/login");
     router.refresh();
