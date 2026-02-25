@@ -15,12 +15,8 @@ export default async function UserAdminPage() {
     <section className="grid gap-4">
       <header>
         <h1 className="text-3xl font-extrabold text-slate-900 dark:text-slate-100">
-          User Administration
+          System Administration
         </h1>
-        <p className="text-sm text-slate-600 dark:text-slate-300">
-          Manage departments, create users, assign role levels, reset 6-digit PINs, and
-          delete users.
-        </p>
       </header>
       <UserAdminPanel />
     </section>

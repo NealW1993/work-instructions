@@ -10,9 +10,6 @@ export default async function AccountSettingsPage() {
         <h1 className="text-3xl font-extrabold text-slate-900 dark:text-slate-100">
           Account Settings
         </h1>
-        <p className="text-sm text-slate-600 dark:text-slate-300">
-          Manage your profile, PIN, saved theme preference, icon color, and sign-in history.
-        </p>
       </header>
       <AccountSettingsPanel
         initialFullName={profile.full_name}

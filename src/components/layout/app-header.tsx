@@ -33,7 +33,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
     ...(isSystemAdmin(profile.role)
       ? [{ href: "/instructions/archived", label: "Archived" }]
       : []),
-    ...(isSystemAdmin(profile.role) ? [{ href: "/admin/users", label: "User Admin" }] : []),
+    ...(isSystemAdmin(profile.role) ? [{ href: "/admin/users", label: "System Admin" }] : []),
   ];
 
   const renderNavLink = (link: HeaderNavLink) => {

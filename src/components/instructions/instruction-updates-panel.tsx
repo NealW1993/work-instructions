@@ -33,52 +33,7 @@ interface InstructionUpdatesPanelProps {
   events: InstructionUpdateEvent[];
 }
 
-interface InstructionUpdateTag {
-  id: string;
-  label: string;
-  actorName: string;
-  occurredAt: string;
-}
-
-function splitUpdateDetailSegments(detail: string) {
-  const normalized = detail.trim();
-  if (!normalized) {
-    return [];
-  }
-
-  const segments = normalized
-    .split(";")
-    .map((segment) => segment.trim().replace(/\.+$/, ""))
-    .filter((segment) => segment.length > 0);
-
-  return segments.length > 0 ? segments : [normalized.replace(/\.+$/, "")];
-}
-
-function getTagTone(label: string) {
-  const normalized = label.toLowerCase();
-
-  if (normalized.includes("added") || normalized.includes("created")) {
-    return "added";
-  }
-
-  if (normalized.includes("removed") || normalized.includes("deleted")) {
-    return "removed";
-  }
-
-  if (normalized.includes("revision")) {
-    return "revision";
-  }
-
-  return "updated";
-}
-
-function formatTagTooltip(actorName: string, occurredAt: string) {
-  const parsed = new Date(occurredAt);
-  const formattedOccurredAt = Number.isNaN(parsed.getTime())
-    ? occurredAt
-    : parsed.toLocaleString();
-  return `Updated by ${actorName} on ${formattedOccurredAt}`;
-}
+const MAX_VISIBLE_UPDATE_CARDS = 5;
 
 function hasSourcePayloadData(sourcePayload: InstructionUpdateSourcePayload | null | undefined) {
   if (!sourcePayload) {
@@ -119,18 +74,6 @@ export function InstructionUpdatesPanel({ events }: InstructionUpdatesPanelProps
       null,
     [selectedSourceEventId, updateEvents],
   );
-
-  const updateTags = useMemo<InstructionUpdateTag[]>(() => {
-    return updateEvents.flatMap((event) => {
-      const segments = splitUpdateDetailSegments(event.detail);
-      return segments.map((segment) => ({
-        id: `${event.id}:${segment.toLowerCase()}`,
-        label: segment,
-        actorName: event.actorName,
-        occurredAt: event.occurredAt,
-      }));
-    });
-  }, [updateEvents]);
 
   useEffect(() => {
     if (!selectedSourceEventId) {
@@ -174,7 +117,7 @@ export function InstructionUpdatesPanel({ events }: InstructionUpdatesPanelProps
                 : "border-slate-400/45 bg-slate-900/10 text-slate-700 hover:bg-slate-900/15 dark:text-slate-200 dark:hover:bg-white/10",
             )}
           >
-            Updates: {showUpdates ? "On" : "Off"}
+            {showUpdates ? "Hide Updates" : "Show Updates"}
           </button>
         </div>
 
@@ -185,36 +128,16 @@ export function InstructionUpdatesPanel({ events }: InstructionUpdatesPanelProps
             </p>
           ) : (
             <div className="grid gap-3">
-              <div className="flex flex-wrap gap-2">
-                {updateTags.map((tag) => {
-                  const tone = getTagTone(tag.label);
-                  return (
-                    <span
-                      key={tag.id}
-                      title={formatTagTooltip(tag.actorName, tag.occurredAt)}
-                      className={cn(
-                        "inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold",
-                        tone === "added" &&
-                          "border-emerald-500/50 bg-emerald-500/15 text-emerald-800 dark:text-emerald-200",
-                        tone === "removed" &&
-                          "border-rose-500/50 bg-rose-500/15 text-rose-800 dark:text-rose-200",
-                        tone === "revision" &&
-                          "border-amber-500/50 bg-amber-500/15 text-amber-900 dark:text-amber-200",
-                        tone === "updated" &&
-                          "border-cyan-500/50 bg-cyan-500/15 text-cyan-900 dark:text-cyan-200",
-                      )}
-                    >
-                      {tag.label}
-                    </span>
-                  );
-                })}
-              </div>
-
-              <div className="grid gap-2">
+              <div
+                className={cn(
+                  "grid gap-2",
+                  updateEvents.length > MAX_VISIBLE_UPDATE_CARDS ? "max-h-[32rem] overflow-y-auto pr-1" : "",
+                )}
+              >
                 {[...updateEvents].reverse().map((event) => (
                   <article
                     key={event.id}
-                    className="rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50"
+                    className="min-h-24 rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="text-xs text-slate-600 dark:text-slate-300">

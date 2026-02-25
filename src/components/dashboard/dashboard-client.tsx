@@ -1775,7 +1775,7 @@ export function DashboardClient({
         <div
           className={cn(
             "flex flex-wrap items-center",
-            widgetSize === "compact" ? "gap-2.5 py-0.5" : "gap-2",
+            widgetSize === "compact" ? "w-full gap-2" : "gap-2",
           )}
         >
           {isSystemAdmin ? (
@@ -1783,7 +1783,7 @@ export function DashboardClient({
               href="/instructions/archived"
               className={cn(
                 "inline-flex items-center justify-center whitespace-nowrap rounded-xl border border-slate-400/35 bg-slate-900/10 text-xs font-semibold text-slate-700 transition hover:bg-slate-900/15 dark:text-slate-200 dark:hover:bg-white/10",
-                widgetSize === "compact" ? "px-3.5 py-2" : "px-3 py-1.5",
+                widgetSize === "compact" ? "px-2.5 py-1.5" : "px-3 py-1.5",
               )}
             >
               Archived
@@ -1794,7 +1794,7 @@ export function DashboardClient({
               href="/instructions/new"
               className={cn(
                 "inline-flex items-center justify-center whitespace-nowrap rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-xs font-semibold text-white transition hover:brightness-110",
-                widgetSize === "compact" ? "px-3.5 py-2" : "px-3 py-1.5",
+                widgetSize === "compact" ? "px-2.5 py-1.5" : "px-3 py-1.5",
               )}
             >
               Create Instruction
@@ -2237,7 +2237,7 @@ export function DashboardClient({
               No recent system activity for {selectedDepartmentName}.
             </p>
           ) : (
-            <div className="mx-auto grid w-full max-w-5xl gap-2">
+            <div className="grid w-full gap-2">
               {visibleSystemHistoryEvents.map((event) => {
                 const isSelected = selectedSystemHistoryEventId === event.id;
                 const openInstructionHref = `/instructions/${event.instruction_id}`;
@@ -2486,8 +2486,6 @@ export function DashboardClient({
     );
   }
 
-  const hiddenWidgets = widgetLayout.filter((widget) => !widget.visible);
-
   return (
     <>
       <div className="grid gap-5">
@@ -2691,28 +2689,6 @@ export function DashboardClient({
                 </p>
               </div>
             </div>
-          ) : hiddenWidgets.length > 0 ? (
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <p className="text-xs text-slate-600 dark:text-slate-300">Hidden widgets:</p>
-              {hiddenWidgets.map((widget) => {
-                const definition = widgetDefinitionsById.get(widget.id);
-                if (!definition) {
-                  return null;
-                }
-
-                return (
-                  <button
-                    key={widget.id}
-                    type="button"
-                    onClick={() => toggleWidget(widget.id)}
-                    className="inline-flex items-center gap-1 rounded-full border border-emerald-500/35 bg-emerald-500/10 px-2.5 py-1 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-500/20 dark:text-emerald-200"
-                  >
-                    <Plus size={12} />
-                    {definition.title}
-                  </button>
-                );
-              })}
-            </div>
           ) : null}
         </section>
 
@@ -2777,7 +2753,7 @@ export function DashboardClient({
                   className={cn(
                     "mb-3 flex flex-col gap-2.5 pr-10",
                     widget.size === "compact"
-                      ? "xl:flex-row xl:items-start xl:justify-between"
+                      ? "items-start"
                       : "md:flex-row md:items-start md:justify-between",
                   )}
                 >
@@ -2799,7 +2775,7 @@ export function DashboardClient({
                   <div
                     className={cn(
                       "flex flex-wrap items-center",
-                      widget.size === "compact" ? "gap-3 pt-1" : "gap-2",
+                      widget.size === "compact" ? "w-full gap-2 pt-1" : "gap-2",
                     )}
                   >
                     {widgetHeaderControls}
