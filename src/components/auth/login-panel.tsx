@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 
@@ -231,43 +230,38 @@ export function LoginPanel() {
   const signupPinMismatch = signupPinConfirm.length > 0 && signupPin !== signupPinConfirm;
 
   return (
-    <div className="grid gap-6 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/75 md:p-8">
-      <div className="space-y-3">
-        <Image
-          src="/omni-technologies-logo.svg"
-          alt="OMNI Technologies"
-          width={420}
-          height={100}
-          priority
-          className="mx-auto h-10 w-auto opacity-95"
-        />
-        <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+    <div className="grid w-full gap-4 text-slate-100">
+      <div className="space-y-2 rounded-3xl border border-white/20 bg-slate-950/45 p-5 shadow-2xl shadow-black/35 backdrop-blur-2xl md:p-6">
+        <h1 className="text-4xl font-bold tracking-tight text-white">
           Work Instructions
         </h1>
-        <p className="text-sm text-slate-600 dark:text-slate-300">
+        <p className="text-base text-slate-200/90">
           Sign in with Employee ID and 6-digit PIN.
         </p>
       </div>
 
       {searchParams.get("error") === "missing_profile" ? (
-        <p className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-200">
+        <p className="rounded-2xl border border-amber-400/40 bg-amber-500/15 p-3 text-sm text-amber-100">
           Account is missing a profile row. Run the SQL migration and try again.
         </p>
       ) : null}
 
       {message ? (
-        <p className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-200">
+        <p className="rounded-2xl border border-emerald-400/45 bg-emerald-500/15 p-3 text-sm text-emerald-100">
           {message}
         </p>
       ) : null}
       {error ? (
-        <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-200">
+        <p className="rounded-2xl border border-rose-400/45 bg-rose-500/15 p-3 text-sm text-rose-100">
           {error}
         </p>
       ) : null}
 
-      <form className="grid gap-3" onSubmit={handlePinLogin}>
-        <label className="grid gap-1 text-sm">
+      <form
+        className="grid gap-3 rounded-3xl border border-white/20 bg-slate-950/45 p-5 shadow-xl shadow-black/30 backdrop-blur-2xl md:p-6"
+        onSubmit={handlePinLogin}
+      >
+        <label className="grid gap-1 text-sm text-slate-200">
           <span>Employee ID</span>
           <input
             required
@@ -278,56 +272,59 @@ export function LoginPanel() {
             onChange={(event) =>
               setPinEmployeeId(normalizeEmployeeId(event.target.value))
             }
-            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+            className="rounded-xl border border-white/20 bg-black/65 px-3 py-2 text-slate-100 outline-none transition focus:border-slate-300"
           />
         </label>
-        <label className="grid gap-1 text-sm">
+        <label className="grid gap-1 text-sm text-slate-200">
           <span>6-Digit PIN</span>
           <PinInput
             required
             value={pinLoginValue}
             onChange={setPinLoginValue}
-            className="tracking-[0.35em]"
+            className="border-white/20 bg-black/65 text-slate-100 tracking-[0.35em] focus:border-slate-300 dark:border-white/20 dark:bg-black/65 dark:text-slate-100"
           />
         </label>
         <button
           type="submit"
           disabled={busy}
-          className="mt-1 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
+          className="mt-1 rounded-xl bg-white/40 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/50 disabled:cursor-not-allowed disabled:opacity-70"
         >
           {busy ? "Validating PIN..." : "Login with PIN"}
         </button>
         <button
           type="button"
           onClick={() => setShowCreateAccount((current) => !current)}
-          className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+          className="rounded-xl border border-white/20 bg-black/50 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
         >
           {showCreateAccount ? "Hide Create Account" : "Create Account"}
         </button>
       </form>
 
       {showCreateAccount ? (
-        <form className="grid gap-3 rounded-2xl border border-slate-300/70 bg-white/60 p-4 dark:border-slate-700 dark:bg-slate-900/50" onSubmit={handleSignup}>
-          <label className="grid gap-1 text-sm">
+        <form
+          className="grid gap-3 rounded-3xl border border-white/20 bg-slate-950/45 p-5 shadow-xl shadow-black/30 backdrop-blur-2xl md:p-6"
+          onSubmit={handleSignup}
+        >
+          <label className="grid gap-1 text-sm text-slate-200">
             <span>Full Name</span>
             <input
               required
               value={signupName}
               onChange={(event) => setSignupName(event.target.value)}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              className="rounded-xl border border-white/20 bg-black/65 px-3 py-2 text-slate-100 outline-none transition focus:border-slate-300"
             />
           </label>
-          <label className="grid gap-1 text-sm">
+          <label className="grid gap-1 text-sm text-slate-200">
             <span>Email</span>
             <input
               required
               type="email"
               value={signupEmail}
               onChange={(event) => setSignupEmail(event.target.value)}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              className="rounded-xl border border-white/20 bg-black/65 px-3 py-2 text-slate-100 outline-none transition focus:border-slate-300"
             />
           </label>
-          <label className="grid gap-1 text-sm">
+          <label className="grid gap-1 text-sm text-slate-200">
             <span>Employee ID</span>
             <input
               required
@@ -338,90 +335,91 @@ export function LoginPanel() {
               onChange={(event) =>
                 setSignupEmployeeId(normalizeEmployeeId(event.target.value))
               }
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              className="rounded-xl border border-white/20 bg-black/65 px-3 py-2 text-slate-100 outline-none transition focus:border-slate-300"
             />
           </label>
-          <label className="grid gap-1 text-sm">
+          <label className="grid gap-1 text-sm text-slate-200">
             <span>6-Digit PIN</span>
             <PinInput
               required
               value={signupPin}
               onChange={setSignupPin}
-              className="tracking-[0.35em]"
+              className="border-white/20 bg-black/65 text-slate-100 tracking-[0.35em] focus:border-slate-300 dark:border-white/20 dark:bg-black/65 dark:text-slate-100"
             />
           </label>
-          <label className="grid gap-1 text-sm">
+          <label className="grid gap-1 text-sm text-slate-200">
             <span>Confirm PIN</span>
             <PinInput
               required
               value={signupPinConfirm}
               onChange={setSignupPinConfirm}
-              className="tracking-[0.35em]"
+              className="border-white/20 bg-black/65 text-slate-100 tracking-[0.35em] focus:border-slate-300 dark:border-white/20 dark:bg-black/65 dark:text-slate-100"
             />
           </label>
           {signupPinMismatch ? (
-            <p className="text-sm text-rose-600 dark:text-rose-300">
+            <p className="text-sm text-rose-200">
               PIN and Confirm PIN do not match.
             </p>
           ) : null}
           <button
             type="submit"
             disabled={busy || signupPinMismatch}
-            className="mt-1 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
+            className="mt-1 rounded-xl bg-white/40 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/50 disabled:cursor-not-allowed disabled:opacity-70"
           >
             {busy ? "Creating account..." : "Create account"}
           </button>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
+          <p className="text-xs text-slate-300/85">
             New accounts are created as <strong>user</strong> by default.
             System admin can promote roles in User Admin.
           </p>
         </form>
       ) : null}
 
-      <p className="text-xs text-slate-500 dark:text-slate-400">
-        Need help? Ask your system admin to reset your role or PIN.
-      </p>
-
-      <div className="mt-1 flex flex-wrap items-center justify-between gap-2 border-t border-slate-300/70 pt-3 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
-        <p>2026 Omni Technologies, all rights reserved.</p>
-        <button
-          type="button"
-          onClick={() => {
-            setFeedbackOpen(true);
-            setFeedbackError(null);
-            setFeedbackStatus(null);
-          }}
-          className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-        >
-          Leave Feedback
-        </button>
+      <div className="grid gap-3 rounded-3xl border border-white/20 bg-slate-950/45 p-5 shadow-xl shadow-black/30 backdrop-blur-2xl">
+        <p className="text-sm text-slate-300/95">
+          Need help? Ask your system admin to reset your role or PIN.
+        </p>
+        <div className="mt-1 flex flex-wrap items-center justify-between gap-2 border-t border-white/15 pt-3 text-xs text-slate-400">
+          <p>2026 Omni Technologies, all rights reserved.</p>
+          <button
+            type="button"
+            onClick={() => {
+              setFeedbackOpen(true);
+              setFeedbackError(null);
+              setFeedbackStatus(null);
+            }}
+            className="rounded-lg border border-white/20 bg-black/45 px-2.5 py-1 font-semibold text-slate-100 transition hover:bg-white/10"
+          >
+            Leave Feedback
+          </button>
+        </div>
       </div>
 
       {feedbackOpen ? (
         <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
-          <div className="grid w-full max-w-lg gap-3 rounded-2xl border border-cyan-500/35 bg-white p-4 shadow-2xl dark:bg-slate-950">
+          <div className="grid w-full max-w-lg gap-3 rounded-2xl border border-white/20 bg-slate-950/90 p-4 text-slate-100 shadow-2xl">
             <div className="grid gap-1">
-              <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">
+              <h3 className="text-lg font-bold text-slate-100">
                 Leave Anonymous Feedback
               </h3>
-              <p className="text-sm text-slate-600 dark:text-slate-300">
+              <p className="text-sm text-slate-300">
                 This will email your feedback anonymously to the system admin.
               </p>
             </div>
 
             {feedbackStatus ? (
-              <p className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-2 text-sm text-emerald-700 dark:text-emerald-200">
+              <p className="rounded-xl border border-emerald-400/45 bg-emerald-500/15 p-2 text-sm text-emerald-100">
                 {feedbackStatus}
               </p>
             ) : null}
             {feedbackError ? (
-              <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-2 text-sm text-rose-700 dark:text-rose-200">
+              <p className="rounded-xl border border-rose-400/45 bg-rose-500/15 p-2 text-sm text-rose-100">
                 {feedbackError}
               </p>
             ) : null}
 
             <form className="grid gap-3" onSubmit={handleSubmitFeedback}>
-              <label className="grid gap-1 text-sm">
+              <label className="grid gap-1 text-sm text-slate-200">
                 <span>Feedback</span>
                 <textarea
                   value={feedbackMessage}
@@ -429,7 +427,7 @@ export function LoginPanel() {
                   rows={6}
                   maxLength={4000}
                   placeholder="What should we improve?"
-                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  className="rounded-xl border border-white/20 bg-black/60 px-3 py-2 text-slate-100 outline-none transition focus:border-slate-300"
                 />
               </label>
 
@@ -437,14 +435,14 @@ export function LoginPanel() {
                 <button
                   type="button"
                   onClick={() => setFeedbackOpen(false)}
-                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+                  className="rounded-xl border border-white/20 bg-black/45 px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
                 >
                   Close
                 </button>
                 <button
                   type="submit"
                   disabled={feedbackBusy}
-                  className="rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
+                  className="rounded-xl bg-white/40 px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/50 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {feedbackBusy ? "Sending..." : "Send Feedback"}
                 </button>

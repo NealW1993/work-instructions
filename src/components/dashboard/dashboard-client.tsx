@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   BarChart3,
+  ChevronRight,
   GripVertical,
   Info,
   LayoutGrid,
@@ -482,6 +483,7 @@ export function DashboardClient({
   const returnStateAppliedRef = useRef(false);
   const [query, setQuery] = useState(initialQuery);
   const [selectedDepartmentId, setSelectedDepartmentId] = useState("all");
+  const [departmentInsightExpanded, setDepartmentInsightExpanded] = useState(false);
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [draggedWidgetId, setDraggedWidgetId] = useState<DashboardWidgetId | null>(null);
   const [dragOverWidgetId, setDragOverWidgetId] = useState<DashboardWidgetId | null>(null);
@@ -1053,6 +1055,7 @@ export function DashboardClient({
   const totalInstructionCount = useMemo(() => {
     return departmentInsights.reduce((sum, entry) => sum + entry.instructionCount, 0);
   }, [departmentInsights]);
+  const totalDepartmentCount = departmentInsights.length;
 
   const selectedDepartmentName =
     selectedDepartmentId === "all"
@@ -1899,42 +1902,80 @@ export function DashboardClient({
             <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
               Department Insight
             </p>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex min-w-0 items-center gap-2 overflow-hidden">
               <button
                 type="button"
-                onClick={() => setSelectedDepartmentId("all")}
-                className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                  selectedDepartmentId === "all"
-                    ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-800 dark:text-cyan-200"
-                    : "border-slate-400/30 bg-slate-900/10 dark:bg-white/10"
-                }`}
+                onClick={() => setDepartmentInsightExpanded((current) => !current)}
+                aria-expanded={departmentInsightExpanded}
+                aria-controls="finder-department-insight-slider"
+                className={cn(
+                  "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition",
+                  departmentInsightExpanded
+                    ? "border-cyan-500/55 bg-cyan-500/15 text-cyan-800 dark:text-cyan-200"
+                    : "border-slate-400/30 bg-slate-900/10 text-slate-700 dark:bg-white/10 dark:text-slate-200",
+                )}
               >
-                All ({totalInstructionCount})
+                <span>
+                  Total ({totalDepartmentCount}/{totalInstructionCount})
+                </span>
+                <ChevronRight
+                  size={13}
+                  className={cn(
+                    "transition-transform duration-300",
+                    departmentInsightExpanded ? "rotate-90" : "",
+                  )}
+                />
               </button>
-              {departmentInsights.map((department) => (
-                <button
-                  key={department.id}
-                  type="button"
-                  onClick={() => setSelectedDepartmentId(department.id)}
-                  style={{
-                    borderColor: colorWithAlpha(
-                      department.color_hex,
-                      selectedDepartmentId === department.id ? 0.75 : 0.4,
-                    ),
-                    backgroundColor: colorWithAlpha(
-                      department.color_hex,
-                      selectedDepartmentId === department.id ? 0.22 : 0.11,
-                    ),
-                  }}
-                  className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                    selectedDepartmentId === department.id
-                      ? "text-slate-900 dark:text-slate-100"
-                      : "text-slate-700 dark:text-slate-200"
-                  }`}
-                >
-                  {department.name} ({department.instructionCount})
-                </button>
-              ))}
+
+              <div
+                id="finder-department-insight-slider"
+                className={cn(
+                  "min-w-0 overflow-hidden transition-all duration-300 ease-out",
+                  departmentInsightExpanded
+                    ? "max-w-full opacity-100"
+                    : "pointer-events-none max-w-0 opacity-0",
+                )}
+              >
+                <div className="overflow-x-auto">
+                  <div className="flex min-w-max items-center gap-2 whitespace-nowrap pr-1">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDepartmentId("all")}
+                      className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                        selectedDepartmentId === "all"
+                          ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-800 dark:text-cyan-200"
+                          : "border-slate-400/30 bg-slate-900/10 dark:bg-white/10"
+                      }`}
+                    >
+                      All ({totalInstructionCount})
+                    </button>
+                    {departmentInsights.map((department) => (
+                      <button
+                        key={department.id}
+                        type="button"
+                        onClick={() => setSelectedDepartmentId(department.id)}
+                        style={{
+                          borderColor: colorWithAlpha(
+                            department.color_hex,
+                            selectedDepartmentId === department.id ? 0.75 : 0.4,
+                          ),
+                          backgroundColor: colorWithAlpha(
+                            department.color_hex,
+                            selectedDepartmentId === department.id ? 0.22 : 0.11,
+                          ),
+                        }}
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                          selectedDepartmentId === department.id
+                            ? "text-slate-900 dark:text-slate-100"
+                            : "text-slate-700 dark:text-slate-200"
+                        }`}
+                      >
+                        {department.name} ({department.instructionCount})
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
