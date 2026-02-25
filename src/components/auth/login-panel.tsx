@@ -1,5 +1,6 @@
 "use client";
 
+import { CircleHelp } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useEffect, useRef, useState } from "react";
 
@@ -250,7 +251,7 @@ export function LoginPanel() {
 
   return (
     <>
-      <div className="relative isolate w-full overflow-hidden rounded-[2rem] border border-white/20 shadow-2xl shadow-black/45">
+      <div className="pointer-events-none fixed inset-0 -z-20 overflow-hidden">
         <video
           ref={backgroundVideoRef}
           src="/omni-login-left.mp4"
@@ -259,46 +260,115 @@ export function LoginPanel() {
           muted
           playsInline
           preload="auto"
-          className="absolute inset-0 h-full w-full object-cover"
+          className="h-full w-full object-cover"
           aria-label="Work instructions background video"
         />
-        <div className="absolute inset-0 bg-slate-950/62" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_20%,rgba(148,163,184,0.28),transparent_52%)]" />
+      </div>
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-slate-950/58" />
+      <div className="relative z-10 mx-auto w-full max-w-3xl rounded-[2rem] border border-white/20 bg-slate-950/32 p-5 text-slate-100 shadow-2xl shadow-black/45 backdrop-blur-2xl md:p-8">
+        <div className="grid gap-2 text-center">
+          <h1 className="text-4xl font-extrabold leading-tight text-white md:text-6xl">
+            Fast, visual work instructions that you create.
+          </h1>
+          <p className="text-lg font-semibold text-slate-100 md:text-xl">Work Instructions</p>
+          <p className="text-base text-slate-200/90">
+            Sign in with Employee ID and 6-digit PIN.
+          </p>
+        </div>
 
-        <div className="relative z-10 mx-auto grid max-w-3xl gap-4 p-5 md:gap-5 md:p-8">
-          <div className="grid gap-2 text-center">
-            <h1 className="text-4xl font-extrabold leading-tight text-white md:text-6xl">
-              Visual work instructions
-            </h1>
-            <h2 className="text-4xl font-extrabold leading-tight text-white md:text-6xl">
-              Made by you. For you.
-            </h2>
-            <p className="text-base text-slate-200/90">
-              Sign in with Employee ID and 6-digit PIN.
-            </p>
+        {searchParams.get("error") === "missing_profile" ? (
+          <p className="mt-4 rounded-2xl border border-amber-400/40 bg-amber-500/15 p-3 text-sm text-amber-100">
+            Account is missing a profile row. Run the SQL migration and try again.
+          </p>
+        ) : null}
+
+        {message ? (
+          <p className="mt-4 rounded-2xl border border-emerald-400/45 bg-emerald-500/15 p-3 text-sm text-emerald-100">
+            {message}
+          </p>
+        ) : null}
+        {error ? (
+          <p className="mt-4 rounded-2xl border border-rose-400/45 bg-rose-500/15 p-3 text-sm text-rose-100">
+            {error}
+          </p>
+        ) : null}
+
+        <form className="mt-4 grid gap-3" onSubmit={handlePinLogin}>
+          <label className="grid gap-1 text-left text-sm text-slate-200">
+            <span>Employee ID</span>
+            <input
+              required
+              inputMode="numeric"
+              pattern="[0-9]{1,6}"
+              maxLength={6}
+              value={pinEmployeeId}
+              onChange={(event) => setPinEmployeeId(normalizeEmployeeId(event.target.value))}
+              className="rounded-xl border border-white/20 bg-black/65 px-3 py-2 text-slate-100 outline-none transition focus:border-slate-300"
+            />
+          </label>
+          <label className="grid gap-1 text-left text-sm text-slate-200">
+            <span>6-Digit PIN</span>
+            <PinInput
+              required
+              value={pinLoginValue}
+              onChange={setPinLoginValue}
+              className="border-white/20 bg-black/65 text-slate-100 tracking-[0.35em] focus:border-slate-300 dark:border-white/20 dark:bg-black/65 dark:text-slate-100"
+            />
+          </label>
+          <div className="mt-1 flex items-center gap-2">
+            <button
+              type="submit"
+              disabled={busy}
+              className="flex-1 rounded-xl bg-white/40 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/50 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {busy ? "Validating PIN..." : "Login with PIN"}
+            </button>
+            <div className="group relative inline-flex">
+              <button
+                type="button"
+                aria-label="Need help?"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/20 bg-black/50 text-slate-100 transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+              >
+                <CircleHelp size={18} />
+              </button>
+              <div className="pointer-events-none absolute bottom-[calc(100%+0.6rem)] right-0 z-20 w-64 rounded-xl border border-white/20 bg-slate-950/95 p-2.5 text-left text-xs text-slate-200 opacity-0 shadow-xl transition group-hover:opacity-100 group-focus-within:opacity-100">
+                Need help? Ask your system admin to reset your role or PIN.
+              </div>
+            </div>
           </div>
-
-          {searchParams.get("error") === "missing_profile" ? (
-            <p className="rounded-2xl border border-amber-400/40 bg-amber-500/15 p-3 text-sm text-amber-100">
-              Account is missing a profile row. Run the SQL migration and try again.
-            </p>
-          ) : null}
-
-          {message ? (
-            <p className="rounded-2xl border border-emerald-400/45 bg-emerald-500/15 p-3 text-sm text-emerald-100">
-              {message}
-            </p>
-          ) : null}
-          {error ? (
-            <p className="rounded-2xl border border-rose-400/45 bg-rose-500/15 p-3 text-sm text-rose-100">
-              {error}
-            </p>
-          ) : null}
-
-          <form
-            className="grid gap-3 rounded-2xl border border-white/20 bg-black/45 p-4 backdrop-blur-xl md:p-5"
-            onSubmit={handlePinLogin}
+          <button
+            type="button"
+            onClick={() => setShowCreateAccount((current) => !current)}
+            className="rounded-xl border border-white/20 bg-black/50 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
           >
+            {showCreateAccount ? "Hide Create Account" : "Create Account"}
+          </button>
+        </form>
+
+        {showCreateAccount ? (
+          <form
+            className="mt-4 grid gap-3 rounded-2xl border border-white/20 bg-black/45 p-4 backdrop-blur-xl md:p-5"
+            onSubmit={handleSignup}
+          >
+            <label className="grid gap-1 text-left text-sm text-slate-200">
+              <span>Full Name</span>
+              <input
+                required
+                value={signupName}
+                onChange={(event) => setSignupName(event.target.value)}
+                className="rounded-xl border border-white/20 bg-black/65 px-3 py-2 text-slate-100 outline-none transition focus:border-slate-300"
+              />
+            </label>
+            <label className="grid gap-1 text-left text-sm text-slate-200">
+              <span>Email</span>
+              <input
+                required
+                type="email"
+                value={signupEmail}
+                onChange={(event) => setSignupEmail(event.target.value)}
+                className="rounded-xl border border-white/20 bg-black/65 px-3 py-2 text-slate-100 outline-none transition focus:border-slate-300"
+              />
+            </label>
             <label className="grid gap-1 text-left text-sm text-slate-200">
               <span>Employee ID</span>
               <input
@@ -306,9 +376,9 @@ export function LoginPanel() {
                 inputMode="numeric"
                 pattern="[0-9]{1,6}"
                 maxLength={6}
-                value={pinEmployeeId}
+                value={signupEmployeeId}
                 onChange={(event) =>
-                  setPinEmployeeId(normalizeEmployeeId(event.target.value))
+                  setSignupEmployeeId(normalizeEmployeeId(event.target.value))
                 }
                 className="rounded-xl border border-white/20 bg-black/65 px-3 py-2 text-slate-100 outline-none transition focus:border-slate-300"
               />
@@ -317,119 +387,50 @@ export function LoginPanel() {
               <span>6-Digit PIN</span>
               <PinInput
                 required
-                value={pinLoginValue}
-                onChange={setPinLoginValue}
+                value={signupPin}
+                onChange={setSignupPin}
                 className="border-white/20 bg-black/65 text-slate-100 tracking-[0.35em] focus:border-slate-300 dark:border-white/20 dark:bg-black/65 dark:text-slate-100"
               />
             </label>
+            <label className="grid gap-1 text-left text-sm text-slate-200">
+              <span>Confirm PIN</span>
+              <PinInput
+                required
+                value={signupPinConfirm}
+                onChange={setSignupPinConfirm}
+                className="border-white/20 bg-black/65 text-slate-100 tracking-[0.35em] focus:border-slate-300 dark:border-white/20 dark:bg-black/65 dark:text-slate-100"
+              />
+            </label>
+            {signupPinMismatch ? (
+              <p className="text-sm text-rose-200">PIN and Confirm PIN do not match.</p>
+            ) : null}
             <button
               type="submit"
-              disabled={busy}
+              disabled={busy || signupPinMismatch}
               className="mt-1 rounded-xl bg-white/40 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/50 disabled:cursor-not-allowed disabled:opacity-70"
             >
-              {busy ? "Validating PIN..." : "Login with PIN"}
+              {busy ? "Creating account..." : "Create account"}
             </button>
-            <button
-              type="button"
-              onClick={() => setShowCreateAccount((current) => !current)}
-              className="rounded-xl border border-white/20 bg-black/50 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
-            >
-              {showCreateAccount ? "Hide Create Account" : "Create Account"}
-            </button>
-          </form>
-
-          {showCreateAccount ? (
-            <form
-              className="grid gap-3 rounded-2xl border border-white/20 bg-black/45 p-4 backdrop-blur-xl md:p-5"
-              onSubmit={handleSignup}
-            >
-              <label className="grid gap-1 text-left text-sm text-slate-200">
-                <span>Full Name</span>
-                <input
-                  required
-                  value={signupName}
-                  onChange={(event) => setSignupName(event.target.value)}
-                  className="rounded-xl border border-white/20 bg-black/65 px-3 py-2 text-slate-100 outline-none transition focus:border-slate-300"
-                />
-              </label>
-              <label className="grid gap-1 text-left text-sm text-slate-200">
-                <span>Email</span>
-                <input
-                  required
-                  type="email"
-                  value={signupEmail}
-                  onChange={(event) => setSignupEmail(event.target.value)}
-                  className="rounded-xl border border-white/20 bg-black/65 px-3 py-2 text-slate-100 outline-none transition focus:border-slate-300"
-                />
-              </label>
-              <label className="grid gap-1 text-left text-sm text-slate-200">
-                <span>Employee ID</span>
-                <input
-                  required
-                  inputMode="numeric"
-                  pattern="[0-9]{1,6}"
-                  maxLength={6}
-                  value={signupEmployeeId}
-                  onChange={(event) =>
-                    setSignupEmployeeId(normalizeEmployeeId(event.target.value))
-                  }
-                  className="rounded-xl border border-white/20 bg-black/65 px-3 py-2 text-slate-100 outline-none transition focus:border-slate-300"
-                />
-              </label>
-              <label className="grid gap-1 text-left text-sm text-slate-200">
-                <span>6-Digit PIN</span>
-                <PinInput
-                  required
-                  value={signupPin}
-                  onChange={setSignupPin}
-                  className="border-white/20 bg-black/65 text-slate-100 tracking-[0.35em] focus:border-slate-300 dark:border-white/20 dark:bg-black/65 dark:text-slate-100"
-                />
-              </label>
-              <label className="grid gap-1 text-left text-sm text-slate-200">
-                <span>Confirm PIN</span>
-                <PinInput
-                  required
-                  value={signupPinConfirm}
-                  onChange={setSignupPinConfirm}
-                  className="border-white/20 bg-black/65 text-slate-100 tracking-[0.35em] focus:border-slate-300 dark:border-white/20 dark:bg-black/65 dark:text-slate-100"
-                />
-              </label>
-              {signupPinMismatch ? (
-                <p className="text-sm text-rose-200">PIN and Confirm PIN do not match.</p>
-              ) : null}
-              <button
-                type="submit"
-                disabled={busy || signupPinMismatch}
-                className="mt-1 rounded-xl bg-white/40 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/50 disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {busy ? "Creating account..." : "Create account"}
-              </button>
-              <p className="text-xs text-slate-300/85">
-                New accounts are created as <strong>user</strong> by default. System admin can
-                promote roles in User Admin.
-              </p>
-            </form>
-          ) : null}
-
-          <div className="grid gap-3 rounded-2xl border border-white/20 bg-black/45 p-4 backdrop-blur-xl md:p-5">
-            <p className="text-sm text-slate-300/95">
-              Need help? Ask your system admin to reset your role or PIN.
+            <p className="text-xs text-slate-300/85">
+              New accounts are created as <strong>user</strong> by default. System admin can
+              promote roles in User Admin.
             </p>
-            <div className="mt-1 flex flex-wrap items-center justify-between gap-2 border-t border-white/15 pt-3 text-xs text-slate-300/80">
-              <p>2026 Omni Technologies, all rights reserved.</p>
-              <button
-                type="button"
-                onClick={() => {
-                  setFeedbackOpen(true);
-                  setFeedbackError(null);
-                  setFeedbackStatus(null);
-                }}
-                className="rounded-lg border border-white/20 bg-black/45 px-2.5 py-1 font-semibold text-slate-100 transition hover:bg-white/10"
-              >
-                Leave Feedback
-              </button>
-            </div>
-          </div>
+          </form>
+        ) : null}
+
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-white/15 pt-3 text-xs text-slate-300/80">
+          <p>2026 Omni Technologies, all rights reserved.</p>
+          <button
+            type="button"
+            onClick={() => {
+              setFeedbackOpen(true);
+              setFeedbackError(null);
+              setFeedbackStatus(null);
+            }}
+            className="rounded-lg border border-white/20 bg-black/45 px-2.5 py-1 font-semibold text-slate-100 transition hover:bg-white/10"
+          >
+            Leave Feedback
+          </button>
         </div>
       </div>
 
