@@ -112,6 +112,21 @@ export interface DashboardSystemHistoryEventData {
   workItem: DashboardWorkItemSummary;
 }
 
+interface SystemHistoryChangeCallout {
+  id: string;
+  label: string;
+  actorName: string;
+  occurredAt: string;
+}
+
+interface SelectedSystemHistoryVersionDetails {
+  selectedEvent: DashboardSystemHistoryEventData;
+  baselineEvent: DashboardSystemHistoryEventData | null;
+  previousEvent: DashboardSystemHistoryEventData | null;
+  changesInEvent: SystemHistoryChangeCallout[];
+  cumulativeChanges: SystemHistoryChangeCallout[];
+}
+
 interface DepartmentInsight {
   id: string;
   name: string;
@@ -153,7 +168,8 @@ const CELEBRATION_CONFETTI_COLORS = [
   "#F59E0B",
   "#FB7185",
 ];
-const SYSTEM_HISTORY_ROW_LIMIT_OPTIONS = [15, 30, 45, 60] as const;
+const DEFAULT_SYSTEM_HISTORY_ROW_LIMIT = 15;
+const SYSTEM_HISTORY_ROW_LIMIT_OPTIONS = [5, 15, 30, 45, 60] as const;
 
 interface DashboardInstructionReturnState {
   query: string;
@@ -212,6 +228,35 @@ function formatDateForSearch(value: string) {
     month: "numeric",
     day: "numeric",
   }).format(parsed);
+}
+
+function toSortableTimestamp(value: string) {
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parseSystemHistoryDetailSegments(detail: string) {
+  const normalized = detail.trim();
+  if (!normalized) {
+    return [];
+  }
+
+  const segments = normalized
+    .split(";")
+    .map((segment) => segment.trim().replace(/\.+$/, ""))
+    .filter((segment) => segment.length > 0);
+
+  return segments.length > 0
+    ? segments
+    : [normalized.replace(/\.+$/, "")];
+}
+
+function formatSystemHistoryTooltip(actorName: string, occurredAt: string) {
+  const parsed = new Date(occurredAt);
+  const formattedOccurredAt = Number.isNaN(parsed.getTime())
+    ? occurredAt
+    : parsed.toLocaleString();
+  return `Updated by ${actorName} on ${formattedOccurredAt}`;
 }
 
 function normalizeDepartmentColor(value: string | null | undefined) {
@@ -434,8 +479,10 @@ export function DashboardClient({
   const [departmentDrilldownDepartmentId, setDepartmentDrilldownDepartmentId] =
     useState<string | null>(null);
   const [systemHistoryRowLimit, setSystemHistoryRowLimit] = useState<number>(
-    SYSTEM_HISTORY_ROW_LIMIT_OPTIONS[0],
+    DEFAULT_SYSTEM_HISTORY_ROW_LIMIT,
   );
+  const [selectedSystemHistoryEventId, setSelectedSystemHistoryEventId] =
+    useState<string | null>(null);
   const [activeLikeCelebration, setActiveLikeCelebration] =
     useState<DashboardLikeCelebrationData | null>(() =>
       (likeCelebration?.newLikesCount ?? 0) > 0 ? likeCelebration : null,
@@ -1027,6 +1074,103 @@ export function DashboardClient({
     );
   }, [selectedDepartmentId, systemHistoryEvents]);
 
+  const visibleSystemHistoryEvents = useMemo(
+    () => filteredSystemHistoryEvents.slice(0, systemHistoryRowLimit),
+    [filteredSystemHistoryEvents, systemHistoryRowLimit],
+  );
+
+  const systemHistoryTimelineByInstruction = useMemo(() => {
+    const eventsByInstruction = new Map<string, DashboardSystemHistoryEventData[]>();
+
+    for (const event of filteredSystemHistoryEvents) {
+      const existingEvents = eventsByInstruction.get(event.instruction_id) ?? [];
+      existingEvents.push(event);
+      eventsByInstruction.set(event.instruction_id, existingEvents);
+    }
+
+    for (const [instructionId, instructionEvents] of eventsByInstruction.entries()) {
+      eventsByInstruction.set(
+        instructionId,
+        [...instructionEvents].sort(
+          (a, b) => toSortableTimestamp(a.occurred_at) - toSortableTimestamp(b.occurred_at),
+        ),
+      );
+    }
+
+    return eventsByInstruction;
+  }, [filteredSystemHistoryEvents]);
+
+  const selectedSystemHistoryVersionDetails = useMemo<SelectedSystemHistoryVersionDetails | null>(
+    () => {
+      if (!selectedSystemHistoryEventId) {
+        return null;
+      }
+
+      const selectedEvent =
+        filteredSystemHistoryEvents.find((event) => event.id === selectedSystemHistoryEventId) ??
+        null;
+      if (!selectedEvent) {
+        return null;
+      }
+
+      const instructionTimeline =
+        systemHistoryTimelineByInstruction.get(selectedEvent.instruction_id) ?? [selectedEvent];
+      const selectedEventIndex = instructionTimeline.findIndex(
+        (event) => event.id === selectedEvent.id,
+      );
+      const safeSelectedIndex =
+        selectedEventIndex >= 0 ? selectedEventIndex : instructionTimeline.length - 1;
+
+      const toChangeCallouts = (events: DashboardSystemHistoryEventData[]) => {
+        const calloutsByKey = new Map<string, SystemHistoryChangeCallout>();
+        for (const event of events) {
+          const segments = parseSystemHistoryDetailSegments(event.detail);
+          for (const segment of segments) {
+            const key = segment.toLowerCase();
+            calloutsByKey.set(key, {
+              id: `${event.id}:${key}`,
+              label: segment,
+              actorName: event.actor_name,
+              occurredAt: event.occurred_at,
+            });
+          }
+        }
+        return [...calloutsByKey.values()];
+      };
+
+      return {
+        selectedEvent,
+        baselineEvent: instructionTimeline[0] ?? null,
+        previousEvent:
+          safeSelectedIndex > 0 ? instructionTimeline[safeSelectedIndex - 1] : null,
+        changesInEvent: toChangeCallouts([selectedEvent]),
+        cumulativeChanges: toChangeCallouts(instructionTimeline.slice(1, safeSelectedIndex + 1)),
+      };
+    },
+    [
+      filteredSystemHistoryEvents,
+      selectedSystemHistoryEventId,
+      systemHistoryTimelineByInstruction,
+    ],
+  );
+
+  useEffect(() => {
+    setSelectedSystemHistoryEventId((currentSelection) => {
+      if (visibleSystemHistoryEvents.length === 0) {
+        return null;
+      }
+
+      if (
+        currentSelection &&
+        visibleSystemHistoryEvents.some((event) => event.id === currentSelection)
+      ) {
+        return currentSelection;
+      }
+
+      return visibleSystemHistoryEvents[0]?.id ?? null;
+    });
+  }, [visibleSystemHistoryEvents]);
+
   const visibleWidgets = useMemo(
     () => widgetLayout.filter((widget) => widget.visible),
     [widgetLayout],
@@ -1571,6 +1715,57 @@ export function DashboardClient({
     })[0] ?? null;
   }
 
+  function renderWidgetHeaderControls(widgetId: DashboardWidgetId) {
+    if (widgetId === "finder" && (canEdit || isSystemAdmin)) {
+      return (
+        <>
+          {isSystemAdmin ? (
+            <Link
+              href="/instructions/archived"
+              className="inline-flex items-center justify-center rounded-xl border border-slate-400/35 bg-slate-900/10 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-900/15 dark:text-slate-200 dark:hover:bg-white/10"
+            >
+              Archived
+            </Link>
+          ) : null}
+          {canEdit ? (
+            <Link
+              href="/instructions/new"
+              className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:brightness-110"
+            >
+              Create Instruction
+            </Link>
+          ) : null}
+        </>
+      );
+    }
+
+    if (widgetId === "system_history") {
+      return (
+        <label className="inline-flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300">
+          <span>Display</span>
+          <select
+            value={systemHistoryRowLimit}
+            onChange={(event) => {
+              const nextLimit = Number.parseInt(event.target.value, 10);
+              if (Number.isFinite(nextLimit) && nextLimit > 0) {
+                setSystemHistoryRowLimit(nextLimit);
+              }
+            }}
+            className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+          >
+            {SYSTEM_HISTORY_ROW_LIMIT_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {option} rows
+              </option>
+            ))}
+          </select>
+        </label>
+      );
+    }
+
+    return null;
+  }
+
   function renderWidgetContent(widgetId: DashboardWidgetId) {
     if (widgetId === "finder") {
       const finderSize = widgetLayoutById.get("finder")?.size ?? "full";
@@ -1578,30 +1773,6 @@ export function DashboardClient({
 
       return (
         <div className="grid gap-4">
-          <div
-            className={cn(
-              "flex flex-wrap items-center gap-2",
-              isFinderCompact ? "justify-start" : "justify-end",
-            )}
-          >
-            {isSystemAdmin ? (
-              <Link
-                href="/instructions/archived"
-                className="inline-flex items-center justify-center rounded-xl border border-slate-400/35 bg-slate-900/10 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-900/15 dark:text-slate-200 dark:hover:bg-white/10"
-              >
-                Archived Instructions
-              </Link>
-            ) : null}
-            {canEdit ? (
-              <Link
-                href="/instructions/new"
-                className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110"
-              >
-                Create Instruction
-              </Link>
-            ) : null}
-          </div>
-
           <div
             className={cn(
               "grid gap-3",
@@ -1989,68 +2160,182 @@ export function DashboardClient({
     }
 
     if (widgetId === "system_history") {
-      const visibleHistoryEvents = filteredSystemHistoryEvents.slice(0, systemHistoryRowLimit);
-
       return (
         <div className="grid gap-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs text-slate-600 dark:text-slate-300">
-              Showing {visibleHistoryEvents.length} of {filteredSystemHistoryEvents.length} events
-            </p>
-            <label className="inline-flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
-              <span>Display</span>
-              <select
-                value={systemHistoryRowLimit}
-                onChange={(event) => {
-                  const nextLimit = Number.parseInt(event.target.value, 10);
-                  if (Number.isFinite(nextLimit) && nextLimit > 0) {
-                    setSystemHistoryRowLimit(nextLimit);
-                  }
-                }}
-                className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-              >
-                {SYSTEM_HISTORY_ROW_LIMIT_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option} rows
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
+          <p className="text-xs text-slate-600 dark:text-slate-300">
+            Showing {visibleSystemHistoryEvents.length} of {filteredSystemHistoryEvents.length}{" "}
+            events
+          </p>
 
-          {visibleHistoryEvents.length === 0 ? (
+          {visibleSystemHistoryEvents.length === 0 ? (
             <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
               No recent system activity for {selectedDepartmentName}.
             </p>
           ) : (
-            visibleHistoryEvents.map((event) => (
-              <Link
-                key={event.id}
-                href={`/instructions/${event.instruction_id}`}
-                style={{
-                  borderColor: colorWithAlpha(event.workItem.department_color, 0.45),
-                  backgroundColor: colorWithAlpha(event.workItem.department_color, 0.12),
-                  boxShadow: `inset 4px 0 0 ${colorWithAlpha(event.workItem.department_color, 0.9)}`,
-                }}
-                className="grid gap-1 rounded-xl border p-3 transition hover:brightness-105"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-200">
-                    {event.action_label}
-                  </p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    <LocalDateTime value={event.occurred_at} mode="dateTime" />
-                  </p>
-                </div>
-                <p className="font-semibold text-slate-900 dark:text-slate-100">
-                  {getLabelWithDepartment(event.workItem)}
-                </p>
-                <p className="text-xs text-slate-600 dark:text-slate-300">{event.detail}</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  By {event.actor_name}
-                </p>
-              </Link>
-            ))
+            <div className="mx-auto grid w-full max-w-5xl gap-2">
+              {visibleSystemHistoryEvents.map((event) => {
+                const isSelected = selectedSystemHistoryEventId === event.id;
+                const versionDetails =
+                  isSelected &&
+                  selectedSystemHistoryVersionDetails?.selectedEvent.id === event.id
+                    ? selectedSystemHistoryVersionDetails
+                    : null;
+
+                return (
+                  <article
+                    key={event.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={isSelected}
+                    onClick={() => setSelectedSystemHistoryEventId(event.id)}
+                    onKeyDown={(eventKeyDown) => {
+                      if (eventKeyDown.key === "Enter" || eventKeyDown.key === " ") {
+                        eventKeyDown.preventDefault();
+                        setSelectedSystemHistoryEventId(event.id);
+                      }
+                    }}
+                    style={{
+                      borderColor: colorWithAlpha(event.workItem.department_color, 0.5),
+                      backgroundColor: colorWithAlpha(event.workItem.department_color, 0.12),
+                      boxShadow: `inset 4px 0 0 ${colorWithAlpha(
+                        event.workItem.department_color,
+                        isSelected ? 1 : 0.85,
+                      )}`,
+                    }}
+                    className={cn(
+                      "grid gap-2 rounded-xl border px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/55",
+                      isSelected ? "ring-2 ring-cyan-500/45" : "hover:brightness-105",
+                    )}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+                        <LocalDateTime value={event.occurred_at} mode="dateTime" />
+                        <span className="font-semibold text-slate-700 dark:text-slate-200">
+                          By {event.actor_name}
+                        </span>
+                      </p>
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-200">
+                        {event.action_label}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <p className="font-semibold text-slate-900 dark:text-slate-100">
+                        {getLabelWithDepartment(event.workItem)}
+                      </p>
+                      <p className="text-sm text-slate-700 dark:text-slate-200">{event.detail}</p>
+                    </div>
+
+                    <p className="text-xs text-slate-600 dark:text-slate-300">
+                      <span className="font-semibold">Instruction:</span>{" "}
+                      {event.workItem.item_title}
+                    </p>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <p
+                        className={cn(
+                          "font-semibold",
+                          isSelected
+                            ? "text-cyan-800 dark:text-cyan-200"
+                            : "text-slate-600 dark:text-slate-300",
+                        )}
+                      >
+                        {isSelected ? "Version check active" : "Click card for version check"}
+                      </p>
+                      <Link
+                        href={`/instructions/${event.instruction_id}`}
+                        onClick={(clickEvent) => clickEvent.stopPropagation()}
+                        className="inline-flex items-center rounded-lg border border-cyan-500/35 bg-cyan-500/10 px-2.5 py-1 font-semibold text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-200"
+                      >
+                        Open instruction
+                      </Link>
+                    </div>
+
+                    {isSelected && versionDetails ? (
+                      <div className="grid gap-2 rounded-lg border border-cyan-500/35 bg-cyan-500/10 p-2.5 dark:border-slate-600 dark:bg-slate-950/70">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-cyan-800 dark:text-cyan-200">
+                          Version Check
+                        </p>
+                        <p className="text-xs text-slate-700 dark:text-slate-300">
+                          Original file: {versionDetails.baselineEvent?.actor_name ?? "Unknown"} on{" "}
+                          <LocalDateTime
+                            value={versionDetails.baselineEvent?.occurred_at ?? event.occurred_at}
+                            mode="dateTime"
+                          />
+                        </p>
+                        <p className="text-xs text-slate-700 dark:text-slate-300">
+                          Selected update: {event.actor_name} on{" "}
+                          <LocalDateTime value={event.occurred_at} mode="dateTime" />
+                          {versionDetails.previousEvent ? (
+                            <>
+                              {" "}
+                              (previous update by {versionDetails.previousEvent.actor_name} on{" "}
+                              <LocalDateTime
+                                value={versionDetails.previousEvent.occurred_at}
+                                mode="dateTime"
+                              />
+                              )
+                            </>
+                          ) : null}
+                        </p>
+
+                        <div className="grid gap-1">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-700 dark:text-slate-200">
+                            Changes In This Event
+                          </p>
+                          {versionDetails.changesInEvent.length === 0 ? (
+                            <p className="text-xs text-slate-600 dark:text-slate-300">
+                              No explicit change summary found for this update.
+                            </p>
+                          ) : (
+                            <div className="flex flex-wrap gap-1.5">
+                              {versionDetails.changesInEvent.map((change) => (
+                                <span
+                                  key={change.id}
+                                  title={formatSystemHistoryTooltip(
+                                    change.actorName,
+                                    change.occurredAt,
+                                  )}
+                                  className="rounded-full border border-cyan-500/45 bg-cyan-500/20 px-2 py-0.5 text-[11px] font-semibold text-cyan-900 dark:text-cyan-100"
+                                >
+                                  {change.label}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="grid gap-1">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-700 dark:text-slate-200">
+                            Highlights Since Original
+                          </p>
+                          {versionDetails.cumulativeChanges.length === 0 ? (
+                            <p className="text-xs text-slate-600 dark:text-slate-300">
+                              No additional updates were captured after creation.
+                            </p>
+                          ) : (
+                            <div className="flex flex-wrap gap-1.5">
+                              {versionDetails.cumulativeChanges.map((change) => (
+                                <span
+                                  key={change.id}
+                                  title={formatSystemHistoryTooltip(
+                                    change.actorName,
+                                    change.occurredAt,
+                                  )}
+                                  className="rounded-full border border-slate-400/60 bg-white/70 px-2 py-0.5 text-[11px] font-semibold text-slate-800 dark:border-slate-600 dark:bg-slate-900/70 dark:text-slate-200"
+                                >
+                                  {change.label}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
+                  </article>
+                );
+              })}
+            </div>
           )}
         </div>
       );
@@ -2366,6 +2651,7 @@ export function DashboardClient({
             const isDragging = draggedWidgetId === widget.id;
             const isDragOverTarget =
               dragOverWidgetId === widget.id && draggedWidgetId !== widget.id;
+            const widgetHeaderControls = renderWidgetHeaderControls(widget.id);
 
             return (
               <section
@@ -2415,7 +2701,7 @@ export function DashboardClient({
 
                 <div
                   className={cn(
-                    "mb-4 flex flex-col gap-3 pr-10",
+                    "mb-3 flex flex-col gap-2.5 pr-10",
                     widget.size === "compact"
                       ? "xl:flex-row xl:items-start xl:justify-between"
                       : "md:flex-row md:items-start md:justify-between",
@@ -2437,6 +2723,7 @@ export function DashboardClient({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
+                    {widgetHeaderControls}
                     <label className="inline-flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300">
                       <span>Size</span>
                       <select
