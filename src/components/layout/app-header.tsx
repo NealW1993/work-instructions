@@ -15,6 +15,10 @@ interface HeaderNavLink {
 }
 
 function isActivePath(pathname: string, href: string) {
+  if (href === "/admin/users" && pathname.startsWith("/admin/")) {
+    return true;
+  }
+
   if (pathname === href) {
     return true;
   }
