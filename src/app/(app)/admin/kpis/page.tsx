@@ -233,6 +233,7 @@ export default async function SystemKpisPage() {
     });
 
   const maxUserUsageSeconds = maxOf(usageByActiveUsers.map((entry) => entry.totalSeconds));
+  const shouldScrollUsageByUser = usageByActiveUsers.length > 5;
   const totalUsageSecondsAcrossActiveUsers = usageByActiveUsers.reduce(
     (sum, entry) => sum + entry.totalSeconds,
     0,
@@ -451,7 +452,13 @@ export default async function SystemKpisPage() {
             No active users found.
           </p>
         ) : (
-          <div className="grid max-h-[28rem] gap-2 overflow-y-auto pr-1">
+          <div
+            className={
+              shouldScrollUsageByUser
+                ? "grid max-h-[24rem] gap-2 overflow-y-auto pr-1"
+                : "grid gap-2"
+            }
+          >
             {usageByActiveUsers.map((entry) => {
               const width = (entry.totalSeconds / maxUserUsageSeconds) * 100;
               return (

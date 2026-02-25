@@ -11,6 +11,7 @@ import {
   clearSessionStart,
   ensureSessionStartTime,
   formatElapsedHhMmSs,
+  getSessionStartTime,
 } from "@/lib/session-timer";
 import type { Profile } from "@/lib/types";
 
@@ -71,6 +72,32 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
     [supabase],
   );
 
+  const finalizeServerSession = useCallback(async () => {
+    const sessionStartedAtMs = getSessionStartTime();
+    const clientElapsedSeconds =
+      sessionStartedAtMs !== null
+        ? Math.max(0, Math.floor((Date.now() - sessionStartedAtMs) / 1000))
+        : null;
+
+    const response = await fetch("/api/auth/session/end", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "same-origin",
+      keepalive: true,
+      body: JSON.stringify({
+        sessionStartedAtMs,
+        clientElapsedSeconds,
+      }),
+    });
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new Error(payload.error ?? "Unable to finalize session telemetry.");
+    }
+  }, []);
+
   useEffect(() => {
     const startedAt = ensureSessionStartTime();
 
@@ -87,9 +114,30 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
   }, []);
 
   useEffect(() => {
-    void touchServerSession(false).catch(() => {
-      // Session time sync is best-effort and should never block page usage.
-    });
+    let cancelled = false;
+
+    const syncSessionStart = async () => {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (cancelled) {
+          return;
+        }
+
+        try {
+          await touchServerSession(false);
+          return;
+        } catch {
+          if (attempt < 2) {
+            await new Promise((resolve) => window.setTimeout(resolve, 350 * (attempt + 1)));
+          }
+        }
+      }
+    };
+
+    void syncSessionStart();
+
+    return () => {
+      cancelled = true;
+    };
   }, [touchServerSession]);
 
   useEffect(() => {
@@ -122,8 +170,10 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
   }, [open]);
 
   async function handleSignOut() {
-    await touchServerSession(true).catch(() => {
-      // Do not block sign-out if a session telemetry call fails.
+    await finalizeServerSession().catch(async () => {
+      await touchServerSession(true).catch(() => {
+        // Do not block sign-out if a session telemetry call fails.
+      });
     });
 
     await supabase.auth.signOut();

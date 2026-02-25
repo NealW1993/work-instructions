@@ -4,7 +4,7 @@ import { LogOut } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { usePostHog } from "posthog-js/react";
 
-import { clearSessionStart } from "@/lib/session-timer";
+import { clearSessionStart, getSessionStartTime } from "@/lib/session-timer";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 export function SignOutButton() {
@@ -13,13 +13,33 @@ export function SignOutButton() {
 
   async function handleSignOut() {
     const supabase = getSupabaseBrowserClient();
+    const sessionStartedAtMs = getSessionStartTime();
+    const clientElapsedSeconds =
+      sessionStartedAtMs !== null
+        ? Math.max(0, Math.floor((Date.now() - sessionStartedAtMs) / 1000))
+        : null;
 
     try {
-      const { error: touchSessionError } = await supabase.rpc("touch_user_session", {
-        end_session: true,
+      const response = await fetch("/api/auth/session/end", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "same-origin",
+        keepalive: true,
+        body: JSON.stringify({
+          sessionStartedAtMs,
+          clientElapsedSeconds,
+        }),
       });
-      if (touchSessionError) {
-        console.warn("Unable to finalize session telemetry:", touchSessionError.message);
+
+      if (!response.ok) {
+        const { error: touchSessionError } = await supabase.rpc("touch_user_session", {
+          end_session: true,
+        });
+        if (touchSessionError) {
+          console.warn("Unable to finalize session telemetry:", touchSessionError.message);
+        }
       }
     } catch {
       // Do not block sign-out on session telemetry failures.
