@@ -1858,7 +1858,7 @@ export function DashboardClient({
                   value={query}
                   autoComplete="off"
                   spellCheck={false}
-                  placeholder="Start typing (example: P, PG, PN-4401, Mold-23B)"
+                  placeholder="Start typing"
                   onChange={(event) => setQuery(event.target.value)}
                   className="w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-10 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
                 />
@@ -2489,7 +2489,7 @@ export function DashboardClient({
   return (
     <>
       <div className="grid gap-5">
-        <section className="rounded-3xl border border-white/30 bg-white/80 p-4 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-5">
+        <section className="relative overflow-hidden border-y border-white/20 bg-gradient-to-r from-white/45 via-white/20 to-white/45 p-4 backdrop-blur-sm dark:border-white/10 dark:from-slate-900/55 dark:via-slate-900/35 dark:to-slate-900/55 md:p-5">
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div className="space-y-1">
               <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-300">
@@ -2702,6 +2702,37 @@ export function DashboardClient({
             const isDragOverTarget =
               dragOverWidgetId === widget.id && draggedWidgetId !== widget.id;
             const widgetHeaderControls = renderWidgetHeaderControls(widget.id, widget.size);
+            const showFinderCompactSystemAdminSizeFirst =
+              isSystemAdmin && widget.id === "finder" && widget.size === "compact";
+            const sizeControl = (
+              <label
+                className={cn(
+                  "inline-flex items-center text-xs text-slate-600 dark:text-slate-300",
+                  widget.size === "compact" ? "gap-1.5" : "gap-1",
+                )}
+              >
+                <span>Size</span>
+                <select
+                  value={widget.size}
+                  onChange={(event) =>
+                    updateWidgetSize(
+                      widget.id,
+                      event.target.value as DashboardWidgetSize,
+                    )
+                  }
+                  className={cn(
+                    "rounded-lg border border-slate-300 bg-white px-2 text-xs outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950",
+                    widget.size === "compact" ? "py-1.5" : "py-1",
+                  )}
+                >
+                  {WIDGET_SIZE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            );
 
             return (
               <section
@@ -2776,36 +2807,11 @@ export function DashboardClient({
                     className={cn(
                       "flex flex-wrap items-center",
                       widget.size === "compact" ? "w-full gap-2 pt-1" : "gap-2",
+                      showFinderCompactSystemAdminSizeFirst ? "flex-col items-start" : "",
                     )}
                   >
-                    {widgetHeaderControls}
-                    <label
-                      className={cn(
-                        "inline-flex items-center text-xs text-slate-600 dark:text-slate-300",
-                        widget.size === "compact" ? "gap-1.5" : "gap-1",
-                      )}
-                    >
-                      <span>Size</span>
-                      <select
-                        value={widget.size}
-                        onChange={(event) =>
-                          updateWidgetSize(
-                            widget.id,
-                            event.target.value as DashboardWidgetSize,
-                          )
-                        }
-                        className={cn(
-                          "rounded-lg border border-slate-300 bg-white px-2 text-xs outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950",
-                          widget.size === "compact" ? "py-1.5" : "py-1",
-                        )}
-                      >
-                        {WIDGET_SIZE_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    {showFinderCompactSystemAdminSizeFirst ? sizeControl : widgetHeaderControls}
+                    {showFinderCompactSystemAdminSizeFirst ? widgetHeaderControls : sizeControl}
                   </div>
                 </div>
 

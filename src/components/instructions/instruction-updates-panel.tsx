@@ -51,6 +51,47 @@ function hasSourcePayloadData(sourcePayload: InstructionUpdateSourcePayload | nu
   );
 }
 
+interface SourceMediaPreviewProps {
+  media: InstructionUpdateSourceMedia;
+  tone: "added" | "removed";
+}
+
+function SourceMediaPreview({ media, tone }: SourceMediaPreviewProps) {
+  const toneClasses =
+    tone === "added"
+      ? "border-emerald-500/35 bg-emerald-500/10"
+      : "border-rose-500/35 bg-rose-500/10";
+
+  const linkClasses = tone === "added" ? "text-emerald-100" : "text-rose-100";
+
+  return (
+    <figure className={cn("grid gap-2 rounded-lg border p-2", toneClasses)}>
+      <div className="overflow-hidden rounded-md border border-white/15 bg-slate-950/60">
+        {media.type === "video" ? (
+          <video src={media.src} controls preload="metadata" className="max-h-64 w-full object-contain" />
+        ) : (
+          // Remote media URLs are dynamic and not known at build time.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={media.src}
+            alt="Update media preview"
+            loading="lazy"
+            className="max-h-64 w-full object-contain"
+          />
+        )}
+      </div>
+      <a
+        href={media.src}
+        target="_blank"
+        rel="noreferrer"
+        className={cn("break-all text-xs underline underline-offset-2", linkClasses)}
+      >
+        {media.src}
+      </a>
+    </figure>
+  );
+}
+
 export function InstructionUpdatesPanel({ events }: InstructionUpdatesPanelProps) {
   const [showUpdates, setShowUpdates] = useState(false);
   const [selectedSourceEventId, setSelectedSourceEventId] = useState<string | null>(null);
@@ -229,14 +270,13 @@ export function InstructionUpdatesPanel({ events }: InstructionUpdatesPanelProps
                     <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
                       Added Media
                     </p>
-                    <div className="grid gap-1">
+                    <div className="grid gap-2">
                       {selectedSourceEvent.sourcePayload?.addedMedia?.map((media, index) => (
-                        <p
+                        <SourceMediaPreview
                           key={`${media.type}:${media.src}:${index}`}
-                          className="rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-3 py-1.5 text-sm text-emerald-100"
-                        >
-                          {media.type.toUpperCase()}: {media.src}
-                        </p>
+                          media={media}
+                          tone="added"
+                        />
                       ))}
                     </div>
                   </div>
@@ -247,14 +287,16 @@ export function InstructionUpdatesPanel({ events }: InstructionUpdatesPanelProps
                     <p className="text-xs font-semibold uppercase tracking-wide text-rose-300">
                       Removed Media
                     </p>
-                    <div className="grid gap-1">
+                    <p className="text-xs text-rose-100/85">
+                      Some removed media may no longer be available to preview.
+                    </p>
+                    <div className="grid gap-2">
                       {selectedSourceEvent.sourcePayload?.removedMedia?.map((media, index) => (
-                        <p
+                        <SourceMediaPreview
                           key={`${media.type}:${media.src}:${index}`}
-                          className="rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-1.5 text-sm text-rose-100"
-                        >
-                          {media.type.toUpperCase()}: {media.src}
-                        </p>
+                          media={media}
+                          tone="removed"
+                        />
                       ))}
                     </div>
                   </div>
