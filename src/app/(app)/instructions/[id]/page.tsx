@@ -12,6 +12,7 @@ import { LikeInstructionButton } from "@/components/instructions/like-instructio
 import { PinInstructionButton } from "@/components/instructions/pin-instruction-button";
 import {
   type InstructionUpdateEvent,
+  type InstructionUpdateSourcePayload,
   InstructionUpdatesPanel,
 } from "@/components/instructions/instruction-updates-panel";
 import { LocalDateTime } from "@/components/ui/local-date-time";
@@ -74,6 +75,7 @@ interface InstructionChangeEventRow {
   occurred_at: string;
   actor_user_id: string;
   revision: number | null;
+  source_payload: unknown;
 }
 
 function looksLikeHtml(value: string): boolean {
@@ -204,6 +206,73 @@ function renderInstructionContent(value: string) {
   );
 }
 
+function normalizeInstructionUpdateSourcePayload(
+  value: unknown,
+): InstructionUpdateSourcePayload | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const normalizeMediaList = (
+    mediaValue: unknown,
+  ): Array<{ type: "image" | "video"; src: string }> => {
+    if (!Array.isArray(mediaValue)) {
+      return [];
+    }
+
+    return mediaValue
+      .map((entry) => {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+          return null;
+        }
+
+        const mediaEntry = entry as Record<string, unknown>;
+        const type = mediaEntry.type === "video" ? "video" : mediaEntry.type === "image" ? "image" : null;
+        const src = typeof mediaEntry.src === "string" ? mediaEntry.src.trim() : "";
+
+        if (!type || !src) {
+          return null;
+        }
+
+        return { type, src };
+      })
+      .filter((entry): entry is { type: "image" | "video"; src: string } => entry !== null);
+  };
+
+  const normalizedPayload: InstructionUpdateSourcePayload = {
+    addedTextSnippet:
+      typeof candidate.addedTextSnippet === "string" ? candidate.addedTextSnippet : undefined,
+    removedTextSnippet:
+      typeof candidate.removedTextSnippet === "string"
+        ? candidate.removedTextSnippet
+        : undefined,
+    addedMedia: normalizeMediaList(candidate.addedMedia),
+    removedMedia: normalizeMediaList(candidate.removedMedia),
+    previousRevision:
+      typeof candidate.previousRevision === "number"
+        ? candidate.previousRevision
+        : undefined,
+    nextRevision:
+      typeof candidate.nextRevision === "number" ? candidate.nextRevision : undefined,
+    mediaFormattingUpdated:
+      typeof candidate.mediaFormattingUpdated === "boolean"
+        ? candidate.mediaFormattingUpdated
+        : undefined,
+  };
+
+  const hasPayloadData =
+    Boolean(normalizedPayload.addedTextSnippet) ||
+    Boolean(normalizedPayload.removedTextSnippet) ||
+    (normalizedPayload.addedMedia?.length ?? 0) > 0 ||
+    (normalizedPayload.removedMedia?.length ?? 0) > 0 ||
+    normalizedPayload.mediaFormattingUpdated === true ||
+    normalizedPayload.previousRevision !== undefined ||
+    normalizedPayload.nextRevision !== undefined;
+
+  return hasPayloadData ? normalizedPayload : null;
+}
+
 export default async function InstructionDetailsPage({ params }: InstructionPageProps) {
   const { id } = await params;
   const { supabase, profile } = await requireAuthenticatedUser();
@@ -235,7 +304,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
 
   const { data: instructionChangeEventsData } = await supabase
     .from("instruction_change_events")
-    .select("id, event_type, detail, occurred_at, actor_user_id, revision")
+    .select("id, event_type, detail, occurred_at, actor_user_id, revision, source_payload")
     .eq("instruction_id", instruction.id)
     .order("occurred_at", { ascending: true })
     .limit(400);
@@ -271,6 +340,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
               : `Revision ${changeEvent.revision ?? instruction.revision} updated.`),
           occurredAt: changeEvent.occurred_at,
           actorName: userMap.get(changeEvent.actor_user_id) ?? "Unknown",
+          sourcePayload: normalizeInstructionUpdateSourcePayload(changeEvent.source_payload),
         }))
       : (() => {
           const fallbackEvents: InstructionUpdateEvent[] = [
@@ -280,6 +350,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
               detail: "Instruction created.",
               occurredAt: instruction.created_at,
               actorName: userMap.get(instruction.created_by) ?? "Unknown",
+              sourcePayload: null,
             },
           ];
 
@@ -298,6 +369,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
                 instruction.last_change_summary?.trim() || "Instruction content updated.",
               occurredAt: instruction.updated_at,
               actorName: userMap.get(instruction.updated_by) ?? "Unknown",
+              sourcePayload: null,
             });
           }
 

@@ -54,6 +54,26 @@ interface EditorSnapshot {
   revision: number;
 }
 
+interface InstructionChangeSourceMedia {
+  type: "image" | "video";
+  src: string;
+}
+
+interface InstructionChangeSourcePayload {
+  addedTextSnippet?: string;
+  removedTextSnippet?: string;
+  addedMedia?: InstructionChangeSourceMedia[];
+  removedMedia?: InstructionChangeSourceMedia[];
+  previousRevision?: number;
+  nextRevision?: number;
+  mediaFormattingUpdated?: boolean;
+}
+
+interface InstructionChangeComputation {
+  summary: string;
+  sourcePayload: InstructionChangeSourcePayload | null;
+}
+
 type PendingNavigation =
   | {
       kind: "history-back";
@@ -196,6 +216,105 @@ function extractInlineMediaDetails(content: string) {
   };
 }
 
+function extractMediaMarkupSignatures(content: string) {
+  const normalizedContent = normalizeEditorContent(content);
+  const mediaMarkupPattern = /<(figure|img|video)\b[^>]*>/gi;
+  const signatures: string[] = [];
+
+  let match = mediaMarkupPattern.exec(normalizedContent);
+  while (match) {
+    signatures.push((match[0] ?? "").replace(/\s+/g, " ").trim());
+    match = mediaMarkupPattern.exec(normalizedContent);
+  }
+
+  return signatures;
+}
+
+function collectAddedMedia(
+  nextSources: Set<string>,
+  previousSources: Set<string>,
+  mediaType: "image" | "video",
+) {
+  const added: InstructionChangeSourceMedia[] = [];
+  for (const source of nextSources) {
+    if (!previousSources.has(source)) {
+      added.push({
+        type: mediaType,
+        src: source,
+      });
+    }
+  }
+  return added;
+}
+
+function collectRemovedMedia(
+  previousSources: Set<string>,
+  nextSources: Set<string>,
+  mediaType: "image" | "video",
+) {
+  const removed: InstructionChangeSourceMedia[] = [];
+  for (const source of previousSources) {
+    if (!nextSources.has(source)) {
+      removed.push({
+        type: mediaType,
+        src: source,
+      });
+    }
+  }
+  return removed;
+}
+
+function extractTextChangeSnippet(previousText: string, nextText: string) {
+  if (previousText === nextText) {
+    return {
+      addedTextSnippet: "",
+      removedTextSnippet: "",
+    };
+  }
+
+  let prefixIndex = 0;
+  const sharedMaxLength = Math.min(previousText.length, nextText.length);
+  while (
+    prefixIndex < sharedMaxLength &&
+    previousText[prefixIndex] === nextText[prefixIndex]
+  ) {
+    prefixIndex += 1;
+  }
+
+  let previousSuffixIndex = previousText.length - 1;
+  let nextSuffixIndex = nextText.length - 1;
+  while (
+    previousSuffixIndex >= prefixIndex &&
+    nextSuffixIndex >= prefixIndex &&
+    previousText[previousSuffixIndex] === nextText[nextSuffixIndex]
+  ) {
+    previousSuffixIndex -= 1;
+    nextSuffixIndex -= 1;
+  }
+
+  const removedTextSnippet = previousText
+    .slice(prefixIndex, previousSuffixIndex + 1)
+    .trim();
+  const addedTextSnippet = nextText.slice(prefixIndex, nextSuffixIndex + 1).trim();
+
+  return {
+    addedTextSnippet,
+    removedTextSnippet,
+  };
+}
+
+function hasSourcePayloadData(sourcePayload: InstructionChangeSourcePayload) {
+  return Boolean(
+    sourcePayload.addedTextSnippet ||
+      sourcePayload.removedTextSnippet ||
+      (sourcePayload.addedMedia?.length ?? 0) > 0 ||
+      (sourcePayload.removedMedia?.length ?? 0) > 0 ||
+      sourcePayload.mediaFormattingUpdated ||
+      sourcePayload.previousRevision !== undefined ||
+      sourcePayload.nextRevision !== undefined,
+  );
+}
+
 function countAddedMedia(nextSources: Set<string>, previousSources: Set<string>) {
   let count = 0;
   for (const source of nextSources) {
@@ -221,16 +340,27 @@ function buildInstructionUpdateSummary(params: {
   nextBody: string;
   previousRevision: number;
   nextRevision: number;
-}) {
+}): InstructionChangeComputation {
   const previousNormalized = normalizeEditorContent(params.previousBody);
   const nextNormalized = normalizeEditorContent(params.nextBody);
   const summaryParts: string[] = [];
+  const sourcePayload: InstructionChangeSourcePayload = {};
 
-  const previousPlainText = richTextToPlain(previousNormalized).replace(/\s+/g, " ").trim();
-  const nextPlainText = richTextToPlain(nextNormalized).replace(/\s+/g, " ").trim();
+  const previousPlainTextRaw = richTextToPlain(previousNormalized);
+  const nextPlainTextRaw = richTextToPlain(nextNormalized);
+  const previousPlainText = previousPlainTextRaw.replace(/\s+/g, " ").trim();
+  const nextPlainText = nextPlainTextRaw.replace(/\s+/g, " ").trim();
   const characterDelta = nextPlainText.length - previousPlainText.length;
 
   if (previousPlainText !== nextPlainText) {
+    const textSnippet = extractTextChangeSnippet(previousPlainTextRaw, nextPlainTextRaw);
+    if (textSnippet.addedTextSnippet) {
+      sourcePayload.addedTextSnippet = textSnippet.addedTextSnippet;
+    }
+    if (textSnippet.removedTextSnippet) {
+      sourcePayload.removedTextSnippet = textSnippet.removedTextSnippet;
+    }
+
     if (characterDelta > 0) {
       summaryParts.push(`${characterDelta} characters added`);
     } else if (characterDelta < 0) {
@@ -249,6 +379,21 @@ function buildInstructionUpdateSummary(params: {
   const removedVideos = countRemovedMedia(previousMedia.videoSources, nextMedia.videoSources);
   const addedMediaCount = addedImages + addedVideos;
   const removedMediaCount = removedImages + removedVideos;
+  const addedMedia = [
+    ...collectAddedMedia(nextMedia.imageSources, previousMedia.imageSources, "image"),
+    ...collectAddedMedia(nextMedia.videoSources, previousMedia.videoSources, "video"),
+  ];
+  const removedMedia = [
+    ...collectRemovedMedia(previousMedia.imageSources, nextMedia.imageSources, "image"),
+    ...collectRemovedMedia(previousMedia.videoSources, nextMedia.videoSources, "video"),
+  ];
+
+  if (addedMedia.length > 0) {
+    sourcePayload.addedMedia = addedMedia;
+  }
+  if (removedMedia.length > 0) {
+    sourcePayload.removedMedia = removedMedia;
+  }
 
   if (addedImages > 0) {
     summaryParts.push(`Image${addedImages === 1 ? "" : "s"} added (+${addedImages})`);
@@ -263,24 +408,39 @@ function buildInstructionUpdateSummary(params: {
     summaryParts.push(`Video${removedVideos === 1 ? "" : "s"} removed (-${removedVideos})`);
   }
 
+  const previousMediaMarkupSignatures = extractMediaMarkupSignatures(previousNormalized);
+  const nextMediaMarkupSignatures = extractMediaMarkupSignatures(nextNormalized);
+  const mediaMarkupChanged =
+    previousMediaMarkupSignatures.length === nextMediaMarkupSignatures.length
+      ? previousMediaMarkupSignatures.some(
+          (signature, index) => signature !== nextMediaMarkupSignatures[index],
+        )
+      : previousMediaMarkupSignatures.length !== nextMediaMarkupSignatures.length;
+
   if (
-    previousMedia.allSources.size > 0 &&
-    previousNormalized !== nextNormalized &&
+    (previousMedia.allSources.size > 0 || nextMedia.allSources.size > 0) &&
+    mediaMarkupChanged &&
     addedMediaCount === 0 &&
     removedMediaCount === 0
   ) {
     summaryParts.push("Media formatting updated");
+    sourcePayload.mediaFormattingUpdated = true;
   }
 
   if (params.previousRevision !== params.nextRevision) {
     summaryParts.push(`Revision ${params.previousRevision} -> ${params.nextRevision}`);
+    sourcePayload.previousRevision = params.previousRevision;
+    sourcePayload.nextRevision = params.nextRevision;
   }
 
   if (summaryParts.length === 0) {
     summaryParts.push("Instruction details updated");
   }
 
-  return `${summaryParts.join("; ")}.`;
+  return {
+    summary: `${summaryParts.join("; ")}.`,
+    sourcePayload: hasSourcePayloadData(sourcePayload) ? sourcePayload : null,
+  };
 }
 
 function buildInstructionCreateSummary(body: string, revision: number) {
@@ -965,7 +1125,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       let instructionId = initialData?.instructionId ?? "";
       const previousBodyForSummary = initialData?.bodyMarkdown ?? "";
       const previousRevisionForSummary = initialData?.revision ?? revision;
-      const changeSummary =
+      const changeComputation =
         mode === "edit"
           ? buildInstructionUpdateSummary({
               previousBody: previousBodyForSummary,
@@ -973,7 +1133,14 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
               previousRevision: previousRevisionForSummary,
               nextRevision: revision,
             })
-          : buildInstructionCreateSummary(bodyMarkdown, revision);
+          : {
+              summary: buildInstructionCreateSummary(bodyMarkdown, revision),
+              sourcePayload: null,
+            };
+      const changeSummary = changeComputation.summary;
+      let changeOccurredAt: string | null = null;
+      const changeEventType: "created" | "updated" =
+        mode === "edit" ? "updated" : "created";
 
       if (mode === "create" || mode === "fork") {
         const { data: insertedInstruction, error: insertInstructionError } = await supabase
@@ -987,10 +1154,11 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
             created_by: user.id,
             updated_by: user.id,
           })
-          .select("id")
+          .select("id, created_at")
           .single();
 
-        const typedInstruction = insertedInstruction as { id: string } | null;
+        const typedInstruction =
+          insertedInstruction as { id: string; created_at: string } | null;
 
         if (insertInstructionError || !typedInstruction) {
           throw new Error(
@@ -999,8 +1167,9 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         }
 
         instructionId = typedInstruction.id;
+        changeOccurredAt = typedInstruction.created_at ?? new Date().toISOString();
       } else {
-        const { error: updateInstructionError } = await supabase
+        const { data: updatedInstruction, error: updateInstructionError } = await supabase
           .from("work_instructions")
           .update({
             work_item_id: typedWorkItem.id,
@@ -1010,10 +1179,37 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
             last_change_summary: changeSummary,
             updated_by: user.id,
           })
-          .eq("id", instructionId);
+          .eq("id", instructionId)
+          .select("updated_at")
+          .single();
 
         if (updateInstructionError) {
           throw new Error(updateInstructionError.message);
+        }
+
+        const typedUpdatedInstruction =
+          updatedInstruction as { updated_at: string } | null;
+        changeOccurredAt = typedUpdatedInstruction?.updated_at ?? new Date().toISOString();
+      }
+
+      if (changeOccurredAt && changeComputation.sourcePayload) {
+        try {
+          await supabase.from("instruction_change_events").upsert(
+            {
+              instruction_id: instructionId,
+              actor_user_id: user.id,
+              event_type: changeEventType,
+              detail: changeSummary,
+              revision,
+              occurred_at: changeOccurredAt,
+              source_payload: changeComputation.sourcePayload,
+            },
+            {
+              onConflict: "instruction_id,event_type,actor_user_id,occurred_at",
+            },
+          );
+        } catch {
+          // Capturing source snippets is best-effort and should not block saves.
         }
       }
 

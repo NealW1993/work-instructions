@@ -1766,14 +1766,25 @@ export function DashboardClient({
     };
   }, [departmentDrilldownDepartmentId, impactDrilldownKey, navigationModalOpen]);
 
-  function renderWidgetHeaderControls(widgetId: DashboardWidgetId) {
+  function renderWidgetHeaderControls(
+    widgetId: DashboardWidgetId,
+    widgetSize: DashboardWidgetSize,
+  ) {
     if (widgetId === "finder" && (canEdit || isSystemAdmin)) {
       return (
-        <>
+        <div
+          className={cn(
+            "flex flex-wrap items-center",
+            widgetSize === "compact" ? "gap-2.5 py-0.5" : "gap-2",
+          )}
+        >
           {isSystemAdmin ? (
             <Link
               href="/instructions/archived"
-              className="inline-flex items-center justify-center rounded-xl border border-slate-400/35 bg-slate-900/10 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-900/15 dark:text-slate-200 dark:hover:bg-white/10"
+              className={cn(
+                "inline-flex items-center justify-center whitespace-nowrap rounded-xl border border-slate-400/35 bg-slate-900/10 text-xs font-semibold text-slate-700 transition hover:bg-slate-900/15 dark:text-slate-200 dark:hover:bg-white/10",
+                widgetSize === "compact" ? "px-3.5 py-2" : "px-3 py-1.5",
+              )}
             >
               Archived
             </Link>
@@ -1781,12 +1792,15 @@ export function DashboardClient({
           {canEdit ? (
             <Link
               href="/instructions/new"
-              className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:brightness-110"
+              className={cn(
+                "inline-flex items-center justify-center whitespace-nowrap rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-xs font-semibold text-white transition hover:brightness-110",
+                widgetSize === "compact" ? "px-3.5 py-2" : "px-3 py-1.5",
+              )}
             >
               Create Instruction
             </Link>
           ) : null}
-        </>
+        </div>
       );
     }
 
@@ -2711,7 +2725,7 @@ export function DashboardClient({
             const isDragging = draggedWidgetId === widget.id;
             const isDragOverTarget =
               dragOverWidgetId === widget.id && draggedWidgetId !== widget.id;
-            const widgetHeaderControls = renderWidgetHeaderControls(widget.id);
+            const widgetHeaderControls = renderWidgetHeaderControls(widget.id, widget.size);
 
             return (
               <section
@@ -2782,9 +2796,19 @@ export function DashboardClient({
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div
+                    className={cn(
+                      "flex flex-wrap items-center",
+                      widget.size === "compact" ? "gap-3 pt-1" : "gap-2",
+                    )}
+                  >
                     {widgetHeaderControls}
-                    <label className="inline-flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300">
+                    <label
+                      className={cn(
+                        "inline-flex items-center text-xs text-slate-600 dark:text-slate-300",
+                        widget.size === "compact" ? "gap-1.5" : "gap-1",
+                      )}
+                    >
                       <span>Size</span>
                       <select
                         value={widget.size}
@@ -2794,7 +2818,10 @@ export function DashboardClient({
                             event.target.value as DashboardWidgetSize,
                           )
                         }
-                        className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                        className={cn(
+                          "rounded-lg border border-slate-300 bg-white px-2 text-xs outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950",
+                          widget.size === "compact" ? "py-1.5" : "py-1",
+                        )}
                       >
                         {WIDGET_SIZE_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
