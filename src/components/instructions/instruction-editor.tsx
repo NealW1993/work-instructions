@@ -168,22 +168,52 @@ function buildSnapshot(data: {
   };
 }
 
-function extractInlineMediaSources(content: string) {
+function extractInlineMediaDetails(content: string) {
   const normalizedContent = normalizeEditorContent(content);
-  const sources = new Set<string>();
+  const imageSources = new Set<string>();
+  const videoSources = new Set<string>();
   const mediaPattern = /<(img|video)\b[^>]*\bsrc=(["'])(.*?)\2[^>]*>/gi;
 
   let match = mediaPattern.exec(normalizedContent);
   while (match) {
+    const mediaTag = match[1]?.toLowerCase();
     const source = match[3]?.trim();
     if (source) {
-      sources.add(source);
+      if (mediaTag === "img") {
+        imageSources.add(source);
+      } else if (mediaTag === "video") {
+        videoSources.add(source);
+      }
     }
 
     match = mediaPattern.exec(normalizedContent);
   }
 
-  return sources;
+  return {
+    imageSources,
+    videoSources,
+    allSources: new Set([...imageSources, ...videoSources]),
+  };
+}
+
+function countAddedMedia(nextSources: Set<string>, previousSources: Set<string>) {
+  let count = 0;
+  for (const source of nextSources) {
+    if (!previousSources.has(source)) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function countRemovedMedia(previousSources: Set<string>, nextSources: Set<string>) {
+  let count = 0;
+  for (const source of previousSources) {
+    if (!nextSources.has(source)) {
+      count += 1;
+    }
+  }
+  return count;
 }
 
 function buildInstructionUpdateSummary(params: {
@@ -198,36 +228,43 @@ function buildInstructionUpdateSummary(params: {
 
   const previousPlainText = richTextToPlain(previousNormalized).replace(/\s+/g, " ").trim();
   const nextPlainText = richTextToPlain(nextNormalized).replace(/\s+/g, " ").trim();
+  const characterDelta = nextPlainText.length - previousPlainText.length;
+
   if (previousPlainText !== nextPlainText) {
-    summaryParts.push("Instruction steps updated");
-  }
-
-  const previousMediaSources = extractInlineMediaSources(previousNormalized);
-  const nextMediaSources = extractInlineMediaSources(nextNormalized);
-
-  let addedMediaCount = 0;
-  for (const source of nextMediaSources) {
-    if (!previousMediaSources.has(source)) {
-      addedMediaCount += 1;
+    if (characterDelta > 0) {
+      summaryParts.push(`${characterDelta} characters added`);
+    } else if (characterDelta < 0) {
+      summaryParts.push(`${Math.abs(characterDelta)} characters removed`);
+    } else {
+      summaryParts.push("Instruction text edited");
     }
   }
 
-  let removedMediaCount = 0;
-  for (const source of previousMediaSources) {
-    if (!nextMediaSources.has(source)) {
-      removedMediaCount += 1;
-    }
-  }
+  const previousMedia = extractInlineMediaDetails(previousNormalized);
+  const nextMedia = extractInlineMediaDetails(nextNormalized);
 
-  if (addedMediaCount > 0) {
-    summaryParts.push(`Media added (+${addedMediaCount})`);
+  const addedImages = countAddedMedia(nextMedia.imageSources, previousMedia.imageSources);
+  const removedImages = countRemovedMedia(previousMedia.imageSources, nextMedia.imageSources);
+  const addedVideos = countAddedMedia(nextMedia.videoSources, previousMedia.videoSources);
+  const removedVideos = countRemovedMedia(previousMedia.videoSources, nextMedia.videoSources);
+  const addedMediaCount = addedImages + addedVideos;
+  const removedMediaCount = removedImages + removedVideos;
+
+  if (addedImages > 0) {
+    summaryParts.push(`Image${addedImages === 1 ? "" : "s"} added (+${addedImages})`);
   }
-  if (removedMediaCount > 0) {
-    summaryParts.push(`Media removed (-${removedMediaCount})`);
+  if (removedImages > 0) {
+    summaryParts.push(`Image${removedImages === 1 ? "" : "s"} removed (-${removedImages})`);
+  }
+  if (addedVideos > 0) {
+    summaryParts.push(`Video${addedVideos === 1 ? "" : "s"} added (+${addedVideos})`);
+  }
+  if (removedVideos > 0) {
+    summaryParts.push(`Video${removedVideos === 1 ? "" : "s"} removed (-${removedVideos})`);
   }
 
   if (
-    previousMediaSources.size > 0 &&
+    previousMedia.allSources.size > 0 &&
     previousNormalized !== nextNormalized &&
     addedMediaCount === 0 &&
     removedMediaCount === 0
@@ -236,9 +273,7 @@ function buildInstructionUpdateSummary(params: {
   }
 
   if (params.previousRevision !== params.nextRevision) {
-    summaryParts.push(
-      `Revision changed (${params.previousRevision} -> ${params.nextRevision})`,
-    );
+    summaryParts.push(`Revision ${params.previousRevision} -> ${params.nextRevision}`);
   }
 
   if (summaryParts.length === 0) {
@@ -249,12 +284,28 @@ function buildInstructionUpdateSummary(params: {
 }
 
 function buildInstructionCreateSummary(body: string, revision: number) {
-  const mediaCount = extractInlineMediaSources(body).size;
-  if (mediaCount === 0) {
-    return `Revision ${revision} created.`;
+  const normalizedBody = normalizeEditorContent(body);
+  const mediaDetails = extractInlineMediaDetails(normalizedBody);
+  const textLength = richTextToPlain(normalizedBody).replace(/\s+/g, " ").trim().length;
+  const summaryParts: string[] = [`Revision ${revision} created`];
+
+  if (textLength > 0) {
+    summaryParts.push(`${textLength} characters in instruction text`);
   }
 
-  return `Revision ${revision} created with ${mediaCount} media item${mediaCount === 1 ? "" : "s"}.`;
+  if (mediaDetails.imageSources.size > 0) {
+    summaryParts.push(
+      `${mediaDetails.imageSources.size} image${mediaDetails.imageSources.size === 1 ? "" : "s"} added`,
+    );
+  }
+
+  if (mediaDetails.videoSources.size > 0) {
+    summaryParts.push(
+      `${mediaDetails.videoSources.size} video${mediaDetails.videoSources.size === 1 ? "" : "s"} added`,
+    );
+  }
+
+  return `${summaryParts.join("; ")}.`;
 }
 
 function snapshotsAreEqual(a: EditorSnapshot, b: EditorSnapshot) {

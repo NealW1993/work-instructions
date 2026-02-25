@@ -40,6 +40,26 @@ interface DashboardInstructionRow {
   work_items: DashboardInstructionWorkItem | DashboardInstructionWorkItem[];
 }
 
+interface DashboardHistoryInstructionRelation {
+  id: string;
+  is_archived: boolean;
+  work_items: DashboardInstructionWorkItem | DashboardInstructionWorkItem[] | null;
+}
+
+interface DashboardInstructionChangeEventRow {
+  id: string;
+  instruction_id: string;
+  event_type: "created" | "updated" | string;
+  detail: string | null;
+  revision: number | null;
+  occurred_at: string;
+  actor_user_id: string;
+  work_instructions:
+    | DashboardHistoryInstructionRelation
+    | DashboardHistoryInstructionRelation[]
+    | null;
+}
+
 interface DashboardWorkItemInstructionRow {
   id: string;
   revision: number;
@@ -128,6 +148,24 @@ function normalizeInstruction(
   return relation;
 }
 
+function normalizeHistoryEventInstruction(
+  relation:
+    | DashboardHistoryInstructionRelation
+    | DashboardHistoryInstructionRelation[]
+    | null
+    | undefined,
+) {
+  if (!relation) {
+    return null;
+  }
+
+  if (Array.isArray(relation)) {
+    return relation[0] ?? null;
+  }
+
+  return relation;
+}
+
 function getPrimaryPartOrMoldLabel(partNumber: string, moldNumber: string) {
   const normalizedMold = moldNumber?.trim();
   if (normalizedMold) {
@@ -159,6 +197,30 @@ function formatHistoryInstructionUpdateDetail(instruction: DashboardInstructionR
 
   if (instruction.revision > 1) {
     return `Revision ${instruction.revision} updated.`;
+  }
+
+  return "Instruction content updated.";
+}
+
+function formatHistoryEventDetail(params: {
+  detail: string | null | undefined;
+  eventType: "created" | "updated";
+  revision: number | null;
+}) {
+  const summary = params.detail?.trim();
+  if (summary) {
+    return summary;
+  }
+
+  if (params.eventType === "created") {
+    if ((params.revision ?? 0) > 0) {
+      return `Revision ${params.revision} created.`;
+    }
+    return "Instruction created.";
+  }
+
+  if ((params.revision ?? 0) > 0) {
+    return `Revision ${params.revision} updated.`;
   }
 
   return "Instruction content updated.";
@@ -223,6 +285,15 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     .order("updated_at", { ascending: false })
     .limit(120);
 
+  const historyEventsRequest = supabase
+    .from("instruction_change_events")
+    .select(
+      "id, instruction_id, event_type, detail, revision, occurred_at, actor_user_id, work_instructions!inner(id, is_archived, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title))",
+    )
+    .eq("work_instructions.is_archived", false)
+    .order("occurred_at", { ascending: false })
+    .limit(240);
+
   const departmentsRequest = supabase
     .from("departments")
     .select("id, name, color_hex")
@@ -235,6 +306,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     { data: pinnedData, error: pinnedError },
     { data: authoredLikesData },
     { data: historyInstructionsData },
+    { data: historyEventsData },
     { data: departmentsData },
   ] = await Promise.all([
     searchRequest,
@@ -242,6 +314,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     pinnedRequest,
     authoredLikesRequest,
     historyInstructionsRequest,
+    historyEventsRequest,
     departmentsRequest,
   ]);
 
@@ -250,6 +323,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const rawPinned = (pinnedData ?? []) as DashboardPinnedInstructionRow[];
   const rawAuthoredLikes = (authoredLikesData ?? []) as DashboardInstructionLikeRow[];
   const rawHistoryInstructions = (historyInstructionsData ?? []) as DashboardInstructionRow[];
+  const rawHistoryEvents =
+    (historyEventsData ?? []) as DashboardInstructionChangeEventRow[];
 
   const profileIds = new Set<string>();
   for (const item of rawItems) {
@@ -279,6 +354,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   for (const instruction of rawHistoryInstructions) {
     profileIds.add(instruction.created_by);
     profileIds.add(instruction.updated_by);
+  }
+  for (const historyEvent of rawHistoryEvents) {
+    profileIds.add(historyEvent.actor_user_id);
   }
 
   const profileIdList = Array.from(profileIds);
@@ -423,54 +501,101 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     return bTimestamp - aTimestamp;
   });
 
-  const systemHistoryEvents: DashboardSystemHistoryEventData[] = [];
+  const systemHistoryEventsFromEventLog: DashboardSystemHistoryEventData[] = rawHistoryEvents
+    .map((event) => {
+      const historyInstruction = normalizeHistoryEventInstruction(event.work_instructions);
+      const workItem = normalizeWorkItem(historyInstruction?.work_items);
+      if (!workItem) {
+        return null;
+      }
 
-  for (const instruction of rawHistoryInstructions) {
-    const workItem = normalizeWorkItem(instruction.work_items);
-    if (!workItem) {
-      continue;
-    }
+      const eventType = event.event_type === "created" ? "created" : "updated";
 
-    const resolvedWorkItem = {
-      department_id: workItem.department_id,
-      department_name: normalizeDepartmentName(workItem.departments),
-      department_color: normalizeDepartmentColor(workItem.departments),
-      part_number: workItem.part_number,
-      mold_number: workItem.mold_number,
-      item_title: workItem.item_title,
-    };
+      return {
+        id: event.id,
+        occurred_at: event.occurred_at,
+        action_label:
+          eventType === "created" ? "Instruction Created" : "Instruction Updated",
+        actor_name: profileNameMap.get(event.actor_user_id) ?? "Unknown",
+        detail: formatHistoryEventDetail({
+          detail: event.detail,
+          eventType,
+          revision: event.revision,
+        }),
+        instruction_id: event.instruction_id,
+        event_type: eventType,
+        revision: event.revision,
+        workItem: {
+          department_id: workItem.department_id,
+          department_name: normalizeDepartmentName(workItem.departments),
+          department_color: normalizeDepartmentColor(workItem.departments),
+          part_number: workItem.part_number,
+          mold_number: workItem.mold_number,
+          item_title: workItem.item_title,
+        },
+      };
+    })
+    .filter((event): event is DashboardSystemHistoryEventData => event !== null);
 
-    systemHistoryEvents.push({
-      id: `created:${instruction.id}:${instruction.created_at}`,
-      occurred_at: instruction.created_at,
-      action_label: "Instruction Created",
-      actor_name: profileNameMap.get(instruction.created_by) ?? "Unknown",
-      detail: `Revision ${instruction.revision} created.`,
-      instruction_id: instruction.id,
-      workItem: resolvedWorkItem,
-    });
+  const systemHistoryEvents: DashboardSystemHistoryEventData[] =
+    systemHistoryEventsFromEventLog.length > 0
+      ? systemHistoryEventsFromEventLog
+      : (() => {
+          const fallbackEvents: DashboardSystemHistoryEventData[] = [];
 
-    const createdTimestamp = toTimestamp(instruction.created_at) ?? 0;
-    const updatedTimestamp = toTimestamp(instruction.updated_at) ?? 0;
-    const shouldIncludeUpdateEvent =
-      updatedTimestamp > createdTimestamp + 1000 ||
-      instruction.updated_by !== instruction.created_by ||
-      instruction.revision > 1;
+          for (const instruction of rawHistoryInstructions) {
+            const workItem = normalizeWorkItem(instruction.work_items);
+            if (!workItem) {
+              continue;
+            }
 
-    if (!shouldIncludeUpdateEvent) {
-      continue;
-    }
+            const resolvedWorkItem = {
+              department_id: workItem.department_id,
+              department_name: normalizeDepartmentName(workItem.departments),
+              department_color: normalizeDepartmentColor(workItem.departments),
+              part_number: workItem.part_number,
+              mold_number: workItem.mold_number,
+              item_title: workItem.item_title,
+            };
 
-    systemHistoryEvents.push({
-      id: `updated:${instruction.id}:${instruction.updated_at}`,
-      occurred_at: instruction.updated_at,
-      action_label: "Instruction Updated",
-      actor_name: profileNameMap.get(instruction.updated_by) ?? "Unknown",
-      detail: formatHistoryInstructionUpdateDetail(instruction),
-      instruction_id: instruction.id,
-      workItem: resolvedWorkItem,
-    });
-  }
+            fallbackEvents.push({
+              id: `created:${instruction.id}:${instruction.created_at}`,
+              occurred_at: instruction.created_at,
+              action_label: "Instruction Created",
+              actor_name: profileNameMap.get(instruction.created_by) ?? "Unknown",
+              detail: `Revision ${instruction.revision} created.`,
+              instruction_id: instruction.id,
+              event_type: "created",
+              revision: instruction.revision,
+              workItem: resolvedWorkItem,
+            });
+
+            const createdTimestamp = toTimestamp(instruction.created_at) ?? 0;
+            const updatedTimestamp = toTimestamp(instruction.updated_at) ?? 0;
+            const shouldIncludeUpdateEvent =
+              updatedTimestamp > createdTimestamp + 1000 ||
+              instruction.updated_by !== instruction.created_by ||
+              instruction.revision > 1;
+
+            if (!shouldIncludeUpdateEvent) {
+              continue;
+            }
+
+            fallbackEvents.push({
+              id: `updated:${instruction.id}:${instruction.updated_at}`,
+              occurred_at: instruction.updated_at,
+              action_label: "Instruction Updated",
+              actor_name: profileNameMap.get(instruction.updated_by) ?? "Unknown",
+              detail: formatHistoryInstructionUpdateDetail(instruction),
+              instruction_id: instruction.id,
+              event_type: "updated",
+              revision: instruction.revision,
+              workItem: resolvedWorkItem,
+            });
+          }
+
+          return fallbackEvents;
+        })();
 
   systemHistoryEvents.sort((a, b) => {
     const aTimestamp = toTimestamp(a.occurred_at) ?? 0;
@@ -563,7 +688,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       likeCelebration={likeCelebration}
       newestInstructions={newestInstructions}
       items={items}
-      systemHistoryEvents={systemHistoryEvents.slice(0, 36)}
+      systemHistoryEvents={systemHistoryEvents.slice(0, 240)}
       currentUserId={profile.id}
       initialDashboardLayout={profile.dashboard_layout ?? null}
       departmentOptions={

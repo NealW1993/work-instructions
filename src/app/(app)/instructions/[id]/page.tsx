@@ -10,6 +10,10 @@ import { DeleteInstructionButton } from "@/components/instructions/delete-instru
 import { InstructionBackButton } from "@/components/instructions/instruction-back-button";
 import { LikeInstructionButton } from "@/components/instructions/like-instruction-button";
 import { PinInstructionButton } from "@/components/instructions/pin-instruction-button";
+import {
+  type InstructionUpdateEvent,
+  InstructionUpdatesPanel,
+} from "@/components/instructions/instruction-updates-panel";
 import { LocalDateTime } from "@/components/ui/local-date-time";
 import { requireAuthenticatedUser } from "@/lib/auth";
 import { canEditInstructions, isSystemAdmin } from "@/lib/roles";
@@ -25,6 +29,7 @@ interface InstructionRecord {
   id: string;
   is_archived: boolean;
   body_markdown: string;
+  last_change_summary: string | null;
   revision: number;
   created_at: string;
   updated_at: string;
@@ -60,6 +65,15 @@ interface InstructionRecord {
           | null;
       }>;
   instruction_media: InstructionMedia[];
+}
+
+interface InstructionChangeEventRow {
+  id: string;
+  event_type: "created" | "updated" | string;
+  detail: string | null;
+  occurred_at: string;
+  actor_user_id: string;
+  revision: number | null;
 }
 
 function looksLikeHtml(value: string): boolean {
@@ -197,7 +211,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, is_archived, body_markdown, revision, created_at, updated_at, created_by, updated_by, work_items(id, part_number, mold_number, item_title, departments(name)), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
+      "id, is_archived, body_markdown, last_change_summary, revision, created_at, updated_at, created_by, updated_by, work_items(id, part_number, mold_number, item_title, departments(name)), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
     )
     .eq("id", id)
     .eq("is_archived", false)
@@ -219,10 +233,76 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
     notFound();
   }
 
-  const { data: users } = await supabase
-    .from("profiles")
-    .select("id, full_name")
-    .in("id", [instruction.created_by, instruction.updated_by]);
+  const { data: instructionChangeEventsData } = await supabase
+    .from("instruction_change_events")
+    .select("id, event_type, detail, occurred_at, actor_user_id, revision")
+    .eq("instruction_id", instruction.id)
+    .order("occurred_at", { ascending: true })
+    .limit(400);
+
+  const rawInstructionChangeEvents =
+    (instructionChangeEventsData ?? []) as InstructionChangeEventRow[];
+
+  const profileIds = new Set<string>([instruction.created_by, instruction.updated_by]);
+  for (const changeEvent of rawInstructionChangeEvents) {
+    profileIds.add(changeEvent.actor_user_id);
+  }
+
+  const profileIdList = Array.from(profileIds);
+  const { data: users } =
+    profileIdList.length > 0
+      ? await supabase
+          .from("profiles")
+          .select("id, full_name")
+          .in("id", profileIdList)
+      : { data: null };
+
+  const userMap = new Map((users ?? []).map((entry) => [entry.id, entry.full_name]));
+
+  const instructionUpdateEvents: InstructionUpdateEvent[] =
+    rawInstructionChangeEvents.length > 0
+      ? rawInstructionChangeEvents.map((changeEvent) => ({
+          id: changeEvent.id,
+          eventType: changeEvent.event_type === "created" ? "created" : "updated",
+          detail:
+            changeEvent.detail?.trim() ||
+            (changeEvent.event_type === "created"
+              ? `Revision ${changeEvent.revision ?? instruction.revision} created.`
+              : `Revision ${changeEvent.revision ?? instruction.revision} updated.`),
+          occurredAt: changeEvent.occurred_at,
+          actorName: userMap.get(changeEvent.actor_user_id) ?? "Unknown",
+        }))
+      : (() => {
+          const fallbackEvents: InstructionUpdateEvent[] = [
+            {
+              id: `created:${instruction.id}:${instruction.created_at}`,
+              eventType: "created",
+              detail: "Instruction created.",
+              occurredAt: instruction.created_at,
+              actorName: userMap.get(instruction.created_by) ?? "Unknown",
+            },
+          ];
+
+          const createdTimestamp = new Date(instruction.created_at).getTime();
+          const updatedTimestamp = new Date(instruction.updated_at).getTime();
+          const shouldIncludeUpdateEvent =
+            updatedTimestamp > createdTimestamp + 1000 ||
+            instruction.updated_by !== instruction.created_by ||
+            instruction.revision > 1;
+
+          if (shouldIncludeUpdateEvent) {
+            fallbackEvents.push({
+              id: `updated:${instruction.id}:${instruction.updated_at}`,
+              eventType: "updated",
+              detail:
+                instruction.last_change_summary?.trim() || "Instruction content updated.",
+              occurredAt: instruction.updated_at,
+              actorName: userMap.get(instruction.updated_by) ?? "Unknown",
+            });
+          }
+
+          return fallbackEvents;
+        })();
 
   const [
     { data: pinnedInstruction },
@@ -246,8 +326,6 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
       .select("*", { count: "exact", head: true })
       .eq("instruction_id", instruction.id),
   ]);
-
-  const userMap = new Map((users ?? []).map((entry) => [entry.id, entry.full_name]));
 
   return (
     <article className="grid gap-5">
@@ -306,6 +384,8 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
           </div>
         </div>
       </header>
+
+      <InstructionUpdatesPanel events={instructionUpdateEvents} />
 
       <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
         <h2 className="text-xl font-bold">Work Instructions</h2>
