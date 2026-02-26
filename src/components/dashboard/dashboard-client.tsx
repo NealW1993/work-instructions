@@ -443,14 +443,27 @@ function systemHistoryMatchesQuery(
 function getPartIdLabel(workItem: DashboardWorkItemSummary) {
   const partId = workItem.part_id?.trim();
   if (partId) {
-    return `Part ID ${partId}`;
+    return partId;
   }
 
-  return "Part ID N/A";
+  return "N/A";
 }
 
 function getLabelWithDepartment(workItem: DashboardWorkItemSummary) {
   return `${getPartIdLabel(workItem)} | ${workItem.department_name}`;
+}
+
+function PartDepartmentHeading({ workItem }: { workItem: DashboardWorkItemSummary }) {
+  return (
+    <span className="inline-flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+      <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+        {getPartIdLabel(workItem)}
+      </span>
+      <span className="text-xs font-medium text-slate-600 dark:text-slate-300">
+        | {workItem.department_name}
+      </span>
+    </span>
+  );
 }
 
 function cloneWidgetLayout(layout: DashboardWidgetLayoutItem[]) {
@@ -2469,11 +2482,11 @@ export function DashboardClient({
     widgetId: DashboardWidgetId,
     widgetSize: DashboardWidgetSize,
   ) {
-    if (widgetId === "finder" && (canEdit || isSystemAdmin)) {
+    if (widgetId === "finder") {
       return (
         <div
           className={cn(
-            "flex flex-wrap items-center",
+            "flex flex-wrap items-center justify-end",
             widgetSize === "compact" ? "w-full gap-2" : "gap-2",
           )}
         >
@@ -2499,6 +2512,48 @@ export function DashboardClient({
               Create Instruction
             </Link>
           ) : null}
+          <div className="group relative">
+            <button
+              type="button"
+              onPointerDown={(event) => {
+                if (event.pointerType !== "mouse") {
+                  setDepartmentInsightSummaryTooltipVisible(false);
+                }
+              }}
+              onPointerEnter={(event) => {
+                if (event.pointerType === "mouse") {
+                  setDepartmentInsightSummaryTooltipVisible(true);
+                }
+              }}
+              onPointerLeave={() => setDepartmentInsightSummaryTooltipVisible(false)}
+              onClick={() => setDepartmentInsightExpanded((current) => !current)}
+              aria-expanded={departmentInsightExpanded}
+              aria-controls="finder-department-insight-slider"
+              aria-label={`Department insight summary: ${departmentInsightSummary}`}
+              className={cn(
+                "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition",
+                departmentInsightExpanded
+                  ? "border-cyan-500/55 bg-cyan-500/15 text-cyan-800 dark:text-cyan-200"
+                  : "border-slate-400/30 bg-slate-900/10 text-slate-700 dark:bg-white/10 dark:text-slate-200",
+              )}
+            >
+              <span>
+                Total ({totalDepartmentCount}/{totalInstructionCount})
+              </span>
+              <ChevronRight
+                size={13}
+                className={cn(
+                  "transition-transform duration-300",
+                  departmentInsightExpanded ? "rotate-90" : "",
+                )}
+              />
+            </button>
+            {departmentInsightSummaryTooltipVisible ? (
+              <p className="pointer-events-none absolute right-0 top-full z-10 mt-1 w-max max-w-[260px] rounded-lg border border-cyan-500/45 bg-slate-950/95 px-2.5 py-1 text-[11px] font-semibold text-cyan-100 shadow-lg">
+                ({departmentInsightSummary})
+              </p>
+            ) : null}
+          </div>
         </div>
       );
     }
@@ -2532,21 +2587,11 @@ export function DashboardClient({
 
   function renderWidgetContent(widgetId: DashboardWidgetId) {
     if (widgetId === "finder") {
-      const finderSize = widgetLayoutById.get("finder")?.size ?? "full";
-      const isFinderCompact = finderSize === "compact";
-
       return (
         <div className={cn("grid", departmentInsightExpanded ? "gap-4" : "gap-2")}>
-          <div
-            className={cn(
-              "grid gap-2",
-              isFinderCompact ? "grid-cols-1" : "md:grid-cols-[minmax(0,1fr)_170px]",
-            )}
-          >
+          <div className="grid gap-2">
             <label className="grid gap-1 text-sm">
-              <span className="font-semibold">
-                {isFinderCompact ? "Start searching" : "Start searching"}
-              </span>
+              <span className="sr-only">Search for anything</span>
               <div className="relative">
                 <Search
                   size={16}
@@ -2557,6 +2602,7 @@ export function DashboardClient({
                   value={query}
                   autoComplete="off"
                   spellCheck={false}
+                  aria-label="Search for anything"
                   placeholder="Start typing"
                   onChange={(event) => setQuery(event.target.value)}
                   className="w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-10 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
@@ -2576,64 +2622,6 @@ export function DashboardClient({
                 ) : null}
               </div>
             </label>
-
-            <div
-              className={cn(
-                "grid gap-1 text-sm",
-                isFinderCompact ? "justify-items-start" : "justify-items-end",
-              )}
-            >
-              <p className="font-semibold text-slate-700 dark:text-slate-200">
-                Department Insight
-              </p>
-              <div className="group relative">
-                <button
-                  type="button"
-                  onPointerDown={(event) => {
-                    if (event.pointerType !== "mouse") {
-                      setDepartmentInsightSummaryTooltipVisible(false);
-                    }
-                  }}
-                  onPointerEnter={(event) => {
-                    if (event.pointerType === "mouse") {
-                      setDepartmentInsightSummaryTooltipVisible(true);
-                    }
-                  }}
-                  onPointerLeave={() => setDepartmentInsightSummaryTooltipVisible(false)}
-                  onClick={() => setDepartmentInsightExpanded((current) => !current)}
-                  aria-expanded={departmentInsightExpanded}
-                  aria-controls="finder-department-insight-slider"
-                  aria-label={`Department insight summary: ${departmentInsightSummary}`}
-                  className={cn(
-                    "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition",
-                    departmentInsightExpanded
-                      ? "border-cyan-500/55 bg-cyan-500/15 text-cyan-800 dark:text-cyan-200"
-                      : "border-slate-400/30 bg-slate-900/10 text-slate-700 dark:bg-white/10 dark:text-slate-200",
-                  )}
-                >
-                  <span>
-                    Total ({totalDepartmentCount}/{totalInstructionCount})
-                  </span>
-                  <ChevronRight
-                    size={13}
-                    className={cn(
-                      "transition-transform duration-300",
-                      departmentInsightExpanded ? "rotate-90" : "",
-                    )}
-                  />
-                </button>
-                {departmentInsightSummaryTooltipVisible ? (
-                  <p
-                    className={cn(
-                      "pointer-events-none absolute top-full z-10 mt-1 w-max max-w-[260px] rounded-lg border border-cyan-500/45 bg-slate-950/95 px-2.5 py-1 text-[11px] font-semibold text-cyan-100 shadow-lg",
-                      isFinderCompact ? "left-0" : "right-0",
-                    )}
-                  >
-                    ({departmentInsightSummary})
-                  </p>
-                ) : null}
-              </div>
-            </div>
           </div>
 
           <div
@@ -2726,8 +2714,8 @@ export function DashboardClient({
                   >
                     <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                       <div>
-                        <h3 className="font-bold text-slate-900 dark:text-slate-100">
-                          {getLabelWithDepartment(item)}
+                        <h3 className="leading-tight">
+                          <PartDepartmentHeading workItem={item} />
                         </h3>
                         <p className="text-sm text-slate-600 dark:text-slate-300">
                           {item.item_title}
@@ -2803,7 +2791,9 @@ export function DashboardClient({
               }}
               className="rounded-xl border p-3 transition hover:brightness-105"
             >
-              <p className="font-semibold">{getLabelWithDepartment(instruction.workItem)}</p>
+              <p>
+                <PartDepartmentHeading workItem={instruction.workItem} />
+              </p>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 {instruction.workItem.item_title}
               </p>
@@ -2844,7 +2834,9 @@ export function DashboardClient({
               }}
               className="rounded-xl border p-3 transition hover:brightness-105"
             >
-              <p className="font-semibold">{getLabelWithDepartment(instruction.workItem)}</p>
+              <p>
+                <PartDepartmentHeading workItem={instruction.workItem} />
+              </p>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 {instruction.workItem.item_title}
               </p>
@@ -2947,8 +2939,8 @@ export function DashboardClient({
                 className="grid gap-1.5 rounded-xl border p-3 transition hover:brightness-105"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="font-semibold text-slate-900 dark:text-slate-100">
-                    {getLabelWithDepartment(entry.workItem)}
+                  <p>
+                    <PartDepartmentHeading workItem={entry.workItem} />
                   </p>
                   <span
                     className={cn(
@@ -3020,8 +3012,8 @@ export function DashboardClient({
                 </p>
               </div>
 
-              <p className="font-semibold text-slate-900 dark:text-slate-100">
-                {getLabelWithDepartment(event.workItem)}
+              <p>
+                <PartDepartmentHeading workItem={event.workItem} />
               </p>
               <p className="text-xs text-slate-600 dark:text-slate-300">
                 <span className="font-semibold">Instruction:</span> {event.workItem.item_title}
@@ -3120,8 +3112,8 @@ export function DashboardClient({
                     </div>
 
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <p className="font-semibold text-slate-900 dark:text-slate-100">
-                        {getLabelWithDepartment(event.workItem)}
+                      <p>
+                        <PartDepartmentHeading workItem={event.workItem} />
                       </p>
                     </div>
 
@@ -3297,7 +3289,9 @@ export function DashboardClient({
                 }}
                 className="rounded-xl border p-3 transition hover:brightness-105"
               >
-                <p className="font-semibold">{getLabelWithDepartment(entry.workItem)}</p>
+                <p>
+                  <PartDepartmentHeading workItem={entry.workItem} />
+                </p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   Revision {entry.instruction.revision} | Created{" "}
                   <LocalDateTime value={entry.instruction.created_at} mode="date" />

@@ -1464,7 +1464,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         className="grid min-w-0 gap-5 overflow-hidden rounded-3xl border border-white/30 bg-white/75 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7"
       >
         <div className="grid gap-3 md:gap-4">
-          <label className="grid gap-1.5 text-sm">
+          <label className="grid w-full gap-1.5 text-sm md:max-w-[200px]">
             <span className="font-semibold">Part ID</span>
             <div className="relative">
               <input

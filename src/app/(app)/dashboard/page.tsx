@@ -189,10 +189,10 @@ function normalizeHistoryEventInstruction(
 function getPartIdLabel(partId: string) {
   const normalizedPartId = partId?.trim();
   if (normalizedPartId) {
-    return `Part ID ${normalizedPartId}`;
+    return normalizedPartId;
   }
 
-  return "Part ID N/A";
+  return "N/A";
 }
 
 function toTimestamp(value: string | null | undefined) {
