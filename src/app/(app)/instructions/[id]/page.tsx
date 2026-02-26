@@ -529,18 +529,40 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
             </p>
           </div>
           <div className="grid gap-2 md:justify-items-end">
-            <div className="flex flex-wrap items-center gap-2">
-              <LikeInstructionButton
+            <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
+              <InstructionReviewControls
                 instructionId={instruction.id}
-                userId={profile.id}
-                initialLiked={Boolean(likedInstruction)}
-                initialLikeCount={instructionLikeCount ?? 0}
+                instructionUpdatedAt={instruction.updated_at}
+                reviewWindowDays={reviewWindowDays}
+                initialStatus={reviewStatus.status}
+                initialLastCalibratedAt={reviewStatus.lastCalibratedAt}
+                initialFlaggedAt={reviewStatus.flaggedAt}
               />
-              <PinInstructionButton
-                instructionId={instruction.id}
-                userId={profile.id}
-                initialPinned={Boolean(pinnedInstruction)}
-              />
+
+              <div className="grid w-full max-w-[14rem] justify-items-stretch gap-2 md:w-[14rem]">
+                <InstructionUpdatesPanel
+                  events={instructionUpdateEvents}
+                  className="h-fit w-full justify-center self-start"
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  <LikeInstructionButton
+                    instructionId={instruction.id}
+                    userId={profile.id}
+                    initialLiked={Boolean(likedInstruction)}
+                    initialLikeCount={instructionLikeCount ?? 0}
+                    className="w-full justify-center px-2 py-1.5"
+                  />
+                  <PinInstructionButton
+                    instructionId={instruction.id}
+                    userId={profile.id}
+                    initialPinned={Boolean(pinnedInstruction)}
+                    className="w-full justify-center px-2 py-1.5"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2">
               {canEditInstructions(profile.role) ? (
                 <Link
                   href={`/instructions/${instruction.id}/fork`}
@@ -560,21 +582,6 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
               {isSystemAdmin(profile.role) ? (
                 <DeleteInstructionButton instructionId={instruction.id} />
               ) : null}
-            </div>
-
-            <div className="flex flex-wrap items-start justify-end gap-2">
-              <InstructionReviewControls
-                instructionId={instruction.id}
-                instructionUpdatedAt={instruction.updated_at}
-                reviewWindowDays={reviewWindowDays}
-                initialStatus={reviewStatus.status}
-                initialLastCalibratedAt={reviewStatus.lastCalibratedAt}
-                initialFlaggedAt={reviewStatus.flaggedAt}
-              />
-              <InstructionUpdatesPanel
-                events={instructionUpdateEvents}
-                className="h-fit self-start"
-              />
             </div>
           </div>
         </div>
