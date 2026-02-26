@@ -611,6 +611,9 @@ export function DashboardClient({
   const [layoutDirty, setLayoutDirty] = useState(false);
   const [layoutSaving, setLayoutSaving] = useState(false);
   const [layoutError, setLayoutError] = useState<string | null>(null);
+  const [dashboardStudioCollapsed, setDashboardStudioCollapsed] = useState(true);
+  const [layoutPresetsCollapsed, setLayoutPresetsCollapsed] = useState(true);
+  const [widgetLibraryCollapsed, setWidgetLibraryCollapsed] = useState(true);
   const [portalReady, setPortalReady] = useState(false);
   const [navigationModalOpen, setNavigationModalOpen] = useState(false);
   const [impactDrilldownKey, setImpactDrilldownKey] = useState<ImpactDrilldownKey | null>(null);
@@ -835,6 +838,13 @@ export function DashboardClient({
 
   useEffect(() => {
     customizeOpenRef.current = customizeOpen;
+    if (customizeOpen) {
+      setDashboardStudioCollapsed(true);
+      setLayoutPresetsCollapsed(true);
+      setWidgetLibraryCollapsed(true);
+      return;
+    }
+
     if (!customizeOpen) {
       clearWidgetPointerDragState();
     }
@@ -2414,7 +2424,8 @@ export function DashboardClient({
             </div>
           ) : (
             <p className="rounded-xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-              Start typing above to search instructions instantly.
+              Searching in {selectedDepartmentName}. Start typing above to search instructions
+              instantly.
             </p>
           )}
         </div>
@@ -2913,19 +2924,28 @@ export function DashboardClient({
 
         {customizeOpen ? (
           <section className="relative overflow-hidden rounded-3xl border border-white/20 bg-gradient-to-r from-white/55 via-white/35 to-white/55 p-4 shadow-lg backdrop-blur-sm dark:border-white/10 dark:from-slate-900/60 dark:via-slate-900/45 dark:to-slate-900/60 md:p-5">
-            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-              <div className="space-y-1">
-                <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-300">
-                  Dashboard Studio
-                </p>
-                <h1 className="text-xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
-                  Customize Dashboard
-                </h1>
-                <p className="text-xs text-slate-600 dark:text-slate-300">
-                  Apply presets and tune widget visibility or size, then save from
-                  the Dashboard menu in the header.
-                </p>
-              </div>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setDashboardStudioCollapsed((current) => !current)}
+                className="inline-flex min-w-0 items-center gap-2 rounded-xl border border-slate-300/70 bg-white/75 px-3 py-2 text-left transition hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/60 dark:hover:border-cyan-500/50 dark:hover:bg-cyan-500/10"
+              >
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-300">
+                    Dashboard Studio
+                  </p>
+                  <h1 className="text-base font-extrabold tracking-tight text-slate-900 dark:text-slate-100 md:text-lg">
+                    Customize Dashboard
+                  </h1>
+                </div>
+                <ChevronRight
+                  size={16}
+                  className={cn(
+                    "shrink-0 text-slate-600 transition-transform dark:text-slate-300",
+                    dashboardStudioCollapsed ? "" : "rotate-90",
+                  )}
+                />
+              </button>
               <div className="flex flex-wrap items-center justify-end gap-2">
                 {layoutDirty ? (
                   <span className="rounded-full border border-amber-500/45 bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-800 dark:text-amber-200">
@@ -2939,133 +2959,173 @@ export function DashboardClient({
               </div>
             </div>
 
-            <div className="grid gap-2 rounded-2xl border border-slate-300/70 bg-white/65 p-3 dark:border-slate-700 dark:bg-slate-900/50">
-              <div className="grid gap-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  Layout Presets
+            {dashboardStudioCollapsed ? null : (
+              <div className="grid gap-2 rounded-2xl border border-slate-300/70 bg-white/65 p-3 dark:border-slate-700 dark:bg-slate-900/50">
+                <p className="text-xs text-slate-600 dark:text-slate-300">
+                  Apply presets and tune widget visibility or size, then save from
+                  the Dashboard menu in the header.
                 </p>
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {DASHBOARD_LAYOUT_PRESETS.map((preset) => (
-                    <button
-                      key={preset.id}
-                      type="button"
-                      onClick={() => applyLayoutPreset(preset.id)}
+
+                <section className="grid gap-2 rounded-xl border border-slate-300/70 bg-white/70 p-2 dark:border-slate-700 dark:bg-slate-900/60">
+                  <button
+                    type="button"
+                    onClick={() => setLayoutPresetsCollapsed((current) => !current)}
+                    className="inline-flex items-center justify-between gap-2 rounded-lg px-1 py-0.5 text-left transition hover:bg-cyan-500/10"
+                  >
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                      Layout Presets
+                    </span>
+                    <ChevronRight
+                      size={14}
                       className={cn(
-                        "grid gap-2 rounded-xl border p-2 text-left transition",
-                        activeLayoutPresetId === preset.id
-                          ? "border-cyan-500/50 bg-cyan-500/10"
-                          : "border-slate-300/70 bg-white/80 hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/70",
+                        "text-slate-500 transition-transform dark:text-slate-300",
+                        layoutPresetsCollapsed ? "" : "rotate-90",
                       )}
-                    >
-                      <div className="grid min-h-12 grid-cols-6 gap-1 rounded-lg border border-slate-300/70 bg-slate-100/80 p-1 dark:border-slate-700 dark:bg-slate-950/60">
-                        {preset.layout
-                          .filter((entry) => entry.visible)
-                          .slice(0, 6)
-                          .map((entry, index) => (
-                            <span
-                              key={`${preset.id}-${entry.id}-${index}`}
-                              className={cn(
-                                getPresetPreviewSpanClass(entry.size),
-                                "h-2 rounded-sm bg-cyan-500/70 dark:bg-cyan-400/70",
-                              )}
-                            />
-                          ))}
-                      </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-xs font-semibold text-slate-900 dark:text-slate-100">
-                          {preset.label}
-                        </p>
-                        <span
+                    />
+                  </button>
+                  {layoutPresetsCollapsed ? null : (
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      {DASHBOARD_LAYOUT_PRESETS.map((preset) => (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => applyLayoutPreset(preset.id)}
                           className={cn(
-                            "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                            "grid gap-2 rounded-xl border p-2 text-left transition",
                             activeLayoutPresetId === preset.id
-                              ? "bg-cyan-500/20 text-cyan-800 dark:text-cyan-200"
-                              : "bg-slate-500/20 text-slate-700 dark:text-slate-300",
+                              ? "border-cyan-500/50 bg-cyan-500/10"
+                              : "border-slate-300/70 bg-white/80 hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/70",
                           )}
                         >
-                          {activeLayoutPresetId === preset.id ? "Active" : "Select"}
-                        </span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid gap-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  Widget Library
-                </p>
-                <div className="grid gap-2 md:grid-cols-2">
-                  {widgetLayout.map((widget) => {
-                    const definition = widgetDefinitionsById.get(widget.id);
-                    if (!definition) {
-                      return null;
-                    }
-
-                    return (
-                      <article
-                        key={widget.id}
-                        className="grid gap-2 rounded-xl border border-slate-300/70 bg-white/80 p-3 dark:border-slate-700 dark:bg-slate-900/70"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                              {definition.title}
-                            </p>
+                          <div className="grid min-h-12 grid-cols-6 gap-1 rounded-lg border border-slate-300/70 bg-slate-100/80 p-1 dark:border-slate-700 dark:bg-slate-950/60">
+                            {preset.layout
+                              .filter((entry) => entry.visible)
+                              .slice(0, 6)
+                              .map((entry, index) => (
+                                <span
+                                  key={`${preset.id}-${entry.id}-${index}`}
+                                  className={cn(
+                                    getPresetPreviewSpanClass(entry.size),
+                                    "h-2 rounded-sm bg-cyan-500/70 dark:bg-cyan-400/70",
+                                  )}
+                                />
+                              ))}
                           </div>
-                          <span
-                            className={cn(
-                              "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
-                              widget.visible
-                                ? "bg-emerald-500/20 text-emerald-800 dark:text-emerald-200"
-                                : "bg-slate-500/20 text-slate-700 dark:text-slate-300",
-                            )}
-                          >
-                            {widget.visible ? "Visible" : "Hidden"}
-                          </span>
-                        </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                              {preset.label}
+                            </p>
+                            <span
+                              className={cn(
+                                "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                                activeLayoutPresetId === preset.id
+                                  ? "bg-cyan-500/20 text-cyan-800 dark:text-cyan-200"
+                                  : "bg-slate-500/20 text-slate-700 dark:text-slate-300",
+                              )}
+                            >
+                              {activeLayoutPresetId === preset.id ? "Active" : "Select"}
+                            </span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </section>
 
-                        <div className="flex items-center justify-between gap-2">
-                          <button
-                            type="button"
-                            onClick={() => toggleWidget(widget.id)}
-                            className={cn(
-                              "inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-semibold transition",
-                              widget.visible
-                                ? "border-rose-500/40 bg-rose-500/10 text-rose-700 hover:bg-rose-500/20 dark:text-rose-200"
-                                : "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-200",
-                            )}
-                          >
-                            {widget.visible ? <X size={12} /> : <Plus size={12} />}
-                            {widget.visible ? "Remove" : "Add"}
-                          </button>
+                <section className="grid gap-2 rounded-xl border border-slate-300/70 bg-white/70 p-2 dark:border-slate-700 dark:bg-slate-900/60">
+                  <button
+                    type="button"
+                    onClick={() => setWidgetLibraryCollapsed((current) => !current)}
+                    className="inline-flex items-center justify-between gap-2 rounded-lg px-1 py-0.5 text-left transition hover:bg-cyan-500/10"
+                  >
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                      Widget Library
+                    </span>
+                    <ChevronRight
+                      size={14}
+                      className={cn(
+                        "text-slate-500 transition-transform dark:text-slate-300",
+                        widgetLibraryCollapsed ? "" : "rotate-90",
+                      )}
+                    />
+                  </button>
+                  {widgetLibraryCollapsed ? null : (
+                    <>
+                      <div className="grid gap-2 md:grid-cols-2">
+                        {widgetLayout.map((widget) => {
+                          const definition = widgetDefinitionsById.get(widget.id);
+                          if (!definition) {
+                            return null;
+                          }
 
-                          <select
-                            value={widget.size}
-                            onChange={(event) =>
-                              updateWidgetSize(
-                                widget.id,
-                                event.target.value as DashboardWidgetSize,
-                              )
-                            }
-                            className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                          >
-                            {WIDGET_SIZE_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Tip: use the grip handle to drag and reorder widgets while customize mode is on.
-                </p>
+                          return (
+                            <article
+                              key={widget.id}
+                              className="grid gap-2 rounded-xl border border-slate-300/70 bg-white/80 p-3 dark:border-slate-700 dark:bg-slate-900/70"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                                    {definition.title}
+                                  </p>
+                                </div>
+                                <span
+                                  className={cn(
+                                    "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                                    widget.visible
+                                      ? "bg-emerald-500/20 text-emerald-800 dark:text-emerald-200"
+                                      : "bg-slate-500/20 text-slate-700 dark:text-slate-300",
+                                  )}
+                                >
+                                  {widget.visible ? "Visible" : "Hidden"}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center justify-between gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleWidget(widget.id)}
+                                  className={cn(
+                                    "inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-semibold transition",
+                                    widget.visible
+                                      ? "border-rose-500/40 bg-rose-500/10 text-rose-700 hover:bg-rose-500/20 dark:text-rose-200"
+                                      : "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-200",
+                                  )}
+                                >
+                                  {widget.visible ? <X size={12} /> : <Plus size={12} />}
+                                  {widget.visible ? "Remove" : "Add"}
+                                </button>
+
+                                <select
+                                  value={widget.size}
+                                  onChange={(event) =>
+                                    updateWidgetSize(
+                                      widget.id,
+                                      event.target.value as DashboardWidgetSize,
+                                    )
+                                  }
+                                  className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                                >
+                                  {WIDGET_SIZE_OPTIONS.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                      {option.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            </article>
+                          );
+                        })}
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        Tip: use the grip handle to drag and reorder widgets while customize mode
+                        is on.
+                      </p>
+                    </>
+                  )}
+                </section>
               </div>
-            </div>
+            )}
           </section>
         ) : null}
 
@@ -3092,7 +3152,7 @@ export function DashboardClient({
             const widgetHeaderControls = renderWidgetHeaderControls(widget.id, widget.size);
             const showFinderCompactSystemAdminSizeFirst =
               isSystemAdmin && widget.id === "finder" && widget.size === "compact";
-            const sizeControl = (
+            const sizeControl = customizeOpen ? (
               <label
                 className={cn(
                   "inline-flex items-center text-xs text-slate-600 dark:text-slate-300",
@@ -3120,7 +3180,7 @@ export function DashboardClient({
                   ))}
                 </select>
               </label>
-            );
+            ) : null;
 
             return (
               <section
@@ -3135,18 +3195,21 @@ export function DashboardClient({
                     : "",
                 )}
               >
-                <button
-                  type="button"
-                  onClick={() => toggleWidget(widget.id)}
-                  aria-label={`Remove ${definition.title} widget`}
-                  className="absolute right-4 top-4 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border border-rose-500/40 bg-rose-500/10 text-rose-700 transition hover:bg-rose-500/20 dark:text-rose-200"
-                >
-                  <X size={12} />
-                </button>
+                {customizeOpen ? (
+                  <button
+                    type="button"
+                    onClick={() => toggleWidget(widget.id)}
+                    aria-label={`Remove ${definition.title} widget`}
+                    className="absolute right-4 top-4 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border border-rose-500/40 bg-rose-500/10 text-rose-700 transition hover:bg-rose-500/20 dark:text-rose-200"
+                  >
+                    <X size={12} />
+                  </button>
+                ) : null}
 
                 <div
                   className={cn(
-                    "mb-3 flex flex-col gap-2.5 pr-10",
+                    "mb-3 flex flex-col gap-2.5",
+                    customizeOpen ? "pr-10" : "",
                     widget.size === "compact"
                       ? "items-start"
                       : "md:flex-row md:items-start md:justify-between",
