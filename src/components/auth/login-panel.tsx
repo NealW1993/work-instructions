@@ -320,10 +320,10 @@ export function LoginPanel() {
       <div className="auth-login-shell relative z-10 mx-auto w-full max-w-2xl rounded-[2rem] border border-white/20 bg-slate-950/32 p-5 text-slate-100 shadow-2xl shadow-black/45 backdrop-blur-2xl md:p-8">
         <div className="grid gap-2 text-center">
           <h1 className="text-4xl font-extrabold leading-tight text-white md:text-5xl">
-            Visual work instructions for modern teams.
+            Visual work instructions, Reinvented.
           </h1>
           <p className="text-base text-slate-200/90">
-            Clear guidance, faster handoffs, and confident execution.
+            Reduce training time and increase quality from day one.
           </p>
         </div>
 
@@ -381,7 +381,6 @@ export function LoginPanel() {
               <button
                 type="button"
                 aria-label="Need help?"
-                title="If you need help logging in, contact the system admin."
                 onClick={() => {
                   setHelpOpen(true);
                   setHelpError(null);

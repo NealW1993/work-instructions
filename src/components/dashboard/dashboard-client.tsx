@@ -179,8 +179,6 @@ const DEFAULT_SYSTEM_HISTORY_ROW_LIMIT = 15;
 const SYSTEM_HISTORY_ROW_LIMIT_OPTIONS = [5, 15, 30, 45, 60] as const;
 const SYSTEM_HISTORY_ROW_LIMIT_STORAGE_KEY = "dashboard.systemHistoryRowLimit";
 const RECENT_UPDATES_EVENT_LIMIT = 20;
-const WIDGET_DRAG_HOLD_DELAY_MS = 2000;
-const WIDGET_DRAG_CANCEL_MOVE_PX = 16;
 
 interface DashboardInstructionReturnState {
   query: string;
@@ -487,10 +485,6 @@ export function DashboardClient({
   const pointerDragStateRef = useRef<{
     pointerId: number;
     sourceWidgetId: DashboardWidgetId;
-    holdTimeoutId: number | null;
-    activated: boolean;
-    startX: number;
-    startY: number;
   } | null>(null);
   const pendingNavigationRef = useRef<DashboardPendingNavigation | null>(null);
   const navigationModalOpenRef = useRef(false);
@@ -506,6 +500,8 @@ export function DashboardClient({
   const [query, setQuery] = useState(initialQuery);
   const [selectedDepartmentId, setSelectedDepartmentId] = useState("all");
   const [departmentInsightExpanded, setDepartmentInsightExpanded] = useState(false);
+  const [departmentInsightSummaryTooltipVisible, setDepartmentInsightSummaryTooltipVisible] =
+    useState(false);
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [draggedWidgetId, setDraggedWidgetId] = useState<DashboardWidgetId | null>(null);
   const [dragOverWidgetId, setDragOverWidgetId] = useState<DashboardWidgetId | null>(null);
@@ -742,14 +738,14 @@ export function DashboardClient({
 
   useEffect(() => {
     customizeOpenRef.current = customizeOpen;
+    if (!customizeOpen) {
+      clearWidgetPointerDragState();
+    }
   }, [customizeOpen]);
 
   useEffect(() => {
     return () => {
-      const pointerDragState = pointerDragStateRef.current;
-      if (pointerDragState && pointerDragState.holdTimeoutId !== null) {
-        window.clearTimeout(pointerDragState.holdTimeoutId);
-      }
+      pointerDragStateRef.current = null;
     };
   }, []);
 
@@ -1736,11 +1732,6 @@ export function DashboardClient({
   }
 
   function clearWidgetPointerDragState() {
-    const pointerDragState = pointerDragStateRef.current;
-    if (pointerDragState && pointerDragState.holdTimeoutId !== null) {
-      window.clearTimeout(pointerDragState.holdTimeoutId);
-    }
-
     pointerDragStateRef.current = null;
     setDraggedWidgetId(null);
     setDragOverWidgetId(null);
@@ -1750,6 +1741,10 @@ export function DashboardClient({
     widgetId: DashboardWidgetId,
     event: ReactPointerEvent<HTMLButtonElement>,
   ) {
+    if (!customizeOpenRef.current || event.pointerType === "mouse" && event.button !== 0) {
+      return;
+    }
+
     if (event.button !== 0) {
       return;
     }
@@ -1757,50 +1752,18 @@ export function DashboardClient({
     event.preventDefault();
     event.stopPropagation();
 
-    const pointerId = event.pointerId;
-    const holdTimeoutId = window.setTimeout(() => {
-      const pointerDragState = pointerDragStateRef.current;
-      if (!pointerDragState || pointerDragState.pointerId !== pointerId) {
-        return;
-      }
-
-      pointerDragStateRef.current = {
-        ...pointerDragState,
-        activated: true,
-        holdTimeoutId: null,
-      };
-      setDraggedWidgetId(pointerDragState.sourceWidgetId);
-      setDragOverWidgetId(pointerDragState.sourceWidgetId);
-    }, WIDGET_DRAG_HOLD_DELAY_MS);
-
     pointerDragStateRef.current = {
-      pointerId,
+      pointerId: event.pointerId,
       sourceWidgetId: widgetId,
-      holdTimeoutId,
-      activated: false,
-      startX: event.clientX,
-      startY: event.clientY,
     };
+    setDraggedWidgetId(widgetId);
+    setDragOverWidgetId(widgetId);
     event.currentTarget.setPointerCapture(event.pointerId);
   }
 
   function handleWidgetGripPointerMove(event: ReactPointerEvent<HTMLButtonElement>) {
     const pointerDragState = pointerDragStateRef.current;
     if (!pointerDragState || pointerDragState.pointerId !== event.pointerId) {
-      return;
-    }
-
-    if (!pointerDragState.activated) {
-      const movedDistance = Math.hypot(
-        event.clientX - pointerDragState.startX,
-        event.clientY - pointerDragState.startY,
-      );
-      if (movedDistance > WIDGET_DRAG_CANCEL_MOVE_PX) {
-        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-          event.currentTarget.releasePointerCapture(event.pointerId);
-        }
-        clearWidgetPointerDragState();
-      }
       return;
     }
 
@@ -1820,14 +1783,6 @@ export function DashboardClient({
 
     event.preventDefault();
     event.stopPropagation();
-
-    if (!pointerDragState.activated) {
-      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      }
-      clearWidgetPointerDragState();
-      return;
-    }
 
     const sourceWidgetId = pointerDragState.sourceWidgetId;
     const pointerTargetWidgetId =
@@ -2182,6 +2137,17 @@ export function DashboardClient({
               <div className="group relative shrink-0">
                 <button
                   type="button"
+                  onPointerDown={(event) => {
+                    if (event.pointerType !== "mouse") {
+                      setDepartmentInsightSummaryTooltipVisible(false);
+                    }
+                  }}
+                  onPointerEnter={(event) => {
+                    if (event.pointerType === "mouse") {
+                      setDepartmentInsightSummaryTooltipVisible(true);
+                    }
+                  }}
+                  onPointerLeave={() => setDepartmentInsightSummaryTooltipVisible(false)}
                   onClick={() => setDepartmentInsightExpanded((current) => !current)}
                   aria-expanded={departmentInsightExpanded}
                   aria-controls="finder-department-insight-slider"
@@ -2204,9 +2170,11 @@ export function DashboardClient({
                     )}
                   />
                 </button>
-                <p className="pointer-events-none absolute left-0 top-full z-10 mt-1 w-max max-w-[260px] rounded-lg border border-cyan-500/45 bg-slate-950/95 px-2.5 py-1 text-[11px] font-semibold text-cyan-100 opacity-0 shadow-lg transition duration-200 group-hover:opacity-100 group-focus-within:opacity-100">
-                  ({departmentInsightSummary})
-                </p>
+                {departmentInsightSummaryTooltipVisible ? (
+                  <p className="pointer-events-none absolute left-0 top-full z-10 mt-1 w-max max-w-[260px] rounded-lg border border-cyan-500/45 bg-slate-950/95 px-2.5 py-1 text-[11px] font-semibold text-cyan-100 shadow-lg">
+                    ({departmentInsightSummary})
+                  </p>
+                ) : null}
               </div>
 
               <div
@@ -2860,14 +2828,6 @@ export function DashboardClient({
                 </p>
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setCustomizeOpen(false)}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-slate-400/40 bg-slate-900/10 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-900/15 dark:bg-white/10 dark:text-slate-100 dark:hover:bg-white/15"
-                >
-                  <X size={13} />
-                  Close Customize Panel
-                </button>
                 {layoutDirty ? (
                   <span className="rounded-full border border-amber-500/45 bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-800 dark:text-amber-200">
                     Unsaved changes
@@ -3003,22 +2963,11 @@ export function DashboardClient({
                   })}
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Tip: press and hold the grip icon for 2 seconds, then drag to reorder.
+                  Tip: use the grip handle to drag and reorder widgets while customize mode is on.
                 </p>
               </div>
             </div>
           </section>
-        ) : null}
-
-        {customizeOpen ? (
-          <button
-            type="button"
-            onClick={() => setCustomizeOpen(false)}
-            className="fixed bottom-4 right-4 z-30 inline-flex items-center gap-2 rounded-full border border-slate-400/45 bg-slate-950/85 px-4 py-2 text-xs font-semibold text-slate-100 shadow-xl backdrop-blur-sm transition hover:bg-slate-900 md:bottom-6 md:right-6"
-          >
-            <X size={14} />
-            Close Customize Panel
-          </button>
         ) : null}
 
         <div className="grid grid-cols-12 gap-4">
@@ -3094,18 +3043,20 @@ export function DashboardClient({
                   )}
                 >
                   <div className="flex min-w-0 items-start gap-2">
-                    <button
-                      type="button"
-                      aria-label={`Drag to reorder ${definition.title}`}
-                      onDragStart={(event) => event.preventDefault()}
-                      onPointerDown={(event) => handleWidgetGripPointerDown(widget.id, event)}
-                      onPointerMove={handleWidgetGripPointerMove}
-                      onPointerUp={completeWidgetPointerDrag}
-                      onPointerCancel={handleWidgetGripPointerCancel}
-                      className="mt-0.5 touch-none rounded-lg border border-slate-300/70 bg-white/60 p-1.5 text-slate-500 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300 dark:hover:bg-slate-900"
-                    >
-                      <GripVertical size={14} />
-                    </button>
+                    {customizeOpen ? (
+                      <button
+                        type="button"
+                        aria-label={`Drag to reorder ${definition.title}`}
+                        onDragStart={(event) => event.preventDefault()}
+                        onPointerDown={(event) => handleWidgetGripPointerDown(widget.id, event)}
+                        onPointerMove={handleWidgetGripPointerMove}
+                        onPointerUp={completeWidgetPointerDrag}
+                        onPointerCancel={handleWidgetGripPointerCancel}
+                        className="mt-0.5 touch-none cursor-grab rounded-lg border border-slate-300/70 bg-white/60 p-2 text-slate-500 transition hover:bg-slate-100 active:cursor-grabbing dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300 dark:hover:bg-slate-900"
+                      >
+                        <GripVertical size={14} />
+                      </button>
+                    ) : null}
                     <div className="min-w-0">
                       <h2 className="break-words text-xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
                         {definition.title}
