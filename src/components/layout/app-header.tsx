@@ -2,9 +2,21 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { ChevronDown, LayoutGrid, RefreshCw, Save, Undo2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 
 import { UserAccountMenu } from "@/components/layout/user-account-menu";
+import {
+  DASHBOARD_LAYOUT_COMMAND_EVENT,
+  DASHBOARD_LAYOUT_DEFAULT_STATE,
+  DASHBOARD_LAYOUT_MENU_INTENT_KEY,
+  DASHBOARD_LAYOUT_MENU_INTENT_OPEN_CUSTOMIZE,
+  DASHBOARD_LAYOUT_STATE_EVENT,
+  type DashboardLayoutCommand,
+  type DashboardLayoutCommandEventDetail,
+  type DashboardLayoutStateEventDetail,
+} from "@/lib/dashboard-controls";
 import { canEditInstructions, isSystemAdmin } from "@/lib/roles";
 import type { Profile } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -28,9 +40,37 @@ function isActivePath(pathname: string, href: string) {
 
 export function AppHeader({ profile }: { profile: Profile }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const [dashboardMenuOpen, setDashboardMenuOpen] = useState(false);
+  const [dashboardMenuPathname, setDashboardMenuPathname] = useState(pathname);
+  const [dashboardLayoutState, setDashboardLayoutState] = useState(
+    DASHBOARD_LAYOUT_DEFAULT_STATE,
+  );
+
+  const isDashboardActive = isActivePath(pathname, "/dashboard");
+  const activeDashboardLayoutState = isDashboardActive
+    ? dashboardLayoutState
+    : DASHBOARD_LAYOUT_DEFAULT_STATE;
+  const dashboardMenuVisible =
+    dashboardMenuOpen && dashboardMenuPathname === pathname;
+  const canSendDashboardLayoutActions =
+    isDashboardActive && activeDashboardLayoutState.available;
+  const canSaveLayout =
+    canSendDashboardLayoutActions &&
+    activeDashboardLayoutState.layoutDirty &&
+    !activeDashboardLayoutState.layoutSaving;
+  const canDiscardLayout =
+    canSendDashboardLayoutActions &&
+    activeDashboardLayoutState.layoutDirty &&
+    !activeDashboardLayoutState.layoutSaving;
+  const canResetLayout =
+    canSendDashboardLayoutActions && !activeDashboardLayoutState.layoutSaving;
+  const customizeLabel =
+    canSendDashboardLayoutActions && activeDashboardLayoutState.customizeOpen
+      ? "Close Customize Panel"
+      : "Customize Dashboard";
 
   const navLinks: HeaderNavLink[] = [
-    { href: "/dashboard", label: "Dashboard" },
     ...(canEditInstructions(profile.role)
       ? [{ href: "/instructions/new", label: "New Instruction" }]
       : []),
@@ -39,6 +79,112 @@ export function AppHeader({ profile }: { profile: Profile }) {
       : []),
     ...(isSystemAdmin(profile.role) ? [{ href: "/admin/users", label: "System Admin" }] : []),
   ];
+
+  useEffect(() => {
+    const handleDashboardLayoutState = (event: Event) => {
+      const detail = (event as CustomEvent<DashboardLayoutStateEventDetail>).detail;
+      if (!detail || typeof detail.available !== "boolean") {
+        return;
+      }
+
+      setDashboardLayoutState({
+        available: detail.available,
+        customizeOpen: Boolean(detail.customizeOpen),
+        layoutDirty: Boolean(detail.layoutDirty),
+        layoutSaving: Boolean(detail.layoutSaving),
+        layoutError: detail.layoutError ?? null,
+      });
+    };
+
+    window.addEventListener(
+      DASHBOARD_LAYOUT_STATE_EVENT,
+      handleDashboardLayoutState as EventListener,
+    );
+    return () => {
+      window.removeEventListener(
+        DASHBOARD_LAYOUT_STATE_EVENT,
+        handleDashboardLayoutState as EventListener,
+      );
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!dashboardMenuVisible) {
+      return;
+    }
+
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('[data-dashboard-menu-root="true"]')) {
+        return;
+      }
+
+      setDashboardMenuOpen(false);
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setDashboardMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [dashboardMenuVisible]);
+
+  const triggerDashboardAction = useCallback(
+    (command: DashboardLayoutCommand) => {
+      if (isDashboardActive) {
+        if (command === "toggle-customize" && !dashboardLayoutState.available) {
+          try {
+            window.sessionStorage.setItem(
+              DASHBOARD_LAYOUT_MENU_INTENT_KEY,
+              DASHBOARD_LAYOUT_MENU_INTENT_OPEN_CUSTOMIZE,
+            );
+          } catch {
+            // Menu intent persistence is best-effort.
+          }
+        }
+
+        window.dispatchEvent(
+          new CustomEvent<DashboardLayoutCommandEventDetail>(
+            DASHBOARD_LAYOUT_COMMAND_EVENT,
+            {
+              detail: { command },
+            },
+          ),
+        );
+        return;
+      }
+
+      if (command === "toggle-customize") {
+        try {
+          window.sessionStorage.setItem(
+            DASHBOARD_LAYOUT_MENU_INTENT_KEY,
+            DASHBOARD_LAYOUT_MENU_INTENT_OPEN_CUSTOMIZE,
+          );
+        } catch {
+          // Menu intent persistence is best-effort.
+        }
+      }
+
+      router.push("/dashboard");
+    },
+    [dashboardLayoutState.available, isDashboardActive, router],
+  );
+
+  const handleDashboardAction = useCallback(
+    (command: DashboardLayoutCommand) => {
+      triggerDashboardAction(command);
+      setDashboardMenuOpen(false);
+    },
+    [triggerDashboardAction],
+  );
 
   const renderNavLink = (link: HeaderNavLink) => {
     const active = isActivePath(pathname, link.href);
@@ -59,6 +205,118 @@ export function AppHeader({ profile }: { profile: Profile }) {
     );
   };
 
+  const renderDashboardControl = (mobile: boolean) => (
+    <div
+      data-dashboard-menu-root="true"
+      className={cn("relative inline-flex", mobile ? "max-w-full" : "")}
+    >
+      <Link
+        href="/dashboard"
+        className={cn(
+          "inline-flex items-center rounded-l-xl border border-r-0 px-4 py-2 text-sm font-semibold transition",
+          isDashboardActive
+            ? "border-cyan-500/55 bg-cyan-500/15 text-cyan-900 shadow-sm dark:text-cyan-100"
+            : "border-slate-300/70 bg-white/70 text-slate-700 hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/65 dark:text-slate-100 dark:hover:border-cyan-500/50 dark:hover:bg-cyan-500/10",
+        )}
+      >
+        Dashboard
+      </Link>
+
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={dashboardMenuVisible}
+        aria-label="Open dashboard options"
+        onClick={() =>
+          setDashboardMenuOpen((current) => {
+            const next = !current;
+            if (next) {
+              setDashboardMenuPathname(pathname);
+            }
+            return next;
+          })
+        }
+        className={cn(
+          "inline-flex items-center rounded-r-xl border px-2.5 py-2 transition",
+          isDashboardActive
+            ? "border-cyan-500/55 bg-cyan-500/15 text-cyan-900 hover:bg-cyan-500/25 dark:text-cyan-100 dark:hover:bg-cyan-500/25"
+            : "border-slate-300/70 bg-white/70 text-slate-700 hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/65 dark:text-slate-100 dark:hover:border-cyan-500/50 dark:hover:bg-cyan-500/10",
+        )}
+      >
+        <ChevronDown
+          size={14}
+          className={cn("transition", dashboardMenuVisible ? "rotate-180" : "")}
+        />
+      </button>
+
+      {dashboardMenuVisible ? (
+        <div
+          className={cn(
+            "absolute top-[calc(100%+0.5rem)] z-40 grid gap-2 rounded-2xl border border-white/20 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-xl",
+            mobile ? "left-1/2 w-[min(94vw,320px)] -translate-x-1/2" : "left-0 w-[300px]",
+          )}
+        >
+          <button
+            type="button"
+            onClick={() => handleDashboardAction("toggle-customize")}
+            className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/25"
+          >
+            <LayoutGrid size={14} />
+            {customizeLabel}
+          </button>
+
+          <button
+            type="button"
+            disabled={!canSaveLayout}
+            onClick={() => handleDashboardAction("save-layout")}
+            className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/45 bg-emerald-500/15 px-3 py-2 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            <Save size={14} />
+            {activeDashboardLayoutState.layoutSaving ? "Saving..." : "Save Layout"}
+          </button>
+
+          <button
+            type="button"
+            disabled={!canDiscardLayout}
+            onClick={() => handleDashboardAction("discard-changes")}
+            className="inline-flex items-center gap-2 rounded-xl border border-amber-500/45 bg-amber-500/15 px-3 py-2 text-sm font-semibold text-amber-100 transition hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            <Undo2 size={14} />
+            Discard Changes
+          </button>
+
+          <button
+            type="button"
+            disabled={!canResetLayout}
+            onClick={() => handleDashboardAction("reset-defaults")}
+            className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            <RefreshCw size={14} />
+            Reset Defaults
+          </button>
+
+          <div className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-[11px] text-slate-300">
+            {!isDashboardActive
+              ? "Choose Customize Dashboard to jump into dashboard studio."
+              : !activeDashboardLayoutState.available
+                ? "Dashboard studio is loading."
+                : activeDashboardLayoutState.layoutSaving
+                  ? "Saving your layout..."
+                  : activeDashboardLayoutState.layoutDirty
+                    ? "You have unsaved layout changes."
+                    : "Layout is saved for this user account."}
+          </div>
+
+          {activeDashboardLayoutState.layoutError ? (
+            <p className="rounded-xl border border-rose-500/40 bg-rose-500/15 px-3 py-2 text-[11px] text-rose-100">
+              {activeDashboardLayoutState.layoutError}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+
   return (
     <header className="sticky top-0 z-20 border-b border-white/20 bg-white/75 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/70">
       <div className="mx-auto w-full max-w-7xl px-4 py-3 md:px-8">
@@ -78,12 +336,14 @@ export function AppHeader({ profile }: { profile: Profile }) {
             />
           </Link>
           <nav className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-3 md:flex">
+            {renderDashboardControl(false)}
             {navLinks.map(renderNavLink)}
           </nav>
           <UserAccountMenu profile={profile} />
         </div>
 
         <nav className="mt-2 flex flex-wrap items-center justify-center gap-2 md:hidden">
+          {renderDashboardControl(true)}
           {navLinks.map(renderNavLink)}
         </nav>
       </div>

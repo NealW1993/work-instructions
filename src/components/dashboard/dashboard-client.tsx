@@ -3,17 +3,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  BarChart3,
   ChevronRight,
   GripVertical,
   Info,
-  LayoutGrid,
   Plus,
-  RefreshCw,
-  Save,
   Search,
   ThumbsUp,
-  Undo2,
   X,
 } from "lucide-react";
 import {
@@ -36,6 +31,14 @@ import {
   findMatchingDashboardLayoutPreset,
   normalizeDashboardLayout,
 } from "@/lib/dashboard-layout";
+import {
+  DASHBOARD_LAYOUT_COMMAND_EVENT,
+  DASHBOARD_LAYOUT_MENU_INTENT_KEY,
+  DASHBOARD_LAYOUT_MENU_INTENT_OPEN_CUSTOMIZE,
+  DASHBOARD_LAYOUT_STATE_EVENT,
+  type DashboardLayoutCommandEventDetail,
+  type DashboardLayoutStateEventDetail,
+} from "@/lib/dashboard-controls";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { cn } from "@/lib/utils";
 
@@ -469,7 +472,11 @@ export function DashboardClient({
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const realtimeRefreshTimeoutRef = useRef<number | null>(null);
   const layoutDirtyRef = useRef(false);
+  const layoutSavingRef = useRef(false);
   const customizeOpenRef = useRef(false);
+  const saveLayoutActionRef = useRef<(() => Promise<void>) | null>(null);
+  const resetLayoutActionRef = useRef<(() => void) | null>(null);
+  const discardLayoutActionRef = useRef<(() => void) | null>(null);
   const pendingNavigationRef = useRef<DashboardPendingNavigation | null>(null);
   const navigationModalOpenRef = useRef(false);
   const historyGuardActiveRef = useRef(false);
@@ -528,6 +535,23 @@ export function DashboardClient({
 
   const normalizedQuery = query.trim().toLowerCase();
   const isSearching = normalizedQuery.length > 0;
+  const dispatchLayoutStateToHeader = useCallback(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.dispatchEvent(
+      new CustomEvent<DashboardLayoutStateEventDetail>(DASHBOARD_LAYOUT_STATE_EVENT, {
+        detail: {
+          available: true,
+          customizeOpen,
+          layoutDirty,
+          layoutSaving,
+          layoutError,
+        },
+      }),
+    );
+  }, [customizeOpen, layoutDirty, layoutError, layoutSaving]);
 
   const persistInstructionReturnState = useCallback(() => {
     if (typeof window === "undefined") {
@@ -677,12 +701,57 @@ export function DashboardClient({
   }, [systemHistoryRowLimit]);
 
   useEffect(() => {
+    try {
+      const menuIntent = window.sessionStorage.getItem(DASHBOARD_LAYOUT_MENU_INTENT_KEY);
+      if (menuIntent === DASHBOARD_LAYOUT_MENU_INTENT_OPEN_CUSTOMIZE) {
+        setCustomizeOpen(true);
+      }
+    } catch {
+      // Session menu intent is best-effort.
+    } finally {
+      try {
+        window.sessionStorage.removeItem(DASHBOARD_LAYOUT_MENU_INTENT_KEY);
+      } catch {
+        // Session menu intent cleanup is best-effort.
+      }
+    }
+  }, []);
+
+  useEffect(() => {
     layoutDirtyRef.current = layoutDirty;
   }, [layoutDirty]);
 
   useEffect(() => {
+    layoutSavingRef.current = layoutSaving;
+  }, [layoutSaving]);
+
+  useEffect(() => {
     customizeOpenRef.current = customizeOpen;
   }, [customizeOpen]);
+
+  useEffect(() => {
+    dispatchLayoutStateToHeader();
+  }, [dispatchLayoutStateToHeader]);
+
+  useEffect(() => {
+    return () => {
+      if (typeof window === "undefined") {
+        return;
+      }
+
+      window.dispatchEvent(
+        new CustomEvent<DashboardLayoutStateEventDetail>(DASHBOARD_LAYOUT_STATE_EVENT, {
+          detail: {
+            available: false,
+            customizeOpen: false,
+            layoutDirty: false,
+            layoutSaving: false,
+            layoutError: null,
+          },
+        }),
+      );
+    };
+  }, []);
 
   useEffect(() => {
     if (layoutDirtyRef.current) {
@@ -1657,6 +1726,54 @@ export function DashboardClient({
     setLayoutError(null);
   }
 
+  saveLayoutActionRef.current = saveDashboardLayout;
+  resetLayoutActionRef.current = resetDashboardLayout;
+  discardLayoutActionRef.current = discardDashboardLayoutChanges;
+
+  useEffect(() => {
+    const handleLayoutCommand = (event: Event) => {
+      const detail = (event as CustomEvent<DashboardLayoutCommandEventDetail>).detail;
+      if (!detail?.command) {
+        return;
+      }
+
+      if (detail.command === "toggle-customize") {
+        setCustomizeOpen((current) => !current);
+        return;
+      }
+
+      if (detail.command === "save-layout") {
+        if (!layoutDirtyRef.current || layoutSavingRef.current) {
+          return;
+        }
+        void saveLayoutActionRef.current?.();
+        return;
+      }
+
+      if (detail.command === "discard-changes") {
+        if (!layoutDirtyRef.current || layoutSavingRef.current) {
+          return;
+        }
+        discardLayoutActionRef.current?.();
+        return;
+      }
+
+      if (layoutSavingRef.current) {
+        return;
+      }
+
+      resetLayoutActionRef.current?.();
+    };
+
+    window.addEventListener(DASHBOARD_LAYOUT_COMMAND_EVENT, handleLayoutCommand as EventListener);
+    return () => {
+      window.removeEventListener(
+        DASHBOARD_LAYOUT_COMMAND_EVENT,
+        handleLayoutCommand as EventListener,
+      );
+    };
+  }, []);
+
   function closeNavigationModal() {
     pendingNavigationRef.current = null;
     setNavigationModalOpen(false);
@@ -2530,80 +2647,54 @@ export function DashboardClient({
   return (
     <>
       <div className="grid gap-5">
-        <section className="relative overflow-hidden border-y border-white/20 bg-gradient-to-r from-white/45 via-white/20 to-white/45 p-4 backdrop-blur-sm dark:border-white/10 dark:from-slate-900/55 dark:via-slate-900/35 dark:to-slate-900/55 md:p-5">
-          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-            <div className="space-y-1">
-              <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-300">
-                <BarChart3 size={14} />
-                Dashboard Studio
+        {layoutDirty || layoutError ? (
+          <section className="rounded-2xl border border-white/20 bg-white/60 p-3 backdrop-blur-sm dark:border-white/10 dark:bg-slate-900/50">
+            {layoutDirty ? (
+              <p className="text-xs font-semibold text-amber-700 dark:text-amber-200">
+                Unsaved layout changes. Use the Dashboard menu in the header to save
+                or discard.
               </p>
-              <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
-                Build Your Workspace
-              </h1>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setCustomizeOpen((current) => !current)}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-300/70 bg-white/70 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-900"
+            ) : null}
+            {layoutError ? (
+              <p
+                className={cn(
+                  "rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-700 dark:text-rose-200",
+                  layoutDirty ? "mt-2" : "",
+                )}
               >
-                <LayoutGrid size={14} />
-                {customizeOpen ? "Close Customize" : "Customize Widgets"}
-              </button>
+                {layoutError}
+              </p>
+            ) : null}
+          </section>
+        ) : null}
 
-              <button
-                type="button"
-                disabled={layoutSaving || !layoutDirty}
-                onClick={() => void saveDashboardLayout()}
-                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-3 py-2 text-xs font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                <Save size={14} />
-                {layoutSaving ? "Saving..." : "Save Layout"}
-              </button>
-
+        {customizeOpen ? (
+          <section className="relative overflow-hidden rounded-3xl border border-white/20 bg-gradient-to-r from-white/55 via-white/35 to-white/55 p-4 shadow-lg backdrop-blur-sm dark:border-white/10 dark:from-slate-900/60 dark:via-slate-900/45 dark:to-slate-900/60 md:p-5">
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-1">
+                <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-300">
+                  Dashboard Studio
+                </p>
+                <h1 className="text-xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
+                  Customize Dashboard
+                </h1>
+                <p className="text-xs text-slate-600 dark:text-slate-300">
+                  Apply presets and tune widget visibility or size, then save from
+                  the Dashboard menu in the header.
+                </p>
+              </div>
               {layoutDirty ? (
-                <button
-                  type="button"
-                  onClick={discardDashboardLayoutChanges}
-                  disabled={layoutSaving}
-                  className="inline-flex items-center gap-2 rounded-xl border border-amber-500/45 bg-amber-500/15 px-3 py-2 text-xs font-semibold text-amber-800 transition hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-70 dark:text-amber-200"
-                >
-                  <Undo2 size={14} />
-                  Discard Changes
-                </button>
-              ) : null}
-
-              <button
-                type="button"
-                onClick={resetDashboardLayout}
-                disabled={layoutSaving}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-300/70 bg-white/70 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-70 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-900"
-              >
-                <RefreshCw size={14} />
-                Reset Defaults
-              </button>
+                <span className="rounded-full border border-amber-500/45 bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-800 dark:text-amber-200">
+                  Unsaved changes
+                </span>
+              ) : (
+                <span className="rounded-full border border-emerald-500/45 bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-800 dark:text-emerald-200">
+                  Layout saved
+                </span>
+              )}
             </div>
-          </div>
 
-          {layoutDirty ? (
-            <p className="mt-3 text-xs font-semibold text-amber-700 dark:text-amber-200">
-              You have unsaved layout changes.
-            </p>
-          ) : (
-            <p className="mt-3 text-xs text-slate-600 dark:text-slate-300">
-              Layout is saved for this user account.
-            </p>
-          )}
-
-          {layoutError ? (
-            <p className="mt-3 rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-700 dark:text-rose-200">
-              {layoutError}
-            </p>
-          ) : null}
-
-          {customizeOpen ? (
-            <div className="mt-4 grid gap-2 rounded-2xl border border-slate-300/70 bg-white/65 p-3 dark:border-slate-700 dark:bg-slate-900/50">
+            <div className="grid gap-2 rounded-2xl border border-slate-300/70 bg-white/65 p-3 dark:border-slate-700 dark:bg-slate-900/50">
               <div className="grid gap-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                   Layout Presets
@@ -2730,8 +2821,8 @@ export function DashboardClient({
                 </p>
               </div>
             </div>
-          ) : null}
-        </section>
+          </section>
+        ) : null}
 
         <div className="grid grid-cols-12 gap-4">
           {visibleWidgets.map((widget) => {
