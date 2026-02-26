@@ -2970,6 +2970,17 @@ export function DashboardClient({
           </section>
         ) : null}
 
+        {customizeOpen ? (
+          <button
+            type="button"
+            onClick={() => setCustomizeOpen(false)}
+            className="fixed bottom-4 right-4 z-40 inline-flex items-center gap-2 rounded-full border border-slate-400/45 bg-slate-950/85 px-4 py-2 text-xs font-semibold text-slate-100 shadow-xl backdrop-blur-sm transition hover:bg-slate-900 md:bottom-6 md:right-6"
+          >
+            <X size={14} />
+            Close Customize Panel
+          </button>
+        ) : null}
+
         <div className="grid grid-cols-12 gap-4">
           {visibleWidgets.map((widget) => {
             const definition = widgetDefinitionsById.get(widget.id);
