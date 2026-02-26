@@ -187,20 +187,21 @@ export function InstructionUpdatesPanel({ events, className }: InstructionUpdate
 
       {showUpdates ? (
         <div
-          className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[110] overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm"
           role="presentation"
           onClick={() => {
             setShowUpdates(false);
             setSelectedSourceEventId(null);
           }}
         >
-          <article
-            className="grid w-full max-w-4xl gap-3 rounded-2xl border border-white/20 bg-slate-950/95 p-5 shadow-2xl"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Instruction updates"
-            onClick={(clickEvent) => clickEvent.stopPropagation()}
-          >
+          <div className="flex min-h-full items-start justify-center py-2 md:py-6">
+            <article
+              className="grid w-full max-w-4xl gap-3 rounded-2xl border border-white/20 bg-slate-950/95 p-5 shadow-2xl md:max-h-[calc(100dvh-3rem)] md:overflow-y-auto"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Instruction updates"
+              onClick={(clickEvent) => clickEvent.stopPropagation()}
+            >
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="space-y-1">
                 <h2 className="text-xl font-bold text-slate-100">Instruction Updates</h2>
@@ -228,7 +229,7 @@ export function InstructionUpdatesPanel({ events, className }: InstructionUpdate
             ) : (
               <div
                 className={cn(
-                  "grid gap-2",
+                  "grid gap-2 overflow-y-auto",
                   updateEvents.length > MAX_VISIBLE_UPDATE_CARDS
                     ? "max-h-[32rem] overflow-y-auto pr-1"
                     : "",
@@ -262,23 +263,25 @@ export function InstructionUpdatesPanel({ events, className }: InstructionUpdate
                 ))}
               </div>
             )}
-          </article>
+            </article>
+          </div>
         </div>
       ) : null}
 
       {selectedSourceEvent ? (
         <div
-          className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[120] overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm"
           role="presentation"
           onClick={() => setSelectedSourceEventId(null)}
         >
-          <article
-            className="grid w-full max-w-3xl gap-3 rounded-2xl border border-white/20 bg-slate-950/95 p-5 shadow-2xl"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Update source details"
-            onClick={(clickEvent) => clickEvent.stopPropagation()}
-          >
+          <div className="flex min-h-full items-start justify-center py-2 md:py-6">
+            <article
+              className="grid w-full max-w-3xl gap-3 rounded-2xl border border-white/20 bg-slate-950/95 p-5 shadow-2xl md:max-h-[calc(100dvh-3rem)] md:overflow-y-auto"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Update source details"
+              onClick={(clickEvent) => clickEvent.stopPropagation()}
+            >
             <div className="flex items-start justify-between gap-3">
               <div className="grid gap-1">
                 <h3 className="text-lg font-bold text-slate-100">Update Source</h3>
@@ -377,7 +380,8 @@ export function InstructionUpdatesPanel({ events, className }: InstructionUpdate
                 Source snippets are not available for this update event.
               </p>
             )}
-          </article>
+            </article>
+          </div>
         </div>
       ) : null}
     </>
