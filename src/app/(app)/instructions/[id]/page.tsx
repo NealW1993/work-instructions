@@ -8,6 +8,7 @@ import sanitizeHtml from "sanitize-html";
 
 import { DeleteInstructionButton } from "@/components/instructions/delete-instruction-button";
 import { InstructionBackButton } from "@/components/instructions/instruction-back-button";
+import { InstructionReviewControls } from "@/components/instructions/instruction-review-controls";
 import { LikeInstructionButton } from "@/components/instructions/like-instruction-button";
 import { PinInstructionButton } from "@/components/instructions/pin-instruction-button";
 import {
@@ -76,6 +77,53 @@ interface InstructionChangeEventRow {
   actor_user_id: string;
   revision: number | null;
   source_payload: unknown;
+}
+
+interface InstructionReviewSettingsRow {
+  review_window_days: number;
+}
+
+interface InstructionReviewStatusRow {
+  instruction_id: string;
+  status: "up_to_date" | "needs_review";
+  last_calibrated_at: string;
+  flagged_at: string | null;
+}
+
+const DEFAULT_REVIEW_WINDOW_DAYS = 30;
+
+function normalizeReviewWindowDays(value: unknown) {
+  if (!Number.isInteger(value)) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return parsed >= 1 && parsed <= 365 ? parsed : null;
+}
+
+function toElapsedCalendarDaysUtc(value: string) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  const today = new Date();
+  const valueStart = Date.UTC(
+    parsed.getUTCFullYear(),
+    parsed.getUTCMonth(),
+    parsed.getUTCDate(),
+  );
+  const todayStart = Date.UTC(
+    today.getUTCFullYear(),
+    today.getUTCMonth(),
+    today.getUTCDate(),
+  );
+  const elapsed = todayStart - valueStart;
+  if (!Number.isFinite(elapsed) || elapsed < 0) {
+    return null;
+  }
+
+  return Math.round(elapsed / (1000 * 60 * 60 * 24));
 }
 
 function looksLikeHtml(value: string): boolean {
@@ -380,6 +428,8 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
     { data: pinnedInstruction },
     { data: likedInstruction },
     { count: instructionLikeCount },
+    { data: reviewSettingsData, error: reviewSettingsError },
+    { data: reviewStatusData, error: reviewStatusError },
   ] = await Promise.all([
     supabase
       .from("user_pinned_instructions")
@@ -397,13 +447,69 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
       .from("instruction_likes")
       .select("*", { count: "exact", head: true })
       .eq("instruction_id", instruction.id),
+    supabase
+      .from("instruction_review_settings")
+      .select("review_window_days")
+      .eq("id", true)
+      .maybeSingle<InstructionReviewSettingsRow>(),
+    supabase
+      .from("instruction_review_status")
+      .select("instruction_id, status, last_calibrated_at, flagged_at")
+      .eq("instruction_id", instruction.id)
+      .maybeSingle<InstructionReviewStatusRow>(),
   ]);
+
+  const reviewWindowDays =
+    !reviewSettingsError
+      ? normalizeReviewWindowDays(reviewSettingsData?.review_window_days) ??
+        DEFAULT_REVIEW_WINDOW_DAYS
+      : DEFAULT_REVIEW_WINDOW_DAYS;
+  const reviewStatus = {
+    status:
+      !reviewStatusError && reviewStatusData?.status === "needs_review"
+        ? "needs_review"
+        : "up_to_date",
+    lastCalibratedAt:
+      !reviewStatusError && reviewStatusData?.last_calibrated_at
+        ? reviewStatusData.last_calibrated_at
+        : instruction.updated_at,
+    flaggedAt:
+      !reviewStatusError && reviewStatusData?.status === "needs_review"
+        ? reviewStatusData.flagged_at
+        : null,
+  } as const;
+  const reviewAgeDays = toElapsedCalendarDaysUtc(reviewStatus.lastCalibratedAt);
+  const reviewIsOutOfRange =
+    reviewAgeDays !== null && reviewAgeDays >= reviewWindowDays;
+  const showReviewIndicator =
+    reviewStatus.status === "needs_review" || reviewIsOutOfRange;
 
   return (
     <article className="grid gap-5">
       <InstructionBackButton fallbackHref="/dashboard" />
 
       <header className="rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+        {showReviewIndicator ? (
+          <div
+            className={`mb-4 rounded-2xl border px-4 py-3 ${
+              reviewStatus.status === "needs_review"
+                ? "border-amber-500/45 bg-amber-500/12"
+                : "border-cyan-500/45 bg-cyan-500/12"
+            }`}
+          >
+            <p className="text-sm font-bold text-slate-900 dark:text-slate-100">
+              {reviewStatus.status === "needs_review"
+                ? "Needs Review flagged"
+                : "Review check due"}
+            </p>
+            <p className="text-xs text-slate-700 dark:text-slate-200">
+              {reviewStatus.status === "needs_review"
+                ? "This instruction has been flagged for review. It remains available for use while clarity or accuracy updates are assessed."
+                : `This instruction is outside the ${reviewWindowDays}-day review range. It remains available for use, and should be confirmed as Up To Date.`}
+            </p>
+          </div>
+        ) : null}
+
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-3xl font-extrabold text-slate-900 dark:text-slate-100">
@@ -422,37 +528,48 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
               <LocalDateTime value={instruction.updated_at} mode="dateTime" />
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <LikeInstructionButton
+          <div className="grid gap-2 md:justify-items-end">
+            <div className="flex flex-wrap items-center gap-2">
+              <LikeInstructionButton
+                instructionId={instruction.id}
+                userId={profile.id}
+                initialLiked={Boolean(likedInstruction)}
+                initialLikeCount={instructionLikeCount ?? 0}
+              />
+              <PinInstructionButton
+                instructionId={instruction.id}
+                userId={profile.id}
+                initialPinned={Boolean(pinnedInstruction)}
+              />
+              {canEditInstructions(profile.role) ? (
+                <Link
+                  href={`/instructions/${instruction.id}/fork`}
+                  className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-200"
+                >
+                  Fork Instruction
+                </Link>
+              ) : null}
+              {canEditInstructions(profile.role) ? (
+                <Link
+                  href={`/instructions/${instruction.id}/edit`}
+                  className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-200"
+                >
+                  Edit Instruction
+                </Link>
+              ) : null}
+              {isSystemAdmin(profile.role) ? (
+                <DeleteInstructionButton instructionId={instruction.id} />
+              ) : null}
+            </div>
+
+            <InstructionReviewControls
               instructionId={instruction.id}
-              userId={profile.id}
-              initialLiked={Boolean(likedInstruction)}
-              initialLikeCount={instructionLikeCount ?? 0}
+              instructionUpdatedAt={instruction.updated_at}
+              reviewWindowDays={reviewWindowDays}
+              initialStatus={reviewStatus.status}
+              initialLastCalibratedAt={reviewStatus.lastCalibratedAt}
+              initialFlaggedAt={reviewStatus.flaggedAt}
             />
-            <PinInstructionButton
-              instructionId={instruction.id}
-              userId={profile.id}
-              initialPinned={Boolean(pinnedInstruction)}
-            />
-            {canEditInstructions(profile.role) ? (
-              <Link
-                href={`/instructions/${instruction.id}/fork`}
-                className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-200"
-              >
-                Fork Instruction
-              </Link>
-            ) : null}
-            {canEditInstructions(profile.role) ? (
-              <Link
-                href={`/instructions/${instruction.id}/edit`}
-                className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-200"
-              >
-                Edit Instruction
-              </Link>
-            ) : null}
-            {isSystemAdmin(profile.role) ? (
-              <DeleteInstructionButton instructionId={instruction.id} />
-            ) : null}
           </div>
         </div>
       </header>

@@ -1,6 +1,7 @@
 import { DashboardClient } from "@/components/dashboard/dashboard-client";
 import type {
   DashboardInstructionCardData,
+  DashboardInstructionReviewStatusData,
   DashboardLikeCelebrationData,
   DashboardLikedInstructionCardData,
   DashboardPinnedInstructionCardData,
@@ -92,7 +93,28 @@ interface DashboardWorkItemRow {
   work_instructions: DashboardWorkItemInstructionRow[];
 }
 
+interface DashboardInstructionReviewSettingsRow {
+  review_window_days: number;
+}
+
+const DEFAULT_REVIEW_WINDOW_DAYS = 30;
+const MIN_REVIEW_WINDOW_DAYS = 1;
+const MAX_REVIEW_WINDOW_DAYS = 365;
+const REVIEW_STATUS_BATCH_SIZE = 300;
 const DEFAULT_DEPARTMENT_COLOR = "#0EA5E9";
+
+function normalizeReviewWindowDays(value: unknown) {
+  if (!Number.isInteger(value)) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  if (parsed < MIN_REVIEW_WINDOW_DAYS || parsed > MAX_REVIEW_WINDOW_DAYS) {
+    return null;
+  }
+
+  return parsed;
+}
 
 function normalizeWorkItem(
   relation:
@@ -300,6 +322,12 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     .order("sort_order", { ascending: true })
     .order("name", { ascending: true });
 
+  const reviewSettingsRequest = supabase
+    .from("instruction_review_settings")
+    .select("review_window_days")
+    .eq("id", true)
+    .maybeSingle<DashboardInstructionReviewSettingsRow>();
+
   const [
     { data: searchData, error: searchError },
     { data: newestData, error: newestError },
@@ -308,6 +336,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     { data: historyInstructionsData },
     { data: historyEventsData },
     { data: departmentsData },
+    { data: reviewSettingsData, error: reviewSettingsError },
   ] = await Promise.all([
     searchRequest,
     newestRequest,
@@ -316,6 +345,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     historyInstructionsRequest,
     historyEventsRequest,
     departmentsRequest,
+    reviewSettingsRequest,
   ]);
 
   const rawItems = (searchData ?? []) as DashboardWorkItemRow[];
@@ -325,6 +355,49 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const rawHistoryInstructions = (historyInstructionsData ?? []) as DashboardInstructionRow[];
   const rawHistoryEvents =
     (historyEventsData ?? []) as DashboardInstructionChangeEventRow[];
+  const instructionReviewWindowDays =
+    !reviewSettingsError
+      ? normalizeReviewWindowDays(reviewSettingsData?.review_window_days) ??
+        DEFAULT_REVIEW_WINDOW_DAYS
+      : DEFAULT_REVIEW_WINDOW_DAYS;
+
+  const instructionIdSet = new Set<string>();
+  for (const item of rawItems) {
+    for (const instruction of item.work_instructions ?? []) {
+      instructionIdSet.add(instruction.id);
+    }
+  }
+
+  const instructionReviewStatusByInstructionId: Record<
+    string,
+    DashboardInstructionReviewStatusData
+  > = {};
+
+  const instructionIdList = Array.from(instructionIdSet);
+  for (
+    let batchStartIndex = 0;
+    batchStartIndex < instructionIdList.length;
+    batchStartIndex += REVIEW_STATUS_BATCH_SIZE
+  ) {
+    const batchIds = instructionIdList.slice(
+      batchStartIndex,
+      batchStartIndex + REVIEW_STATUS_BATCH_SIZE,
+    );
+
+    const { data: reviewStatusRows, error: reviewStatusError } = await supabase
+      .from("instruction_review_status")
+      .select("instruction_id, status, last_calibrated_at, flagged_at, updated_at")
+      .in("instruction_id", batchIds);
+
+    if (reviewStatusError) {
+      break;
+    }
+
+    for (const row of (reviewStatusRows ??
+      []) as DashboardInstructionReviewStatusData[]) {
+      instructionReviewStatusByInstructionId[row.instruction_id] = row;
+    }
+  }
 
   const profileIds = new Set<string>();
   for (const item of rawItems) {
@@ -692,6 +765,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       currentUserId={profile.id}
       initialDashboardLayout={profile.dashboard_layout ?? null}
       initialDashboardDefaultLayout={profile.dashboard_default_layout ?? null}
+      instructionReviewWindowDays={instructionReviewWindowDays}
+      instructionReviewStatusByInstructionId={instructionReviewStatusByInstructionId}
       departmentOptions={
         (departmentsData ?? []) as Array<{
           id: string;

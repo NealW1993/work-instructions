@@ -103,6 +103,14 @@ export interface DashboardWorkItemData extends DashboardWorkItemSummary {
   work_instructions: DashboardWorkItemInstructionData[];
 }
 
+export interface DashboardInstructionReviewStatusData {
+  instruction_id: string;
+  status: "up_to_date" | "needs_review";
+  last_calibrated_at: string;
+  flagged_at: string | null;
+  updated_at: string;
+}
+
 interface DashboardDepartmentOption {
   id: string;
   name: string;
@@ -143,6 +151,16 @@ interface DepartmentInsight {
   instructionCount: number;
 }
 
+interface ReviewQueueEntry {
+  instruction: DashboardWorkItemInstructionData;
+  workItem: DashboardWorkItemData;
+  reviewStatus: DashboardInstructionReviewStatusData | null;
+  daysSinceUpdate: number | null;
+  daysSinceCalibration: number | null;
+  isFlagged: boolean;
+  isOutOfRange: boolean;
+}
+
 interface DashboardWidgetDefinition {
   id: DashboardWidgetId;
   title: string;
@@ -165,6 +183,11 @@ interface DashboardClientProps {
   currentUserId: string;
   initialDashboardLayout: unknown;
   initialDashboardDefaultLayout: unknown;
+  instructionReviewWindowDays: number;
+  instructionReviewStatusByInstructionId: Record<
+    string,
+    DashboardInstructionReviewStatusData
+  >;
 }
 
 const DEFAULT_DEPARTMENT_COLOR = "#0EA5E9";
@@ -184,6 +207,7 @@ const DEFAULT_SYSTEM_HISTORY_ROW_LIMIT = 15;
 const SYSTEM_HISTORY_ROW_LIMIT_OPTIONS = [5, 15, 30, 45, 60] as const;
 const SYSTEM_HISTORY_ROW_LIMIT_STORAGE_KEY = "dashboard.systemHistoryRowLimit";
 const RECENT_UPDATES_EVENT_LIMIT = 20;
+const DEFAULT_REVIEW_WINDOW_DAYS = 30;
 
 interface DashboardInstructionReturnState {
   query: string;
@@ -274,18 +298,57 @@ function toSortableTimestamp(value: string) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function toElapsedDays(value: string) {
-  const timestamp = toSortableTimestamp(value);
-  if (!timestamp) {
+function normalizeReviewWindowDays(value: number) {
+  if (!Number.isInteger(value)) {
+    return DEFAULT_REVIEW_WINDOW_DAYS;
+  }
+
+  if (value < 1 || value > 365) {
+    return DEFAULT_REVIEW_WINDOW_DAYS;
+  }
+
+  return value;
+}
+
+function toElapsedCalendarDays(value: string) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
     return null;
   }
 
-  const elapsed = Date.now() - timestamp;
-  if (!Number.isFinite(elapsed)) {
+  const today = new Date();
+  const dayStart = new Date(
+    parsed.getFullYear(),
+    parsed.getMonth(),
+    parsed.getDate(),
+  ).getTime();
+  const todayStart = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate(),
+  ).getTime();
+  const elapsed = todayStart - dayStart;
+  if (!Number.isFinite(elapsed) || elapsed < 0) {
     return null;
   }
 
-  return Math.max(0, Math.floor(elapsed / (1000 * 60 * 60 * 24)));
+  return Math.round(elapsed / (1000 * 60 * 60 * 24));
+}
+
+function formatElapsedDaysLabel(daysElapsed: number | null) {
+  if (daysElapsed === null) {
+    return "Update age unavailable";
+  }
+
+  if (daysElapsed === 0) {
+    return "Updated today";
+  }
+
+  if (daysElapsed === 1) {
+    return "Updated 1 day ago";
+  }
+
+  return `Updated ${daysElapsed} days ago`;
 }
 
 function parseSystemHistoryDetailSegments(detail: string) {
@@ -660,6 +723,8 @@ export function DashboardClient({
   currentUserId,
   initialDashboardLayout,
   initialDashboardDefaultLayout,
+  instructionReviewWindowDays,
+  instructionReviewStatusByInstructionId,
 }: DashboardClientProps) {
   const router = useRouter();
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -743,6 +808,7 @@ export function DashboardClient({
       })),
     [],
   );
+  const normalizedReviewWindowDays = normalizeReviewWindowDays(instructionReviewWindowDays);
 
   const normalizedQuery = query.trim().toLowerCase();
   const isSearching = normalizedQuery.length > 0;
@@ -1585,7 +1651,7 @@ export function DashboardClient({
     [items],
   );
 
-  const reviewQueueEntries = useMemo(() => {
+  const reviewQueueEntries = useMemo<ReviewQueueEntry[]>(() => {
     const departmentScoped =
       selectedDepartmentId === "all"
         ? flattenedInstructionEntries
@@ -1601,14 +1667,54 @@ export function DashboardClient({
         )
       : departmentScoped;
 
-    return [...queryScoped]
-      .sort(
-        (a, b) =>
+    return queryScoped
+      .map((entry) => {
+        const reviewStatus =
+          instructionReviewStatusByInstructionId[entry.instruction.id] ?? null;
+        const daysSinceCalibration = toElapsedCalendarDays(
+          reviewStatus?.last_calibrated_at ?? entry.instruction.updated_at,
+        );
+        const daysSinceUpdate = toElapsedCalendarDays(entry.instruction.updated_at);
+        const isFlagged = reviewStatus?.status === "needs_review";
+        const isOutOfRange =
+          daysSinceCalibration !== null &&
+          daysSinceCalibration >= normalizedReviewWindowDays;
+
+        return {
+          instruction: entry.instruction,
+          workItem: entry.workItem,
+          reviewStatus,
+          daysSinceUpdate,
+          daysSinceCalibration,
+          isFlagged,
+          isOutOfRange,
+        };
+      })
+      .filter((entry) => entry.isFlagged || entry.isOutOfRange)
+      .sort((a, b) => {
+        if (a.isFlagged !== b.isFlagged) {
+          return a.isFlagged ? -1 : 1;
+        }
+
+        const daysGapA = a.daysSinceCalibration ?? -1;
+        const daysGapB = b.daysSinceCalibration ?? -1;
+        if (daysGapA !== daysGapB) {
+          return daysGapB - daysGapA;
+        }
+
+        return (
           toSortableTimestamp(a.instruction.updated_at) -
-          toSortableTimestamp(b.instruction.updated_at),
-      )
-      .slice(0, 8);
-  }, [flattenedInstructionEntries, normalizedQuery, selectedDepartmentId]);
+          toSortableTimestamp(b.instruction.updated_at)
+        );
+      })
+      .slice(0, 12);
+  }, [
+    flattenedInstructionEntries,
+    normalizedQuery,
+    selectedDepartmentId,
+    instructionReviewStatusByInstructionId,
+    normalizedReviewWindowDays,
+  ]);
 
   const myInstructionEntries = useMemo(
     () =>
@@ -2814,13 +2920,16 @@ export function DashboardClient({
     if (widgetId === "review_queue") {
       return reviewQueueEntries.length === 0 ? (
         <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-          No review candidates for {selectedDepartmentName}.
+          No instructions are out of the review range or flagged for review in{" "}
+          {selectedDepartmentName}.
         </p>
       ) : (
         <div className="grid gap-2">
           {reviewQueueEntries.map((entry) => {
-            const daysSinceUpdate = toElapsedDays(entry.instruction.updated_at);
-            const needsReview = (daysSinceUpdate ?? 0) >= 30;
+            const overdueDays =
+              entry.daysSinceCalibration === null
+                ? null
+                : Math.max(0, entry.daysSinceCalibration - normalizedReviewWindowDays);
 
             return (
               <Link
@@ -2843,12 +2952,12 @@ export function DashboardClient({
                   <span
                     className={cn(
                       "rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide",
-                      needsReview
-                        ? "border-amber-500/45 bg-amber-500/15 text-amber-700 dark:text-amber-200"
-                        : "border-cyan-500/45 bg-cyan-500/15 text-cyan-800 dark:text-cyan-200",
+                      entry.isFlagged
+                        ? "border-rose-500/45 bg-rose-500/15 text-rose-700 dark:text-rose-200"
+                        : "border-amber-500/45 bg-amber-500/15 text-amber-700 dark:text-amber-200",
                     )}
                   >
-                    {needsReview ? "Needs review" : "In range"}
+                    {entry.isFlagged ? "Needs review" : "Out of range"}
                   </span>
                 </div>
                 <p className="text-xs text-slate-600 dark:text-slate-300">
@@ -2860,13 +2969,16 @@ export function DashboardClient({
                   {entry.instruction.updater_name}
                 </p>
                 <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  {daysSinceUpdate === null
-                    ? "Update age unavailable"
-                    : daysSinceUpdate === 0
-                      ? "Updated today"
-                      : daysSinceUpdate === 1
-                        ? "Updated 1 day ago"
-                        : `Updated ${daysSinceUpdate} days ago`}
+                  {formatElapsedDaysLabel(entry.daysSinceUpdate)}
+                </p>
+                <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  {entry.isFlagged
+                    ? "Marked as needs review by a user."
+                    : overdueDays === null
+                      ? "Review window status unavailable."
+                      : overdueDays === 0
+                        ? `Due for re-check now (${normalizedReviewWindowDays}-day window).`
+                        : `Out of range by ${overdueDays} day${overdueDays === 1 ? "" : "s"} (${normalizedReviewWindowDays}-day window).`}
                 </p>
               </Link>
             );

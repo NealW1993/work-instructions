@@ -29,6 +29,11 @@ interface AdminDepartment {
   updated_at: string;
 }
 
+interface InstructionReviewSettingsResponse {
+  reviewWindowDays: number;
+  updatedAt: string | null;
+}
+
 interface CreateUserFieldErrors {
   fullName: boolean;
   email: boolean;
@@ -75,6 +80,7 @@ const DEFAULT_DEPARTMENT_COLORS = [
   "#F43F5E",
   "#3B82F6",
 ] as const;
+const DEFAULT_REVIEW_WINDOW_DAYS = 30;
 
 function normalizeColorHex(value: string) {
   const normalized = value.trim().toUpperCase();
@@ -96,6 +102,19 @@ function getInputClass(hasError: boolean) {
   );
 }
 
+function normalizeReviewWindowDaysInput(value: string) {
+  const parsed = Number.parseInt(value.trim(), 10);
+  if (!Number.isInteger(parsed)) {
+    return null;
+  }
+
+  if (parsed < 1 || parsed > 365) {
+    return null;
+  }
+
+  return parsed;
+}
+
 export function UserAdminPanel() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
@@ -105,6 +124,15 @@ export function UserAdminPanel() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [reviewWindowDaysInput, setReviewWindowDaysInput] = useState<string>(
+    String(DEFAULT_REVIEW_WINDOW_DAYS),
+  );
+  const [reviewWindowDaysSaved, setReviewWindowDaysSaved] = useState<number>(
+    DEFAULT_REVIEW_WINDOW_DAYS,
+  );
+  const [reviewWindowUpdatedAt, setReviewWindowUpdatedAt] = useState<string | null>(null);
+  const [reviewSettingsBusy, setReviewSettingsBusy] = useState(false);
+  const [reviewWindowInputHasError, setReviewWindowInputHasError] = useState(false);
 
   const [newDepartmentName, setNewDepartmentName] = useState("");
   const [newDepartmentNameHasError, setNewDepartmentNameHasError] = useState(false);
@@ -245,15 +273,58 @@ export function UserAdminPanel() {
     }
   }, [getAuthHeaders]);
 
+  const fetchInstructionReviewSettings = useCallback(async () => {
+    setReviewSettingsBusy(true);
+
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/instruction-review/settings", {
+        method: "GET",
+        headers,
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      } & Partial<InstructionReviewSettingsResponse>;
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to load instruction review settings.");
+      }
+
+      const nextReviewWindowDays = normalizeReviewWindowDaysInput(
+        String(payload.reviewWindowDays ?? DEFAULT_REVIEW_WINDOW_DAYS),
+      );
+      const resolvedReviewWindowDays =
+        nextReviewWindowDays ?? DEFAULT_REVIEW_WINDOW_DAYS;
+
+      setReviewWindowDaysSaved(resolvedReviewWindowDays);
+      setReviewWindowDaysInput(String(resolvedReviewWindowDays));
+      setReviewWindowUpdatedAt(payload.updatedAt ?? null);
+      setReviewWindowInputHasError(false);
+    } catch (caughtError) {
+      const normalizedMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Unable to load instruction review settings.";
+      setError(normalizedMessage);
+    } finally {
+      setReviewSettingsBusy(false);
+    }
+  }, [getAuthHeaders]);
+
   useEffect(() => {
     setPortalReady(true);
   }, []);
 
   useEffect(() => {
     void (async () => {
-      await Promise.all([fetchUsers(), fetchDepartments()]);
+      await Promise.all([
+        fetchUsers(),
+        fetchDepartments(),
+        fetchInstructionReviewSettings(),
+      ]);
     })();
-  }, [fetchDepartments, fetchUsers]);
+  }, [fetchDepartments, fetchInstructionReviewSettings, fetchUsers]);
 
   useEffect(() => {
     void (async () => {
@@ -412,6 +483,55 @@ export function UserAdminPanel() {
 
     moveDepartmentToIndex(departmentId, parsedOrder - 1);
     cancelDepartmentOrderEdit();
+  }
+
+  async function saveInstructionReviewSettings() {
+    setReviewSettingsBusy(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const reviewWindowDays = normalizeReviewWindowDaysInput(reviewWindowDaysInput);
+      if (reviewWindowDays === null) {
+        setReviewWindowInputHasError(true);
+        throw new Error("Review window days must be a whole number between 1 and 365.");
+      }
+
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/instruction-review/settings", {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ reviewWindowDays }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      } & Partial<InstructionReviewSettingsResponse>;
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to update instruction review settings.");
+      }
+
+      const savedReviewWindowDays = normalizeReviewWindowDaysInput(
+        String(payload.reviewWindowDays ?? reviewWindowDays),
+      );
+
+      setReviewWindowDaysSaved(savedReviewWindowDays ?? reviewWindowDays);
+      setReviewWindowDaysInput(
+        String(savedReviewWindowDays ?? reviewWindowDays),
+      );
+      setReviewWindowUpdatedAt(payload.updatedAt ?? null);
+      setReviewWindowInputHasError(false);
+      setMessage("Instruction review window updated.");
+    } catch (caughtError) {
+      const normalizedMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Unable to update instruction review settings.";
+      setError(normalizedMessage);
+    } finally {
+      setReviewSettingsBusy(false);
+    }
   }
 
   async function handleCreateUser(event: FormEvent<HTMLFormElement>) {
@@ -855,6 +975,62 @@ export function UserAdminPanel() {
           {error}
         </p>
       ) : null}
+
+      <div className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-bold">Instruction Review Window</h2>
+          <button
+            type="button"
+            disabled={reviewSettingsBusy}
+            onClick={() => void fetchInstructionReviewSettings()}
+            className="rounded-lg border border-slate-300/70 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-100/70 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800/70"
+          >
+            {reviewSettingsBusy ? "Working..." : "Reload"}
+          </button>
+        </div>
+        <p className="text-sm text-slate-600 dark:text-slate-300">
+          Only instructions outside this range, or flagged Needs Review, appear in the
+          dashboard review queue.
+        </p>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="grid gap-1 text-sm">
+            <span>Days before re-check is required</span>
+            <input
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={3}
+              value={reviewWindowDaysInput}
+              onChange={(event) => {
+                setReviewWindowDaysInput(event.target.value.replace(/\D/g, "").slice(0, 3));
+                if (reviewWindowInputHasError) {
+                  setReviewWindowInputHasError(false);
+                }
+              }}
+              className={getInputClass(reviewWindowInputHasError)}
+            />
+          </label>
+
+          <button
+            type="button"
+            disabled={reviewSettingsBusy}
+            onClick={() => void saveInstructionReviewSettings()}
+            className="rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {reviewSettingsBusy ? "Saving..." : "Save Review Window"}
+          </button>
+        </div>
+
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          Active range: {reviewWindowDaysSaved} day
+          {reviewWindowDaysSaved === 1 ? "" : "s"}.
+          {reviewWindowUpdatedAt ? (
+            <>
+              {" "}
+              Last updated <LocalDateTime value={reviewWindowUpdatedAt} mode="dateTime" />.
+            </>
+          ) : null}
+        </p>
+      </div>
 
       <div className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
         <div className="flex flex-wrap items-center justify-between gap-2">
