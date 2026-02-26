@@ -3,6 +3,7 @@ export type DashboardWidgetId =
   | "pinned"
   | "newest"
   | "department_activity"
+  | "review_queue"
   | "recent_updates"
   | "my_impact"
   | "system_history";
@@ -26,6 +27,7 @@ export const DASHBOARD_WIDGET_IDS: DashboardWidgetId[] = [
   "pinned",
   "newest",
   "department_activity",
+  "review_queue",
   "recent_updates",
   "my_impact",
   "system_history",
@@ -50,6 +52,7 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
       { id: "newest", visible: true, size: "standard" },
       { id: "pinned", visible: true, size: "standard" },
       { id: "department_activity", visible: true, size: "standard" },
+      { id: "review_queue", visible: true, size: "standard" },
       { id: "recent_updates", visible: true, size: "wide" },
       { id: "system_history", visible: true, size: "full" },
     ],
@@ -63,6 +66,7 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
       { id: "finder", visible: true, size: "wide" },
       { id: "department_activity", visible: true, size: "standard" },
       { id: "newest", visible: true, size: "standard" },
+      { id: "review_queue", visible: true, size: "compact" },
       { id: "pinned", visible: true, size: "compact" },
       { id: "my_impact", visible: true, size: "compact" },
     ],
@@ -75,6 +79,7 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
       { id: "department_activity", visible: true, size: "wide" },
       { id: "recent_updates", visible: true, size: "wide" },
       { id: "system_history", visible: true, size: "wide" },
+      { id: "review_queue", visible: true, size: "standard" },
       { id: "newest", visible: true, size: "standard" },
       { id: "pinned", visible: true, size: "standard" },
       { id: "my_impact", visible: true, size: "compact" },
@@ -89,6 +94,7 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
       { id: "newest", visible: true, size: "standard" },
       { id: "finder", visible: true, size: "full" },
       { id: "recent_updates", visible: true, size: "standard" },
+      { id: "review_queue", visible: true, size: "compact" },
       { id: "system_history", visible: true, size: "wide" },
       { id: "department_activity", visible: true, size: "compact" },
     ],
@@ -103,6 +109,7 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
       { id: "my_impact", visible: true, size: "standard" },
       { id: "department_activity", visible: true, size: "standard" },
       { id: "recent_updates", visible: true, size: "wide" },
+      { id: "review_queue", visible: true, size: "compact" },
       { id: "system_history", visible: true, size: "full" },
     ],
   },
@@ -114,6 +121,7 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
       { id: "recent_updates", visible: true, size: "full" },
       { id: "department_activity", visible: true, size: "standard" },
       { id: "newest", visible: true, size: "standard" },
+      { id: "review_queue", visible: true, size: "compact" },
       { id: "finder", visible: true, size: "wide" },
       { id: "pinned", visible: true, size: "standard" },
       { id: "my_impact", visible: true, size: "compact" },

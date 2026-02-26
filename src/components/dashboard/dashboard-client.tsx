@@ -3,11 +3,13 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  CheckCircle2,
   ChevronRight,
   GripVertical,
   Info,
   Plus,
   Search,
+  TriangleAlert,
   ThumbsUp,
   X,
 } from "lucide-react";
@@ -25,6 +27,7 @@ import { createPortal } from "react-dom";
 import { LocalDateTime } from "@/components/ui/local-date-time";
 import {
   DASHBOARD_LAYOUT_PRESETS,
+  DASHBOARD_WIDGET_IDS,
   type DashboardWidgetId,
   type DashboardWidgetLayoutItem,
   type DashboardWidgetSize,
@@ -214,6 +217,10 @@ const WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
     title: "Department Activity",
   },
   {
+    id: "review_queue",
+    title: "Needs Review Queue",
+  },
+  {
     id: "recent_updates",
     title: "Recently Updated Work Items",
   },
@@ -233,6 +240,17 @@ const WIDGET_SIZE_OPTIONS: Array<{ value: DashboardWidgetSize; label: string }> 
   { value: "wide", label: "Wide" },
   { value: "full", label: "Full Width" },
 ];
+
+const RESET_DEFAULT_WIDGET_SIZE_BY_ID: Record<DashboardWidgetId, DashboardWidgetSize> = {
+  finder: "full",
+  pinned: "standard",
+  newest: "standard",
+  department_activity: "standard",
+  review_queue: "standard",
+  recent_updates: "wide",
+  my_impact: "standard",
+  system_history: "full",
+};
 
 function isDashboardWidgetId(value: string): value is DashboardWidgetId {
   return WIDGET_DEFINITIONS.some((entry) => entry.id === value);
@@ -254,6 +272,20 @@ function formatDateForSearch(value: string) {
 function toSortableTimestamp(value: string) {
   const parsed = new Date(value).getTime();
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function toElapsedDays(value: string) {
+  const timestamp = toSortableTimestamp(value);
+  if (!timestamp) {
+    return null;
+  }
+
+  const elapsed = Date.now() - timestamp;
+  if (!Number.isFinite(elapsed)) {
+    return null;
+  }
+
+  return Math.max(0, Math.floor(elapsed / (1000 * 60 * 60 * 24)));
 }
 
 function parseSystemHistoryDetailSegments(detail: string) {
@@ -543,6 +575,14 @@ function buildPresetPreviewRows(
   return rows;
 }
 
+function getResetDefaultDashboardLayout() {
+  return DASHBOARD_WIDGET_IDS.map((id) => ({
+    id,
+    visible: true,
+    size: RESET_DEFAULT_WIDGET_SIZE_BY_ID[id],
+  }));
+}
+
 type DashboardPendingNavigation =
   | {
       kind: "history-back";
@@ -629,7 +669,8 @@ export function DashboardClient({
   const customizeOpenRef = useRef(false);
   const saveLayoutActionRef = useRef<(() => Promise<void>) | null>(null);
   const saveLayoutAsDefaultActionRef = useRef<(() => Promise<void>) | null>(null);
-  const resetLayoutActionRef = useRef<(() => void) | null>(null);
+  const loadDefaultLayoutActionRef = useRef<(() => void) | null>(null);
+  const resetDefaultsActionRef = useRef<(() => Promise<void>) | null>(null);
   const discardLayoutActionRef = useRef<(() => void) | null>(null);
   const pointerDragStateRef = useRef<{
     pointerId: number;
@@ -673,6 +714,8 @@ export function DashboardClient({
   const [widgetLibraryCollapsed, setWidgetLibraryCollapsed] = useState(true);
   const [portalReady, setPortalReady] = useState(false);
   const [navigationModalOpen, setNavigationModalOpen] = useState(false);
+  const [resetDefaultsModalOpen, setResetDefaultsModalOpen] = useState(false);
+  const [layoutNotice, setLayoutNotice] = useState<string | null>(null);
   const [impactDrilldownKey, setImpactDrilldownKey] = useState<ImpactDrilldownKey | null>(null);
   const [departmentDrilldownDepartmentId, setDepartmentDrilldownDepartmentId] =
     useState<string | null>(null);
@@ -754,6 +797,20 @@ export function DashboardClient({
   useEffect(() => {
     setPortalReady(true);
   }, []);
+
+  useEffect(() => {
+    if (!layoutNotice) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setLayoutNotice(null);
+    }, 2600);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [layoutNotice]);
 
   useEffect(() => {
     if (returnStateAppliedRef.current) {
@@ -1528,6 +1585,31 @@ export function DashboardClient({
     [items],
   );
 
+  const reviewQueueEntries = useMemo(() => {
+    const departmentScoped =
+      selectedDepartmentId === "all"
+        ? flattenedInstructionEntries
+        : flattenedInstructionEntries.filter(
+            (entry) => entry.workItem.department_id === selectedDepartmentId,
+          );
+
+    const queryScoped = normalizedQuery
+      ? departmentScoped.filter(
+          (entry) =>
+            itemMatchesQuery(entry.workItem, normalizedQuery) ||
+            instructionMatchesQuery(entry.instruction, normalizedQuery),
+        )
+      : departmentScoped;
+
+    return [...queryScoped]
+      .sort(
+        (a, b) =>
+          toSortableTimestamp(a.instruction.updated_at) -
+          toSortableTimestamp(b.instruction.updated_at),
+      )
+      .slice(0, 8);
+  }, [flattenedInstructionEntries, normalizedQuery, selectedDepartmentId]);
+
   const myInstructionEntries = useMemo(
     () =>
       flattenedInstructionEntries.filter(
@@ -1806,18 +1888,23 @@ export function DashboardClient({
     };
   }, [supabase]);
 
-  async function persistDashboardLayout(saveAsDefault: boolean) {
+  async function persistDashboardLayout(params: {
+    layout: DashboardWidgetLayoutItem[];
+    saveAsDefault: boolean;
+    successNotice?: string | null;
+  }) {
     setLayoutSaving(true);
     setLayoutError(null);
 
     try {
+      const layoutToPersist = params.layout.map((entry) => ({ ...entry }));
       const headers = await getAuthHeaders();
       const response = await fetch("/api/dashboard/layout", {
         method: "PATCH",
         headers,
         body: JSON.stringify({
-          dashboardLayout: widgetLayout,
-          saveAsDefault,
+          dashboardLayout: layoutToPersist,
+          saveAsDefault: params.saveAsDefault,
         }),
       });
 
@@ -1831,16 +1918,21 @@ export function DashboardClient({
         throw new Error(payload.error ?? "Unable to save dashboard layout.");
       }
 
-      const persistedLayout = normalizeDashboardLayout(payload.dashboardLayout ?? widgetLayout);
+      const persistedLayout = normalizeDashboardLayout(
+        payload.dashboardLayout ?? layoutToPersist,
+      );
       setSavedWidgetLayout(cloneWidgetLayout(persistedLayout));
       setWidgetLayout(cloneWidgetLayout(persistedLayout));
-      if (saveAsDefault) {
+      if (params.saveAsDefault) {
         const persistedDefaultLayout = normalizeDashboardLayout(
           payload.dashboardDefaultLayout ?? persistedLayout,
         );
         setDefaultWidgetLayout(cloneWidgetLayout(persistedDefaultLayout));
       }
       setLayoutDirty(false);
+      if (params.successNotice) {
+        setLayoutNotice(params.successNotice);
+      }
       persistSavedLayoutSnapshot(currentUserId, persistedLayout);
       router.refresh();
     } catch (caughtError) {
@@ -1855,11 +1947,41 @@ export function DashboardClient({
   }
 
   async function saveDashboardLayout() {
-    await persistDashboardLayout(false);
+    await persistDashboardLayout({
+      layout: widgetLayout,
+      saveAsDefault: false,
+    });
   }
 
   async function saveDashboardLayoutAsDefault() {
-    await persistDashboardLayout(true);
+    await persistDashboardLayout({
+      layout: widgetLayout,
+      saveAsDefault: true,
+      successNotice: "Default dashboard layout saved.",
+    });
+  }
+
+  function loadDefaultDashboardLayout() {
+    setWidgetLayout((current) => {
+      if (areWidgetLayoutsEqual(current, defaultWidgetLayout)) {
+        return current;
+      }
+
+      const nextLayout = cloneWidgetLayout(defaultWidgetLayout);
+      setLayoutDirty(!areWidgetLayoutsEqual(nextLayout, savedWidgetLayout));
+      setLayoutError(null);
+      setLayoutNotice("Loaded your saved default dashboard layout.");
+      return nextLayout;
+    });
+  }
+
+  async function resetDashboardDefaults() {
+    const resetLayout = getResetDefaultDashboardLayout();
+    await persistDashboardLayout({
+      layout: resetLayout,
+      saveAsDefault: true,
+      successNotice: "Default dashboard has been reset. All widgets are now visible.",
+    });
   }
 
   function updateWidgetLayout(
@@ -2025,19 +2147,6 @@ export function DashboardClient({
     });
   }
 
-  function resetDashboardLayout() {
-    setWidgetLayout((current) => {
-      if (areWidgetLayoutsEqual(current, defaultWidgetLayout)) {
-        return current;
-      }
-
-      const resetLayout = cloneWidgetLayout(defaultWidgetLayout);
-      setLayoutDirty(!areWidgetLayoutsEqual(resetLayout, savedWidgetLayout));
-      setLayoutError(null);
-      return resetLayout;
-    });
-  }
-
   function discardDashboardLayoutChanges() {
     setWidgetLayout(cloneWidgetLayout(savedWidgetLayout));
     setLayoutDirty(false);
@@ -2046,7 +2155,8 @@ export function DashboardClient({
 
   saveLayoutActionRef.current = saveDashboardLayout;
   saveLayoutAsDefaultActionRef.current = saveDashboardLayoutAsDefault;
-  resetLayoutActionRef.current = resetDashboardLayout;
+  loadDefaultLayoutActionRef.current = loadDefaultDashboardLayout;
+  resetDefaultsActionRef.current = resetDashboardDefaults;
   discardLayoutActionRef.current = discardDashboardLayoutChanges;
 
   useEffect(() => {
@@ -2085,11 +2195,20 @@ export function DashboardClient({
         return;
       }
 
-      if (layoutSavingRef.current) {
+      if (detail.command === "load-default") {
+        if (layoutSavingRef.current) {
+          return;
+        }
+        loadDefaultLayoutActionRef.current?.();
         return;
       }
 
-      resetLayoutActionRef.current?.();
+      if (detail.command === "reset-defaults") {
+        if (layoutSavingRef.current) {
+          return;
+        }
+        setResetDefaultsModalOpen(true);
+      }
     };
 
     window.addEventListener(DASHBOARD_LAYOUT_COMMAND_EVENT, handleLayoutCommand as EventListener);
@@ -2100,6 +2219,32 @@ export function DashboardClient({
       );
     };
   }, []);
+
+  function closeResetDefaultsModal() {
+    setResetDefaultsModalOpen(false);
+  }
+
+  function handleConfirmResetDefaults() {
+    setResetDefaultsModalOpen(false);
+    void resetDefaultsActionRef.current?.();
+  }
+
+  useEffect(() => {
+    if (!resetDefaultsModalOpen) {
+      return;
+    }
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setResetDefaultsModalOpen(false);
+      }
+    };
+
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [resetDefaultsModalOpen]);
 
   function closeNavigationModal() {
     pendingNavigationRef.current = null;
@@ -2666,6 +2811,70 @@ export function DashboardClient({
       );
     }
 
+    if (widgetId === "review_queue") {
+      return reviewQueueEntries.length === 0 ? (
+        <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+          No review candidates for {selectedDepartmentName}.
+        </p>
+      ) : (
+        <div className="grid gap-2">
+          {reviewQueueEntries.map((entry) => {
+            const daysSinceUpdate = toElapsedDays(entry.instruction.updated_at);
+            const needsReview = (daysSinceUpdate ?? 0) >= 30;
+
+            return (
+              <Link
+                key={entry.instruction.id}
+                href={`/instructions/${entry.instruction.id}`}
+                style={{
+                  borderColor: colorWithAlpha(entry.workItem.department_color, 0.45),
+                  backgroundColor: colorWithAlpha(entry.workItem.department_color, 0.14),
+                  boxShadow: `inset 4px 0 0 ${colorWithAlpha(
+                    entry.workItem.department_color,
+                    0.85,
+                  )}`,
+                }}
+                className="grid gap-1.5 rounded-xl border p-3 transition hover:brightness-105"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-semibold text-slate-900 dark:text-slate-100">
+                    {getLabelWithDepartment(entry.workItem)}
+                  </p>
+                  <span
+                    className={cn(
+                      "rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                      needsReview
+                        ? "border-amber-500/45 bg-amber-500/15 text-amber-700 dark:text-amber-200"
+                        : "border-cyan-500/45 bg-cyan-500/15 text-cyan-800 dark:text-cyan-200",
+                    )}
+                  >
+                    {needsReview ? "Needs review" : "In range"}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-300">
+                  {entry.workItem.item_title}
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Revision {entry.instruction.revision} | Updated{" "}
+                  <LocalDateTime value={entry.instruction.updated_at} mode="date" /> by{" "}
+                  {entry.instruction.updater_name}
+                </p>
+                <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  {daysSinceUpdate === null
+                    ? "Update age unavailable"
+                    : daysSinceUpdate === 0
+                      ? "Updated today"
+                      : daysSinceUpdate === 1
+                        ? "Updated 1 day ago"
+                        : `Updated ${daysSinceUpdate} days ago`}
+                </p>
+              </Link>
+            );
+          })}
+        </div>
+      );
+    }
+
     if (widgetId === "recent_updates") {
       return recentUpdateEvents.length === 0 ? (
         <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
@@ -2995,6 +3204,15 @@ export function DashboardClient({
   return (
     <>
       <div className="grid gap-5">
+        {layoutNotice ? (
+          <section className="rounded-2xl border border-emerald-500/45 bg-emerald-500/10 p-3 backdrop-blur-sm">
+            <p className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-800 dark:text-emerald-200">
+              <CheckCircle2 size={14} />
+              {layoutNotice}
+            </p>
+          </section>
+        ) : null}
+
         {layoutDirty || layoutError ? (
           <section className="rounded-2xl border border-white/20 bg-white/60 p-3 backdrop-blur-sm dark:border-white/10 dark:bg-slate-900/50">
             {layoutDirty ? (
@@ -3422,6 +3640,50 @@ export function DashboardClient({
                     className="rounded-xl border border-cyan-400/45 bg-cyan-500/20 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/30"
                   >
                     Nice
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+
+      {resetDefaultsModalOpen && portalReady
+        ? createPortal(
+            <div className="fixed inset-0 z-[114] flex items-center justify-center overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
+              <div className="grid w-full max-w-md gap-4 rounded-2xl border border-amber-500/45 bg-slate-950/95 p-5 shadow-2xl">
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-amber-500/40 bg-amber-500/15 text-amber-200">
+                    <TriangleAlert size={16} />
+                  </span>
+                  <div className="grid gap-1">
+                    <h3 className="text-lg font-bold text-slate-100">
+                      Reset dashboard defaults?
+                    </h3>
+                    <p className="text-sm text-slate-300">
+                      This will change your saved default dashboard and immediately load all
+                      widgets as visible.
+                    </p>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-amber-200">
+                      Your current default will be overwritten.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={closeResetDefaultsModal}
+                    className="rounded-xl border border-slate-600 bg-slate-900/70 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmResetDefaults}
+                    className="rounded-xl border border-amber-500/45 bg-amber-500/20 px-4 py-2 text-sm font-semibold text-amber-100 transition hover:bg-amber-500/30"
+                  >
+                    Reset and Load All Widgets
                   </button>
                 </div>
               </div>

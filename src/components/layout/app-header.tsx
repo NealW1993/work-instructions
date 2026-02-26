@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   BookmarkPlus,
+  Download,
   CircleAlert,
   ChevronDown,
   LayoutGrid,
@@ -63,16 +64,20 @@ export function AppHeader({ profile }: { profile: Profile }) {
     dashboardMenuOpen && dashboardMenuPathname === pathname;
   const canSendDashboardLayoutActions =
     isDashboardActive && activeDashboardLayoutState.available;
+  const showCustomizeSaveActions =
+    canSendDashboardLayoutActions && activeDashboardLayoutState.customizeOpen;
   const canSaveLayout =
-    canSendDashboardLayoutActions &&
+    showCustomizeSaveActions &&
     activeDashboardLayoutState.layoutDirty &&
     !activeDashboardLayoutState.layoutSaving;
   const canSaveLayoutAsDefault =
-    canSendDashboardLayoutActions && !activeDashboardLayoutState.layoutSaving;
+    showCustomizeSaveActions && !activeDashboardLayoutState.layoutSaving;
   const canDiscardLayout =
-    canSendDashboardLayoutActions &&
+    showCustomizeSaveActions &&
     activeDashboardLayoutState.layoutDirty &&
     !activeDashboardLayoutState.layoutSaving;
+  const canLoadDefault =
+    canSendDashboardLayoutActions && !activeDashboardLayoutState.layoutSaving;
   const canResetLayout =
     canSendDashboardLayoutActions && !activeDashboardLayoutState.layoutSaving;
   const dashboardNeedsAttention =
@@ -291,33 +296,47 @@ export function AppHeader({ profile }: { profile: Profile }) {
 
           <button
             type="button"
-            disabled={!canSaveLayout}
-            onClick={() => handleDashboardAction("save-layout")}
-            className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/45 bg-emerald-500/15 px-3 py-2 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-45"
-          >
-            <Save size={14} />
-            {activeDashboardLayoutState.layoutSaving ? "Saving..." : "Save Layout"}
-          </button>
-
-          <button
-            type="button"
-            disabled={!canSaveLayoutAsDefault}
-            onClick={() => handleDashboardAction("save-layout-default")}
+            disabled={!canLoadDefault}
+            onClick={() => handleDashboardAction("load-default")}
             className="inline-flex items-center gap-2 rounded-xl border border-sky-500/45 bg-sky-500/15 px-3 py-2 text-sm font-semibold text-sky-100 transition hover:bg-sky-500/25 disabled:cursor-not-allowed disabled:opacity-45"
           >
-            <BookmarkPlus size={14} />
-            Save Layout as Default
+            <Download size={14} />
+            Load Default Dashboard
           </button>
 
-          <button
-            type="button"
-            disabled={!canDiscardLayout}
-            onClick={() => handleDashboardAction("discard-changes")}
-            className="inline-flex items-center gap-2 rounded-xl border border-amber-500/45 bg-amber-500/15 px-3 py-2 text-sm font-semibold text-amber-100 transition hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-45"
-          >
-            <Undo2 size={14} />
-            Discard Changes
-          </button>
+          {showCustomizeSaveActions ? (
+            <>
+              <button
+                type="button"
+                disabled={!canSaveLayout}
+                onClick={() => handleDashboardAction("save-layout")}
+                className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/45 bg-emerald-500/15 px-3 py-2 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <Save size={14} />
+                {activeDashboardLayoutState.layoutSaving ? "Saving..." : "Save Layout"}
+              </button>
+
+              <button
+                type="button"
+                disabled={!canSaveLayoutAsDefault}
+                onClick={() => handleDashboardAction("save-layout-default")}
+                className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <BookmarkPlus size={14} />
+                Save Layout as Default
+              </button>
+
+              <button
+                type="button"
+                disabled={!canDiscardLayout}
+                onClick={() => handleDashboardAction("discard-changes")}
+                className="inline-flex items-center gap-2 rounded-xl border border-amber-500/45 bg-amber-500/15 px-3 py-2 text-sm font-semibold text-amber-100 transition hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <Undo2 size={14} />
+                Discard Changes
+              </button>
+            </>
+          ) : null}
 
           <button
             type="button"
@@ -326,7 +345,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
             className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-45"
           >
             <RefreshCw size={14} />
-            Reset Defaults
+            Reset Dashboard
           </button>
 
           <div className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-[11px] text-slate-300">
@@ -334,11 +353,13 @@ export function AppHeader({ profile }: { profile: Profile }) {
               ? "Choose Customize Dashboard to jump into dashboard studio."
               : !activeDashboardLayoutState.available
                 ? "Dashboard studio is loading."
+              : !activeDashboardLayoutState.customizeOpen
+                ? "Open Customize Dashboard to edit, save, or discard layout changes."
               : activeDashboardLayoutState.layoutSaving
                   ? "Saving your layout..."
                   : activeDashboardLayoutState.layoutDirty
                     ? "You have unsaved layout changes."
-                    : "Layout is saved for this user. Reset uses your saved default."}
+                    : "Layout and default are saved. Load Default Dashboard applies your saved default."}
           </div>
 
           {activeDashboardLayoutState.layoutError ? (

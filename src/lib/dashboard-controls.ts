@@ -8,6 +8,7 @@ export type DashboardLayoutCommand =
   | "save-layout"
   | "save-layout-default"
   | "discard-changes"
+  | "load-default"
   | "reset-defaults";
 
 export interface DashboardLayoutCommandEventDetail {
