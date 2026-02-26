@@ -734,7 +734,7 @@ export function DashboardClient({
   const customizeOpenRef = useRef(false);
   const saveLayoutActionRef = useRef<(() => Promise<void>) | null>(null);
   const saveLayoutAsDefaultActionRef = useRef<(() => Promise<void>) | null>(null);
-  const loadDefaultLayoutActionRef = useRef<(() => void) | null>(null);
+  const loadDefaultLayoutActionRef = useRef<(() => Promise<void>) | null>(null);
   const resetDefaultsActionRef = useRef<(() => Promise<void>) | null>(null);
   const discardLayoutActionRef = useRef<(() => void) | null>(null);
   const pointerDragStateRef = useRef<{
@@ -2067,26 +2067,33 @@ export function DashboardClient({
     });
   }
 
-  function loadDefaultDashboardLayout() {
-    setWidgetLayout((current) => {
-      if (areWidgetLayoutsEqual(current, defaultWidgetLayout)) {
-        return current;
-      }
-
-      const nextLayout = cloneWidgetLayout(defaultWidgetLayout);
-      setLayoutDirty(!areWidgetLayoutsEqual(nextLayout, savedWidgetLayout));
+  async function loadDefaultDashboardLayout() {
+    const nextLayout = cloneWidgetLayout(defaultWidgetLayout);
+    if (areWidgetLayoutsEqual(widgetLayout, nextLayout)) {
       setLayoutError(null);
       setLayoutNotice("Loaded your saved default dashboard layout.");
-      return nextLayout;
+      return;
+    }
+
+    await persistDashboardLayout({
+      layout: nextLayout,
+      saveAsDefault: false,
+      successNotice: "Loaded your saved default dashboard layout.",
     });
   }
 
-  async function resetDashboardDefaults() {
+  async function resetDashboardLayout() {
     const resetLayout = getResetDefaultDashboardLayout();
+    if (areWidgetLayoutsEqual(widgetLayout, resetLayout)) {
+      setLayoutError(null);
+      setLayoutNotice("Dashboard reset. All widgets are visible. Saved default unchanged.");
+      return;
+    }
+
     await persistDashboardLayout({
       layout: resetLayout,
-      saveAsDefault: true,
-      successNotice: "Default dashboard has been reset. All widgets are now visible.",
+      saveAsDefault: false,
+      successNotice: "Dashboard reset. All widgets are visible. Saved default unchanged.",
     });
   }
 
@@ -2262,7 +2269,7 @@ export function DashboardClient({
   saveLayoutActionRef.current = saveDashboardLayout;
   saveLayoutAsDefaultActionRef.current = saveDashboardLayoutAsDefault;
   loadDefaultLayoutActionRef.current = loadDefaultDashboardLayout;
-  resetDefaultsActionRef.current = resetDashboardDefaults;
+  resetDefaultsActionRef.current = resetDashboardLayout;
   discardLayoutActionRef.current = discardDashboardLayoutChanges;
 
   useEffect(() => {
@@ -2305,7 +2312,7 @@ export function DashboardClient({
         if (layoutSavingRef.current) {
           return;
         }
-        loadDefaultLayoutActionRef.current?.();
+        void loadDefaultLayoutActionRef.current?.();
         return;
       }
 
@@ -3770,14 +3777,13 @@ export function DashboardClient({
                   </span>
                   <div className="grid gap-1">
                     <h3 className="text-lg font-bold text-slate-100">
-                      Reset dashboard defaults?
+                      Reset dashboard layout?
                     </h3>
                     <p className="text-sm text-slate-300">
-                      This will change your saved default dashboard and immediately load all
-                      widgets as visible.
+                      This will load all widgets and re-arrange your current dashboard layout.
                     </p>
                     <p className="text-xs font-semibold uppercase tracking-wide text-amber-200">
-                      Your current default will be overwritten.
+                      Your saved default dashboard will not be changed.
                     </p>
                   </div>
                 </div>

@@ -248,6 +248,25 @@ function formatHistoryEventDetail(params: {
   return "Instruction content updated.";
 }
 
+function getHistoryEventActionLabel(params: {
+  eventType: "created" | "updated";
+  detail: string | null | undefined;
+}) {
+  if (params.eventType === "created") {
+    return "Instruction Created";
+  }
+
+  const normalizedDetail = params.detail?.trim().toLowerCase() ?? "";
+  if (normalizedDetail.includes("review state changed to needs review")) {
+    return "Needs Review";
+  }
+  if (normalizedDetail.includes("review state changed to up to date")) {
+    return "Marked Up To Date";
+  }
+
+  return "Instruction Updated";
+}
+
 function buildCreatorNameMap(
   users: Array<{ id: string; full_name: string }> | null,
 ) {
@@ -587,8 +606,10 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       return {
         id: event.id,
         occurred_at: event.occurred_at,
-        action_label:
-          eventType === "created" ? "Instruction Created" : "Instruction Updated",
+        action_label: getHistoryEventActionLabel({
+          eventType,
+          detail: event.detail,
+        }),
         actor_name: profileNameMap.get(event.actor_user_id) ?? "Unknown",
         detail: formatHistoryEventDetail({
           detail: event.detail,

@@ -359,7 +359,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
                   ? "Saving your layout..."
                   : activeDashboardLayoutState.layoutDirty
                     ? "You have unsaved layout changes."
-                    : "Layout and default are saved. Load Default Dashboard applies your saved default."}
+                    : "Layout and default are saved. Load Default Dashboard applies your saved default, and Reset Dashboard only resets the current layout."}
           </div>
 
           {activeDashboardLayoutState.layoutError ? (
