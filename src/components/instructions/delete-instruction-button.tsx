@@ -6,13 +6,16 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { cn } from "@/lib/utils";
 
 interface DeleteInstructionButtonProps {
   instructionId: string;
+  className?: string;
 }
 
 export function DeleteInstructionButton({
   instructionId,
+  className,
 }: DeleteInstructionButtonProps) {
   const router = useRouter();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
@@ -74,7 +77,10 @@ export function DeleteInstructionButton({
           setConfirmOpen(true);
         }}
         disabled={busy}
-        className="inline-flex items-center gap-2 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-sm font-semibold text-rose-200 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-70"
+        className={cn(
+          "inline-flex items-center gap-2 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-sm font-semibold text-rose-200 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-70",
+          className,
+        )}
       >
         {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
         Archive Instruction
