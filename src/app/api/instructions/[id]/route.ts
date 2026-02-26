@@ -5,6 +5,7 @@ import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 interface InstructionRecord {
   id: string;
+  work_item_id: string;
   is_archived: boolean;
 }
 
@@ -45,7 +46,7 @@ export async function DELETE(
 
   const { data: instruction, error: instructionReadError } = await supabaseAdmin
     .from("work_instructions")
-    .select("id, is_archived")
+    .select("id, work_item_id, is_archived")
     .eq("id", id)
     .maybeSingle<InstructionRecord>();
 
@@ -99,7 +100,7 @@ export async function PATCH(
 
   const { data: instruction, error: instructionReadError } = await supabaseAdmin
     .from("work_instructions")
-    .select("id, is_archived")
+    .select("id, work_item_id, is_archived")
     .eq("id", id)
     .maybeSingle<InstructionRecord>();
 
@@ -121,6 +122,41 @@ export async function PATCH(
     return NextResponse.json({ success: true, archived: false, restored: true });
   }
 
+  const { data: activeInstructions, error: activeInstructionsError } = await supabaseAdmin
+    .from("work_instructions")
+    .select("id")
+    .eq("work_item_id", instruction.work_item_id)
+    .eq("is_archived", false)
+    .neq("id", instruction.id);
+
+  if (activeInstructionsError) {
+    return NextResponse.json(
+      { error: activeInstructionsError.message },
+      { status: 500 },
+    );
+  }
+
+  const activeInstructionIds = ((activeInstructions ?? []) as Array<{ id: string }>).map(
+    (entry) => entry.id,
+  );
+
+  if (activeInstructionIds.length > 0) {
+    const { error: archiveOtherActiveInstructionsError } = await supabaseAdmin
+      .from("work_instructions")
+      .update({
+        is_archived: true,
+        updated_by: auth.requester.id,
+      })
+      .in("id", activeInstructionIds);
+
+    if (archiveOtherActiveInstructionsError) {
+      return NextResponse.json(
+        { error: archiveOtherActiveInstructionsError.message },
+        { status: 500 },
+      );
+    }
+  }
+
   const { error: restoreInstructionError } = await supabaseAdmin
     .from("work_instructions")
     .update({
@@ -130,6 +166,16 @@ export async function PATCH(
     .eq("id", id);
 
   if (restoreInstructionError) {
+    if (activeInstructionIds.length > 0) {
+      await supabaseAdmin
+        .from("work_instructions")
+        .update({
+          is_archived: false,
+          updated_by: auth.requester.id,
+        })
+        .in("id", activeInstructionIds);
+    }
+
     return NextResponse.json(
       { error: restoreInstructionError.message },
       { status: 500 },

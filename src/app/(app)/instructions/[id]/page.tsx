@@ -8,6 +8,10 @@ import sanitizeHtml from "sanitize-html";
 
 import { DeleteInstructionButton } from "@/components/instructions/delete-instruction-button";
 import { InstructionBackButton } from "@/components/instructions/instruction-back-button";
+import {
+  type InstructionRevisionHistoryEntry,
+  InstructionRevisionHistoryControl,
+} from "@/components/instructions/instruction-revision-history-control";
 import { InstructionReviewControls } from "@/components/instructions/instruction-review-controls";
 import { LikeInstructionButton } from "@/components/instructions/like-instruction-button";
 import { PinInstructionButton } from "@/components/instructions/pin-instruction-button";
@@ -29,6 +33,7 @@ interface InstructionPageProps {
 
 interface InstructionRecord {
   id: string;
+  work_item_id: string;
   is_archived: boolean;
   body_markdown: string;
   last_change_summary: string | null;
@@ -77,6 +82,15 @@ interface InstructionChangeEventRow {
   actor_user_id: string;
   revision: number | null;
   source_payload: unknown;
+}
+
+interface InstructionRevisionHistoryRow {
+  id: string;
+  revision: number;
+  is_archived: boolean;
+  created_at: string;
+  updated_at: string;
+  updated_by: string;
 }
 
 interface InstructionReviewSettingsRow {
@@ -328,10 +342,9 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, is_archived, body_markdown, last_change_summary, revision, created_at, updated_at, created_by, updated_by, work_items(id, part_number, mold_number, item_title, departments(name)), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
+      "id, work_item_id, is_archived, body_markdown, last_change_summary, revision, created_at, updated_at, created_by, updated_by, work_items(id, part_number, mold_number, item_title, departments(name)), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
     )
     .eq("id", id)
-    .eq("is_archived", false)
     .maybeSingle();
 
   if (error) {
@@ -350,6 +363,20 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
     notFound();
   }
 
+  const { data: revisionHistoryData, error: revisionHistoryError } = await supabase
+    .from("work_instructions")
+    .select("id, revision, is_archived, created_at, updated_at, updated_by")
+    .eq("work_item_id", instruction.work_item_id)
+    .order("revision", { ascending: false })
+    .order("updated_at", { ascending: false });
+
+  if (revisionHistoryError) {
+    throw new Error(revisionHistoryError.message);
+  }
+
+  const revisionHistoryRows =
+    (revisionHistoryData ?? []) as InstructionRevisionHistoryRow[];
+
   const { data: instructionChangeEventsData } = await supabase
     .from("instruction_change_events")
     .select("id, event_type, detail, occurred_at, actor_user_id, revision, source_payload")
@@ -361,6 +388,9 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
     (instructionChangeEventsData ?? []) as InstructionChangeEventRow[];
 
   const profileIds = new Set<string>([instruction.created_by, instruction.updated_by]);
+  for (const revisionHistoryRow of revisionHistoryRows) {
+    profileIds.add(revisionHistoryRow.updated_by);
+  }
   for (const changeEvent of rawInstructionChangeEvents) {
     profileIds.add(changeEvent.actor_user_id);
   }
@@ -375,6 +405,16 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
       : { data: null };
 
   const userMap = new Map((users ?? []).map((entry) => [entry.id, entry.full_name]));
+  const revisionHistoryEntries: InstructionRevisionHistoryEntry[] = revisionHistoryRows.map(
+    (entry) => ({
+      id: entry.id,
+      revision: entry.revision,
+      isArchived: entry.is_archived,
+      createdAt: entry.created_at,
+      updatedAt: entry.updated_at,
+      updatedByName: userMap.get(entry.updated_by) ?? "Unknown",
+    }),
+  );
 
   const instructionUpdateEvents: InstructionUpdateEvent[] =
     rawInstructionChangeEvents.length > 0
@@ -483,14 +523,17 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
     reviewAgeDays !== null && reviewAgeDays >= reviewWindowDays;
   const showReviewIndicator =
     reviewStatus.status === "needs_review" || reviewIsOutOfRange;
-  const showCompactEditorInstructionActions = canEditInstructions(profile.role);
+  const instructionIsArchived = instruction.is_archived;
+  const showCompactEditorInstructionActions =
+    canEditInstructions(profile.role) && !instructionIsArchived;
+  const canPromoteArchivedRevision = canEditInstructions(profile.role);
 
   return (
     <article className="grid gap-5">
       <InstructionBackButton fallbackHref="/dashboard" />
 
       <header className="rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
-        {showReviewIndicator ? (
+        {!instructionIsArchived && showReviewIndicator ? (
           <div
             className={`mb-4 rounded-2xl border px-4 py-3 ${
               reviewStatus.status === "needs_review"
@@ -511,6 +554,17 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
           </div>
         ) : null}
 
+        {instructionIsArchived ? (
+          <div className="mb-4 rounded-2xl border border-amber-500/45 bg-amber-500/12 px-4 py-3">
+            <p className="text-sm font-bold text-slate-900 dark:text-slate-100">
+              Archived revision
+            </p>
+            <p className="text-xs text-slate-700 dark:text-slate-200">
+              This revision is stored in history and hidden from dashboard/search.
+            </p>
+          </div>
+        ) : null}
+
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-3xl font-extrabold text-slate-900 dark:text-slate-100">
@@ -521,6 +575,11 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
               <strong>{workItem.mold_number || "N/A"}</strong> | Department:{" "}
               <strong>{departmentName}</strong> | Revision{" "}
               <strong>{instruction.revision}</strong>
+              <InstructionRevisionHistoryControl
+                currentInstructionId={instruction.id}
+                entries={revisionHistoryEntries}
+                canPromoteArchivedRevision={canPromoteArchivedRevision}
+              />
             </p>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
               Created by {userMap.get(instruction.created_by) ?? "Unknown"} on{" "}
@@ -531,35 +590,39 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
           </div>
           <div className="grid gap-2 md:justify-items-end">
             <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
-              <InstructionReviewControls
-                instructionId={instruction.id}
-                instructionUpdatedAt={instruction.updated_at}
-                reviewWindowDays={reviewWindowDays}
-                initialStatus={reviewStatus.status}
-                initialLastCalibratedAt={reviewStatus.lastCalibratedAt}
-                initialFlaggedAt={reviewStatus.flaggedAt}
-              />
+              {!instructionIsArchived ? (
+                <InstructionReviewControls
+                  instructionId={instruction.id}
+                  instructionUpdatedAt={instruction.updated_at}
+                  reviewWindowDays={reviewWindowDays}
+                  initialStatus={reviewStatus.status}
+                  initialLastCalibratedAt={reviewStatus.lastCalibratedAt}
+                  initialFlaggedAt={reviewStatus.flaggedAt}
+                />
+              ) : null}
 
               <div className="grid w-full max-w-[14rem] justify-items-stretch gap-2 md:w-[14rem]">
                 <InstructionUpdatesPanel
                   events={instructionUpdateEvents}
                   className="h-fit w-full justify-center self-start"
                 />
-                <div className="grid grid-cols-2 gap-2">
-                  <LikeInstructionButton
-                    instructionId={instruction.id}
-                    userId={profile.id}
-                    initialLiked={Boolean(likedInstruction)}
-                    initialLikeCount={instructionLikeCount ?? 0}
-                    className="w-full justify-center px-2 py-1.5"
-                  />
-                  <PinInstructionButton
-                    instructionId={instruction.id}
-                    userId={profile.id}
-                    initialPinned={Boolean(pinnedInstruction)}
-                    className="w-full justify-center px-2 py-1.5"
-                  />
-                </div>
+                {!instructionIsArchived ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <LikeInstructionButton
+                      instructionId={instruction.id}
+                      userId={profile.id}
+                      initialLiked={Boolean(likedInstruction)}
+                      initialLikeCount={instructionLikeCount ?? 0}
+                      className="w-full justify-center px-2 py-1.5"
+                    />
+                    <PinInstructionButton
+                      instructionId={instruction.id}
+                      userId={profile.id}
+                      initialPinned={Boolean(pinnedInstruction)}
+                      className="w-full justify-center px-2 py-1.5"
+                    />
+                  </div>
+                ) : null}
                 {showCompactEditorInstructionActions ? (
                   <div className="grid grid-cols-2 gap-2">
                     <Link
@@ -576,7 +639,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
                     </Link>
                   </div>
                 ) : null}
-                {isSystemAdmin(profile.role) ? (
+                {isSystemAdmin(profile.role) && !instructionIsArchived ? (
                   <DeleteInstructionButton
                     instructionId={instruction.id}
                     className="w-full justify-center px-3 py-1.5 text-xs"

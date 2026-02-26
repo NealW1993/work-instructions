@@ -87,6 +87,21 @@ type PendingNavigation =
       href: string;
     };
 
+interface ActiveInstructionConflict {
+  id: string;
+  revision: number;
+}
+
+interface RevisionConflictModalState {
+  existingInstructionId: string;
+  existingRevision: number;
+  requestedRevision: number;
+  partNumber: string;
+  moldNumber: string;
+  itemTitle: string;
+  departmentName: string;
+}
+
 interface FieldErrors {
   department: boolean;
   partOrMold: boolean;
@@ -692,7 +707,10 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   const [forkCanceledModalOpen, setForkCanceledModalOpen] = useState(false);
   const [navigationModalOpen, setNavigationModalOpen] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null);
+  const [revisionConflictModal, setRevisionConflictModal] =
+    useState<RevisionConflictModalState | null>(null);
 
+  const formRef = useRef<HTMLFormElement | null>(null);
   const partInputRef = useRef<HTMLInputElement | null>(null);
   const moldInputRef = useRef<HTMLInputElement | null>(null);
   const itemTitleInputRef = useRef<HTMLInputElement | null>(null);
@@ -702,6 +720,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   const suppressNextPopStateRef = useRef(false);
   const pendingNavigationRef = useRef<PendingNavigation | null>(null);
   const navigationBypassRef = useRef(false);
+  const confirmedReplacementInstructionIdRef = useRef<string | null>(null);
 
   const initialSnapshot = useMemo(
     () =>
@@ -751,6 +770,11 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
     return !snapshotsAreEqual(currentSnapshot, initialSnapshot);
   }, [createModeHasMeaningfulChanges, currentSnapshot, initialSnapshot, mode]);
+
+  const selectedDepartmentName = useMemo(
+    () => departments.find((department) => department.id === departmentId)?.name ?? "Unknown",
+    [departmentId, departments],
+  );
 
   useEffect(() => {
     setPortalReady(true);
@@ -1152,6 +1176,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     setMessage(null);
     setError(null);
     setFieldErrors(DEFAULT_FIELD_ERRORS);
+    setRevisionConflictModal(null);
 
     const normalizedPartNumber = partNumber.trim();
     const normalizedMoldNumber = moldNumber.trim();
@@ -1255,10 +1280,12 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         throw new Error(workItemError?.message ?? "Unable to save work item.");
       }
 
-      if (mode !== "fork") {
+      let currentActiveInstruction: ActiveInstructionConflict | null = null;
+
+      {
         let duplicateCheckRequest = supabase
           .from("work_instructions")
-          .select("id")
+          .select("id, revision")
           .eq("is_archived", false)
           .eq("work_item_id", typedWorkItem.id)
           .limit(1);
@@ -1274,18 +1301,72 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           throw new Error(duplicateCheckError.message);
         }
 
-        if (duplicateInstruction) {
-          setFieldErrors((current) => ({
-            ...current,
-            itemTitle: true,
-          }));
-          itemTitleInputRef.current?.focus();
-          throw new Error(
-            "A work instruction with this title already exists for this Part/Mold. Open the existing instruction to edit it.",
-          );
+        const typedDuplicateInstruction =
+          (duplicateInstruction as ActiveInstructionConflict | null) ?? null;
+
+        if (typedDuplicateInstruction) {
+          currentActiveInstruction = typedDuplicateInstruction;
+
+          if (mode === "edit") {
+            setFieldErrors((current) => ({
+              ...current,
+              itemTitle: true,
+            }));
+            itemTitleInputRef.current?.focus();
+            throw new Error(
+              "A work instruction with this title already exists for this Part/Mold. Open the existing instruction to edit it.",
+            );
+          }
+
+          if (mode === "create") {
+            if (typedDuplicateInstruction.revision === revision) {
+              setFieldErrors((current) => ({
+                ...current,
+                revision: true,
+              }));
+              throw new Error(
+                `Revision ${revision} is already active for this work item. Open the existing instruction instead.`,
+              );
+            }
+
+            const replacementWasConfirmed =
+              confirmedReplacementInstructionIdRef.current === typedDuplicateInstruction.id;
+
+            if (!replacementWasConfirmed) {
+              setRevisionConflictModal({
+                existingInstructionId: typedDuplicateInstruction.id,
+                existingRevision: typedDuplicateInstruction.revision,
+                requestedRevision: revision,
+                partNumber: normalizedPartNumber,
+                moldNumber: normalizedMoldNumber,
+                itemTitle: itemTitle.trim(),
+                departmentName: selectedDepartmentName,
+              });
+              return;
+            }
+          }
+
+          if (mode === "fork") {
+            setFieldErrors((current) => ({
+              ...current,
+              itemTitle: true,
+            }));
+            itemTitleInputRef.current?.focus();
+            throw new Error(
+              "An active instruction already exists for this Part/Mold and title. Change Part/Mold/Title before creating a fork.",
+            );
+          }
         }
       }
 
+      if (mode !== "create" || !currentActiveInstruction) {
+        confirmedReplacementInstructionIdRef.current = null;
+      }
+
+      const isEditRevisionBump =
+        mode === "edit" &&
+        Boolean(initialData?.instructionId) &&
+        revision !== (initialData?.revision ?? revision);
       let instructionId = initialData?.instructionId ?? "";
       const previousBodyForSummary = initialData?.bodyMarkdown ?? "";
       const previousRevisionForSummary = initialData?.revision ?? revision;
@@ -1303,10 +1384,36 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
             };
       const changeSummary = changeComputation.summary;
       let changeOccurredAt: string | null = null;
-      const changeEventType: "created" | "updated" =
-        mode === "edit" ? "updated" : "created";
+      let changeEventType: "created" | "updated" = "updated";
 
-      if (mode === "create" || mode === "fork") {
+      if (mode === "create" || mode === "fork" || isEditRevisionBump) {
+        const instructionToArchiveId =
+          mode === "create"
+            ? (currentActiveInstruction?.id ?? null)
+            : isEditRevisionBump
+              ? (initialData?.instructionId ?? null)
+              : null;
+        let archivedInstructionRollbackId: string | null = null;
+
+        if (instructionToArchiveId) {
+          const { error: archiveCurrentInstructionError } = await supabase
+            .from("work_instructions")
+            .update({
+              is_archived: true,
+              updated_by: user.id,
+            })
+            .eq("id", instructionToArchiveId);
+
+          if (archiveCurrentInstructionError) {
+            throw new Error(
+              archiveCurrentInstructionError.message ??
+                "Unable to archive the previous active revision.",
+            );
+          }
+
+          archivedInstructionRollbackId = instructionToArchiveId;
+        }
+
         const { data: insertedInstruction, error: insertInstructionError } = await supabase
           .from("work_instructions")
           .insert({
@@ -1325,6 +1432,20 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           insertedInstruction as { id: string; created_at: string } | null;
 
         if (insertInstructionError || !typedInstruction) {
+          if (archivedInstructionRollbackId) {
+            try {
+              await supabase
+                .from("work_instructions")
+                .update({
+                  is_archived: false,
+                  updated_by: user.id,
+                })
+                .eq("id", archivedInstructionRollbackId);
+            } catch {
+              // Rollback is best-effort when revision insert fails.
+            }
+          }
+
           throw new Error(
             insertInstructionError?.message ?? "Unable to create instruction.",
           );
@@ -1332,6 +1453,8 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
         instructionId = typedInstruction.id;
         changeOccurredAt = typedInstruction.created_at ?? new Date().toISOString();
+        changeEventType = "created";
+        confirmedReplacementInstructionIdRef.current = null;
       } else {
         const { data: updatedInstruction, error: updateInstructionError } = await supabase
           .from("work_instructions")
@@ -1354,6 +1477,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         const typedUpdatedInstruction =
           updatedInstruction as { updated_at: string } | null;
         changeOccurredAt = typedUpdatedInstruction?.updated_at ?? new Date().toISOString();
+        changeEventType = "updated";
       }
 
       if (changeOccurredAt && changeComputation.sourcePayload) {
@@ -1378,9 +1502,11 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       }
 
       setMessage(
-        mode === "edit"
-          ? "Instruction updated successfully."
-          : mode === "fork"
+        isEditRevisionBump
+          ? "New revision created successfully."
+          : mode === "edit"
+            ? "Instruction updated successfully."
+            : mode === "fork"
             ? "Instruction fork created successfully."
             : "Instruction created successfully.",
       );
@@ -1391,6 +1517,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         router.refresh();
       });
     } catch (caughtError) {
+      confirmedReplacementInstructionIdRef.current = null;
       setError(normalizeSubmissionError(caughtError));
       navigationBypassRef.current = false;
     } finally {
@@ -1412,6 +1539,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       ) : null}
 
       <form
+        ref={formRef}
         noValidate
         onSubmit={handleSubmit}
         className="grid min-w-0 gap-5 overflow-hidden rounded-3xl border border-white/30 bg-white/75 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7"
@@ -1666,6 +1794,76 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
               : "Create Instruction"}
         </button>
       </form>
+
+      {revisionConflictModal && portalReady
+        ? createPortal(
+            <div className="fixed inset-0 z-[112] flex items-center justify-center overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
+              <div className="grid w-full max-w-lg gap-4 rounded-2xl border border-cyan-500/45 bg-slate-950/95 p-5 shadow-2xl">
+                <div className="grid gap-2">
+                  <h3 className="text-lg font-bold text-slate-100">
+                    Replace current active revision?
+                  </h3>
+                  <p className="text-sm text-slate-300">
+                    {revisionConflictModal.itemTitle} | {revisionConflictModal.departmentName}
+                  </p>
+                  <p className="text-sm text-slate-300">
+                    {summarizePartMold(
+                      revisionConflictModal.partNumber,
+                      revisionConflictModal.moldNumber,
+                    ) || "Part/Mold not specified"}
+                  </p>
+                  <p className="text-sm text-slate-300">
+                    Continuing will move revision {revisionConflictModal.existingRevision} into
+                    storage and make revision {revisionConflictModal.requestedRevision} the current
+                    active instruction.
+                  </p>
+                </div>
+
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      confirmedReplacementInstructionIdRef.current = null;
+                      setRevisionConflictModal(null);
+                    }}
+                    className="rounded-xl border border-slate-600 bg-slate-900/70 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const existingInstructionId = revisionConflictModal.existingInstructionId;
+                      confirmedReplacementInstructionIdRef.current = null;
+                      setRevisionConflictModal(null);
+                      window.open(
+                        `/instructions/${existingInstructionId}`,
+                        "_blank",
+                        "noopener,noreferrer",
+                      );
+                    }}
+                    className="rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/25"
+                  >
+                    View Existing
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      confirmedReplacementInstructionIdRef.current =
+                        revisionConflictModal.existingInstructionId;
+                      setRevisionConflictModal(null);
+                      formRef.current?.requestSubmit();
+                    }}
+                    className="rounded-xl border border-emerald-500/45 bg-emerald-500/20 px-4 py-2 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/30"
+                  >
+                    Continue
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
 
       {navigationModalOpen && portalReady
         ? createPortal(
