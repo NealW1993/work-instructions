@@ -320,10 +320,10 @@ export function LoginPanel() {
       <div className="auth-login-shell relative z-10 mx-auto w-full max-w-2xl rounded-[2rem] border border-white/20 bg-slate-950/32 p-5 text-slate-100 shadow-2xl shadow-black/45 backdrop-blur-2xl md:p-8">
         <div className="grid gap-2 text-center">
           <h1 className="text-4xl font-extrabold leading-tight text-white md:text-5xl">
-            Visual work instructions, Reinvented.
+            Visual work instructions.
           </h1>
           <p className="text-base text-slate-200/90">
-            Reduce training time and increase quality from day one.
+            Reduce training time and increase quality.
           </p>
         </div>
 
@@ -406,7 +406,7 @@ export function LoginPanel() {
 
         {showCreateAccount ? (
           <form
-            className="mx-auto mt-4 grid w-full max-w-xl gap-3 rounded-2xl border border-white/20 bg-black/45 p-4 backdrop-blur-xl md:p-5"
+            className="mx-auto mt-4 grid w-full max-w-xl gap-3 rounded-2xl border border-white/30 bg-gradient-to-br from-white/[0.16] via-white/[0.1] to-white/[0.06] p-4 shadow-[0_18px_50px_rgba(2,6,23,0.28)] backdrop-blur-2xl md:p-5"
             onSubmit={handleSignup}
           >
             <label className="grid gap-1 text-left text-sm text-slate-200">
