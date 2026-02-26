@@ -691,6 +691,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       systemHistoryEvents={systemHistoryEvents.slice(0, 240)}
       currentUserId={profile.id}
       initialDashboardLayout={profile.dashboard_layout ?? null}
+      initialDashboardDefaultLayout={profile.dashboard_default_layout ?? null}
       departmentOptions={
         (departmentsData ?? []) as Array<{
           id: string;

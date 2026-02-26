@@ -22,6 +22,7 @@ export interface Profile {
   theme_preference?: ThemePreference;
   icon_color?: string;
   dashboard_layout?: unknown;
+  dashboard_default_layout?: unknown;
   authored_likes_seen_at?: string;
   total_signed_in_seconds?: number;
   active_session_started_at?: string | null;

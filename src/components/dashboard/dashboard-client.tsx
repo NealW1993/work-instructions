@@ -24,7 +24,6 @@ import { createPortal } from "react-dom";
 
 import { LocalDateTime } from "@/components/ui/local-date-time";
 import {
-  DEFAULT_DASHBOARD_LAYOUT_PRESET_ID,
   DASHBOARD_LAYOUT_PRESETS,
   type DashboardWidgetId,
   type DashboardWidgetLayoutItem,
@@ -162,6 +161,7 @@ interface DashboardClientProps {
   departmentOptions: DashboardDepartmentOption[];
   currentUserId: string;
   initialDashboardLayout: unknown;
+  initialDashboardDefaultLayout: unknown;
 }
 
 const DEFAULT_DEPARTMENT_COLOR = "#0EA5E9";
@@ -477,18 +477,70 @@ function getWidgetSpanClass(size: DashboardWidgetSize) {
   }
 }
 
-function getPresetPreviewSpanClass(size: DashboardWidgetSize) {
+function getPresetPreviewSpanValue(size: DashboardWidgetSize) {
   switch (size) {
     case "compact":
-      return "col-span-2";
+      return 2;
     case "standard":
-      return "col-span-3";
+      return 3;
     case "wide":
-      return "col-span-4";
+      return 4;
     case "full":
     default:
-      return "col-span-6";
+      return 6;
   }
+}
+
+function buildPresetPreviewRows(
+  presetId: string,
+  layout: DashboardWidgetLayoutItem[],
+) {
+  const rows: Array<Array<{ key: string; span: number }>> = [];
+  let currentRow: Array<{ key: string; span: number }> = [];
+  let consumedColumns = 0;
+
+  layout
+    .filter((entry) => entry.visible)
+    .forEach((entry, index) => {
+      const span = getPresetPreviewSpanValue(entry.size);
+      if (consumedColumns > 0 && consumedColumns + span > 6) {
+        const remaining = 6 - consumedColumns;
+        if (remaining > 0 && currentRow.length > 0) {
+          const lastCell = currentRow[currentRow.length - 1];
+          if (lastCell) {
+            lastCell.span += remaining;
+          }
+        }
+        rows.push(currentRow);
+        currentRow = [];
+        consumedColumns = 0;
+      }
+
+      currentRow.push({
+        key: `${presetId}-${entry.id}-${index}`,
+        span,
+      });
+      consumedColumns += span;
+
+      if (consumedColumns === 6) {
+        rows.push(currentRow);
+        currentRow = [];
+        consumedColumns = 0;
+      }
+    });
+
+  if (currentRow.length > 0) {
+    const remaining = 6 - consumedColumns;
+    if (remaining > 0) {
+      const lastCell = currentRow[currentRow.length - 1];
+      if (lastCell) {
+        lastCell.span += remaining;
+      }
+    }
+    rows.push(currentRow);
+  }
+
+  return rows;
 }
 
 type DashboardPendingNavigation =
@@ -567,6 +619,7 @@ export function DashboardClient({
   departmentOptions,
   currentUserId,
   initialDashboardLayout,
+  initialDashboardDefaultLayout,
 }: DashboardClientProps) {
   const router = useRouter();
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -575,6 +628,7 @@ export function DashboardClient({
   const layoutSavingRef = useRef(false);
   const customizeOpenRef = useRef(false);
   const saveLayoutActionRef = useRef<(() => Promise<void>) | null>(null);
+  const saveLayoutAsDefaultActionRef = useRef<(() => Promise<void>) | null>(null);
   const resetLayoutActionRef = useRef<(() => void) | null>(null);
   const discardLayoutActionRef = useRef<(() => void) | null>(null);
   const pointerDragStateRef = useRef<{
@@ -608,6 +662,9 @@ export function DashboardClient({
     const snapshotLayout = readSavedLayoutSnapshot(currentUserId);
     return snapshotLayout ?? normalizeDashboardLayout(initialDashboardLayout);
   });
+  const [defaultWidgetLayout, setDefaultWidgetLayout] = useState<DashboardWidgetLayoutItem[]>(
+    () => normalizeDashboardLayout(initialDashboardDefaultLayout),
+  );
   const [layoutDirty, setLayoutDirty] = useState(false);
   const [layoutSaving, setLayoutSaving] = useState(false);
   const [layoutError, setLayoutError] = useState<string | null>(null);
@@ -881,6 +938,9 @@ export function DashboardClient({
   }, []);
 
   useEffect(() => {
+    const serverDefaultLayout = normalizeDashboardLayout(initialDashboardDefaultLayout);
+    setDefaultWidgetLayout(cloneWidgetLayout(serverDefaultLayout));
+
     if (layoutDirtyRef.current) {
       return;
     }
@@ -896,7 +956,7 @@ export function DashboardClient({
     if (snapshotLayout && areWidgetLayoutsEqual(snapshotLayout, serverLayout)) {
       clearSavedLayoutSnapshot(currentUserId);
     }
-  }, [currentUserId, initialDashboardLayout]);
+  }, [currentUserId, initialDashboardDefaultLayout, initialDashboardLayout]);
 
   useEffect(() => {
     navigationModalOpenRef.current = navigationModalOpen;
@@ -1746,7 +1806,7 @@ export function DashboardClient({
     };
   }, [supabase]);
 
-  async function saveDashboardLayout() {
+  async function persistDashboardLayout(saveAsDefault: boolean) {
     setLayoutSaving(true);
     setLayoutError(null);
 
@@ -1757,12 +1817,14 @@ export function DashboardClient({
         headers,
         body: JSON.stringify({
           dashboardLayout: widgetLayout,
+          saveAsDefault,
         }),
       });
 
       const payload = (await response.json().catch(() => ({}))) as {
         error?: string;
         dashboardLayout?: unknown;
+        dashboardDefaultLayout?: unknown;
       };
 
       if (!response.ok) {
@@ -1772,6 +1834,12 @@ export function DashboardClient({
       const persistedLayout = normalizeDashboardLayout(payload.dashboardLayout ?? widgetLayout);
       setSavedWidgetLayout(cloneWidgetLayout(persistedLayout));
       setWidgetLayout(cloneWidgetLayout(persistedLayout));
+      if (saveAsDefault) {
+        const persistedDefaultLayout = normalizeDashboardLayout(
+          payload.dashboardDefaultLayout ?? persistedLayout,
+        );
+        setDefaultWidgetLayout(cloneWidgetLayout(persistedDefaultLayout));
+      }
       setLayoutDirty(false);
       persistSavedLayoutSnapshot(currentUserId, persistedLayout);
       router.refresh();
@@ -1786,16 +1854,24 @@ export function DashboardClient({
     }
   }
 
+  async function saveDashboardLayout() {
+    await persistDashboardLayout(false);
+  }
+
+  async function saveDashboardLayoutAsDefault() {
+    await persistDashboardLayout(true);
+  }
+
   function updateWidgetLayout(
     updater: (current: DashboardWidgetLayoutItem[]) => DashboardWidgetLayoutItem[],
   ) {
     setWidgetLayout((current) => {
       const next = updater(current);
-      if (next === current) {
+      if (next === current || areWidgetLayoutsEqual(next, current)) {
         return current;
       }
 
-      setLayoutDirty(true);
+      setLayoutDirty(!areWidgetLayoutsEqual(next, savedWidgetLayout));
       setLayoutError(null);
       return next;
     });
@@ -1938,19 +2014,28 @@ export function DashboardClient({
     }
 
     setWidgetLayout((current) => {
-      const currentPresetId = findMatchingDashboardLayoutPreset(current)?.id;
-      if (currentPresetId === preset.id) {
+      const nextLayout = preset.layout.map((entry) => ({ ...entry }));
+      if (areWidgetLayoutsEqual(current, nextLayout)) {
         return current;
       }
 
-      setLayoutDirty(true);
+      setLayoutDirty(!areWidgetLayoutsEqual(nextLayout, savedWidgetLayout));
       setLayoutError(null);
-      return preset.layout.map((entry) => ({ ...entry }));
+      return nextLayout;
     });
   }
 
   function resetDashboardLayout() {
-    applyLayoutPreset(DEFAULT_DASHBOARD_LAYOUT_PRESET_ID);
+    setWidgetLayout((current) => {
+      if (areWidgetLayoutsEqual(current, defaultWidgetLayout)) {
+        return current;
+      }
+
+      const resetLayout = cloneWidgetLayout(defaultWidgetLayout);
+      setLayoutDirty(!areWidgetLayoutsEqual(resetLayout, savedWidgetLayout));
+      setLayoutError(null);
+      return resetLayout;
+    });
   }
 
   function discardDashboardLayoutChanges() {
@@ -1960,6 +2045,7 @@ export function DashboardClient({
   }
 
   saveLayoutActionRef.current = saveDashboardLayout;
+  saveLayoutAsDefaultActionRef.current = saveDashboardLayoutAsDefault;
   resetLayoutActionRef.current = resetDashboardLayout;
   discardLayoutActionRef.current = discardDashboardLayoutChanges;
 
@@ -1980,6 +2066,14 @@ export function DashboardClient({
           return;
         }
         void saveLayoutActionRef.current?.();
+        return;
+      }
+
+      if (detail.command === "save-layout-default") {
+        if (layoutSavingRef.current) {
+          return;
+        }
+        void saveLayoutAsDefaultActionRef.current?.();
         return;
       }
 
@@ -2985,49 +3079,57 @@ export function DashboardClient({
                   </button>
                   {layoutPresetsCollapsed ? null : (
                     <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                      {DASHBOARD_LAYOUT_PRESETS.map((preset) => (
-                        <button
-                          key={preset.id}
-                          type="button"
-                          onClick={() => applyLayoutPreset(preset.id)}
-                          className={cn(
-                            "grid gap-2 rounded-xl border p-2 text-left transition",
-                            activeLayoutPresetId === preset.id
-                              ? "border-cyan-500/50 bg-cyan-500/10"
-                              : "border-slate-300/70 bg-white/80 hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/70",
-                          )}
-                        >
-                          <div className="grid min-h-12 grid-cols-6 gap-1 rounded-lg border border-slate-300/70 bg-slate-100/80 p-1 dark:border-slate-700 dark:bg-slate-950/60">
-                            {preset.layout
-                              .filter((entry) => entry.visible)
-                              .slice(0, 6)
-                              .map((entry, index) => (
-                                <span
-                                  key={`${preset.id}-${entry.id}-${index}`}
-                                  className={cn(
-                                    getPresetPreviewSpanClass(entry.size),
-                                    "h-2 rounded-sm bg-cyan-500/70 dark:bg-cyan-400/70",
-                                  )}
-                                />
+                      {DASHBOARD_LAYOUT_PRESETS.map((preset) => {
+                        const previewRows = buildPresetPreviewRows(preset.id, preset.layout);
+
+                        return (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            onClick={() => applyLayoutPreset(preset.id)}
+                            className={cn(
+                              "grid h-full gap-2 rounded-xl border p-2 text-left transition",
+                              activeLayoutPresetId === preset.id
+                                ? "border-cyan-500/50 bg-cyan-500/10"
+                                : "border-slate-300/70 bg-white/80 hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/70",
+                            )}
+                          >
+                            <div className="grid min-h-12 gap-1 rounded-lg border border-slate-300/70 bg-slate-100/80 p-1 dark:border-slate-700 dark:bg-slate-950/60">
+                              {previewRows.map((row, rowIndex) => (
+                                <div
+                                  key={`${preset.id}-row-${rowIndex}`}
+                                  className="grid grid-cols-6 gap-1"
+                                >
+                                  {row.map((cell) => (
+                                    <span
+                                      key={cell.key}
+                                      className="h-2 rounded-sm bg-cyan-500/70 dark:bg-cyan-400/70"
+                                      style={{
+                                        gridColumn: `span ${cell.span} / span ${cell.span}`,
+                                      }}
+                                    />
+                                  ))}
+                                </div>
                               ))}
-                          </div>
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-xs font-semibold text-slate-900 dark:text-slate-100">
-                              {preset.label}
-                            </p>
-                            <span
-                              className={cn(
-                                "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
-                                activeLayoutPresetId === preset.id
-                                  ? "bg-cyan-500/20 text-cyan-800 dark:text-cyan-200"
-                                  : "bg-slate-500/20 text-slate-700 dark:text-slate-300",
-                              )}
-                            >
-                              {activeLayoutPresetId === preset.id ? "Active" : "Select"}
-                            </span>
-                          </div>
-                        </button>
-                      ))}
+                            </div>
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                                {preset.label}
+                              </p>
+                              <span
+                                className={cn(
+                                  "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                                  activeLayoutPresetId === preset.id
+                                    ? "bg-cyan-500/20 text-cyan-800 dark:text-cyan-200"
+                                    : "bg-slate-500/20 text-slate-700 dark:text-slate-300",
+                                )}
+                              >
+                                {activeLayoutPresetId === preset.id ? "Active" : "Select"}
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </section>

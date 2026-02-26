@@ -97,13 +97,13 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
     id: "compact_grid",
     label: "Compact Grid",
     layout: [
-      { id: "finder", visible: true, size: "wide" },
+      { id: "finder", visible: true, size: "compact" },
       { id: "newest", visible: true, size: "compact" },
       { id: "pinned", visible: true, size: "compact" },
-      { id: "my_impact", visible: true, size: "compact" },
-      { id: "department_activity", visible: true, size: "wide" },
+      { id: "my_impact", visible: true, size: "standard" },
+      { id: "department_activity", visible: true, size: "standard" },
       { id: "recent_updates", visible: true, size: "wide" },
-      { id: "system_history", visible: true, size: "wide" },
+      { id: "system_history", visible: true, size: "full" },
     ],
   },
   {

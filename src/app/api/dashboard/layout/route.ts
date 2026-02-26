@@ -9,6 +9,7 @@ import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 interface UpdateDashboardLayoutBody {
   dashboardLayout?: unknown;
+  saveAsDefault?: boolean;
 }
 
 export async function GET(request: NextRequest) {
@@ -20,17 +21,24 @@ export async function GET(request: NextRequest) {
   const supabaseAdmin = getSupabaseAdminClient();
   const { data, error } = await supabaseAdmin
     .from("profiles")
-    .select("dashboard_layout")
+    .select("dashboard_layout, dashboard_default_layout")
     .eq("id", requester.id)
-    .maybeSingle<{ dashboard_layout: unknown }>();
+    .maybeSingle<{
+      dashboard_layout: unknown;
+      dashboard_default_layout: unknown;
+    }>();
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
   const normalizedLayout = normalizeDashboardLayout(data?.dashboard_layout ?? null);
+  const normalizedDefaultLayout = normalizeDashboardLayout(
+    data?.dashboard_default_layout ?? null,
+  );
   return NextResponse.json({
     dashboardLayout: normalizedLayout,
+    dashboardDefaultLayout: normalizedDefaultLayout,
   });
 }
 
@@ -50,12 +58,18 @@ export async function PATCH(request: NextRequest) {
     );
   }
   const normalizedLayout = normalizeDashboardLayout(parsedLayout);
+  const saveAsDefault = body.saveAsDefault === true;
 
   const supabaseAdmin = getSupabaseAdminClient();
   const { error } = await supabaseAdmin
     .from("profiles")
     .update({
       dashboard_layout: normalizedLayout,
+      ...(saveAsDefault
+        ? {
+            dashboard_default_layout: normalizedLayout,
+          }
+        : {}),
     })
     .eq("id", requester.id);
 
@@ -63,5 +77,12 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ dashboardLayout: normalizedLayout });
+  return NextResponse.json({
+    dashboardLayout: normalizedLayout,
+    ...(saveAsDefault
+      ? {
+          dashboardDefaultLayout: normalizedLayout,
+        }
+      : {}),
+  });
 }

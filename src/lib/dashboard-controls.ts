@@ -6,6 +6,7 @@ export const DASHBOARD_LAYOUT_MENU_INTENT_OPEN_CUSTOMIZE = "open-customize";
 export type DashboardLayoutCommand =
   | "toggle-customize"
   | "save-layout"
+  | "save-layout-default"
   | "discard-changes"
   | "reset-defaults";
 

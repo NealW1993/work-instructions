@@ -3,7 +3,15 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { CircleAlert, ChevronDown, LayoutGrid, RefreshCw, Save, Undo2 } from "lucide-react";
+import {
+  BookmarkPlus,
+  CircleAlert,
+  ChevronDown,
+  LayoutGrid,
+  RefreshCw,
+  Save,
+  Undo2,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { UserAccountMenu } from "@/components/layout/user-account-menu";
@@ -59,6 +67,8 @@ export function AppHeader({ profile }: { profile: Profile }) {
     canSendDashboardLayoutActions &&
     activeDashboardLayoutState.layoutDirty &&
     !activeDashboardLayoutState.layoutSaving;
+  const canSaveLayoutAsDefault =
+    canSendDashboardLayoutActions && !activeDashboardLayoutState.layoutSaving;
   const canDiscardLayout =
     canSendDashboardLayoutActions &&
     activeDashboardLayoutState.layoutDirty &&
@@ -291,6 +301,16 @@ export function AppHeader({ profile }: { profile: Profile }) {
 
           <button
             type="button"
+            disabled={!canSaveLayoutAsDefault}
+            onClick={() => handleDashboardAction("save-layout-default")}
+            className="inline-flex items-center gap-2 rounded-xl border border-sky-500/45 bg-sky-500/15 px-3 py-2 text-sm font-semibold text-sky-100 transition hover:bg-sky-500/25 disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            <BookmarkPlus size={14} />
+            Save Layout as Default
+          </button>
+
+          <button
+            type="button"
             disabled={!canDiscardLayout}
             onClick={() => handleDashboardAction("discard-changes")}
             className="inline-flex items-center gap-2 rounded-xl border border-amber-500/45 bg-amber-500/15 px-3 py-2 text-sm font-semibold text-amber-100 transition hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-45"
@@ -314,11 +334,11 @@ export function AppHeader({ profile }: { profile: Profile }) {
               ? "Choose Customize Dashboard to jump into dashboard studio."
               : !activeDashboardLayoutState.available
                 ? "Dashboard studio is loading."
-                : activeDashboardLayoutState.layoutSaving
+              : activeDashboardLayoutState.layoutSaving
                   ? "Saving your layout..."
                   : activeDashboardLayoutState.layoutDirty
                     ? "You have unsaved layout changes."
-                    : "Layout is saved for this user account."}
+                    : "Layout is saved for this user. Reset uses your saved default."}
           </div>
 
           {activeDashboardLayoutState.layoutError ? (
