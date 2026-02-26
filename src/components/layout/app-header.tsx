@@ -13,7 +13,7 @@ import {
   Save,
   Undo2,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { type MouseEvent as ReactMouseEvent, useCallback, useEffect, useState } from "react";
 
 import { UserAccountMenu } from "@/components/layout/user-account-menu";
 import {
@@ -34,6 +34,8 @@ interface HeaderNavLink {
   href: string;
   label: string;
 }
+
+const DASHBOARD_RETURN_STATE_KEY = "__dashboardInstructionReturnState";
 
 function isActivePath(pathname: string, href: string) {
   if (href === "/admin/users" && pathname.startsWith("/admin/")) {
@@ -64,16 +66,18 @@ export function AppHeader({ profile }: { profile: Profile }) {
     dashboardMenuOpen && dashboardMenuPathname === pathname;
   const canSendDashboardLayoutActions =
     isDashboardActive && activeDashboardLayoutState.available;
-  const showCustomizeSaveActions =
+  const showLayoutSaveActions =
+    canSendDashboardLayoutActions && activeDashboardLayoutState.layoutDirty;
+  const showSaveLayoutAsDefaultAction =
     canSendDashboardLayoutActions && activeDashboardLayoutState.customizeOpen;
   const canSaveLayout =
-    showCustomizeSaveActions &&
+    showLayoutSaveActions &&
     activeDashboardLayoutState.layoutDirty &&
     !activeDashboardLayoutState.layoutSaving;
   const canSaveLayoutAsDefault =
-    showCustomizeSaveActions && !activeDashboardLayoutState.layoutSaving;
+    showSaveLayoutAsDefaultAction && !activeDashboardLayoutState.layoutSaving;
   const canDiscardLayout =
-    showCustomizeSaveActions &&
+    showLayoutSaveActions &&
     activeDashboardLayoutState.layoutDirty &&
     !activeDashboardLayoutState.layoutSaving;
   const canLoadDefault =
@@ -157,6 +161,41 @@ export function AppHeader({ profile }: { profile: Profile }) {
     };
   }, [dashboardMenuVisible]);
 
+  const clearDashboardInstructionReturnState = useCallback(() => {
+    try {
+      window.sessionStorage.removeItem(DASHBOARD_RETURN_STATE_KEY);
+    } catch {
+      // Session storage cleanup is best-effort.
+    }
+  }, []);
+
+  const handleDashboardLinkClick = useCallback(
+    (event: ReactMouseEvent<HTMLAnchorElement>) => {
+      if (event.defaultPrevented || event.button !== 0) {
+        return;
+      }
+
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        return;
+      }
+
+      clearDashboardInstructionReturnState();
+      setDashboardMenuOpen(false);
+
+      if (!isDashboardActive) {
+        return;
+      }
+
+      event.preventDefault();
+      window.scrollTo({
+        top: 0,
+        left: 0,
+        behavior: "auto",
+      });
+    },
+    [clearDashboardInstructionReturnState, isDashboardActive],
+  );
+
   const triggerDashboardAction = useCallback(
     (command: DashboardLayoutCommand) => {
       if (isDashboardActive) {
@@ -193,9 +232,10 @@ export function AppHeader({ profile }: { profile: Profile }) {
         }
       }
 
+      clearDashboardInstructionReturnState();
       router.push("/dashboard");
     },
-    [dashboardLayoutState.available, isDashboardActive, router],
+    [clearDashboardInstructionReturnState, dashboardLayoutState.available, isDashboardActive, router],
   );
 
   const handleDashboardAction = useCallback(
@@ -232,6 +272,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
     >
       <Link
         href="/dashboard"
+        onClick={handleDashboardLinkClick}
         className={cn(
           "inline-flex items-center rounded-l-xl border border-r-0 px-4 py-2 text-sm font-semibold transition",
           isDashboardActive
@@ -304,7 +345,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
             Load Default Dashboard
           </button>
 
-          {showCustomizeSaveActions ? (
+          {showLayoutSaveActions ? (
             <>
               <button
                 type="button"
@@ -318,16 +359,6 @@ export function AppHeader({ profile }: { profile: Profile }) {
 
               <button
                 type="button"
-                disabled={!canSaveLayoutAsDefault}
-                onClick={() => handleDashboardAction("save-layout-default")}
-                className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-45"
-              >
-                <BookmarkPlus size={14} />
-                Save Layout as Default
-              </button>
-
-              <button
-                type="button"
                 disabled={!canDiscardLayout}
                 onClick={() => handleDashboardAction("discard-changes")}
                 className="inline-flex items-center gap-2 rounded-xl border border-amber-500/45 bg-amber-500/15 px-3 py-2 text-sm font-semibold text-amber-100 transition hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-45"
@@ -336,6 +367,18 @@ export function AppHeader({ profile }: { profile: Profile }) {
                 Discard Changes
               </button>
             </>
+          ) : null}
+
+          {showSaveLayoutAsDefaultAction ? (
+            <button
+              type="button"
+              disabled={!canSaveLayoutAsDefault}
+              onClick={() => handleDashboardAction("save-layout-default")}
+              className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              <BookmarkPlus size={14} />
+              Save Layout as Default
+            </button>
           ) : null}
 
           <button
@@ -353,13 +396,13 @@ export function AppHeader({ profile }: { profile: Profile }) {
               ? "Choose Customize Dashboard to jump into dashboard studio."
               : !activeDashboardLayoutState.available
                 ? "Dashboard studio is loading."
+              : activeDashboardLayoutState.layoutDirty
+                ? "You have unsaved layout changes."
               : !activeDashboardLayoutState.customizeOpen
-                ? "Open Customize Dashboard to edit, save, or discard layout changes."
+                ? "Open Customize Dashboard to edit layout and manage defaults."
               : activeDashboardLayoutState.layoutSaving
                   ? "Saving your layout..."
-                  : activeDashboardLayoutState.layoutDirty
-                    ? "You have unsaved layout changes."
-                    : "Layout and default are saved. Load Default Dashboard applies your saved default, and Reset Dashboard only resets the current layout."}
+                  : "Layout and default are saved. Load Default Dashboard applies your saved default, and Reset Dashboard only resets the current layout."}
           </div>
 
           {activeDashboardLayoutState.layoutError ? (
@@ -378,6 +421,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
         <div className="relative flex items-center justify-end">
           <Link
             href="/dashboard"
+            onClick={handleDashboardLinkClick}
             aria-label="OMNI Technologies Dashboard"
             className="absolute left-0 hidden items-center rounded-lg px-1 py-1 transition hover:opacity-90 md:inline-flex"
           >

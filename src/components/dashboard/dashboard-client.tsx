@@ -2551,7 +2551,7 @@ export function DashboardClient({
           >
             <label className="grid gap-1 text-sm">
               <span className="font-semibold">
-                {isFinderCompact ? "Part Number or Mold" : "Part Number or Mold Number"}
+                {isFinderCompact ? "Start searching" : "Start searching"}
               </span>
               <div className="relative">
                 <Search
