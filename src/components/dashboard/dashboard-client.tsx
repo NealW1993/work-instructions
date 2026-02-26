@@ -168,6 +168,8 @@ const DEFAULT_DEPARTMENT_COLOR = "#0EA5E9";
 const DASHBOARD_HISTORY_GUARD_STATE_KEY = "__dashboardLayoutUnsavedGuard";
 const DASHBOARD_RETURN_STATE_KEY = "__dashboardInstructionReturnState";
 const DASHBOARD_RETURN_STATE_MAX_AGE_MS = 1000 * 60 * 30;
+const DASHBOARD_LAYOUT_SNAPSHOT_KEY = "__dashboardSavedLayoutSnapshot";
+const DASHBOARD_LAYOUT_SNAPSHOT_MAX_AGE_MS = 1000 * 60 * 60 * 4;
 const CELEBRATION_CONFETTI_COLORS = [
   "#22D3EE",
   "#60A5FA",
@@ -186,6 +188,12 @@ interface DashboardInstructionReturnState {
   scrollX: number;
   scrollY: number;
   savedAt: number;
+}
+
+interface DashboardSavedLayoutSnapshot {
+  userId: string;
+  savedAt: number;
+  layout: DashboardWidgetLayoutItem[];
 }
 
 const WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
@@ -360,6 +368,93 @@ function cloneWidgetLayout(layout: DashboardWidgetLayoutItem[]) {
   return layout.map((entry) => ({ ...entry }));
 }
 
+function areWidgetLayoutsEqual(
+  first: DashboardWidgetLayoutItem[],
+  second: DashboardWidgetLayoutItem[],
+) {
+  if (first.length !== second.length) {
+    return false;
+  }
+
+  return first.every((entry, index) => {
+    const candidate = second[index];
+    return (
+      candidate &&
+      entry.id === candidate.id &&
+      entry.visible === candidate.visible &&
+      entry.size === candidate.size
+    );
+  });
+}
+
+function readSavedLayoutSnapshot(userId: string): DashboardWidgetLayoutItem[] | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const rawSnapshot = window.sessionStorage.getItem(DASHBOARD_LAYOUT_SNAPSHOT_KEY);
+    if (!rawSnapshot) {
+      return null;
+    }
+
+    const parsedSnapshot = JSON.parse(rawSnapshot) as Partial<DashboardSavedLayoutSnapshot>;
+    if (
+      parsedSnapshot.userId !== userId ||
+      typeof parsedSnapshot.savedAt !== "number" ||
+      !Array.isArray(parsedSnapshot.layout)
+    ) {
+      return null;
+    }
+
+    if (Date.now() - parsedSnapshot.savedAt > DASHBOARD_LAYOUT_SNAPSHOT_MAX_AGE_MS) {
+      window.sessionStorage.removeItem(DASHBOARD_LAYOUT_SNAPSHOT_KEY);
+      return null;
+    }
+
+    return cloneWidgetLayout(normalizeDashboardLayout(parsedSnapshot.layout));
+  } catch {
+    return null;
+  }
+}
+
+function persistSavedLayoutSnapshot(userId: string, layout: DashboardWidgetLayoutItem[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    const snapshot: DashboardSavedLayoutSnapshot = {
+      userId,
+      savedAt: Date.now(),
+      layout: cloneWidgetLayout(layout),
+    };
+    window.sessionStorage.setItem(DASHBOARD_LAYOUT_SNAPSHOT_KEY, JSON.stringify(snapshot));
+  } catch {
+    // Persisting layout snapshot is best-effort.
+  }
+}
+
+function clearSavedLayoutSnapshot(userId: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    const rawSnapshot = window.sessionStorage.getItem(DASHBOARD_LAYOUT_SNAPSHOT_KEY);
+    if (!rawSnapshot) {
+      return;
+    }
+
+    const parsedSnapshot = JSON.parse(rawSnapshot) as Partial<DashboardSavedLayoutSnapshot>;
+    if (parsedSnapshot.userId === userId) {
+      window.sessionStorage.removeItem(DASHBOARD_LAYOUT_SNAPSHOT_KEY);
+    }
+  } catch {
+    // Snapshot cleanup is best-effort.
+  }
+}
+
 function shouldCaptureInstructionReturnState(pathname: string) {
   if (!pathname.startsWith("/instructions/")) {
     return false;
@@ -505,12 +600,14 @@ export function DashboardClient({
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [draggedWidgetId, setDraggedWidgetId] = useState<DashboardWidgetId | null>(null);
   const [dragOverWidgetId, setDragOverWidgetId] = useState<DashboardWidgetId | null>(null);
-  const [savedWidgetLayout, setSavedWidgetLayout] = useState<DashboardWidgetLayoutItem[]>(() =>
-    normalizeDashboardLayout(initialDashboardLayout),
-  );
-  const [widgetLayout, setWidgetLayout] = useState<DashboardWidgetLayoutItem[]>(() =>
-    normalizeDashboardLayout(initialDashboardLayout),
-  );
+  const [savedWidgetLayout, setSavedWidgetLayout] = useState<DashboardWidgetLayoutItem[]>(() => {
+    const snapshotLayout = readSavedLayoutSnapshot(currentUserId);
+    return snapshotLayout ?? normalizeDashboardLayout(initialDashboardLayout);
+  });
+  const [widgetLayout, setWidgetLayout] = useState<DashboardWidgetLayoutItem[]>(() => {
+    const snapshotLayout = readSavedLayoutSnapshot(currentUserId);
+    return snapshotLayout ?? normalizeDashboardLayout(initialDashboardLayout);
+  });
   const [layoutDirty, setLayoutDirty] = useState(false);
   const [layoutSaving, setLayoutSaving] = useState(false);
   const [layoutError, setLayoutError] = useState<string | null>(null);
@@ -778,11 +875,18 @@ export function DashboardClient({
       return;
     }
 
-    const normalizedLayout = normalizeDashboardLayout(initialDashboardLayout);
-    setSavedWidgetLayout(cloneWidgetLayout(normalizedLayout));
-    setWidgetLayout(cloneWidgetLayout(normalizedLayout));
+    const serverLayout = normalizeDashboardLayout(initialDashboardLayout);
+    const snapshotLayout = readSavedLayoutSnapshot(currentUserId);
+    const nextLayout = snapshotLayout ?? serverLayout;
+
+    setSavedWidgetLayout(cloneWidgetLayout(nextLayout));
+    setWidgetLayout(cloneWidgetLayout(nextLayout));
     setLayoutDirty(false);
-  }, [initialDashboardLayout]);
+
+    if (snapshotLayout && areWidgetLayoutsEqual(snapshotLayout, serverLayout)) {
+      clearSavedLayoutSnapshot(currentUserId);
+    }
+  }, [currentUserId, initialDashboardLayout]);
 
   useEffect(() => {
     navigationModalOpenRef.current = navigationModalOpen;
@@ -1648,14 +1752,19 @@ export function DashboardClient({
 
       const payload = (await response.json().catch(() => ({}))) as {
         error?: string;
+        dashboardLayout?: unknown;
       };
 
       if (!response.ok) {
         throw new Error(payload.error ?? "Unable to save dashboard layout.");
       }
 
-      setSavedWidgetLayout(cloneWidgetLayout(widgetLayout));
+      const persistedLayout = normalizeDashboardLayout(payload.dashboardLayout ?? widgetLayout);
+      setSavedWidgetLayout(cloneWidgetLayout(persistedLayout));
+      setWidgetLayout(cloneWidgetLayout(persistedLayout));
       setLayoutDirty(false);
+      persistSavedLayoutSnapshot(currentUserId, persistedLayout);
+      router.refresh();
     } catch (caughtError) {
       const normalizedMessage =
         caughtError instanceof Error
@@ -2071,11 +2180,11 @@ export function DashboardClient({
       const isFinderCompact = finderSize === "compact";
 
       return (
-        <div className="grid gap-4">
+        <div className={cn("grid", departmentInsightExpanded ? "gap-4" : "gap-2")}>
           <div
             className={cn(
-              "grid gap-3",
-              isFinderCompact ? "grid-cols-1" : "md:grid-cols-[minmax(0,1fr)_260px]",
+              "grid gap-2",
+              isFinderCompact ? "grid-cols-1" : "md:grid-cols-[minmax(0,1fr)_170px]",
             )}
           >
             <label className="grid gap-1 text-sm">
@@ -2112,29 +2221,16 @@ export function DashboardClient({
               </div>
             </label>
 
-            <label className="grid gap-1 text-sm">
-              <span className="font-semibold">Department</span>
-              <select
-                value={selectedDepartmentId}
-                onChange={(event) => setSelectedDepartmentId(event.target.value)}
-                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-              >
-                <option value="all">All Departments</option>
-                {departmentInsights.map((department) => (
-                  <option key={department.id} value={department.id}>
-                    {department.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <div className="grid gap-2">
-            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-              Department Insight
-            </p>
-            <div className="flex min-w-0 items-start gap-2">
-              <div className="group relative shrink-0">
+            <div
+              className={cn(
+                "grid gap-1 text-sm",
+                isFinderCompact ? "justify-items-start" : "justify-items-end",
+              )}
+            >
+              <p className="font-semibold text-slate-700 dark:text-slate-200">
+                Department Insight
+              </p>
+              <div className="group relative">
                 <button
                   type="button"
                   onPointerDown={(event) => {
@@ -2171,71 +2267,74 @@ export function DashboardClient({
                   />
                 </button>
                 {departmentInsightSummaryTooltipVisible ? (
-                  <p className="pointer-events-none absolute left-0 top-full z-10 mt-1 w-max max-w-[260px] rounded-lg border border-cyan-500/45 bg-slate-950/95 px-2.5 py-1 text-[11px] font-semibold text-cyan-100 shadow-lg">
+                  <p
+                    className={cn(
+                      "pointer-events-none absolute top-full z-10 mt-1 w-max max-w-[260px] rounded-lg border border-cyan-500/45 bg-slate-950/95 px-2.5 py-1 text-[11px] font-semibold text-cyan-100 shadow-lg",
+                      isFinderCompact ? "left-0" : "right-0",
+                    )}
+                  >
                     ({departmentInsightSummary})
                   </p>
                 ) : null}
               </div>
+            </div>
+          </div>
 
+          <div
+            id="finder-department-insight-slider"
+            className={cn(
+              "min-w-0 overflow-hidden transition-[max-height,opacity] duration-300 ease-out",
+              departmentInsightExpanded ? "max-h-[40rem] opacity-100" : "max-h-0 opacity-0",
+            )}
+          >
+            <div
+              className={cn(
+                shouldScrollDepartmentInsight ? "overflow-x-auto pb-1" : "overflow-visible",
+              )}
+            >
               <div
-                id="finder-department-insight-slider"
                 className={cn(
-                  "min-w-0 overflow-hidden transition-[max-width,max-height,opacity] duration-300 ease-out",
-                  departmentInsightExpanded
-                    ? "max-h-[40rem] max-w-full opacity-100"
-                    : "pointer-events-none max-h-0 max-w-0 opacity-0",
+                  "items-center gap-2 pr-1",
+                  shouldScrollDepartmentInsight
+                    ? "flex min-w-max whitespace-nowrap"
+                    : "flex flex-wrap whitespace-normal",
                 )}
               >
-                <div
-                  className={cn(
-                    shouldScrollDepartmentInsight ? "overflow-x-auto pb-1" : "overflow-visible",
-                  )}
+                <button
+                  type="button"
+                  onClick={() => setSelectedDepartmentId("all")}
+                  className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                    selectedDepartmentId === "all"
+                      ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-800 dark:text-cyan-200"
+                      : "border-slate-400/30 bg-slate-900/10 dark:bg-white/10"
+                  }`}
                 >
-                  <div
-                    className={cn(
-                      "items-center gap-2 pr-1",
-                      shouldScrollDepartmentInsight
-                        ? "flex min-w-max whitespace-nowrap"
-                        : "flex flex-wrap whitespace-normal",
-                    )}
+                  All ({totalInstructionCount})
+                </button>
+                {departmentInsights.map((department) => (
+                  <button
+                    key={department.id}
+                    type="button"
+                    onClick={() => setSelectedDepartmentId(department.id)}
+                    style={{
+                      borderColor: colorWithAlpha(
+                        department.color_hex,
+                        selectedDepartmentId === department.id ? 0.75 : 0.4,
+                      ),
+                      backgroundColor: colorWithAlpha(
+                        department.color_hex,
+                        selectedDepartmentId === department.id ? 0.22 : 0.11,
+                      ),
+                    }}
+                    className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                      selectedDepartmentId === department.id
+                        ? "text-slate-900 dark:text-slate-100"
+                        : "text-slate-700 dark:text-slate-200"
+                    }`}
                   >
-                    <button
-                      type="button"
-                      onClick={() => setSelectedDepartmentId("all")}
-                      className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                        selectedDepartmentId === "all"
-                          ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-800 dark:text-cyan-200"
-                          : "border-slate-400/30 bg-slate-900/10 dark:bg-white/10"
-                      }`}
-                    >
-                      All ({totalInstructionCount})
-                    </button>
-                    {departmentInsights.map((department) => (
-                      <button
-                        key={department.id}
-                        type="button"
-                        onClick={() => setSelectedDepartmentId(department.id)}
-                        style={{
-                          borderColor: colorWithAlpha(
-                            department.color_hex,
-                            selectedDepartmentId === department.id ? 0.75 : 0.4,
-                          ),
-                          backgroundColor: colorWithAlpha(
-                            department.color_hex,
-                            selectedDepartmentId === department.id ? 0.22 : 0.11,
-                          ),
-                        }}
-                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                          selectedDepartmentId === department.id
-                            ? "text-slate-900 dark:text-slate-100"
-                            : "text-slate-700 dark:text-slate-200"
-                        }`}
-                      >
-                        {department.name} ({department.instructionCount})
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                    {department.name} ({department.instructionCount})
+                  </button>
+                ))}
               </div>
             </div>
           </div>
