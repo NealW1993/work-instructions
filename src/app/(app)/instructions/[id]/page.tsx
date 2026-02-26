@@ -45,8 +45,7 @@ interface InstructionRecord {
   work_items:
     | {
         id: string;
-        part_number: string;
-        mold_number: string;
+        part_id: string;
         item_title: string;
         departments:
           | {
@@ -59,8 +58,7 @@ interface InstructionRecord {
       }
     | Array<{
         id: string;
-        part_number: string;
-        mold_number: string;
+        part_id: string;
         item_title: string;
         departments:
           | {
@@ -342,7 +340,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, work_item_id, is_archived, body_markdown, last_change_summary, revision, created_at, updated_at, created_by, updated_by, work_items(id, part_number, mold_number, item_title, departments(name)), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
+      "id, work_item_id, is_archived, body_markdown, last_change_summary, revision, created_at, updated_at, created_by, updated_by, work_items(id, part_id, item_title, departments(name)), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -571,8 +569,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
               {workItem.item_title}
             </h1>
             <p className="text-sm text-slate-600 dark:text-slate-300">
-              Part: <strong>{workItem.part_number}</strong> | Mold:{" "}
-              <strong>{workItem.mold_number || "N/A"}</strong> | Department:{" "}
+              Part ID: <strong>{workItem.part_id}</strong> | Department:{" "}
               <strong>{departmentName}</strong> | Revision{" "}
               <strong>{instruction.revision}</strong>
               <InstructionRevisionHistoryControl

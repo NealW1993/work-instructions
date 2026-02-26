@@ -32,8 +32,7 @@ export interface Profile {
 
 export interface WorkItem {
   id: string;
-  part_number: string;
-  mold_number: string | null;
+  part_id: string;
   item_title: string;
   department_id: string;
   created_by: string;

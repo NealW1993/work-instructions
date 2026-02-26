@@ -11,8 +11,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 interface ArchivedInstructionWorkItemSummary {
   department_name: string;
-  part_number: string;
-  mold_number: string | null;
+  part_id: string;
   item_title: string;
 }
 
@@ -35,25 +34,19 @@ interface DepartmentFilterOption {
   count: number;
 }
 
-function getPrimaryPartOrMoldLabel(workItem: ArchivedInstructionWorkItemSummary) {
-  const mold = workItem.mold_number?.trim();
-  if (mold) {
-    return `Mold # ${mold}`;
+function getPartIdLabel(workItem: ArchivedInstructionWorkItemSummary) {
+  const partId = workItem.part_id?.trim();
+  if (!partId) {
+    return "Part ID N/A";
   }
 
-  const part = workItem.part_number?.trim();
-  if (part) {
-    return `Part # ${part}`;
-  }
-
-  return "Part # N/A";
+  return `Part ID ${partId}`;
 }
 
 function normalizeSearchValue(instruction: ArchivedInstructionListItem) {
   return [
     instruction.workItem.department_name,
-    instruction.workItem.part_number,
-    instruction.workItem.mold_number ?? "",
+    instruction.workItem.part_id,
     instruction.workItem.item_title,
     instruction.creator_name,
     instruction.updated_by_name,
@@ -188,7 +181,7 @@ export function ArchivedInstructionsPanel({
                 value={query}
                 autoComplete="off"
                 spellCheck={false}
-                placeholder="Search by part, mold, title, department, or user"
+                placeholder="Search by Part ID, title, department, or user"
                 onChange={(event) => setQuery(event.target.value)}
                 className="w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-3 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
               />
@@ -240,7 +233,7 @@ export function ArchivedInstructionsPanel({
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <p className="text-lg font-bold text-slate-900 dark:text-slate-100">
-                    {getPrimaryPartOrMoldLabel(instruction.workItem)} |{" "}
+                    {getPartIdLabel(instruction.workItem)} |{" "}
                     {instruction.workItem.department_name}
                   </p>
                   <p className="text-sm text-slate-600 dark:text-slate-300">
@@ -289,7 +282,7 @@ export function ArchivedInstructionsPanel({
                 <div className="grid gap-1">
                   <h3 className="text-lg font-bold text-slate-100">Restore Instruction?</h3>
                   <p className="text-sm text-slate-300">
-                    {getPrimaryPartOrMoldLabel(confirmInstruction.workItem)} |{" "}
+                    {getPartIdLabel(confirmInstruction.workItem)} |{" "}
                     {confirmInstruction.workItem.department_name}
                   </p>
                   <p className="text-sm text-slate-300">

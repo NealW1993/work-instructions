@@ -49,8 +49,7 @@ interface DashboardWorkItemSummary {
   department_id: string;
   department_name: string;
   department_color: string;
-  part_number: string;
-  mold_number: string;
+  part_id: string;
   item_title: string;
 }
 
@@ -405,7 +404,7 @@ function itemMatchesQuery(item: DashboardWorkItemData, normalizedQuery: string) 
   }
 
   const haystack =
-    `${item.item_title} ${item.part_number} ${item.mold_number} ${item.department_name}`.toLowerCase();
+    `${item.item_title} ${item.part_id} ${item.department_name}`.toLowerCase();
   return haystack.includes(normalizedQuery);
 }
 
@@ -434,29 +433,24 @@ function systemHistoryMatchesQuery(
 
   const haystack =
     `${event.action_label} ${event.actor_name} ${event.detail} ` +
-    `${event.workItem.item_title} ${event.workItem.part_number} ${event.workItem.mold_number} ` +
-    `${event.workItem.department_name} ${getPrimaryPartOrMoldLabel(event.workItem)} ` +
+    `${event.workItem.item_title} ${event.workItem.part_id} ` +
+    `${event.workItem.department_name} ${getPartIdLabel(event.workItem)} ` +
     `${formatDateForSearch(event.occurred_at)}`;
 
   return haystack.toLowerCase().includes(normalizedQuery);
 }
 
-function getPrimaryPartOrMoldLabel(workItem: DashboardWorkItemSummary) {
-  const mold = workItem.mold_number?.trim();
-  if (mold) {
-    return `Mold # ${mold}`;
+function getPartIdLabel(workItem: DashboardWorkItemSummary) {
+  const partId = workItem.part_id?.trim();
+  if (partId) {
+    return `Part ID ${partId}`;
   }
 
-  const part = workItem.part_number?.trim();
-  if (part) {
-    return `Part # ${part}`;
-  }
-
-  return "Part # N/A";
+  return "Part ID N/A";
 }
 
 function getLabelWithDepartment(workItem: DashboardWorkItemSummary) {
-  return `${getPrimaryPartOrMoldLabel(workItem)} | ${workItem.department_name}`;
+  return `${getPartIdLabel(workItem)} | ${workItem.department_name}`;
 }
 
 function cloneWidgetLayout(layout: DashboardWidgetLayoutItem[]) {

@@ -12,8 +12,7 @@ interface DepartmentRelation {
 }
 
 interface ArchivedInstructionWorkItemRow {
-  part_number: string;
-  mold_number: string | null;
+  part_id: string;
   item_title: string;
   departments: DepartmentRelation | DepartmentRelation[] | null;
 }
@@ -74,7 +73,7 @@ export default async function ArchivedInstructionsPage() {
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, revision, created_at, updated_at, created_by, updated_by, work_items(part_number, mold_number, item_title, departments(name))",
+      "id, revision, created_at, updated_at, created_by, updated_by, work_items(part_id, item_title, departments(name))",
     )
     .eq("is_archived", true)
     .order("updated_at", { ascending: false })
@@ -121,8 +120,7 @@ export default async function ArchivedInstructionsPage() {
         updated_by_name: userNameMap.get(row.updated_by) ?? "Unknown",
         workItem: {
           department_name: normalizeDepartmentName(workItem.departments),
-          part_number: workItem.part_number,
-          mold_number: workItem.mold_number,
+          part_id: workItem.part_id,
           item_title: workItem.item_title,
         },
       };

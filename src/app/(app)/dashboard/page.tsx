@@ -25,8 +25,7 @@ interface DashboardDepartmentRelation {
 interface DashboardInstructionWorkItem {
   department_id: string;
   departments: DashboardDepartmentRelation | DashboardDepartmentRelation[] | null;
-  part_number: string;
-  mold_number: string;
+  part_id: string;
   item_title: string;
 }
 
@@ -86,8 +85,7 @@ interface DashboardWorkItemRow {
   id: string;
   department_id: string;
   departments: DashboardDepartmentRelation | DashboardDepartmentRelation[] | null;
-  part_number: string;
-  mold_number: string;
+  part_id: string;
   item_title: string;
   updated_at: string;
   work_instructions: DashboardWorkItemInstructionRow[];
@@ -188,18 +186,13 @@ function normalizeHistoryEventInstruction(
   return relation;
 }
 
-function getPrimaryPartOrMoldLabel(partNumber: string, moldNumber: string) {
-  const normalizedMold = moldNumber?.trim();
-  if (normalizedMold) {
-    return `Mold # ${normalizedMold}`;
+function getPartIdLabel(partId: string) {
+  const normalizedPartId = partId?.trim();
+  if (normalizedPartId) {
+    return `Part ID ${normalizedPartId}`;
   }
 
-  const normalizedPart = partNumber?.trim();
-  if (normalizedPart) {
-    return `Part # ${normalizedPart}`;
-  }
-
-  return "Part # N/A";
+  return "Part ID N/A";
 }
 
 function toTimestamp(value: string | null | undefined) {
@@ -281,7 +274,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const searchRequest = supabase
     .from("work_items")
     .select(
-      "id, department_id, departments(name, color_hex), part_number, mold_number, item_title, updated_at, work_instructions!inner(id, revision, created_at, updated_at, created_by, updated_by)",
+      "id, department_id, departments(name, color_hex), part_id, item_title, updated_at, work_instructions!inner(id, revision, created_at, updated_at, created_by, updated_by)",
     )
     .eq("work_instructions.is_archived", false)
     .order("updated_at", { ascending: false })
@@ -290,7 +283,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const newestRequest = supabase
     .from("work_instructions")
     .select(
-      "id, revision, last_change_summary, created_at, updated_at, created_by, updated_by, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title)",
+      "id, revision, last_change_summary, created_at, updated_at, created_by, updated_by, work_items(department_id, departments(name, color_hex), part_id, item_title)",
     )
     .eq("is_archived", false)
     .order("created_at", { ascending: false })
@@ -299,7 +292,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const pinnedRequest = supabase
     .from("user_pinned_instructions")
     .select(
-      "created_at, work_instructions!inner(id, revision, last_change_summary, created_at, updated_at, created_by, updated_by, is_archived, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title))",
+      "created_at, work_instructions!inner(id, revision, last_change_summary, created_at, updated_at, created_by, updated_by, is_archived, work_items(department_id, departments(name, color_hex), part_id, item_title))",
     )
     .eq("user_id", profile.id)
     .eq("work_instructions.is_archived", false)
@@ -309,7 +302,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const authoredLikesRequest = supabase
     .from("instruction_likes")
     .select(
-      "created_at, instruction_id, user_id, work_instructions!inner(id, revision, last_change_summary, created_at, updated_at, created_by, updated_by, is_archived, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title))",
+      "created_at, instruction_id, user_id, work_instructions!inner(id, revision, last_change_summary, created_at, updated_at, created_by, updated_by, is_archived, work_items(department_id, departments(name, color_hex), part_id, item_title))",
     )
     .eq("work_instructions.created_by", profile.id)
     .eq("work_instructions.is_archived", false)
@@ -320,7 +313,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const historyInstructionsRequest = supabase
     .from("work_instructions")
     .select(
-      "id, revision, last_change_summary, created_at, updated_at, created_by, updated_by, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title)",
+      "id, revision, last_change_summary, created_at, updated_at, created_by, updated_by, work_items(department_id, departments(name, color_hex), part_id, item_title)",
     )
     .eq("is_archived", false)
     .order("updated_at", { ascending: false })
@@ -329,7 +322,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const historyEventsRequest = supabase
     .from("instruction_change_events")
     .select(
-      "id, instruction_id, event_type, detail, revision, occurred_at, actor_user_id, work_instructions!inner(id, is_archived, work_items(department_id, departments(name, color_hex), part_number, mold_number, item_title))",
+      "id, instruction_id, event_type, detail, revision, occurred_at, actor_user_id, work_instructions!inner(id, is_archived, work_items(department_id, departments(name, color_hex), part_id, item_title))",
     )
     .eq("work_instructions.is_archived", false)
     .order("occurred_at", { ascending: false })
@@ -469,8 +462,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     department_id: item.department_id,
     department_name: normalizeDepartmentName(item.departments),
     department_color: normalizeDepartmentColor(item.departments),
-    part_number: item.part_number,
-    mold_number: item.mold_number,
+    part_id: item.part_id,
     item_title: item.item_title,
     updated_at: item.updated_at,
     work_instructions: (item.work_instructions ?? []).map((instruction) => ({
@@ -502,8 +494,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           department_id: workItem.department_id,
           department_name: normalizeDepartmentName(workItem.departments),
           department_color: normalizeDepartmentColor(workItem.departments),
-          part_number: workItem.part_number,
-          mold_number: workItem.mold_number,
+          part_id: workItem.part_id,
           item_title: workItem.item_title,
         },
       };
@@ -532,8 +523,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           department_id: workItem.department_id,
           department_name: normalizeDepartmentName(workItem.departments),
           department_color: normalizeDepartmentColor(workItem.departments),
-          part_number: workItem.part_number,
-          mold_number: workItem.mold_number,
+          part_id: workItem.part_id,
           item_title: workItem.item_title,
         },
         pinned_at: row.created_at,
@@ -578,8 +568,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         department_id: workItem.department_id,
         department_name: normalizeDepartmentName(workItem.departments),
         department_color: normalizeDepartmentColor(workItem.departments),
-        part_number: workItem.part_number,
-        mold_number: workItem.mold_number,
+        part_id: workItem.part_id,
         item_title: workItem.item_title,
       },
       likes_count: 1,
@@ -623,8 +612,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           department_id: workItem.department_id,
           department_name: normalizeDepartmentName(workItem.departments),
           department_color: normalizeDepartmentColor(workItem.departments),
-          part_number: workItem.part_number,
-          mold_number: workItem.mold_number,
+          part_id: workItem.part_id,
           item_title: workItem.item_title,
         },
       };
@@ -647,8 +635,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
               department_id: workItem.department_id,
               department_name: normalizeDepartmentName(workItem.departments),
               department_color: normalizeDepartmentColor(workItem.departments),
-              part_number: workItem.part_number,
-              mold_number: workItem.mold_number,
+              part_id: workItem.part_id,
               item_title: workItem.item_title,
             };
 
@@ -740,7 +727,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
 
     likeHighlightByInstruction.set(instruction.id, {
       instructionId: instruction.id,
-      label: `${getPrimaryPartOrMoldLabel(workItem.part_number, workItem.mold_number)} | ${normalizeDepartmentName(workItem.departments)}`,
+      label: `${getPartIdLabel(workItem.part_id)} | ${normalizeDepartmentName(workItem.departments)}`,
       newLikesCount: 1,
       latestLikedAt: row.created_at,
     });

@@ -16,8 +16,7 @@ interface InstructionEditorProps {
     sourceInstructionId?: string;
     workItemId?: string;
     departmentId?: string;
-    partNumber: string;
-    moldNumber: string;
+    partId: string;
     itemTitle: string;
     bodyMarkdown: string;
     revision: number;
@@ -27,8 +26,7 @@ interface InstructionEditorProps {
 interface WorkItemSearchResult {
   id: string;
   department_id: string;
-  part_number: string;
-  mold_number: string;
+  part_id: string;
   item_title: string;
   departments:
     | {
@@ -47,8 +45,7 @@ interface DepartmentOption {
 
 interface EditorSnapshot {
   departmentId: string;
-  partNumber: string;
-  moldNumber: string;
+  partId: string;
   itemTitle: string;
   bodyMarkdown: string;
   revision: number;
@@ -96,15 +93,14 @@ interface RevisionConflictModalState {
   existingInstructionId: string;
   existingRevision: number;
   requestedRevision: number;
-  partNumber: string;
-  moldNumber: string;
+  partId: string;
   itemTitle: string;
   departmentName: string;
 }
 
 interface FieldErrors {
   department: boolean;
-  partOrMold: boolean;
+  partId: boolean;
   itemTitle: boolean;
   revision: boolean;
   body: boolean;
@@ -112,7 +108,7 @@ interface FieldErrors {
 
 const DEFAULT_FIELD_ERRORS: FieldErrors = {
   department: false,
-  partOrMold: false,
+  partId: false,
   itemTitle: false,
   revision: false,
   body: false,
@@ -287,15 +283,8 @@ function extractSemanticDiffLines(content: string) {
   }
 }
 
-function summarizePartMold(partNumber: string, moldNumber: string) {
-  const part = partNumber.trim();
-  const mold = moldNumber.trim();
-
-  if (part && mold) {
-    return `${part} | ${mold}`;
-  }
-
-  return part || mold || "";
+function formatPartId(partId: string) {
+  return partId.trim();
 }
 
 function normalizeSubmissionError(error: unknown) {
@@ -308,16 +297,14 @@ function normalizeSnapshotValue(value: string) {
 
 function buildSnapshot(data: {
   departmentId: string;
-  partNumber: string;
-  moldNumber: string;
+  partId: string;
   itemTitle: string;
   bodyMarkdown: string;
   revision: number;
 }): EditorSnapshot {
   return {
     departmentId: normalizeSnapshotValue(data.departmentId),
-    partNumber: normalizeSnapshotValue(data.partNumber),
-    moldNumber: normalizeSnapshotValue(data.moldNumber),
+    partId: normalizeSnapshotValue(data.partId),
     itemTitle: normalizeSnapshotValue(data.itemTitle),
     bodyMarkdown: normalizeEditorContent(data.bodyMarkdown),
     revision: data.revision,
@@ -650,8 +637,7 @@ function buildInstructionCreateSummary(body: string, revision: number) {
 function snapshotsAreEqual(a: EditorSnapshot, b: EditorSnapshot) {
   return (
     a.departmentId === b.departmentId &&
-    a.partNumber === b.partNumber &&
-    a.moldNumber === b.moldNumber &&
+    a.partId === b.partId &&
     a.itemTitle === b.itemTitle &&
     a.bodyMarkdown === b.bodyMarkdown &&
     a.revision === b.revision
@@ -681,14 +667,10 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   const [departmentId, setDepartmentId] = useState(initialData?.departmentId ?? "");
   const [departmentTouched, setDepartmentTouched] = useState(false);
 
-  const [partNumber, setPartNumber] = useState(initialData?.partNumber ?? "");
-  const [moldNumber, setMoldNumber] = useState(initialData?.moldNumber ?? "");
+  const [partId, setPartId] = useState(initialData?.partId ?? "");
   const [partSuggestions, setPartSuggestions] = useState<WorkItemSearchResult[]>([]);
-  const [moldSuggestions, setMoldSuggestions] = useState<WorkItemSearchResult[]>([]);
   const [partSearchBusy, setPartSearchBusy] = useState(false);
-  const [moldSearchBusy, setMoldSearchBusy] = useState(false);
   const [partSearchOpen, setPartSearchOpen] = useState(false);
-  const [moldSearchOpen, setMoldSearchOpen] = useState(false);
 
   const [workItemId, setWorkItemId] = useState<string | null>(
     mode === "edit" ? (initialData?.workItemId ?? null) : null,
@@ -712,7 +694,6 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
   const formRef = useRef<HTMLFormElement | null>(null);
   const partInputRef = useRef<HTMLInputElement | null>(null);
-  const moldInputRef = useRef<HTMLInputElement | null>(null);
   const itemTitleInputRef = useRef<HTMLInputElement | null>(null);
   const hasUnsavedChangesRef = useRef(false);
   const navigationModalOpenRef = useRef(false);
@@ -726,8 +707,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     () =>
       buildSnapshot({
         departmentId: initialData?.departmentId ?? "",
-        partNumber: initialData?.partNumber ?? "",
-        moldNumber: initialData?.moldNumber ?? "",
+        partId: initialData?.partId ?? "",
         itemTitle: initialData?.itemTitle ?? "",
         bodyMarkdown: initialData?.bodyMarkdown ?? "",
         revision: initialData?.revision ?? 1,
@@ -739,19 +719,17 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     () =>
       buildSnapshot({
         departmentId,
-        partNumber,
-        moldNumber,
+        partId,
         itemTitle,
         bodyMarkdown,
         revision,
       }),
-    [bodyMarkdown, departmentId, itemTitle, moldNumber, partNumber, revision],
+    [bodyMarkdown, departmentId, itemTitle, partId, revision],
   );
 
   const createModeHasMeaningfulChanges = useMemo(() => {
     const hasContentChanges =
-      currentSnapshot.partNumber.length > 0 ||
-      currentSnapshot.moldNumber.length > 0 ||
+      currentSnapshot.partId.length > 0 ||
       currentSnapshot.itemTitle.length > 0 ||
       currentSnapshot.revision !== initialSnapshot.revision ||
       richTextToPlain(currentSnapshot.bodyMarkdown).length > 0;
@@ -988,7 +966,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   }, [departmentId, departments]);
 
   useEffect(() => {
-    const query = partNumber.trim();
+    const query = partId.trim();
     if (query.length < 2) {
       setPartSuggestions([]);
       setPartSearchBusy(false);
@@ -1004,9 +982,9 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           const { data, error: searchError } = await supabase
             .from("work_items")
             .select(
-              "id, department_id, part_number, mold_number, item_title, departments(name), work_instructions!inner(id)",
+              "id, department_id, part_id, item_title, departments(name), work_instructions!inner(id)",
             )
-            .ilike("part_number", `%${safeQuery}%`)
+            .ilike("part_id", `%${safeQuery}%`)
             .eq("work_instructions.is_archived", false)
             .order("updated_at", { ascending: false })
             .limit(8);
@@ -1038,82 +1016,27 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       isActive = false;
       window.clearTimeout(timer);
     };
-  }, [partNumber, supabase]);
-
-  useEffect(() => {
-    const query = moldNumber.trim();
-    if (query.length < 2) {
-      setMoldSuggestions([]);
-      setMoldSearchBusy(false);
-      return;
-    }
-
-    let isActive = true;
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        setMoldSearchBusy(true);
-        try {
-          const safeQuery = escapeLikeQuery(query);
-          const { data, error: searchError } = await supabase
-            .from("work_items")
-            .select(
-              "id, department_id, part_number, mold_number, item_title, departments(name), work_instructions!inner(id)",
-            )
-            .ilike("mold_number", `%${safeQuery}%`)
-            .eq("work_instructions.is_archived", false)
-            .order("updated_at", { ascending: false })
-            .limit(8);
-
-          if (!isActive) {
-            return;
-          }
-
-          if (searchError) {
-            throw searchError;
-          }
-
-          setMoldSuggestions((data ?? []) as WorkItemSearchResult[]);
-        } catch {
-          if (!isActive) {
-            return;
-          }
-
-          setMoldSuggestions([]);
-        } finally {
-          if (isActive) {
-            setMoldSearchBusy(false);
-          }
-        }
-      })();
-    }, 200);
-
-    return () => {
-      isActive = false;
-      window.clearTimeout(timer);
-    };
-  }, [moldNumber, supabase]);
+  }, [partId, supabase]);
 
   function applySuggestedWorkItem(result: WorkItemSearchResult) {
     setDepartmentTouched(true);
     setDepartmentId(result.department_id);
-    setPartNumber(result.part_number);
-    setMoldNumber(result.mold_number);
+    setPartId(result.part_id);
     setItemTitle(result.item_title);
     setWorkItemId(result.id);
     setPartSearchOpen(false);
-    setMoldSearchOpen(false);
     setFieldErrors((current) => ({
       ...current,
       department: false,
-      partOrMold: false,
+      partId: false,
       itemTitle: false,
     }));
   }
 
-  function setPartOrMoldErrorAndFocus() {
+  function setPartIdErrorAndFocus() {
     setFieldErrors((current) => ({
       ...current,
-      partOrMold: true,
+      partId: true,
     }));
     partInputRef.current?.focus();
   }
@@ -1178,8 +1101,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     setFieldErrors(DEFAULT_FIELD_ERRORS);
     setRevisionConflictModal(null);
 
-    const normalizedPartNumber = partNumber.trim();
-    const normalizedMoldNumber = moldNumber.trim();
+    const normalizedPartId = partId.trim();
     const normalizedDepartmentId = departmentId.trim();
 
     if (mode === "fork" && snapshotsAreEqual(currentSnapshot, initialSnapshot)) {
@@ -1198,9 +1120,9 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       return;
     }
 
-    if (!normalizedPartNumber && !normalizedMoldNumber) {
-      setPartOrMoldErrorAndFocus();
-      setError("Part # or Mold # is required.");
+    if (!normalizedPartId) {
+      setPartIdErrorAndFocus();
+      setError("Part ID is required.");
       setBusy(false);
       return;
     }
@@ -1250,14 +1172,12 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       const workItemPayload: {
         id?: string;
         department_id: string;
-        part_number: string;
-        mold_number: string;
+        part_id: string;
         item_title: string;
         created_by: string;
       } = {
         department_id: normalizedDepartmentId,
-        part_number: normalizedPartNumber,
-        mold_number: normalizedMoldNumber,
+        part_id: normalizedPartId,
         item_title: itemTitle.trim(),
         created_by: user.id,
       };
@@ -1269,7 +1189,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       const { data: workItem, error: workItemError } = await supabase
         .from("work_items")
         .upsert(workItemPayload, {
-          onConflict: "part_number,mold_number,item_title,department_id",
+          onConflict: "part_id,item_title,department_id",
         })
         .select("id")
         .single();
@@ -1314,7 +1234,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
             }));
             itemTitleInputRef.current?.focus();
             throw new Error(
-              "A work instruction with this title already exists for this Part/Mold. Open the existing instruction to edit it.",
+              "A work instruction with this title already exists for this Part ID. Open the existing instruction to edit it.",
             );
           }
 
@@ -1337,8 +1257,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                 existingInstructionId: typedDuplicateInstruction.id,
                 existingRevision: typedDuplicateInstruction.revision,
                 requestedRevision: revision,
-                partNumber: normalizedPartNumber,
-                moldNumber: normalizedMoldNumber,
+                partId: normalizedPartId,
                 itemTitle: itemTitle.trim(),
                 departmentName: selectedDepartmentName,
               });
@@ -1353,7 +1272,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
             }));
             itemTitleInputRef.current?.focus();
             throw new Error(
-              "An active instruction already exists for this Part/Mold and title. Change Part/Mold/Title before creating a fork.",
+              "An active instruction already exists for this Part ID and title. Change Part ID or title before creating a fork.",
             );
           }
         }
@@ -1544,13 +1463,13 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         onSubmit={handleSubmit}
         className="grid min-w-0 gap-5 overflow-hidden rounded-3xl border border-white/30 bg-white/75 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7"
       >
-        <div className="grid gap-3 md:grid-cols-2 md:gap-4">
+        <div className="grid gap-3 md:gap-4">
           <label className="grid gap-1.5 text-sm">
-            <span className="font-semibold">Part #</span>
+            <span className="font-semibold">Part ID</span>
             <div className="relative">
               <input
                 ref={partInputRef}
-                value={partNumber}
+                value={partId}
                 placeholder="Example: SK-12345"
                 onFocus={() => {
                   if (partSuggestions.length > 0) {
@@ -1561,19 +1480,19 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                   window.setTimeout(() => setPartSearchOpen(false), 120);
                 }}
                 onChange={(event) => {
-                  setPartNumber(event.target.value);
+                  setPartId(event.target.value);
                   setPartSearchOpen(true);
                   setWorkItemId(null);
-                  if (fieldErrors.partOrMold) {
+                  if (fieldErrors.partId) {
                     setFieldErrors((current) => ({
                       ...current,
-                      partOrMold: false,
+                      partId: false,
                     }));
                   }
                 }}
                 className={cn(
                   "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950",
-                  fieldErrors.partOrMold ? "border-rose-500 ring-2 ring-rose-500/30" : "",
+                  fieldErrors.partId ? "border-rose-500 ring-2 ring-rose-500/30" : "",
                 )}
               />
               {partSearchOpen ? (
@@ -1584,7 +1503,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                     </p>
                   ) : partSuggestions.length === 0 ? (
                     <p className="px-2 py-2 text-xs text-slate-500 dark:text-slate-300">
-                      No part matches.
+                      No Part ID matches.
                     </p>
                   ) : (
                     partSuggestions.map((result) => (
@@ -1598,80 +1517,10 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                         className="grid w-full gap-0.5 rounded-lg px-2 py-1.5 text-left text-xs transition hover:bg-cyan-500/10"
                       >
                         <span className="font-semibold text-slate-800 dark:text-slate-100">
-                          {result.part_number}
+                          {result.part_id}
                         </span>
                         <span className="text-slate-500 dark:text-slate-300">
-                          {getDepartmentNameFromRelation(result.departments)} |{" "}
-                          {summarizePartMold(result.part_number, result.mold_number)} |{" "}
-                          {result.item_title}
-                        </span>
-                      </button>
-                    ))
-                  )}
-                </div>
-              ) : null}
-            </div>
-          </label>
-
-          <label className="grid gap-1.5 text-sm">
-            <span className="font-semibold">Mold #</span>
-            <div className="relative">
-              <input
-                ref={moldInputRef}
-                value={moldNumber}
-                placeholder="Example: FAL-11"
-                onFocus={() => {
-                  if (moldSuggestions.length > 0) {
-                    setMoldSearchOpen(true);
-                  }
-                }}
-                onBlur={() => {
-                  window.setTimeout(() => setMoldSearchOpen(false), 120);
-                }}
-                onChange={(event) => {
-                  setMoldNumber(event.target.value);
-                  setMoldSearchOpen(true);
-                  setWorkItemId(null);
-                  if (fieldErrors.partOrMold) {
-                    setFieldErrors((current) => ({
-                      ...current,
-                      partOrMold: false,
-                    }));
-                  }
-                }}
-                className={cn(
-                  "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950",
-                  fieldErrors.partOrMold ? "border-rose-500 ring-2 ring-rose-500/30" : "",
-                )}
-              />
-              {moldSearchOpen ? (
-                <div className="absolute left-0 right-0 top-[calc(100%+0.4rem)] z-20 max-h-60 overflow-auto rounded-xl border border-slate-300 bg-white/95 p-1 shadow-xl backdrop-blur dark:border-slate-700 dark:bg-slate-950/95">
-                  {moldSearchBusy ? (
-                    <p className="px-2 py-2 text-xs text-slate-500 dark:text-slate-300">
-                      Searching...
-                    </p>
-                  ) : moldSuggestions.length === 0 ? (
-                    <p className="px-2 py-2 text-xs text-slate-500 dark:text-slate-300">
-                      No mold matches.
-                    </p>
-                  ) : (
-                    moldSuggestions.map((result) => (
-                      <button
-                        key={result.id}
-                        type="button"
-                        onMouseDown={(event) => {
-                          event.preventDefault();
-                          applySuggestedWorkItem(result);
-                        }}
-                        className="grid w-full gap-0.5 rounded-lg px-2 py-1.5 text-left text-xs transition hover:bg-cyan-500/10"
-                      >
-                        <span className="font-semibold text-slate-800 dark:text-slate-100">
-                          {result.mold_number || "N/A"}
-                        </span>
-                        <span className="text-slate-500 dark:text-slate-300">
-                          {getDepartmentNameFromRelation(result.departments)} |{" "}
-                          {summarizePartMold(result.part_number, result.mold_number)} |{" "}
-                          {result.item_title}
+                          {getDepartmentNameFromRelation(result.departments)} | {result.item_title}
                         </span>
                       </button>
                     ))
@@ -1807,10 +1656,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                     {revisionConflictModal.itemTitle} | {revisionConflictModal.departmentName}
                   </p>
                   <p className="text-sm text-slate-300">
-                    {summarizePartMold(
-                      revisionConflictModal.partNumber,
-                      revisionConflictModal.moldNumber,
-                    ) || "Part/Mold not specified"}
+                    {formatPartId(revisionConflictModal.partId) || "Part ID not specified"}
                   </p>
                   <p className="text-sm text-slate-300">
                     Continuing will move revision {revisionConflictModal.existingRevision} into
