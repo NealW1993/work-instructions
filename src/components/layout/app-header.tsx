@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ChevronDown, LayoutGrid, RefreshCw, Save, Undo2 } from "lucide-react";
+import { CircleAlert, ChevronDown, LayoutGrid, RefreshCw, Save, Undo2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { UserAccountMenu } from "@/components/layout/user-account-menu";
@@ -65,6 +65,11 @@ export function AppHeader({ profile }: { profile: Profile }) {
     !activeDashboardLayoutState.layoutSaving;
   const canResetLayout =
     canSendDashboardLayoutActions && !activeDashboardLayoutState.layoutSaving;
+  const dashboardNeedsAttention =
+    canSendDashboardLayoutActions &&
+    (activeDashboardLayoutState.layoutDirty ||
+      activeDashboardLayoutState.layoutSaving ||
+      Boolean(activeDashboardLayoutState.layoutError));
   const customizeLabel =
     canSendDashboardLayoutActions && activeDashboardLayoutState.customizeOpen
       ? "Close Customize Panel"
@@ -226,7 +231,11 @@ export function AppHeader({ profile }: { profile: Profile }) {
         type="button"
         aria-haspopup="menu"
         aria-expanded={dashboardMenuVisible}
-        aria-label="Open dashboard options"
+        aria-label={
+          dashboardNeedsAttention
+            ? "Open dashboard options. Action required."
+            : "Open dashboard options"
+        }
         onClick={() =>
           setDashboardMenuOpen((current) => {
             const next = !current;
@@ -237,12 +246,17 @@ export function AppHeader({ profile }: { profile: Profile }) {
           })
         }
         className={cn(
-          "inline-flex items-center rounded-r-xl border px-2.5 py-2 transition",
+          "relative inline-flex items-center rounded-r-xl border px-2.5 py-2 transition",
           isDashboardActive
             ? "border-cyan-500/55 bg-cyan-500/15 text-cyan-900 hover:bg-cyan-500/25 dark:text-cyan-100 dark:hover:bg-cyan-500/25"
             : "border-slate-300/70 bg-white/70 text-slate-700 hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/65 dark:text-slate-100 dark:hover:border-cyan-500/50 dark:hover:bg-cyan-500/10",
         )}
       >
+        {dashboardNeedsAttention ? (
+          <span className="absolute -right-1 -top-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-amber-200/40 bg-amber-500 text-amber-950 shadow-lg">
+            <CircleAlert size={11} />
+          </span>
+        ) : null}
         <ChevronDown
           size={14}
           className={cn("transition", dashboardMenuVisible ? "rotate-180" : "")}

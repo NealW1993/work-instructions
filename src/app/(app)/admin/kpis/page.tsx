@@ -6,6 +6,7 @@ import { requireAuthenticatedUser } from "@/lib/auth";
 import { isSystemAdmin } from "@/lib/roles";
 import { formatElapsedHhMmSs } from "@/lib/session-timer";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import { cn } from "@/lib/utils";
 
 interface KpiProfileRow {
   id: string;
@@ -143,6 +144,62 @@ function KpiSummaryCard(props: {
       </p>
       <p className="text-2xl font-extrabold">{props.value}</p>
     </article>
+  );
+}
+
+type KpiTooltipTone = "cyan" | "emerald" | "amber" | "violet" | "rose";
+
+function KpiDataTooltip(props: {
+  title: string;
+  lines: string[];
+  tone?: KpiTooltipTone;
+  align?: "left" | "center" | "right";
+  accentColor?: string;
+}) {
+  const toneClasses: Record<KpiTooltipTone, string> = {
+    cyan: "border-cyan-500/50 bg-slate-950/95 text-cyan-100",
+    emerald: "border-emerald-500/50 bg-slate-950/95 text-emerald-100",
+    amber: "border-amber-500/50 bg-slate-950/95 text-amber-100",
+    violet: "border-violet-500/50 bg-slate-950/95 text-violet-100",
+    rose: "border-rose-500/50 bg-slate-950/95 text-rose-100",
+  };
+  const alignClasses: Record<"left" | "center" | "right", string> = {
+    left: "left-0",
+    center: "left-1/2 -translate-x-1/2",
+    right: "right-0",
+  };
+  const tone = props.tone ?? "cyan";
+  const align = props.align ?? "right";
+
+  return (
+    <div
+      className={cn(
+        "pointer-events-none absolute top-0 z-20 w-64 -translate-y-[108%] rounded-xl border px-3 py-2 text-xs shadow-2xl ring-1 ring-black/45 opacity-0 transition duration-200 group-hover:opacity-100 group-focus-within:opacity-100",
+        alignClasses[align],
+        props.accentColor ? "border-white/35 bg-slate-950 text-slate-100" : toneClasses[tone],
+      )}
+      style={
+        props.accentColor
+          ? {
+              borderColor: colorWithAlpha(props.accentColor, 0.7),
+              backgroundColor: "rgba(2, 6, 23, 0.98)",
+              boxShadow: `0 18px 40px rgba(0, 0, 0, 0.45), inset 3px 0 0 ${colorWithAlpha(
+                props.accentColor,
+                0.95,
+              )}`,
+            }
+          : undefined
+      }
+    >
+      <p className="font-semibold">{props.title}</p>
+      <div className="mt-1 grid gap-0.5">
+        {props.lines.map((line, index) => (
+          <p key={`${props.title}-${index}`} className="text-[11px] opacity-95">
+            {line}
+          </p>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -359,6 +416,11 @@ export default async function SystemKpisPage() {
   const maxTrendBarCount = maxOf(
     trendPoints.flatMap((point) => [point.created, point.updated]),
   );
+  const trendAxisStep = Math.max(1, Math.ceil(maxTrendBarCount / 4));
+  const trendAxisTicks = Array.from({ length: 5 }, (_, index) =>
+    trendAxisStep * (4 - index),
+  );
+  const trendAxisMax = trendAxisTicks[0] ?? 1;
 
   const topContributors: ContributorPoint[] = Array.from(contributorCounts.entries())
     .map(([userId, updates]) => ({
@@ -461,11 +523,27 @@ export default async function SystemKpisPage() {
           >
             {usageByActiveUsers.map((entry) => {
               const width = (entry.totalSeconds / maxUserUsageSeconds) * 100;
+              const usageSharePercent =
+                totalUsageSecondsAcrossActiveUsers > 0
+                  ? (entry.totalSeconds / totalUsageSecondsAcrossActiveUsers) * 100
+                  : 0;
+
               return (
                 <article
                   key={entry.id}
-                  className="grid gap-1 rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50"
+                  className="group relative grid gap-1 rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50"
                 >
+                  <KpiDataTooltip
+                    tone="cyan"
+                    title={entry.label}
+                    lines={[
+                      `${formatDurationFromSeconds(entry.totalSeconds)} total tracked usage.`,
+                      entry.activeSession
+                        ? "Active live session is currently running."
+                        : "No active live session right now.",
+                      `${usageSharePercent.toFixed(1)}% of all active-user usage time.`,
+                    ]}
+                  />
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                     <p className="font-semibold text-slate-800 dark:text-slate-100">{entry.label}</p>
                     <p className="font-mono text-slate-600 dark:text-slate-300">
@@ -507,12 +585,26 @@ export default async function SystemKpisPage() {
                 const width = (entry.totalCount / maxDepartmentTotal) * 100;
                 const activeWidth = entry.totalCount > 0 ? (entry.activeCount / entry.totalCount) * 100 : 0;
                 const archivedWidth = Math.max(0, 100 - activeWidth);
+                const departmentSharePercent =
+                  activeInstructionCount + archivedInstructionCount > 0
+                    ? (entry.totalCount / (activeInstructionCount + archivedInstructionCount)) * 100
+                    : 0;
 
                 return (
                   <article
                     key={entry.id}
-                    className="grid gap-1.5 rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50"
+                    className="group relative grid gap-1.5 rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50"
                   >
+                    <KpiDataTooltip
+                      align="left"
+                      accentColor={entry.colorHex}
+                      title={entry.name}
+                      lines={[
+                        `${entry.totalCount} total instructions in this department.`,
+                        `${entry.activeCount} active, ${entry.archivedCount} archived.`,
+                        `${departmentSharePercent.toFixed(1)}% of all instruction volume.`,
+                      ]}
+                    />
                     <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                       <p className="font-semibold text-slate-800 dark:text-slate-100">{entry.name}</p>
                       <p className="text-slate-600 dark:text-slate-300">
@@ -566,31 +658,95 @@ export default async function SystemKpisPage() {
               </span>
             </div>
 
-            <div className="grid h-52 grid-cols-14 items-end gap-1 rounded-xl border border-slate-300/70 bg-white/70 p-2 dark:border-slate-700 dark:bg-slate-900/50">
-              {trendPoints.map((point) => {
-                const createdHeight = (point.created / maxTrendBarCount) * 100;
-                const updatedHeight = (point.updated / maxTrendBarCount) * 100;
+            <div className="rounded-xl border border-slate-300/70 bg-white/70 p-2 dark:border-slate-700 dark:bg-slate-900/50">
+              <div className="grid grid-cols-[2rem_minmax(0,1fr)] gap-2">
+                <div className="grid h-44 grid-rows-5 items-end text-right text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                  {trendAxisTicks.map((tickValue, index) => (
+                    <span
+                      key={`trend-axis-${tickValue}-${index}`}
+                      className={index === trendAxisTicks.length - 1 ? "" : "translate-y-1"}
+                    >
+                      {tickValue}
+                    </span>
+                  ))}
+                </div>
 
-                return (
-                  <div key={point.key} className="grid h-full grid-rows-[1fr_auto] gap-1">
-                    <div className="flex items-end justify-center gap-1">
-                      <span
-                        className="w-2 rounded-t bg-emerald-500/85"
-                        style={{ height: `${Math.max(point.created > 0 ? createdHeight : 0, point.created > 0 ? 6 : 0)}%` }}
-                        title={`${point.label}: ${point.created} created`}
-                      />
-                      <span
-                        className="w-2 rounded-t bg-cyan-500/85"
-                        style={{ height: `${Math.max(point.updated > 0 ? updatedHeight : 0, point.updated > 0 ? 6 : 0)}%` }}
-                        title={`${point.label}: ${point.updated} updated`}
-                      />
+                <div className="min-w-0">
+                  <div className="relative h-44">
+                    <div className="pointer-events-none absolute inset-0 grid grid-rows-5">
+                      {trendAxisTicks.map((_, index) => (
+                        <span
+                          key={`trend-grid-line-${index}`}
+                          className={cn(
+                            "border-t border-slate-300/35 dark:border-slate-700/45",
+                            index === trendAxisTicks.length - 1
+                              ? "border-b border-slate-300/35 dark:border-slate-700/45"
+                              : "",
+                          )}
+                        />
+                      ))}
                     </div>
-                    <p className="text-center text-[10px] text-slate-500 dark:text-slate-400">
-                      {point.label}
-                    </p>
+
+                    <div className="relative grid h-44 grid-cols-14 items-end gap-1">
+                      {trendPoints.map((point) => {
+                        const createdHeight = (point.created / trendAxisMax) * 100;
+                        const updatedHeight = (point.updated / trendAxisMax) * 100;
+                        const totalEvents = point.created + point.updated;
+                        const trendTooltipTone: KpiTooltipTone =
+                          totalEvents === 0
+                            ? "violet"
+                            : point.updated >= point.created
+                              ? "cyan"
+                              : "emerald";
+
+                        return (
+                          <div
+                            key={point.key}
+                            tabIndex={0}
+                            className="group relative flex h-full items-end justify-center gap-1 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70"
+                          >
+                            <KpiDataTooltip
+                              align="center"
+                              tone={trendTooltipTone}
+                              title={`Activity on ${point.key}`}
+                              lines={[
+                                `${point.created} created event${point.created === 1 ? "" : "s"}.`,
+                                `${point.updated} updated event${point.updated === 1 ? "" : "s"}.`,
+                                `${totalEvents} total tracked changes.`,
+                              ]}
+                            />
+                            <span
+                              className="w-2 rounded-t bg-emerald-500/85"
+                              style={{
+                                height: `${Math.max(point.created > 0 ? createdHeight : 0, point.created > 0 ? 6 : 0)}%`,
+                              }}
+                              title={`${point.label}: ${point.created} created`}
+                            />
+                            <span
+                              className="w-2 rounded-t bg-cyan-500/85"
+                              style={{
+                                height: `${Math.max(point.updated > 0 ? updatedHeight : 0, point.updated > 0 ? 6 : 0)}%`,
+                              }}
+                              title={`${point.label}: ${point.updated} updated`}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                );
-              })}
+
+                  <div className="mt-1 grid grid-cols-14 gap-1">
+                    {trendPoints.map((point) => (
+                      <p
+                        key={`trend-label-${point.key}`}
+                        className="text-center text-[10px] text-slate-500 dark:text-slate-400"
+                      >
+                        {point.label}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
 
             <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -618,11 +774,23 @@ export default async function SystemKpisPage() {
           <div className="grid gap-2">
             {topContributors.map((entry) => {
               const width = (entry.updates / maxContributorUpdates) * 100;
+              const contributionSharePercent =
+                updatedLast30Days > 0 ? (entry.updates / updatedLast30Days) * 100 : 0;
+
               return (
                 <article
                   key={entry.userId}
-                  className="grid gap-1 rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50"
+                  className="group relative grid gap-1 rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50"
                 >
+                  <KpiDataTooltip
+                    tone="violet"
+                    title={entry.label}
+                    lines={[
+                      `${entry.updates} update event${entry.updates === 1 ? "" : "s"} in the last 30 days.`,
+                      `${contributionSharePercent.toFixed(1)}% of all update activity.`,
+                      `Ranked among the top ${topContributors.length} contributors.`,
+                    ]}
+                  />
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                     <p className="font-semibold text-slate-800 dark:text-slate-100">{entry.label}</p>
                     <p className="text-slate-600 dark:text-slate-300">{entry.updates} updates</p>

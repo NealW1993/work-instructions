@@ -1,11 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArchiveRestore, Loader2, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { InstructionBackButton } from "@/components/instructions/instruction-back-button";
 import { LocalDateTime } from "@/components/ui/local-date-time";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 
@@ -165,19 +165,15 @@ export function ArchivedInstructionsPanel({
 
   return (
     <div className="grid gap-5">
+      <InstructionBackButton fallbackHref="/dashboard" />
+
       <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
-        <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
+        <div className="grid gap-2">
           <div>
             <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
               Archived Work Instructions
             </h1>
           </div>
-          <Link
-            href="/dashboard"
-            className="inline-flex items-center justify-center rounded-xl border border-slate-400/35 bg-slate-900/10 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-900/15 dark:text-slate-200 dark:hover:bg-white/10"
-          >
-            Back to Dashboard
-          </Link>
         </div>
 
         <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_260px]">

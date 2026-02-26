@@ -59,3 +59,33 @@ export async function sendAnonymousFeedbackEmail(options: {
     `,
   });
 }
+
+export async function sendLoginHelpRequestEmail(options: {
+  to: string;
+  name: string;
+  message: string;
+}) {
+  const mailer = getTransporter();
+  const submittedAt = new Date().toISOString();
+  const safeName = escapeHtml(options.name);
+  const safeMessage = escapeHtml(options.message);
+
+  await mailer.sendMail({
+    from: serverEnv.SMTP_FROM,
+    to: options.to,
+    subject: "Login Help Request",
+    text:
+      "Help request received from the login page.\n\n" +
+      `Name: ${options.name}\n` +
+      `Submitted at (UTC): ${submittedAt}\n\n` +
+      options.message,
+    html: `
+      <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111;">
+        <h2>Login Help Request</h2>
+        <p><strong>Name:</strong> ${safeName}</p>
+        <p><strong>Submitted at (UTC):</strong> ${submittedAt}</p>
+        <p style="white-space:pre-wrap;">${safeMessage}</p>
+      </div>
+    `,
+  });
+}

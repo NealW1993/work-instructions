@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -178,6 +179,8 @@ const DEFAULT_SYSTEM_HISTORY_ROW_LIMIT = 15;
 const SYSTEM_HISTORY_ROW_LIMIT_OPTIONS = [5, 15, 30, 45, 60] as const;
 const SYSTEM_HISTORY_ROW_LIMIT_STORAGE_KEY = "dashboard.systemHistoryRowLimit";
 const RECENT_UPDATES_EVENT_LIMIT = 20;
+const WIDGET_DRAG_HOLD_DELAY_MS = 2000;
+const WIDGET_DRAG_CANCEL_MOVE_PX = 16;
 
 interface DashboardInstructionReturnState {
   query: string;
@@ -224,6 +227,10 @@ const WIDGET_SIZE_OPTIONS: Array<{ value: DashboardWidgetSize; label: string }> 
   { value: "wide", label: "Wide" },
   { value: "full", label: "Full Width" },
 ];
+
+function isDashboardWidgetId(value: string): value is DashboardWidgetId {
+  return WIDGET_DEFINITIONS.some((entry) => entry.id === value);
+}
 
 function formatDateForSearch(value: string) {
   const parsed = new Date(value);
@@ -477,6 +484,14 @@ export function DashboardClient({
   const saveLayoutActionRef = useRef<(() => Promise<void>) | null>(null);
   const resetLayoutActionRef = useRef<(() => void) | null>(null);
   const discardLayoutActionRef = useRef<(() => void) | null>(null);
+  const pointerDragStateRef = useRef<{
+    pointerId: number;
+    sourceWidgetId: DashboardWidgetId;
+    holdTimeoutId: number | null;
+    activated: boolean;
+    startX: number;
+    startY: number;
+  } | null>(null);
   const pendingNavigationRef = useRef<DashboardPendingNavigation | null>(null);
   const navigationModalOpenRef = useRef(false);
   const historyGuardActiveRef = useRef(false);
@@ -728,6 +743,15 @@ export function DashboardClient({
   useEffect(() => {
     customizeOpenRef.current = customizeOpen;
   }, [customizeOpen]);
+
+  useEffect(() => {
+    return () => {
+      const pointerDragState = pointerDragStateRef.current;
+      if (pointerDragState && pointerDragState.holdTimeoutId !== null) {
+        window.clearTimeout(pointerDragState.holdTimeoutId);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     dispatchLayoutStateToHeader();
@@ -1125,6 +1149,8 @@ export function DashboardClient({
     return departmentInsights.reduce((sum, entry) => sum + entry.instructionCount, 0);
   }, [departmentInsights]);
   const totalDepartmentCount = departmentInsights.length;
+  const departmentInsightSummary = `${totalDepartmentCount} departments / ${totalInstructionCount} instructions`;
+  const shouldScrollDepartmentInsight = totalDepartmentCount > 15;
 
   const selectedDepartmentName =
     selectedDepartmentId === "all"
@@ -1698,6 +1724,139 @@ export function DashboardClient({
     });
   }
 
+  function getWidgetIdAtPointerPosition(clientX: number, clientY: number) {
+    const element = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+    const widgetContainer = element?.closest<HTMLElement>("[data-dashboard-widget-id]");
+    const candidateId = widgetContainer?.dataset.dashboardWidgetId;
+    if (!candidateId || !isDashboardWidgetId(candidateId)) {
+      return null;
+    }
+
+    return candidateId;
+  }
+
+  function clearWidgetPointerDragState() {
+    const pointerDragState = pointerDragStateRef.current;
+    if (pointerDragState && pointerDragState.holdTimeoutId !== null) {
+      window.clearTimeout(pointerDragState.holdTimeoutId);
+    }
+
+    pointerDragStateRef.current = null;
+    setDraggedWidgetId(null);
+    setDragOverWidgetId(null);
+  }
+
+  function handleWidgetGripPointerDown(
+    widgetId: DashboardWidgetId,
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) {
+    if (event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const pointerId = event.pointerId;
+    const holdTimeoutId = window.setTimeout(() => {
+      const pointerDragState = pointerDragStateRef.current;
+      if (!pointerDragState || pointerDragState.pointerId !== pointerId) {
+        return;
+      }
+
+      pointerDragStateRef.current = {
+        ...pointerDragState,
+        activated: true,
+        holdTimeoutId: null,
+      };
+      setDraggedWidgetId(pointerDragState.sourceWidgetId);
+      setDragOverWidgetId(pointerDragState.sourceWidgetId);
+    }, WIDGET_DRAG_HOLD_DELAY_MS);
+
+    pointerDragStateRef.current = {
+      pointerId,
+      sourceWidgetId: widgetId,
+      holdTimeoutId,
+      activated: false,
+      startX: event.clientX,
+      startY: event.clientY,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleWidgetGripPointerMove(event: ReactPointerEvent<HTMLButtonElement>) {
+    const pointerDragState = pointerDragStateRef.current;
+    if (!pointerDragState || pointerDragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    if (!pointerDragState.activated) {
+      const movedDistance = Math.hypot(
+        event.clientX - pointerDragState.startX,
+        event.clientY - pointerDragState.startY,
+      );
+      if (movedDistance > WIDGET_DRAG_CANCEL_MOVE_PX) {
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+        clearWidgetPointerDragState();
+      }
+      return;
+    }
+
+    const targetWidgetId = getWidgetIdAtPointerPosition(event.clientX, event.clientY);
+    if (!targetWidgetId || targetWidgetId === dragOverWidgetId) {
+      return;
+    }
+
+    setDragOverWidgetId(targetWidgetId);
+  }
+
+  function completeWidgetPointerDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    const pointerDragState = pointerDragStateRef.current;
+    if (!pointerDragState || pointerDragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!pointerDragState.activated) {
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      clearWidgetPointerDragState();
+      return;
+    }
+
+    const sourceWidgetId = pointerDragState.sourceWidgetId;
+    const pointerTargetWidgetId =
+      getWidgetIdAtPointerPosition(event.clientX, event.clientY) ?? dragOverWidgetId;
+
+    if (pointerTargetWidgetId && pointerTargetWidgetId !== sourceWidgetId) {
+      reorderWidgets(sourceWidgetId, pointerTargetWidgetId);
+    }
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    clearWidgetPointerDragState();
+  }
+
+  function handleWidgetGripPointerCancel(event: ReactPointerEvent<HTMLButtonElement>) {
+    const pointerDragState = pointerDragStateRef.current;
+    if (!pointerDragState || pointerDragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    clearWidgetPointerDragState();
+  }
+
   function applyLayoutPreset(presetId: string) {
     const preset = DASHBOARD_LAYOUT_PRESETS.find((entry) => entry.id === presetId);
     if (!preset) {
@@ -2019,42 +2178,59 @@ export function DashboardClient({
             <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
               Department Insight
             </p>
-            <div className="flex min-w-0 items-center gap-2 overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setDepartmentInsightExpanded((current) => !current)}
-                aria-expanded={departmentInsightExpanded}
-                aria-controls="finder-department-insight-slider"
-                className={cn(
-                  "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition",
-                  departmentInsightExpanded
-                    ? "border-cyan-500/55 bg-cyan-500/15 text-cyan-800 dark:text-cyan-200"
-                    : "border-slate-400/30 bg-slate-900/10 text-slate-700 dark:bg-white/10 dark:text-slate-200",
-                )}
-              >
-                <span>
-                  Total ({totalDepartmentCount}/{totalInstructionCount})
-                </span>
-                <ChevronRight
-                  size={13}
+            <div className="flex min-w-0 items-start gap-2">
+              <div className="group relative shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setDepartmentInsightExpanded((current) => !current)}
+                  aria-expanded={departmentInsightExpanded}
+                  aria-controls="finder-department-insight-slider"
+                  aria-label={`Department insight summary: ${departmentInsightSummary}`}
                   className={cn(
-                    "transition-transform duration-300",
-                    departmentInsightExpanded ? "rotate-90" : "",
+                    "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition",
+                    departmentInsightExpanded
+                      ? "border-cyan-500/55 bg-cyan-500/15 text-cyan-800 dark:text-cyan-200"
+                      : "border-slate-400/30 bg-slate-900/10 text-slate-700 dark:bg-white/10 dark:text-slate-200",
                   )}
-                />
-              </button>
+                >
+                  <span>
+                    Total ({totalDepartmentCount}/{totalInstructionCount})
+                  </span>
+                  <ChevronRight
+                    size={13}
+                    className={cn(
+                      "transition-transform duration-300",
+                      departmentInsightExpanded ? "rotate-90" : "",
+                    )}
+                  />
+                </button>
+                <p className="pointer-events-none absolute left-0 top-full z-10 mt-1 w-max max-w-[260px] rounded-lg border border-cyan-500/45 bg-slate-950/95 px-2.5 py-1 text-[11px] font-semibold text-cyan-100 opacity-0 shadow-lg transition duration-200 group-hover:opacity-100 group-focus-within:opacity-100">
+                  ({departmentInsightSummary})
+                </p>
+              </div>
 
               <div
                 id="finder-department-insight-slider"
                 className={cn(
-                  "min-w-0 overflow-hidden transition-all duration-300 ease-out",
+                  "min-w-0 overflow-hidden transition-[max-width,max-height,opacity] duration-300 ease-out",
                   departmentInsightExpanded
-                    ? "max-w-full opacity-100"
-                    : "pointer-events-none max-w-0 opacity-0",
+                    ? "max-h-[40rem] max-w-full opacity-100"
+                    : "pointer-events-none max-h-0 max-w-0 opacity-0",
                 )}
               >
-                <div className="overflow-x-auto">
-                  <div className="flex min-w-max items-center gap-2 whitespace-nowrap pr-1">
+                <div
+                  className={cn(
+                    shouldScrollDepartmentInsight ? "overflow-x-auto pb-1" : "overflow-visible",
+                  )}
+                >
+                  <div
+                    className={cn(
+                      "items-center gap-2 pr-1",
+                      shouldScrollDepartmentInsight
+                        ? "flex min-w-max whitespace-nowrap"
+                        : "flex flex-wrap whitespace-normal",
+                    )}
+                  >
                     <button
                       type="button"
                       onClick={() => setSelectedDepartmentId("all")}
@@ -2683,15 +2859,25 @@ export function DashboardClient({
                   the Dashboard menu in the header.
                 </p>
               </div>
-              {layoutDirty ? (
-                <span className="rounded-full border border-amber-500/45 bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-800 dark:text-amber-200">
-                  Unsaved changes
-                </span>
-              ) : (
-                <span className="rounded-full border border-emerald-500/45 bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-800 dark:text-emerald-200">
-                  Layout saved
-                </span>
-              )}
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCustomizeOpen(false)}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-slate-400/40 bg-slate-900/10 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-900/15 dark:bg-white/10 dark:text-slate-100 dark:hover:bg-white/15"
+                >
+                  <X size={13} />
+                  Close Customize Panel
+                </button>
+                {layoutDirty ? (
+                  <span className="rounded-full border border-amber-500/45 bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-800 dark:text-amber-200">
+                    Unsaved changes
+                  </span>
+                ) : (
+                  <span className="rounded-full border border-emerald-500/45 bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-800 dark:text-emerald-200">
+                    Layout saved
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="grid gap-2 rounded-2xl border border-slate-300/70 bg-white/65 p-3 dark:border-slate-700 dark:bg-slate-900/50">
@@ -2817,11 +3003,22 @@ export function DashboardClient({
                   })}
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Tip: drag visible widgets by the grip icon to reorder.
+                  Tip: press and hold the grip icon for 2 seconds, then drag to reorder.
                 </p>
               </div>
             </div>
           </section>
+        ) : null}
+
+        {customizeOpen ? (
+          <button
+            type="button"
+            onClick={() => setCustomizeOpen(false)}
+            className="fixed bottom-4 right-4 z-30 inline-flex items-center gap-2 rounded-full border border-slate-400/45 bg-slate-950/85 px-4 py-2 text-xs font-semibold text-slate-100 shadow-xl backdrop-blur-sm transition hover:bg-slate-900 md:bottom-6 md:right-6"
+          >
+            <X size={14} />
+            Close Customize Panel
+          </button>
         ) : null}
 
         <div className="grid grid-cols-12 gap-4">
@@ -2869,31 +3066,7 @@ export function DashboardClient({
             return (
               <section
                 key={widget.id}
-                draggable
-                onDragStart={() => setDraggedWidgetId(widget.id)}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  if (dragOverWidgetId !== widget.id) {
-                    setDragOverWidgetId(widget.id);
-                  }
-                }}
-                onDragLeave={() => {
-                  if (dragOverWidgetId === widget.id) {
-                    setDragOverWidgetId(null);
-                  }
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  if (draggedWidgetId) {
-                    reorderWidgets(draggedWidgetId, widget.id);
-                  }
-                  setDraggedWidgetId(null);
-                  setDragOverWidgetId(null);
-                }}
-                onDragEnd={() => {
-                  setDraggedWidgetId(null);
-                  setDragOverWidgetId(null);
-                }}
+                data-dashboard-widget-id={widget.id}
                 className={cn(
                   getWidgetSpanClass(widget.size),
                   "relative min-w-0 overflow-hidden rounded-3xl border border-white/30 bg-white/80 p-4 shadow-xl backdrop-blur-xl transition dark:border-white/10 dark:bg-slate-900/70 md:p-5",
@@ -2924,7 +3097,12 @@ export function DashboardClient({
                     <button
                       type="button"
                       aria-label={`Drag to reorder ${definition.title}`}
-                      className="mt-0.5 rounded-lg border border-slate-300/70 bg-white/60 p-1.5 text-slate-500 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300 dark:hover:bg-slate-900"
+                      onDragStart={(event) => event.preventDefault()}
+                      onPointerDown={(event) => handleWidgetGripPointerDown(widget.id, event)}
+                      onPointerMove={handleWidgetGripPointerMove}
+                      onPointerUp={completeWidgetPointerDrag}
+                      onPointerCancel={handleWidgetGripPointerCancel}
+                      className="mt-0.5 touch-none rounded-lg border border-slate-300/70 bg-white/60 p-1.5 text-slate-500 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300 dark:hover:bg-slate-900"
                     >
                       <GripVertical size={14} />
                     </button>

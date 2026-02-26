@@ -44,15 +44,22 @@ export function LoginPanel() {
   const [feedbackBusy, setFeedbackBusy] = useState(false);
   const [feedbackStatus, setFeedbackStatus] = useState<string | null>(null);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpName, setHelpName] = useState("");
+  const [helpMessage, setHelpMessage] = useState("");
+  const [helpBusy, setHelpBusy] = useState(false);
+  const [helpStatus, setHelpStatus] = useState<string | null>(null);
+  const [helpError, setHelpError] = useState<string | null>(null);
   const backgroundVideoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
-    if (!feedbackOpen) {
+    if (!feedbackOpen && !helpOpen) {
       return;
     }
 
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        setHelpOpen(false);
         setFeedbackOpen(false);
       }
     };
@@ -61,7 +68,7 @@ export function LoginPanel() {
     return () => {
       document.removeEventListener("keydown", handleEscape);
     };
-  }, [feedbackOpen]);
+  }, [feedbackOpen, helpOpen]);
 
   useEffect(() => {
     const video = backgroundVideoRef.current;
@@ -247,6 +254,51 @@ export function LoginPanel() {
     }
   }
 
+  async function handleSubmitHelpRequest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const normalizedName = helpName.trim();
+    const normalizedMessage = helpMessage.trim();
+    if (!normalizedName) {
+      setHelpError("Please enter your name.");
+      setHelpStatus(null);
+      return;
+    }
+
+    if (!normalizedMessage) {
+      setHelpError("Please enter a help request message.");
+      setHelpStatus(null);
+      return;
+    }
+
+    setHelpBusy(true);
+    setHelpError(null);
+    setHelpStatus(null);
+
+    try {
+      const response = await fetch("/api/auth/help", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: normalizedName,
+          message: normalizedMessage,
+        }),
+      });
+
+      await parseJsonResponse(response);
+      setHelpStatus("Help request sent. A system admin will follow up.");
+      setHelpMessage("");
+    } catch (caughtError) {
+      const normalizedError =
+        caughtError instanceof Error ? caughtError.message : "Unable to send help request.";
+      setHelpError(normalizedError);
+    } finally {
+      setHelpBusy(false);
+    }
+  }
+
   const signupPinMismatch = signupPinConfirm.length > 0 && signupPin !== signupPinConfirm;
 
   return (
@@ -265,13 +317,13 @@ export function LoginPanel() {
         />
       </div>
       <div className="pointer-events-none fixed inset-0 -z-10 bg-slate-950/58" />
-      <div className="auth-login-shell relative z-10 mx-auto w-full max-w-3xl rounded-[2rem] border border-white/20 bg-slate-950/32 p-5 text-slate-100 shadow-2xl shadow-black/45 backdrop-blur-2xl md:p-8">
+      <div className="auth-login-shell relative z-10 mx-auto w-full max-w-2xl rounded-[2rem] border border-white/20 bg-slate-950/32 p-5 text-slate-100 shadow-2xl shadow-black/45 backdrop-blur-2xl md:p-8">
         <div className="grid gap-2 text-center">
-          <h1 className="text-4xl font-extrabold leading-tight text-white md:text-6xl">
-            Fast, visual work instructions.
+          <h1 className="text-4xl font-extrabold leading-tight text-white md:text-5xl">
+            Visual work instructions for modern teams.
           </h1>
           <p className="text-base text-slate-200/90">
-            Made by you. For you.
+            Clear guidance, faster handoffs, and confident execution.
           </p>
         </div>
 
@@ -292,8 +344,11 @@ export function LoginPanel() {
           </p>
         ) : null}
 
-        <form className="mt-4 grid gap-3" onSubmit={handlePinLogin}>
-          <label className="grid gap-1 text-left text-sm text-slate-200">
+        <form
+          className="mx-auto mt-5 grid w-full max-w-xl justify-items-center gap-3"
+          onSubmit={handlePinLogin}
+        >
+          <label className="grid w-full max-w-[360px] gap-1 text-left text-sm text-slate-200">
             <span>Employee ID</span>
             <input
               required
@@ -305,7 +360,7 @@ export function LoginPanel() {
               className="rounded-xl border border-white/20 bg-black/65 px-3 py-2 text-slate-100 outline-none transition focus:border-slate-300"
             />
           </label>
-          <label className="grid gap-1 text-left text-sm text-slate-200">
+          <label className="grid w-full max-w-[360px] gap-1 text-left text-sm text-slate-200">
             <span>6-Digit PIN</span>
             <PinInput
               required
@@ -314,31 +369,37 @@ export function LoginPanel() {
               className="border-white/20 bg-black/65 text-slate-100 tracking-[0.35em] focus:border-slate-300 dark:border-white/20 dark:bg-black/65 dark:text-slate-100"
             />
           </label>
-          <div className="mt-1 flex items-center gap-2">
+          <div className="mt-1 flex w-full max-w-[360px] items-center justify-center gap-2">
             <button
               type="submit"
               disabled={busy}
-              className="flex-1 rounded-xl bg-white/40 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/50 disabled:cursor-not-allowed disabled:opacity-70"
+              className="flex-1 rounded-xl bg-white/40 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/50 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {busy ? "Validating PIN..." : "Login with PIN"}
             </button>
-            <div className="group relative inline-flex">
+            <div className="group relative inline-flex shrink-0">
               <button
                 type="button"
                 aria-label="Need help?"
+                title="If you need help logging in, contact the system admin."
+                onClick={() => {
+                  setHelpOpen(true);
+                  setHelpError(null);
+                  setHelpStatus(null);
+                }}
                 className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/20 bg-black/50 text-slate-100 transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
               >
                 <CircleHelp size={18} />
               </button>
-              <div className="pointer-events-none absolute bottom-[calc(100%+0.6rem)] right-0 z-20 w-64 rounded-xl border border-white/20 bg-slate-950/95 p-2.5 text-left text-xs text-slate-200 opacity-0 shadow-xl transition group-hover:opacity-100 group-focus-within:opacity-100">
-                Need help? Ask your system admin to reset your role or PIN.
+              <div className="pointer-events-none absolute bottom-[calc(100%+0.55rem)] right-0 z-20 w-60 rounded-xl border border-white/20 bg-slate-950/95 p-2.5 text-left text-xs text-slate-200 opacity-0 shadow-xl transition group-hover:opacity-100 group-focus-within:opacity-100">
+                If you need help logging in, contact the system admin.
               </div>
             </div>
           </div>
           <button
             type="button"
             onClick={() => setShowCreateAccount((current) => !current)}
-            className="rounded-xl border border-white/20 bg-black/50 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
+            className="justify-self-center w-full max-w-[360px] rounded-xl border border-white/20 bg-black/50 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
           >
             {showCreateAccount ? "Hide Create Account" : "Create Account"}
           </button>
@@ -346,7 +407,7 @@ export function LoginPanel() {
 
         {showCreateAccount ? (
           <form
-            className="mt-4 grid gap-3 rounded-2xl border border-white/20 bg-black/45 p-4 backdrop-blur-xl md:p-5"
+            className="mx-auto mt-4 grid w-full max-w-xl gap-3 rounded-2xl border border-white/20 bg-black/45 p-4 backdrop-blur-xl md:p-5"
             onSubmit={handleSignup}
           >
             <label className="grid gap-1 text-left text-sm text-slate-200">
@@ -406,7 +467,7 @@ export function LoginPanel() {
             <button
               type="submit"
               disabled={busy || signupPinMismatch}
-              className="mt-1 rounded-xl bg-white/40 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/50 disabled:cursor-not-allowed disabled:opacity-70"
+              className="mt-1 justify-self-center w-full max-w-[220px] rounded-xl bg-white/40 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/50 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {busy ? "Creating account..." : "Create account"}
             </button>
@@ -418,7 +479,7 @@ export function LoginPanel() {
         ) : null}
 
         <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-white/15 pt-3 text-xs text-slate-300/80">
-          <p>2026 Omni Technologies, all rights reserved.</p>
+          <p>&reg; 2026 Omni Technologies, all rights reserved.</p>
           <button
             type="button"
             onClick={() => {
@@ -481,6 +542,72 @@ export function LoginPanel() {
                   className="rounded-xl bg-white/40 px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/50 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {feedbackBusy ? "Sending..." : "Send Feedback"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {helpOpen ? (
+        <div className="fixed inset-0 z-[121] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+          <div className="grid w-full max-w-lg gap-3 rounded-2xl border border-white/20 bg-slate-950/90 p-4 text-slate-100 shadow-2xl">
+            <div className="grid gap-1">
+              <h3 className="text-lg font-bold text-slate-100">Request Help</h3>
+              <p className="text-sm text-slate-300">
+                Send your name and a short message to the system admin.
+              </p>
+            </div>
+
+            {helpStatus ? (
+              <p className="rounded-xl border border-emerald-400/45 bg-emerald-500/15 p-2 text-sm text-emerald-100">
+                {helpStatus}
+              </p>
+            ) : null}
+            {helpError ? (
+              <p className="rounded-xl border border-rose-400/45 bg-rose-500/15 p-2 text-sm text-rose-100">
+                {helpError}
+              </p>
+            ) : null}
+
+            <form className="grid gap-3" onSubmit={handleSubmitHelpRequest}>
+              <label className="grid gap-1 text-sm text-slate-200">
+                <span>Name</span>
+                <input
+                  value={helpName}
+                  onChange={(event) => setHelpName(event.target.value)}
+                  maxLength={120}
+                  placeholder="Your name"
+                  className="rounded-xl border border-white/20 bg-black/60 px-3 py-2 text-slate-100 outline-none transition focus:border-slate-300"
+                />
+              </label>
+
+              <label className="grid gap-1 text-sm text-slate-200">
+                <span>Message</span>
+                <textarea
+                  value={helpMessage}
+                  onChange={(event) => setHelpMessage(event.target.value)}
+                  rows={6}
+                  maxLength={4000}
+                  placeholder="How can we help?"
+                  className="rounded-xl border border-white/20 bg-black/60 px-3 py-2 text-slate-100 outline-none transition focus:border-slate-300"
+                />
+              </label>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setHelpOpen(false)}
+                  className="rounded-xl border border-white/20 bg-black/45 px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
+                >
+                  Close
+                </button>
+                <button
+                  type="submit"
+                  disabled={helpBusy}
+                  className="rounded-xl bg-white/40 px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/50 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {helpBusy ? "Sending..." : "Send Help Request"}
                 </button>
               </div>
             </form>

@@ -1483,7 +1483,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
               }));
             }
           }}
-          placeholder="Type work instructions here. Use toolbar buttons for formatting and inline media."
+          placeholder=""
           minHeightClassName="min-h-72"
           hasError={fieldErrors.body}
           focusRequestKey={bodyFocusRequestKey}
