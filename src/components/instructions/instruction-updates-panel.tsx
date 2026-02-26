@@ -31,6 +31,7 @@ export interface InstructionUpdateEvent {
 
 interface InstructionUpdatesPanelProps {
   events: InstructionUpdateEvent[];
+  className?: string;
 }
 
 const MAX_VISIBLE_UPDATE_CARDS = 5;
@@ -117,7 +118,7 @@ function SourceMediaPreview({ media, tone }: SourceMediaPreviewProps) {
   );
 }
 
-export function InstructionUpdatesPanel({ events }: InstructionUpdatesPanelProps) {
+export function InstructionUpdatesPanel({ events, className }: InstructionUpdatesPanelProps) {
   const [showUpdates, setShowUpdates] = useState(false);
   const [selectedSourceEventId, setSelectedSourceEventId] = useState<string | null>(null);
 
@@ -136,27 +137,35 @@ export function InstructionUpdatesPanel({ events }: InstructionUpdatesPanelProps
 
   const selectedSourceEvent = useMemo(
     () =>
-      updateEvents.find((event) => event.id === selectedSourceEventId && event.eventType === "updated") ??
-      null,
+      updateEvents.find(
+        (event) => event.id === selectedSourceEventId && event.eventType === "updated",
+      ) ?? null,
     [selectedSourceEventId, updateEvents],
   );
 
   useEffect(() => {
-    if (!selectedSourceEventId) {
+    if (!showUpdates && !selectedSourceEventId) {
       return;
     }
 
     const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setSelectedSourceEventId(null);
+      if (event.key !== "Escape") {
+        return;
       }
+
+      if (selectedSourceEventId) {
+        setSelectedSourceEventId(null);
+        return;
+      }
+
+      setShowUpdates(false);
     };
 
     document.addEventListener("keydown", handleEscape);
     return () => {
       document.removeEventListener("keydown", handleEscape);
     };
-  }, [selectedSourceEventId]);
+  }, [selectedSourceEventId, showUpdates]);
 
   if (events.length === 0) {
     return null;
@@ -164,53 +173,76 @@ export function InstructionUpdatesPanel({ events }: InstructionUpdatesPanelProps
 
   return (
     <>
-      <section className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="space-y-1">
-            <h2 className="text-xl font-bold">Instruction Updates</h2>
-            <p className="text-xs text-slate-600 dark:text-slate-300">
-              {updateEvents.length} update event{updateEvents.length === 1 ? "" : "s"} captured
-              since original.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setShowUpdates((current) => !current)}
-            className={cn(
-              "inline-flex items-center rounded-lg border px-3 py-1.5 text-xs font-semibold transition",
-              showUpdates
-                ? "border-cyan-500/45 bg-cyan-500/15 text-cyan-800 dark:text-cyan-200"
-                : "border-slate-400/45 bg-slate-900/10 text-slate-700 hover:bg-slate-900/15 dark:text-slate-200 dark:hover:bg-white/10",
-            )}
-          >
-            {showUpdates ? "Hide Updates" : "Show Updates"}
-          </button>
-        </div>
+      <button
+        type="button"
+        onClick={() => setShowUpdates(true)}
+        className={cn(
+          "inline-flex items-center rounded-lg border px-3 py-1.5 text-xs font-semibold transition",
+          "border-slate-400/45 bg-slate-900/10 text-slate-700 hover:bg-slate-900/15 dark:text-slate-200 dark:hover:bg-white/10",
+          className,
+        )}
+      >
+        Show Updates
+      </button>
 
-        {showUpdates ? (
-          updateEvents.length === 0 ? (
-            <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-              No updates were recorded after the original version.
-            </p>
-          ) : (
-            <div className="grid gap-3">
+      {showUpdates ? (
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"
+          role="presentation"
+          onClick={() => {
+            setShowUpdates(false);
+            setSelectedSourceEventId(null);
+          }}
+        >
+          <article
+            className="grid w-full max-w-4xl gap-3 rounded-2xl border border-white/20 bg-slate-950/95 p-5 shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Instruction updates"
+            onClick={(clickEvent) => clickEvent.stopPropagation()}
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-1">
+                <h2 className="text-xl font-bold text-slate-100">Instruction Updates</h2>
+                <p className="text-xs text-slate-300">
+                  {updateEvents.length} update event{updateEvents.length === 1 ? "" : "s"}{" "}
+                  captured since original.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowUpdates(false);
+                  setSelectedSourceEventId(null);
+                }}
+                className="inline-flex items-center rounded-lg border border-slate-500/45 bg-slate-900/40 px-2.5 py-1 text-xs font-semibold text-slate-200 transition hover:bg-slate-800/60"
+              >
+                Close
+              </button>
+            </div>
+
+            {updateEvents.length === 0 ? (
+              <p className="rounded-xl border border-slate-500/40 bg-slate-900/40 p-3 text-sm text-slate-300">
+                No updates were recorded after the original version.
+              </p>
+            ) : (
               <div
                 className={cn(
                   "grid gap-2",
-                  updateEvents.length > MAX_VISIBLE_UPDATE_CARDS ? "max-h-[32rem] overflow-y-auto pr-1" : "",
+                  updateEvents.length > MAX_VISIBLE_UPDATE_CARDS
+                    ? "max-h-[32rem] overflow-y-auto pr-1"
+                    : "",
                 )}
               >
                 {[...updateEvents].reverse().map((event) => (
                   <article
                     key={event.id}
-                    className="min-h-24 rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50"
+                    className="min-h-24 rounded-xl border border-slate-300/40 bg-slate-900/45 p-3"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-xs text-slate-600 dark:text-slate-300">
+                      <p className="text-xs text-slate-300">
                         <LocalDateTime value={event.occurredAt} mode="dateTime" /> by{" "}
-                        <span className="font-semibold text-slate-800 dark:text-slate-100">
-                          {event.actorName}
-                        </span>
+                        <span className="font-semibold text-slate-100">{event.actorName}</span>
                       </p>
                       <button
                         type="button"
@@ -218,23 +250,21 @@ export function InstructionUpdatesPanel({ events }: InstructionUpdatesPanelProps
                         className={cn(
                           "inline-flex items-center rounded-lg border px-2.5 py-1 text-xs font-semibold transition",
                           hasSourcePayloadData(event.sourcePayload)
-                            ? "border-cyan-500/45 bg-cyan-500/15 text-cyan-800 hover:bg-cyan-500/25 dark:text-cyan-200"
-                            : "border-slate-400/45 bg-slate-900/10 text-slate-700 hover:bg-slate-900/15 dark:text-slate-200 dark:hover:bg-white/10",
+                            ? "border-cyan-500/45 bg-cyan-500/15 text-cyan-200 hover:bg-cyan-500/25"
+                            : "border-slate-500/45 bg-slate-900/30 text-slate-200 hover:bg-slate-800/60",
                         )}
                       >
                         View Source
                       </button>
                     </div>
-                    <p className="mt-1 text-sm text-slate-700 dark:text-slate-200">
-                      {event.detail}
-                    </p>
+                    <p className="mt-1 text-sm text-slate-200">{event.detail}</p>
                   </article>
                 ))}
               </div>
-            </div>
-          )
-        ) : null}
-      </section>
+            )}
+          </article>
+        </div>
+      ) : null}
 
       {selectedSourceEvent ? (
         <div

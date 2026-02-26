@@ -562,19 +562,23 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
               ) : null}
             </div>
 
-            <InstructionReviewControls
-              instructionId={instruction.id}
-              instructionUpdatedAt={instruction.updated_at}
-              reviewWindowDays={reviewWindowDays}
-              initialStatus={reviewStatus.status}
-              initialLastCalibratedAt={reviewStatus.lastCalibratedAt}
-              initialFlaggedAt={reviewStatus.flaggedAt}
-            />
+            <div className="flex flex-wrap items-start justify-end gap-2">
+              <InstructionReviewControls
+                instructionId={instruction.id}
+                instructionUpdatedAt={instruction.updated_at}
+                reviewWindowDays={reviewWindowDays}
+                initialStatus={reviewStatus.status}
+                initialLastCalibratedAt={reviewStatus.lastCalibratedAt}
+                initialFlaggedAt={reviewStatus.flaggedAt}
+              />
+              <InstructionUpdatesPanel
+                events={instructionUpdateEvents}
+                className="h-fit self-start"
+              />
+            </div>
           </div>
         </div>
       </header>
-
-      <InstructionUpdatesPanel events={instructionUpdateEvents} />
 
       <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
         <h2 className="text-xl font-bold">Work Instructions</h2>

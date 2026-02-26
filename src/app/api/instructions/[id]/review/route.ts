@@ -47,9 +47,9 @@ export async function PATCH(
 
   const { data: instruction, error: instructionError } = await supabaseAdmin
     .from("work_instructions")
-    .select("id, is_archived, updated_at")
+    .select("id, is_archived, updated_at, revision")
     .eq("id", id)
-    .maybeSingle<{ id: string; is_archived: boolean; updated_at: string }>();
+    .maybeSingle<{ id: string; is_archived: boolean; updated_at: string; revision: number }>();
 
   if (instructionError) {
     return NextResponse.json({ error: instructionError.message }, { status: 500 });
@@ -68,9 +68,9 @@ export async function PATCH(
 
   const { data: existingStatus, error: statusReadError } = await supabaseAdmin
     .from("instruction_review_status")
-    .select("last_calibrated_at")
+    .select("status, last_calibrated_at")
     .eq("instruction_id", instruction.id)
-    .maybeSingle<{ last_calibrated_at: string }>();
+    .maybeSingle<{ status: InstructionReviewStatus; last_calibrated_at: string }>();
 
   if (statusReadError) {
     return NextResponse.json({ error: statusReadError.message }, { status: 500 });
@@ -100,6 +100,39 @@ export async function PATCH(
 
   if (upsertError) {
     return NextResponse.json({ error: upsertError.message }, { status: 500 });
+  }
+
+  if (existingStatus?.status !== requestedStatus) {
+    const reviewStateDetail =
+      requestedStatus === "needs_review"
+        ? "Review state changed to Needs Review."
+        : "Review state changed to Up To Date.";
+
+    const { error: changeEventError } = await supabaseAdmin
+      .from("instruction_change_events")
+      .upsert(
+        {
+          instruction_id: instruction.id,
+          actor_user_id: requester.id,
+          event_type: "updated",
+          detail: reviewStateDetail,
+          revision: instruction.revision,
+          occurred_at: nowIso,
+          source_payload: {
+            kind: "instruction_review_state",
+            previousStatus: existingStatus?.status ?? null,
+            nextStatus: requestedStatus,
+          },
+        },
+        {
+          onConflict: "instruction_id,event_type,actor_user_id,occurred_at",
+          ignoreDuplicates: true,
+        },
+      );
+
+    if (changeEventError) {
+      return NextResponse.json({ error: changeEventError.message }, { status: 500 });
+    }
   }
 
   const { data: refreshedStatus, error: refreshedStatusError } = await supabaseAdmin

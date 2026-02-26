@@ -96,7 +96,9 @@ export function InstructionReviewControls({
     initialLastCalibratedAt ?? instructionUpdatedAt,
   );
   const [flaggedAt, setFlaggedAt] = useState<string | null>(initialFlaggedAt);
-  const [busyStatus, setBusyStatus] = useState<"up_to_date" | "needs_review" | null>(null);
+  const [busyStatus, setBusyStatus] = useState<InstructionReviewStatusPayload["status"] | null>(
+    null,
+  );
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -126,6 +128,10 @@ export function InstructionReviewControls({
 
   async function updateInstructionReviewStatus(nextStatus: "up_to_date" | "needs_review") {
     if (busyStatus) {
+      return;
+    }
+
+    if (nextStatus === status) {
       return;
     }
 
@@ -204,33 +210,43 @@ export function InstructionReviewControls({
       )}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          disabled={busyStatus !== null}
-          onClick={() => void updateInstructionReviewStatus("up_to_date")}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/45 bg-emerald-500/12 px-3 py-1.5 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60 dark:text-emerald-200"
+        <span
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold",
+            status === "needs_review"
+              ? "border-amber-500/45 bg-amber-500/12 text-amber-800 dark:text-amber-200"
+              : "border-emerald-500/45 bg-emerald-500/12 text-emerald-800 dark:text-emerald-200",
+          )}
         >
-          {busyStatus === "up_to_date" ? (
-            <Loader2 size={12} className="animate-spin" />
+          {status === "needs_review" ? (
+            <TriangleAlert size={12} />
           ) : (
             <CheckCircle2 size={12} />
           )}
-          Up To Date
-        </button>
+          {status === "needs_review" ? "Needs Review" : "Up To Date"}
+        </span>
 
-        <button
-          type="button"
-          disabled={busyStatus !== null}
-          onClick={() => void updateInstructionReviewStatus("needs_review")}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/45 bg-amber-500/12 px-3 py-1.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-60 dark:text-amber-200"
-        >
-          {busyStatus === "needs_review" ? (
-            <Loader2 size={12} className="animate-spin" />
-          ) : (
-            <TriangleAlert size={12} />
-          )}
-          Needs Review
-        </button>
+        <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
+          <span>Set state</span>
+          <span className="relative inline-flex items-center">
+            <select
+              value={status}
+              disabled={busyStatus !== null}
+              onChange={(event) =>
+                void updateInstructionReviewStatus(
+                  event.target.value as "up_to_date" | "needs_review",
+                )
+              }
+              className="rounded-lg border border-slate-400/45 bg-slate-900/10 px-2.5 py-1.5 text-xs font-semibold text-slate-700 outline-none transition hover:bg-slate-900/15 focus:border-cyan-500 disabled:cursor-not-allowed disabled:opacity-60 dark:text-slate-100 dark:hover:bg-white/10"
+            >
+              <option value="up_to_date">Up To Date</option>
+              <option value="needs_review">Needs Review</option>
+            </select>
+            {busyStatus ? (
+              <Loader2 size={12} className="pointer-events-none absolute right-2 animate-spin" />
+            ) : null}
+          </span>
+        </label>
       </div>
 
       <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">{statusSummary}</p>

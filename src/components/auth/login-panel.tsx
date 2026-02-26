@@ -478,7 +478,7 @@ export function LoginPanel() {
         ) : null}
 
         <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-white/15 pt-3 text-xs text-slate-300/80">
-          <p>&copy; 2026 All rights reserved.</p>
+          <p>&copy; 2026</p>
           <button
             type="button"
             onClick={() => {
