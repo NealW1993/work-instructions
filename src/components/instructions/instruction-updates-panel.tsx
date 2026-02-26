@@ -51,6 +51,31 @@ function hasSourcePayloadData(sourcePayload: InstructionUpdateSourcePayload | nu
   );
 }
 
+function normalizeSnippetForComparison(value: string) {
+  return value.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function shouldSuppressRemovedSnippet(
+  sourcePayload: InstructionUpdateSourcePayload | null | undefined,
+) {
+  const addedSnippet = sourcePayload?.addedTextSnippet?.trim();
+  const removedSnippet = sourcePayload?.removedTextSnippet?.trim();
+  if (!addedSnippet || !removedSnippet) {
+    return false;
+  }
+
+  const normalizedAdded = normalizeSnippetForComparison(addedSnippet);
+  const normalizedRemoved = normalizeSnippetForComparison(removedSnippet);
+  if (!normalizedAdded || !normalizedRemoved) {
+    return false;
+  }
+
+  return (
+    normalizedAdded !== normalizedRemoved &&
+    normalizedAdded.includes(normalizedRemoved)
+  );
+}
+
 interface SourceMediaPreviewProps {
   media: InstructionUpdateSourceMedia;
   tone: "added" | "removed";
@@ -254,7 +279,8 @@ export function InstructionUpdatesPanel({ events }: InstructionUpdatesPanelProps
                   </div>
                 ) : null}
 
-                {selectedSourceEvent.sourcePayload?.removedTextSnippet ? (
+                {selectedSourceEvent.sourcePayload?.removedTextSnippet &&
+                !shouldSuppressRemovedSnippet(selectedSourceEvent.sourcePayload) ? (
                   <div className="grid gap-1.5">
                     <p className="text-xs font-semibold uppercase tracking-wide text-rose-300">
                       Removed Text

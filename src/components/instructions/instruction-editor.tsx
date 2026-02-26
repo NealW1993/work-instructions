@@ -151,6 +151,127 @@ function richTextToPlain(value: string): string {
     .trim();
 }
 
+const MAX_LINE_DIFF_ITEMS = 400;
+
+function normalizeDiffLine(value: string) {
+  return value
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .trim();
+}
+
+function getOrderedListIndex(item: Element) {
+  const parent = item.parentElement;
+  if (!parent) {
+    return 1;
+  }
+
+  const listItems = Array.from(parent.children).filter((child) => child.tagName === "LI");
+  const index = listItems.indexOf(item);
+  return index >= 0 ? index + 1 : 1;
+}
+
+function extractSemanticDiffLines(content: string) {
+  const normalizedContent = normalizeEditorContent(content);
+  if (!normalizedContent) {
+    return [] as string[];
+  }
+
+  const fallbackLines = richTextToPlain(normalizedContent)
+    .split(/\r?\n+/)
+    .map(normalizeDiffLine)
+    .filter(Boolean);
+
+  if (typeof DOMParser === "undefined") {
+    return fallbackLines;
+  }
+
+  try {
+    const parser = new DOMParser();
+    const documentNode = parser.parseFromString(
+      `<article>${normalizedContent}</article>`,
+      "text/html",
+    );
+    const root = documentNode.body.firstElementChild;
+    if (!root) {
+      return fallbackLines;
+    }
+
+    const lines: string[] = [];
+    const lineNodes = root.querySelectorAll("h1,h2,h3,p,blockquote,pre,li");
+
+    for (const node of lineNodes) {
+      const tagName = node.tagName.toUpperCase();
+      if (tagName !== "LI") {
+        const inListItem = node.parentElement?.closest("li");
+        if (inListItem) {
+          continue;
+        }
+      }
+
+      if (tagName === "LI") {
+        const clone = node.cloneNode(true) as HTMLElement;
+        clone.querySelectorAll("ol,ul").forEach((listNode) => listNode.remove());
+        const listItemText = normalizeDiffLine(clone.textContent ?? "");
+        if (!listItemText) {
+          continue;
+        }
+
+        const isTaskItem = node.getAttribute("data-type") === "taskItem";
+        if (isTaskItem) {
+          const taskMarker = node.getAttribute("data-checked") === "true" ? "[x]" : "[ ]";
+          lines.push(`${taskMarker} ${listItemText}`);
+          continue;
+        }
+
+        const parentTagName = node.parentElement?.tagName.toUpperCase();
+        const marker =
+          parentTagName === "OL"
+            ? `${getOrderedListIndex(node)}.`
+            : parentTagName === "UL"
+              ? "-"
+              : "";
+        lines.push(marker ? `${marker} ${listItemText}` : listItemText);
+        continue;
+      }
+
+      if (tagName === "PRE") {
+        const codeLines = (node.textContent ?? "")
+          .replace(/\u00a0/g, " ")
+          .split(/\r?\n+/)
+          .map((line) => line.trimEnd())
+          .filter((line) => line.trim().length > 0);
+        for (const codeLine of codeLines) {
+          lines.push(codeLine);
+        }
+        continue;
+      }
+
+      const text = normalizeDiffLine(node.textContent ?? "");
+      if (!text) {
+        continue;
+      }
+
+      if (tagName === "H1" || tagName === "H2" || tagName === "H3") {
+        const level = Number.parseInt(tagName.slice(1), 10);
+        lines.push(`${"#".repeat(Number.isFinite(level) ? level : 1)} ${text}`);
+        continue;
+      }
+
+      if (tagName === "BLOCKQUOTE") {
+        lines.push(`> ${text}`);
+        continue;
+      }
+
+      lines.push(text);
+    }
+
+    return lines.length > 0 ? lines : fallbackLines;
+  } catch {
+    return fallbackLines;
+  }
+}
+
 function summarizePartMold(partNumber: string, moldNumber: string) {
   const part = partNumber.trim();
   const mold = moldNumber.trim();
@@ -264,42 +385,83 @@ function collectRemovedMedia(
   return removed;
 }
 
-function extractTextChangeSnippet(previousText: string, nextText: string) {
-  if (previousText === nextText) {
+function extractTextChangeSnippet(previousBody: string, nextBody: string) {
+  const previousLines = extractSemanticDiffLines(previousBody);
+  const nextLines = extractSemanticDiffLines(nextBody);
+
+  if (
+    previousLines.length === nextLines.length &&
+    previousLines.every((line, index) => line === nextLines[index])
+  ) {
     return {
       addedTextSnippet: "",
       removedTextSnippet: "",
     };
   }
 
-  let prefixIndex = 0;
-  const sharedMaxLength = Math.min(previousText.length, nextText.length);
-  while (
-    prefixIndex < sharedMaxLength &&
-    previousText[prefixIndex] === nextText[prefixIndex]
+  if (
+    previousLines.length > MAX_LINE_DIFF_ITEMS ||
+    nextLines.length > MAX_LINE_DIFF_ITEMS
   ) {
-    prefixIndex += 1;
+    return {
+      addedTextSnippet: nextLines.join("\n").trim(),
+      removedTextSnippet: previousLines.join("\n").trim(),
+    };
   }
 
-  let previousSuffixIndex = previousText.length - 1;
-  let nextSuffixIndex = nextText.length - 1;
-  while (
-    previousSuffixIndex >= prefixIndex &&
-    nextSuffixIndex >= prefixIndex &&
-    previousText[previousSuffixIndex] === nextText[nextSuffixIndex]
-  ) {
-    previousSuffixIndex -= 1;
-    nextSuffixIndex -= 1;
+  const previousLength = previousLines.length;
+  const nextLength = nextLines.length;
+  const lcs: number[][] = Array.from({ length: previousLength + 1 }, () =>
+    Array.from({ length: nextLength + 1 }, () => 0),
+  );
+
+  for (let previousIndex = previousLength - 1; previousIndex >= 0; previousIndex -= 1) {
+    for (let nextIndex = nextLength - 1; nextIndex >= 0; nextIndex -= 1) {
+      if (previousLines[previousIndex] === nextLines[nextIndex]) {
+        lcs[previousIndex]![nextIndex] = lcs[previousIndex + 1]![nextIndex + 1]! + 1;
+      } else {
+        lcs[previousIndex]![nextIndex] = Math.max(
+          lcs[previousIndex + 1]![nextIndex]!,
+          lcs[previousIndex]![nextIndex + 1]!,
+        );
+      }
+    }
   }
 
-  const removedTextSnippet = previousText
-    .slice(prefixIndex, previousSuffixIndex + 1)
-    .trim();
-  const addedTextSnippet = nextText.slice(prefixIndex, nextSuffixIndex + 1).trim();
+  const addedLines: string[] = [];
+  const removedLines: string[] = [];
+  let previousIndex = 0;
+  let nextIndex = 0;
+
+  while (previousIndex < previousLength && nextIndex < nextLength) {
+    if (previousLines[previousIndex] === nextLines[nextIndex]) {
+      previousIndex += 1;
+      nextIndex += 1;
+      continue;
+    }
+
+    if (lcs[previousIndex + 1]![nextIndex]! >= lcs[previousIndex]![nextIndex + 1]!) {
+      removedLines.push(previousLines[previousIndex]!);
+      previousIndex += 1;
+    } else {
+      addedLines.push(nextLines[nextIndex]!);
+      nextIndex += 1;
+    }
+  }
+
+  while (previousIndex < previousLength) {
+    removedLines.push(previousLines[previousIndex]!);
+    previousIndex += 1;
+  }
+
+  while (nextIndex < nextLength) {
+    addedLines.push(nextLines[nextIndex]!);
+    nextIndex += 1;
+  }
 
   return {
-    addedTextSnippet,
-    removedTextSnippet,
+    addedTextSnippet: addedLines.join("\n").trim(),
+    removedTextSnippet: removedLines.join("\n").trim(),
   };
 }
 
@@ -351,9 +513,11 @@ function buildInstructionUpdateSummary(params: {
   const previousPlainText = previousPlainTextRaw.replace(/\s+/g, " ").trim();
   const nextPlainText = nextPlainTextRaw.replace(/\s+/g, " ").trim();
   const characterDelta = nextPlainText.length - previousPlainText.length;
+  const previousSemanticText = extractSemanticDiffLines(previousNormalized).join("\n");
+  const nextSemanticText = extractSemanticDiffLines(nextNormalized).join("\n");
 
-  if (previousPlainText !== nextPlainText) {
-    const textSnippet = extractTextChangeSnippet(previousPlainTextRaw, nextPlainTextRaw);
+  if (previousSemanticText !== nextSemanticText) {
+    const textSnippet = extractTextChangeSnippet(previousNormalized, nextNormalized);
     if (textSnippet.addedTextSnippet) {
       sourcePayload.addedTextSnippet = textSnippet.addedTextSnippet;
     }
