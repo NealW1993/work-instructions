@@ -528,7 +528,9 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
 
   return (
     <article className="grid gap-5">
-      <InstructionBackButton fallbackHref="/dashboard" />
+      <InstructionBackButton
+        fallbackHref={instructionIsArchived ? "/instructions/archived" : "/dashboard"}
+      />
 
       <header className="rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
         {!instructionIsArchived && showReviewIndicator ? (
@@ -555,7 +557,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
         {instructionIsArchived ? (
           <div className="mb-4 rounded-2xl border border-amber-500/45 bg-amber-500/12 px-4 py-3">
             <p className="text-sm font-bold text-slate-900 dark:text-slate-100">
-              Archived revision
+              This instruction is currently archived.
             </p>
             <p className="text-xs text-slate-700 dark:text-slate-200">
               This revision is stored in history and hidden from dashboard/search.

@@ -7,6 +7,15 @@ interface InstructionRecord {
   id: string;
   work_item_id: string;
   is_archived: boolean;
+  revision: number;
+}
+
+interface RestoreRequestBody {
+  forceSwap?: boolean;
+}
+
+interface DeleteRequestBody {
+  permanent?: boolean;
 }
 
 async function requireSystemAdmin(request: NextRequest) {
@@ -43,10 +52,19 @@ export async function DELETE(
 
   const { id } = await context.params;
   const supabaseAdmin = getSupabaseAdminClient();
+  let requestBody: DeleteRequestBody = {};
+
+  try {
+    requestBody = (await request.json()) as DeleteRequestBody;
+  } catch {
+    requestBody = {};
+  }
+
+  const permanentDelete = requestBody.permanent === true;
 
   const { data: instruction, error: instructionReadError } = await supabaseAdmin
     .from("work_instructions")
-    .select("id, work_item_id, is_archived")
+    .select("id, work_item_id, is_archived, revision")
     .eq("id", id)
     .maybeSingle<InstructionRecord>();
 
@@ -62,6 +80,33 @@ export async function DELETE(
       { error: "Instruction not found." },
       { status: 404 },
     );
+  }
+
+  if (permanentDelete) {
+    if (!instruction.is_archived) {
+      return NextResponse.json(
+        { error: "Only archived instructions can be permanently deleted." },
+        { status: 400 },
+      );
+    }
+
+    const { error: permanentDeleteError } = await supabaseAdmin
+      .from("work_instructions")
+      .delete()
+      .eq("id", id);
+
+    if (permanentDeleteError) {
+      return NextResponse.json(
+        { error: permanentDeleteError.message },
+        { status: 500 },
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      deleted: true,
+      permanent: true,
+    });
   }
 
   if (instruction.is_archived) {
@@ -97,10 +142,19 @@ export async function PATCH(
 
   const { id } = await context.params;
   const supabaseAdmin = getSupabaseAdminClient();
+  let requestBody: RestoreRequestBody = {};
+
+  try {
+    requestBody = (await request.json()) as RestoreRequestBody;
+  } catch {
+    requestBody = {};
+  }
+
+  const forceSwap = requestBody.forceSwap === true;
 
   const { data: instruction, error: instructionReadError } = await supabaseAdmin
     .from("work_instructions")
-    .select("id, work_item_id, is_archived")
+    .select("id, work_item_id, is_archived, revision")
     .eq("id", id)
     .maybeSingle<InstructionRecord>();
 
@@ -124,7 +178,7 @@ export async function PATCH(
 
   const { data: activeInstructions, error: activeInstructionsError } = await supabaseAdmin
     .from("work_instructions")
-    .select("id")
+    .select("id, revision")
     .eq("work_item_id", instruction.work_item_id)
     .eq("is_archived", false)
     .neq("id", instruction.id);
@@ -136,9 +190,33 @@ export async function PATCH(
     );
   }
 
-  const activeInstructionIds = ((activeInstructions ?? []) as Array<{ id: string }>).map(
-    (entry) => entry.id,
-  );
+  const activeInstructionRows = (activeInstructions ?? []) as Array<{
+    id: string;
+    revision: number;
+  }>;
+  const activeInstructionIds = activeInstructionRows.map((entry) => entry.id);
+
+  if (activeInstructionRows.length > 0 && !forceSwap) {
+    const existingActiveInstruction = [...activeInstructionRows].sort(
+      (first, second) => second.revision - first.revision,
+    )[0];
+
+    if (existingActiveInstruction) {
+      return NextResponse.json(
+        {
+          error: "An active revision already exists for this work instruction.",
+          conflict: {
+            existingInstructionId: existingActiveInstruction.id,
+            existingRevision: existingActiveInstruction.revision,
+            restoringRevision: instruction.revision,
+            hasNewerRevision:
+              existingActiveInstruction.revision > instruction.revision,
+          },
+        },
+        { status: 409 },
+      );
+    }
+  }
 
   if (activeInstructionIds.length > 0) {
     const { error: archiveOtherActiveInstructionsError } = await supabaseAdmin
@@ -182,5 +260,10 @@ export async function PATCH(
     );
   }
 
-  return NextResponse.json({ success: true, archived: false, restored: true });
+  return NextResponse.json({
+    success: true,
+    archived: false,
+    restored: true,
+    swappedOutInstructionIds: activeInstructionIds,
+  });
 }
