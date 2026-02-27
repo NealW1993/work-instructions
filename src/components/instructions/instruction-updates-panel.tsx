@@ -396,7 +396,7 @@ export function InstructionUpdatesPanel({ events, className }: InstructionUpdate
           className,
         )}
       >
-        Show Updates
+        Show Updates ({updateEvents.length})
       </button>
 
       {canUsePortal && updatesModal ? createPortal(updatesModal, document.body) : null}
