@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { ChevronDown, Clock3, LogOut, Settings } from "lucide-react";
+import { ChevronDown, Clock3, LogOut, Settings, SlidersHorizontal } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { usePostHog } from "posthog-js/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { isSystemAdmin } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
   clearSessionStart,
@@ -242,6 +243,17 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
             <Settings size={15} />
             Account Settings
           </Link>
+
+          {isSystemAdmin(profile.role) ? (
+            <Link
+              href="/admin/users"
+              onClick={() => setOpen(false)}
+              className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/40 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/25"
+            >
+              <SlidersHorizontal size={15} />
+              System Settings
+            </Link>
+          ) : null}
 
           <button
             type="button"

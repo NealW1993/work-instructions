@@ -30,11 +30,6 @@ import { canEditInstructions, isSystemAdmin } from "@/lib/roles";
 import type { Profile } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-interface HeaderNavLink {
-  href: string;
-  label: string;
-}
-
 const DASHBOARD_RETURN_STATE_KEY = "__dashboardInstructionReturnState";
 
 function isActivePath(pathname: string, href: string) {
@@ -54,16 +49,27 @@ export function AppHeader({ profile }: { profile: Profile }) {
   const router = useRouter();
   const [dashboardMenuOpen, setDashboardMenuOpen] = useState(false);
   const [dashboardMenuPathname, setDashboardMenuPathname] = useState(pathname);
+  const [instructionMenuOpen, setInstructionMenuOpen] = useState(false);
+  const [instructionMenuPathname, setInstructionMenuPathname] = useState(pathname);
   const [dashboardLayoutState, setDashboardLayoutState] = useState(
     DASHBOARD_LAYOUT_DEFAULT_STATE,
   );
 
+  const canCreateInstructions = canEditInstructions(profile.role);
+  const canViewArchivedInstructions = isSystemAdmin(profile.role);
   const isDashboardActive = isActivePath(pathname, "/dashboard");
+  const isNewInstructionActive = isActivePath(pathname, "/instructions/new");
+  const isArchivedInstructionActive = isActivePath(pathname, "/instructions/archived");
+  const instructionControlActive = isNewInstructionActive || isArchivedInstructionActive;
   const activeDashboardLayoutState = isDashboardActive
     ? dashboardLayoutState
     : DASHBOARD_LAYOUT_DEFAULT_STATE;
   const dashboardMenuVisible =
     dashboardMenuOpen && dashboardMenuPathname === pathname;
+  const instructionMenuVisible =
+    canViewArchivedInstructions &&
+    instructionMenuOpen &&
+    instructionMenuPathname === pathname;
   const canSendDashboardLayoutActions =
     isDashboardActive && activeDashboardLayoutState.available;
   const showLayoutSaveActions =
@@ -94,16 +100,6 @@ export function AppHeader({ profile }: { profile: Profile }) {
       ? "Close Customize Panel"
       : "Customize Dashboard";
 
-  const navLinks: HeaderNavLink[] = [
-    ...(canEditInstructions(profile.role)
-      ? [{ href: "/instructions/new", label: "New Instruction" }]
-      : []),
-    ...(isSystemAdmin(profile.role)
-      ? [{ href: "/instructions/archived", label: "Archived" }]
-      : []),
-    ...(isSystemAdmin(profile.role) ? [{ href: "/admin/users", label: "System Admin" }] : []),
-  ];
-
   useEffect(() => {
     const handleDashboardLayoutState = (event: Event) => {
       const detail = (event as CustomEvent<DashboardLayoutStateEventDetail>).detail;
@@ -133,22 +129,27 @@ export function AppHeader({ profile }: { profile: Profile }) {
   }, []);
 
   useEffect(() => {
-    if (!dashboardMenuVisible) {
+    if (!dashboardMenuVisible && !instructionMenuVisible) {
       return;
     }
 
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as HTMLElement | null;
-      if (target?.closest('[data-dashboard-menu-root="true"]')) {
+      if (
+        target?.closest('[data-dashboard-menu-root="true"]') ||
+        target?.closest('[data-instruction-menu-root="true"]')
+      ) {
         return;
       }
 
       setDashboardMenuOpen(false);
+      setInstructionMenuOpen(false);
     };
 
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setDashboardMenuOpen(false);
+        setInstructionMenuOpen(false);
       }
     };
 
@@ -159,7 +160,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("keydown", handleEscape);
     };
-  }, [dashboardMenuVisible]);
+  }, [dashboardMenuVisible, instructionMenuVisible]);
 
   const clearDashboardInstructionReturnState = useCallback(() => {
     try {
@@ -181,6 +182,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
 
       clearDashboardInstructionReturnState();
       setDashboardMenuOpen(false);
+      setInstructionMenuOpen(false);
 
       if (!isDashboardActive) {
         return;
@@ -242,28 +244,10 @@ export function AppHeader({ profile }: { profile: Profile }) {
     (command: DashboardLayoutCommand) => {
       triggerDashboardAction(command);
       setDashboardMenuOpen(false);
+      setInstructionMenuOpen(false);
     },
     [triggerDashboardAction],
   );
-
-  const renderNavLink = (link: HeaderNavLink) => {
-    const active = isActivePath(pathname, link.href);
-
-    return (
-      <Link
-        key={link.href}
-        href={link.href}
-        className={cn(
-          "inline-flex items-center rounded-xl border px-4 py-2 text-sm font-semibold transition",
-          active
-            ? "border-cyan-500/55 bg-cyan-500/15 text-cyan-900 shadow-sm dark:text-cyan-100"
-            : "border-slate-300/70 bg-white/70 text-slate-700 hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/65 dark:text-slate-100 dark:hover:border-cyan-500/50 dark:hover:bg-cyan-500/10",
-        )}
-      >
-        {link.label}
-      </Link>
-    );
-  };
 
   const renderDashboardControl = (mobile: boolean) => (
     <div
@@ -297,6 +281,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
             const next = !current;
             if (next) {
               setDashboardMenuPathname(pathname);
+              setInstructionMenuOpen(false);
             }
             return next;
           })
@@ -415,6 +400,105 @@ export function AppHeader({ profile }: { profile: Profile }) {
     </div>
   );
 
+  const renderInstructionControl = (mobile: boolean) => {
+    if (!canCreateInstructions) {
+      return null;
+    }
+
+    if (!canViewArchivedInstructions) {
+      return (
+        <Link
+          href="/instructions/new"
+          onClick={() => {
+            setDashboardMenuOpen(false);
+            setInstructionMenuOpen(false);
+          }}
+          className={cn(
+            "inline-flex items-center rounded-xl border px-4 py-2 text-sm font-semibold transition",
+            isNewInstructionActive
+              ? "border-cyan-500/55 bg-cyan-500/15 text-cyan-900 shadow-sm dark:text-cyan-100"
+              : "border-slate-300/70 bg-white/70 text-slate-700 hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/65 dark:text-slate-100 dark:hover:border-cyan-500/50 dark:hover:bg-cyan-500/10",
+          )}
+        >
+          New Instruction
+        </Link>
+      );
+    }
+
+    return (
+      <div
+        data-instruction-menu-root="true"
+        className={cn("relative inline-flex", mobile ? "max-w-full" : "")}
+      >
+        <Link
+          href="/instructions/new"
+          onClick={() => {
+            setDashboardMenuOpen(false);
+            setInstructionMenuOpen(false);
+          }}
+          className={cn(
+            "inline-flex items-center rounded-l-xl border border-r-0 px-4 py-2 text-sm font-semibold transition",
+            instructionControlActive
+              ? "border-cyan-500/55 bg-cyan-500/15 text-cyan-900 shadow-sm dark:text-cyan-100"
+              : "border-slate-300/70 bg-white/70 text-slate-700 hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/65 dark:text-slate-100 dark:hover:border-cyan-500/50 dark:hover:bg-cyan-500/10",
+          )}
+        >
+          New Instruction
+        </Link>
+
+        <button
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={instructionMenuVisible}
+          aria-label="Open instruction options"
+          onClick={() =>
+            setInstructionMenuOpen((current) => {
+              const next = !current;
+              if (next) {
+                setInstructionMenuPathname(pathname);
+                setDashboardMenuOpen(false);
+              }
+              return next;
+            })
+          }
+          className={cn(
+            "inline-flex items-center rounded-r-xl border px-2.5 py-2 transition",
+            instructionControlActive
+              ? "border-cyan-500/55 bg-cyan-500/15 text-cyan-900 hover:bg-cyan-500/25 dark:text-cyan-100 dark:hover:bg-cyan-500/25"
+              : "border-slate-300/70 bg-white/70 text-slate-700 hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/65 dark:text-slate-100 dark:hover:border-cyan-500/50 dark:hover:bg-cyan-500/10",
+          )}
+        >
+          <ChevronDown
+            size={14}
+            className={cn("transition", instructionMenuVisible ? "rotate-180" : "")}
+          />
+        </button>
+
+        {instructionMenuVisible ? (
+          <div
+            className={cn(
+              "absolute top-[calc(100%+0.5rem)] z-40 grid gap-2 rounded-2xl border border-white/20 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-xl",
+              mobile ? "left-1/2 w-[min(94vw,280px)] -translate-x-1/2" : "left-0 w-[220px]",
+            )}
+          >
+            <Link
+              href="/instructions/archived"
+              onClick={() => setInstructionMenuOpen(false)}
+              className={cn(
+                "inline-flex items-center rounded-xl border px-3 py-2 text-sm font-semibold transition",
+                isArchivedInstructionActive
+                  ? "border-cyan-500/45 bg-cyan-500/20 text-cyan-100"
+                  : "border-white/20 bg-white/10 text-slate-100 hover:bg-white/20",
+              )}
+            >
+              Archived
+            </Link>
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
   return (
     <header className="sticky top-0 z-20 border-b border-white/20 bg-white/75 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/70">
       <div className="mx-auto w-full max-w-7xl px-4 py-3 md:px-8">
@@ -436,14 +520,14 @@ export function AppHeader({ profile }: { profile: Profile }) {
           </Link>
           <nav className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-3 md:flex">
             {renderDashboardControl(false)}
-            {navLinks.map(renderNavLink)}
+            {renderInstructionControl(false)}
           </nav>
           <UserAccountMenu profile={profile} />
         </div>
 
         <nav className="mt-2 flex flex-wrap items-center justify-center gap-2 md:hidden">
           {renderDashboardControl(true)}
-          {navLinks.map(renderNavLink)}
+          {renderInstructionControl(true)}
         </nav>
       </div>
     </header>

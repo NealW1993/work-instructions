@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { createPortal } from "react-dom";
 import { GripVertical } from "lucide-react";
 
+import { InstructionReviewActivityChart } from "@/components/admin/instruction-review-activity-chart";
 import { LocalDateTime } from "@/components/ui/local-date-time";
 import { PinInput } from "@/components/ui/pin-input";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -133,6 +134,7 @@ export function UserAdminPanel() {
   const [reviewWindowUpdatedAt, setReviewWindowUpdatedAt] = useState<string | null>(null);
   const [reviewSettingsBusy, setReviewSettingsBusy] = useState(false);
   const [reviewWindowInputHasError, setReviewWindowInputHasError] = useState(false);
+  const [reviewActivityReloadToken, setReviewActivityReloadToken] = useState(0);
 
   const [newDepartmentName, setNewDepartmentName] = useState("");
   const [newDepartmentNameHasError, setNewDepartmentNameHasError] = useState(false);
@@ -982,7 +984,10 @@ export function UserAdminPanel() {
           <button
             type="button"
             disabled={reviewSettingsBusy}
-            onClick={() => void fetchInstructionReviewSettings()}
+            onClick={() => {
+              void fetchInstructionReviewSettings();
+              setReviewActivityReloadToken((current) => current + 1);
+            }}
             className="rounded-lg border border-slate-300/70 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-100/70 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800/70"
           >
             {reviewSettingsBusy ? "Working..." : "Reload"}
@@ -1030,6 +1035,11 @@ export function UserAdminPanel() {
             </>
           ) : null}
         </p>
+
+        <InstructionReviewActivityChart
+          getAuthHeaders={getAuthHeaders}
+          reloadToken={reviewActivityReloadToken}
+        />
       </div>
 
       <div className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
