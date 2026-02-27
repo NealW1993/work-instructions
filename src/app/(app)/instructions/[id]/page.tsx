@@ -15,6 +15,7 @@ import {
 import { InstructionReviewControls } from "@/components/instructions/instruction-review-controls";
 import { LikeInstructionButton } from "@/components/instructions/like-instruction-button";
 import { PinInstructionButton } from "@/components/instructions/pin-instruction-button";
+import { RestoreArchivedInstructionButton } from "@/components/instructions/restore-archived-instruction-button";
 import {
   type InstructionUpdateEvent,
   type InstructionUpdateSourcePayload,
@@ -693,12 +694,22 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
               Part ID: <strong>{workItem.part_id}</strong> | Department:{" "}
               <strong>{departmentName}</strong> | Revision{" "}
               <strong>{instruction.revision}</strong>
-              <InstructionRevisionHistoryControl
-                currentInstructionId={instruction.id}
-                entries={revisionHistoryEntries}
-                canPromoteArchivedRevision={canPromoteArchivedRevision}
-                hideBaseRevision={instructionIsArchived}
-              />
+              <span className="ml-1 inline-flex items-center gap-1 align-middle">
+                <InstructionRevisionHistoryControl
+                  currentInstructionId={instruction.id}
+                  entries={revisionHistoryEntries}
+                  canPromoteArchivedRevision={canPromoteArchivedRevision}
+                  hideBaseRevision={instructionIsArchived}
+                />
+                {instructionIsArchived && canPromoteArchivedRevision ? (
+                  <RestoreArchivedInstructionButton
+                    instructionId={instruction.id}
+                    revision={instruction.revision}
+                    partId={workItem.part_id}
+                    departmentName={departmentName}
+                  />
+                ) : null}
+              </span>
             </p>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
               Created by {userMap.get(instruction.created_by) ?? "Unknown"} on{" "}

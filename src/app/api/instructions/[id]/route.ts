@@ -58,6 +58,29 @@ async function requireSystemAdmin(request: NextRequest) {
   return { error: null, requester };
 }
 
+async function requireAdminOrSystemAdmin(request: NextRequest) {
+  const requester = await getRequestProfile(request);
+
+  if (!requester) {
+    return {
+      error: NextResponse.json({ error: "Unauthorized." }, { status: 401 }),
+      requester: null,
+    };
+  }
+
+  if (requester.role !== "admin" && requester.role !== "system_admin") {
+    return {
+      error: NextResponse.json(
+        { error: "Only admins and system admins can restore work instructions." },
+        { status: 403 },
+      ),
+      requester,
+    };
+  }
+
+  return { error: null, requester };
+}
+
 function normalizeWorkItemRelation(
   relation: WorkInstructionLookupRecord["work_items"],
 ) {
@@ -170,7 +193,7 @@ export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireSystemAdmin(request);
+  const auth = await requireAdminOrSystemAdmin(request);
   if (auth.error || !auth.requester) {
     return auth.error;
   }
