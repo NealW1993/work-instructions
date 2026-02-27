@@ -1,6 +1,6 @@
 "use client";
 
-import { History, Loader2, RotateCcw } from "lucide-react";
+import { Eye, History, Loader2, RotateCcw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
@@ -41,7 +41,11 @@ export function InstructionRevisionHistoryControl({
   const [menuOpen, setMenuOpen] = useState(false);
   const [busyRevisionId, setBusyRevisionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const oldRevisionEntries = useMemo(
+  const uniqueRevisionCount = useMemo(
+    () => new Set(entries.map((entry) => entry.revision)).size,
+    [entries],
+  );
+  const historyEntries = useMemo(
     () => entries.filter((entry) => entry.isArchived),
     [entries],
   );
@@ -67,7 +71,7 @@ export function InstructionRevisionHistoryControl({
     };
   }, [menuOpen]);
 
-  if (oldRevisionEntries.length === 0) {
+  if (uniqueRevisionCount <= 1 || historyEntries.length === 0) {
     return null;
   }
 
@@ -143,7 +147,7 @@ export function InstructionRevisionHistoryControl({
                 ) : null}
 
                 <div className="grid max-h-[60vh] gap-2 overflow-y-auto pr-1">
-                  {oldRevisionEntries.map((entry) => {
+                  {historyEntries.map((entry) => {
                     const isCurrent = entry.id === currentInstructionId;
 
                     return (
@@ -172,21 +176,20 @@ export function InstructionRevisionHistoryControl({
                         </p>
 
                         <div className="flex flex-wrap justify-end gap-2">
-                          {!isCurrent ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setMenuOpen(false);
-                                router.push(`/instructions/${entry.id}`);
-                                router.refresh();
-                              }}
-                              className="rounded-lg border border-cyan-500/40 bg-cyan-500/15 px-3 py-1.5 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/25"
-                            >
-                              Open Revision
-                            </button>
-                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMenuOpen(false);
+                              router.push(`/instructions/${entry.id}`);
+                              router.refresh();
+                            }}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/15 px-3 py-1.5 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/25"
+                          >
+                            <Eye size={12} />
+                            View Revision
+                          </button>
 
-                          {canPromoteArchivedRevision && entry.isArchived ? (
+                          {canPromoteArchivedRevision && entry.isArchived && !isCurrent ? (
                             <button
                               type="button"
                               disabled={busyRevisionId === entry.id}

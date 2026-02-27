@@ -10,6 +10,23 @@ interface InstructionRecord {
   revision: number;
 }
 
+interface WorkItemRecord {
+  id: string;
+  part_id: string;
+  item_title: string;
+  department_id: string;
+}
+
+interface WorkInstructionLookupRecord {
+  id: string;
+  work_item_id: string;
+  revision: number;
+  work_items:
+    | Pick<WorkItemRecord, "part_id" | "item_title" | "department_id">
+    | Array<Pick<WorkItemRecord, "part_id" | "item_title" | "department_id">>
+    | null;
+}
+
 interface RestoreRequestBody {
   forceSwap?: boolean;
 }
@@ -39,6 +56,24 @@ async function requireSystemAdmin(request: NextRequest) {
   }
 
   return { error: null, requester };
+}
+
+function normalizeWorkItemRelation(
+  relation: WorkInstructionLookupRecord["work_items"],
+) {
+  if (!relation) {
+    return null;
+  }
+
+  if (Array.isArray(relation)) {
+    return relation[0] ?? null;
+  }
+
+  return relation;
+}
+
+function normalizeLookupValue(value: string) {
+  return value.trim().toLowerCase();
 }
 
 export async function DELETE(
@@ -176,24 +211,97 @@ export async function PATCH(
     return NextResponse.json({ success: true, archived: false, restored: true });
   }
 
-  const { data: activeInstructions, error: activeInstructionsError } = await supabaseAdmin
-    .from("work_instructions")
-    .select("id, revision")
-    .eq("work_item_id", instruction.work_item_id)
-    .eq("is_archived", false)
-    .neq("id", instruction.id);
+  const { data: targetWorkItem, error: targetWorkItemError } = await supabaseAdmin
+    .from("work_items")
+    .select("id, part_id, item_title, department_id")
+    .eq("id", instruction.work_item_id)
+    .maybeSingle<WorkItemRecord>();
 
-  if (activeInstructionsError) {
+  if (targetWorkItemError) {
     return NextResponse.json(
-      { error: activeInstructionsError.message },
+      { error: targetWorkItemError.message },
       { status: 500 },
     );
   }
 
-  const activeInstructionRows = (activeInstructions ?? []) as Array<{
+  if (!targetWorkItem) {
+    return NextResponse.json(
+      { error: "Instruction work item was not found." },
+      { status: 404 },
+    );
+  }
+
+  const [
+    { data: activeInstructionsByWorkItem, error: activeInstructionsByWorkItemError },
+    { data: activeInstructionsByPartIdDepartment, error: activeInstructionsByPartIdDepartmentError },
+  ] = await Promise.all([
+    supabaseAdmin
+      .from("work_instructions")
+      .select("id, revision")
+      .eq("work_item_id", instruction.work_item_id)
+      .eq("is_archived", false)
+      .neq("id", instruction.id),
+    supabaseAdmin
+      .from("work_instructions")
+      .select(
+        "id, work_item_id, revision, work_items!inner(part_id, item_title, department_id)",
+      )
+      .eq("is_archived", false)
+      .neq("id", instruction.id)
+      .eq("work_items.department_id", targetWorkItem.department_id),
+  ]);
+
+  if (activeInstructionsByWorkItemError) {
+    return NextResponse.json(
+      { error: activeInstructionsByWorkItemError.message },
+      { status: 500 },
+    );
+  }
+
+  if (activeInstructionsByPartIdDepartmentError) {
+    return NextResponse.json(
+      { error: activeInstructionsByPartIdDepartmentError.message },
+      { status: 500 },
+    );
+  }
+
+  const activeInstructionRowsByWorkItem = (activeInstructionsByWorkItem ?? []) as Array<{
     id: string;
     revision: number;
   }>;
+  const activeInstructionRowsByPartIdDepartment =
+    (activeInstructionsByPartIdDepartment ?? []) as WorkInstructionLookupRecord[];
+  const normalizedTargetPartId = normalizeLookupValue(targetWorkItem.part_id);
+  const normalizedTargetItemTitle = normalizeLookupValue(targetWorkItem.item_title);
+  const matchedLegacyRows = activeInstructionRowsByPartIdDepartment
+    .map((entry) => {
+      const entryWorkItem = normalizeWorkItemRelation(entry.work_items);
+      if (!entryWorkItem) {
+        return null;
+      }
+
+      if (
+        normalizeLookupValue(entryWorkItem.part_id) !== normalizedTargetPartId ||
+        normalizeLookupValue(entryWorkItem.item_title) !== normalizedTargetItemTitle
+      ) {
+        return null;
+      }
+
+      return {
+        id: entry.id,
+        revision: entry.revision,
+      };
+    })
+    .filter((entry): entry is { id: string; revision: number } => entry !== null);
+
+  const activeInstructionById = new Map<string, { id: string; revision: number }>();
+  for (const entry of [...activeInstructionRowsByWorkItem, ...matchedLegacyRows]) {
+    if (!activeInstructionById.has(entry.id)) {
+      activeInstructionById.set(entry.id, entry);
+    }
+  }
+
+  const activeInstructionRows = [...activeInstructionById.values()];
   const activeInstructionIds = activeInstructionRows.map((entry) => entry.id);
 
   if (activeInstructionRows.length > 0 && !forceSwap) {
