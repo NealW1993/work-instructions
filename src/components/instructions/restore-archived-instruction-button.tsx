@@ -111,7 +111,7 @@ export function RestoreArchivedInstructionButton({
 
       {confirmOpen && portalReady
         ? createPortal(
-            <div className="fixed inset-0 z-[126] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm">
+            <div className="dark fixed inset-0 z-[126] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm">
               <div className="grid w-full max-w-md gap-4 rounded-2xl border border-cyan-500/45 bg-slate-950/95 p-5 shadow-2xl">
                 <div className="grid gap-1">
                   <h3 className="text-lg font-bold text-slate-100">Restore Instruction?</h3>
@@ -155,7 +155,7 @@ export function RestoreArchivedInstructionButton({
 
       {conflict && portalReady
         ? createPortal(
-            <div className="fixed inset-0 z-[127] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm">
+            <div className="dark fixed inset-0 z-[127] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm">
               <div className="grid w-full max-w-xl gap-4 rounded-2xl border border-cyan-500/45 bg-slate-950/95 p-5 shadow-2xl">
                 <div className="grid gap-2">
                   <h3 className="text-lg font-bold text-slate-100">

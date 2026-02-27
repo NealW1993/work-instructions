@@ -3688,7 +3688,7 @@ export function DashboardClient({
       activeLikeCelebration &&
       activeLikeCelebration.newLikesCount > 0
         ? createPortal(
-            <div className="fixed inset-0 z-[113] flex items-center justify-center overflow-hidden bg-slate-950/65 p-4 backdrop-blur-sm sm:p-6">
+            <div className="dark fixed inset-0 z-[113] flex items-center justify-center overflow-hidden bg-slate-950/65 p-4 backdrop-blur-sm sm:p-6">
               <div className="pointer-events-none absolute inset-0">
                 {celebrationConfettiPieces.map((piece) => (
                   <span
@@ -3757,7 +3757,7 @@ export function DashboardClient({
 
       {resetDefaultsModalOpen && portalReady
         ? createPortal(
-            <div className="fixed inset-0 z-[114] flex items-center justify-center overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
+            <div className="dark fixed inset-0 z-[114] flex items-center justify-center overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
               <div className="grid w-full max-w-md gap-4 rounded-2xl border border-amber-500/45 bg-slate-950/95 p-5 shadow-2xl">
                 <div className="flex items-start gap-3">
                   <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-amber-500/40 bg-amber-500/15 text-amber-200">
@@ -3800,7 +3800,7 @@ export function DashboardClient({
 
       {navigationModalOpen && portalReady
         ? createPortal(
-            <div className="fixed inset-0 z-[111] flex items-center justify-center overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
+            <div className="dark fixed inset-0 z-[111] flex items-center justify-center overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
               <div className="grid w-full max-w-md gap-4 rounded-2xl border border-amber-500/45 bg-slate-950/95 p-5 shadow-2xl">
                 <div className="grid gap-1">
                   <h3 className="text-lg font-bold text-slate-100">
@@ -3836,7 +3836,7 @@ export function DashboardClient({
 
       {activeImpactDrilldown && portalReady
         ? createPortal(
-            <div className="fixed inset-0 z-[112] flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm sm:p-6">
+            <div className="dark fixed inset-0 z-[112] flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm sm:p-6">
               <div className="grid w-full max-w-2xl gap-4 rounded-2xl border border-cyan-500/35 bg-slate-950/95 p-5 shadow-2xl">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -3885,7 +3885,7 @@ export function DashboardClient({
 
       {activeDepartmentDrilldown && portalReady
         ? createPortal(
-            <div className="fixed inset-0 z-[112] flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm sm:p-6">
+            <div className="dark fixed inset-0 z-[112] flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm sm:p-6">
               <div className="grid w-full max-w-2xl gap-4 rounded-2xl border border-cyan-500/35 bg-slate-950/95 p-5 shadow-2xl">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>

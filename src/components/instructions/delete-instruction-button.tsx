@@ -89,7 +89,7 @@ export function DeleteInstructionButton({
 
       {confirmOpen && portalReady
         ? createPortal(
-            <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-slate-950/70 p-4 backdrop-blur-sm sm:p-6">
+            <div className="dark fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-slate-950/70 p-4 backdrop-blur-sm sm:p-6">
               <div className="grid w-full max-w-md gap-4 rounded-2xl border border-rose-500/30 bg-slate-950/95 p-5 shadow-2xl max-h-[calc(100vh-2rem)] overflow-y-auto">
                 <div className="grid gap-1">
                   <h3 className="text-lg font-bold text-slate-100">Archive Instruction?</h3>

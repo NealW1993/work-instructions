@@ -1646,7 +1646,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
       {revisionConflictModal && portalReady
         ? createPortal(
-            <div className="fixed inset-0 z-[112] flex items-center justify-center overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
+            <div className="dark fixed inset-0 z-[112] flex items-center justify-center overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
               <div className="grid w-full max-w-lg gap-4 rounded-2xl border border-cyan-500/45 bg-slate-950/95 p-5 shadow-2xl">
                 <div className="grid gap-2">
                   <h3 className="text-lg font-bold text-slate-100">
@@ -1713,7 +1713,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
       {navigationModalOpen && portalReady
         ? createPortal(
-            <div className="fixed inset-0 z-[111] flex items-center justify-center overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
+            <div className="dark fixed inset-0 z-[111] flex items-center justify-center overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
               <div className="grid w-full max-w-md gap-4 rounded-2xl border border-amber-500/45 bg-slate-950/95 p-5 shadow-2xl">
                 <div className="grid gap-1">
                   <h3 className="text-lg font-bold text-slate-100">Discard unsaved changes?</h3>
@@ -1747,7 +1747,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
       {forkCanceledModalOpen && portalReady
         ? createPortal(
-            <div className="fixed inset-0 z-[110] flex items-center justify-center overflow-y-auto bg-slate-950/70 p-4 backdrop-blur-sm sm:p-6">
+            <div className="dark fixed inset-0 z-[110] flex items-center justify-center overflow-y-auto bg-slate-950/70 p-4 backdrop-blur-sm sm:p-6">
               <div className="grid w-full max-w-md gap-4 rounded-2xl border border-cyan-500/35 bg-slate-950/95 p-5 shadow-2xl max-h-[calc(100vh-2rem)] overflow-y-auto">
                 <div className="grid gap-1">
                   <h3 className="text-lg font-bold text-slate-100">Fork canceled</h3>

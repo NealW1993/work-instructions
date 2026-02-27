@@ -1545,7 +1545,7 @@ export function UserAdminPanel() {
 
       {confirmDialog && portalReady
         ? createPortal(
-            <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+            <div className="dark fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
               <div className="grid w-full max-w-md gap-4 rounded-2xl border border-rose-500/40 bg-slate-950/95 p-5 shadow-2xl">
                 <div className="grid gap-1">
                   <h3 className="text-lg font-bold text-slate-100">{confirmDialog.title}</h3>

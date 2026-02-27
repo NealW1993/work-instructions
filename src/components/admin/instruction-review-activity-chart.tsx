@@ -742,7 +742,7 @@ export function InstructionReviewActivityChart({
       {portalReady && isModalOpen
         ? createPortal(
             <div
-              className="fixed inset-0 z-[121] overflow-y-auto bg-slate-950/80 backdrop-blur-sm"
+              className="dark fixed inset-0 z-[121] overflow-y-auto bg-slate-950/80 backdrop-blur-sm"
               role="presentation"
             >
               <div
