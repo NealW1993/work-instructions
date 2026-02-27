@@ -275,7 +275,7 @@ export function InstructionReviewControls({
           ? "Review timing is unavailable."
           : daysUntilDue === 0
             ? "Review check is due today."
-            : `Next review check in ${daysUntilDue} day${daysUntilDue === 1 ? "" : "s"}.`;
+            : null;
 
   const nextReviewCheckLabel =
     daysUntilDue === null
@@ -375,7 +375,9 @@ export function InstructionReviewControls({
             ) : null}
           </div>
 
-          <p className="text-[11px] font-semibold text-slate-300">{statusSummary}</p>
+          {statusSummary ? (
+            <p className="text-[11px] font-semibold text-slate-300">{statusSummary}</p>
+          ) : null}
           {message ? (
             <p className="text-[11px] font-semibold text-emerald-300">{message}</p>
           ) : null}

@@ -41,6 +41,9 @@ interface ReviewMonthBucket {
   monthIndex: number;
   shortLabel: string;
   longLabel: string;
+  needsReviewCount: number;
+  upToDateCount: number;
+  totalCount: number;
   events: ReviewActivityEvent[];
 }
 
@@ -146,11 +149,22 @@ function formatUtcMonthDayLabel(date: Date) {
   return `${month} ${date.getUTCDate()}`;
 }
 
+function getSeriesBarHeight(count: number, maxCount: number) {
+  if (count <= 0 || maxCount <= 0) {
+    return 2;
+  }
+
+  return Math.max((count / maxCount) * 100, 7);
+}
+
 function buildMonthBuckets(events: ReviewActivityEvent[]) {
   const monthBuckets: ReviewMonthBucket[] = MONTH_SHORT_LABELS.map((shortLabel, monthIndex) => ({
     monthIndex,
     shortLabel,
     longLabel: MONTH_LONG_LABELS[monthIndex] ?? shortLabel,
+    needsReviewCount: 0,
+    upToDateCount: 0,
+    totalCount: 0,
     events: [],
   }));
 
@@ -163,6 +177,12 @@ function buildMonthBuckets(events: ReviewActivityEvent[]) {
     const monthBucket = monthBuckets[occurredAt.getUTCMonth()];
     if (monthBucket) {
       monthBucket.events.push(event);
+      monthBucket.totalCount += 1;
+      if (event.nextStatus === "needs_review") {
+        monthBucket.needsReviewCount += 1;
+      } else {
+        monthBucket.upToDateCount += 1;
+      }
     }
   }
 
@@ -315,14 +335,27 @@ export function InstructionReviewActivityChart({
     return events.filter((event) => event.nextStatus === statusFilter);
   }, [events, statusFilter]);
 
-  const monthBuckets = useMemo(() => buildMonthBuckets(filteredEvents), [filteredEvents]);
+  const monthBuckets = useMemo(() => buildMonthBuckets(events), [events]);
+  const filteredMonthBuckets = useMemo(
+    () => buildMonthBuckets(filteredEvents),
+    [filteredEvents],
+  );
 
   const maxMonthlyCount = useMemo(() => {
-    const monthlyCounts = monthBuckets.map((monthBucket) => monthBucket.events.length);
+    const monthlyCounts = monthBuckets.flatMap((monthBucket) => [
+      monthBucket.needsReviewCount,
+      monthBucket.upToDateCount,
+    ]);
     return monthlyCounts.length > 0 ? Math.max(...monthlyCounts, 1) : 1;
   }, [monthBuckets]);
 
-  const selectedMonth = monthBuckets[selectedMonthIndex];
+  const totalNeedsReviewEvents = useMemo(
+    () => events.filter((event) => event.nextStatus === "needs_review").length,
+    [events],
+  );
+  const totalUpToDateEvents = events.length - totalNeedsReviewEvents;
+  const selectedMonth = filteredMonthBuckets[selectedMonthIndex];
+  const selectedMonthAllStates = monthBuckets[selectedMonthIndex];
   const selectedMonthEvents = useMemo(() => selectedMonth?.events ?? [], [selectedMonth]);
   const weekBuckets = useMemo(
     () => buildWeekBuckets(selectedMonthEvents),
@@ -413,73 +446,123 @@ export function InstructionReviewActivityChart({
         </p>
       ) : null}
 
-      <div className="rounded-xl border border-slate-300/70 bg-white/70 p-2 dark:border-slate-700 dark:bg-slate-900/55">
+      <div className="rounded-xl border border-slate-300/70 bg-white/70 p-2.5 dark:border-slate-700 dark:bg-slate-900/55">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="inline-flex flex-wrap items-center gap-3 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-sm bg-gradient-to-t from-amber-600 to-amber-400" />
+              Needs Review
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-sm bg-gradient-to-t from-emerald-600 to-cyan-400" />
+              Up To Date
+            </span>
+          </div>
+          <p className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            Clustered monthly view
+          </p>
+        </div>
+
         <div
           className={cn(
-            "grid grid-cols-12 gap-1",
-            expanded ? "h-56" : "h-24",
+            "relative overflow-hidden rounded-lg border border-slate-300/70 bg-white/75 dark:border-slate-700 dark:bg-slate-950/40",
+            expanded ? "h-60" : "h-28",
           )}
         >
-          {monthBuckets.map((monthBucket) => {
-            const monthEventCount = monthBucket.events.length;
-            const barHeight = monthEventCount > 0 ? (monthEventCount / maxMonthlyCount) * 100 : 0;
-            const isSelected = selectedMonthIndex === monthBucket.monthIndex;
+          <div className="pointer-events-none absolute inset-0 grid grid-rows-4">
+            <span className="border-b border-dashed border-slate-300/70 dark:border-slate-700/70" />
+            <span className="border-b border-dashed border-slate-300/70 dark:border-slate-700/70" />
+            <span className="border-b border-dashed border-slate-300/70 dark:border-slate-700/70" />
+            <span className="border-b border-slate-300/70 dark:border-slate-700/70" />
+          </div>
 
-            return (
-              <button
-                key={monthBucket.shortLabel}
-                type="button"
-                onClick={() => {
-                  setSelectedMonthIndex(monthBucket.monthIndex);
-                  if (!expanded) {
-                    setIsModalOpen(true);
-                  }
-                }}
-                className={cn(
-                  "group flex min-w-0 flex-col items-center justify-end rounded-md px-0.5 pb-1 pt-1 outline-none transition focus-visible:ring-2 focus-visible:ring-cyan-500/70",
-                  isSelected
-                    ? "bg-cyan-500/15 ring-1 ring-cyan-500/45"
-                    : "hover:bg-cyan-500/10",
-                )}
-                title={`${monthBucket.longLabel}: ${monthEventCount} review event${monthEventCount === 1 ? "" : "s"}`}
-              >
-                <span
-                  className={cn(
-                    "w-full rounded-sm transition",
-                    isSelected
-                      ? "bg-gradient-to-t from-cyan-500 to-blue-500"
-                      : "bg-slate-500/60 group-hover:bg-cyan-500/80",
-                  )}
-                  style={{
-                    height: `${Math.max(monthEventCount > 0 ? barHeight : 0, monthEventCount > 0 ? 6 : 2)}%`,
+          <div className="relative z-10 grid h-full grid-cols-12 gap-1 px-1.5 pb-1 pt-2">
+            {monthBuckets.map((monthBucket) => {
+              const isSelected = selectedMonthIndex === monthBucket.monthIndex;
+              const filteredMonthBucket = filteredMonthBuckets[monthBucket.monthIndex];
+              const filteredMonthEventCount = filteredMonthBucket?.totalCount ?? 0;
+              const needsReviewBarHeight = getSeriesBarHeight(
+                monthBucket.needsReviewCount,
+                maxMonthlyCount,
+              );
+              const upToDateBarHeight = getSeriesBarHeight(
+                monthBucket.upToDateCount,
+                maxMonthlyCount,
+              );
+              const dimNeedsSeries = statusFilter === "up_to_date";
+              const dimUpToDateSeries = statusFilter === "needs_review";
+
+              return (
+                <button
+                  key={monthBucket.shortLabel}
+                  type="button"
+                  onClick={() => {
+                    setSelectedMonthIndex(monthBucket.monthIndex);
+                    if (!expanded) {
+                      setIsModalOpen(true);
+                    }
                   }}
-                />
-                <span
                   className={cn(
-                    "mt-1 text-[10px] font-semibold",
+                    "group flex min-w-0 flex-col items-center justify-end rounded-md px-0.5 pb-1 pt-1 outline-none transition focus-visible:ring-2 focus-visible:ring-cyan-500/70",
                     isSelected
-                      ? "text-cyan-700 dark:text-cyan-200"
-                      : "text-slate-600 dark:text-slate-300",
+                      ? "bg-cyan-500/15 ring-1 ring-cyan-500/45"
+                      : "hover:bg-cyan-500/10",
                   )}
+                  title={`${monthBucket.longLabel}: Needs Review ${monthBucket.needsReviewCount}, Up To Date ${monthBucket.upToDateCount}, Current filter ${filteredMonthEventCount}`}
                 >
-                  {monthBucket.shortLabel}
-                </span>
-              </button>
-            );
-          })}
+                  <div className="flex h-full w-full items-end justify-center gap-[3px]">
+                    <span
+                      className={cn(
+                        "w-[42%] rounded-t-[4px] border border-amber-300/25 transition",
+                        isSelected
+                          ? "bg-gradient-to-t from-amber-700 to-amber-500"
+                          : "bg-amber-500/70 group-hover:bg-amber-400/90",
+                        dimNeedsSeries ? "opacity-30" : "opacity-100",
+                      )}
+                      style={{ height: `${needsReviewBarHeight}%` }}
+                    />
+                    <span
+                      className={cn(
+                        "w-[42%] rounded-t-[4px] border border-emerald-300/25 transition",
+                        isSelected
+                          ? "bg-gradient-to-t from-emerald-700 to-cyan-500"
+                          : "bg-cyan-500/70 group-hover:bg-cyan-400/90",
+                        dimUpToDateSeries ? "opacity-30" : "opacity-100",
+                      )}
+                      style={{ height: `${upToDateBarHeight}%` }}
+                    />
+                  </div>
+                  <span
+                    className={cn(
+                      "mt-1 text-[10px] font-semibold leading-none",
+                      isSelected
+                        ? "text-cyan-700 dark:text-cyan-200"
+                        : "text-slate-600 dark:text-slate-300",
+                    )}
+                  >
+                    {monthBucket.shortLabel}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
       <p className="text-xs text-slate-500 dark:text-slate-400">
-        {filteredEvents.length} review event{filteredEvents.length === 1 ? "" : "s"} for {selectedYear}.
-        Click a month bar to open weekly drill-down details.
+        {events.length} review event{events.length === 1 ? "" : "s"} for {selectedYear}
+        {" "}(
+        {totalNeedsReviewEvents} Needs Review, {totalUpToDateEvents} Up To Date).{" "}
+        {filteredEvents.length} event{filteredEvents.length === 1 ? "" : "s"} match the active
+        filter.
       </p>
 
       <div className="grid gap-2 rounded-xl border border-slate-300/70 bg-white/60 p-3 dark:border-slate-700 dark:bg-slate-900/45">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-            {selectedMonth?.longLabel ?? "Month"}: {totalMonthEvents} review event
+            {selectedMonthAllStates?.longLabel ?? "Month"}: {totalMonthEvents} review event
             {totalMonthEvents === 1 ? "" : "s"}
+            {statusFilter === "all" ? "" : ` (${getReviewStatusLabel(statusFilter)})`}
           </h3>
           {selectedWeekKey ? (
             <p className="text-xs text-slate-500 dark:text-slate-300">
@@ -528,8 +611,8 @@ export function InstructionReviewActivityChart({
             ) : (
               <div
                 className={cn(
-                  "grid gap-1 overflow-y-auto pr-1",
-                  expanded ? "max-h-[34rem]" : "max-h-52",
+                  "grid gap-1 pr-1",
+                  expanded ? "" : "max-h-52 overflow-y-auto",
                 )}
               >
                 {(expanded ? selectedWeekEvents : compactVisibleWeekEvents).map((event) => (
@@ -607,36 +690,42 @@ export function InstructionReviewActivityChart({
       {portalReady && isModalOpen
         ? createPortal(
             <div
-              className="fixed inset-0 z-[121] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm sm:p-6"
+              className="fixed inset-0 z-[121] overflow-y-auto bg-slate-950/80 backdrop-blur-sm"
               role="presentation"
-              onClick={() => setIsModalOpen(false)}
             >
               <div
-                className="grid max-h-[90dvh] w-full max-w-6xl gap-4 overflow-hidden rounded-2xl border border-cyan-500/35 bg-slate-950/95 p-4 shadow-2xl sm:p-5"
-                role="dialog"
-                aria-modal="true"
-                aria-label="Instruction review activity chart"
-                onClick={(event) => event.stopPropagation()}
+                className="flex min-h-full items-center justify-center p-4 sm:p-6"
+                onClick={() => setIsModalOpen(false)}
               >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h3 className="text-lg font-bold text-slate-100">
-                      Instruction Review Activity
-                    </h3>
-                    <p className="text-sm text-slate-300">
-                      Monthly review counts with week and instruction-level drill-down.
-                    </p>
+                <div
+                  className="flex max-h-[92dvh] w-full max-w-6xl min-h-0 flex-col gap-4 overflow-hidden rounded-2xl border border-cyan-500/35 bg-slate-950/95 p-4 shadow-2xl sm:p-5"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label="Instruction review activity chart"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-100">
+                        Instruction Review Activity
+                      </h3>
+                      <p className="text-sm text-slate-300">
+                        Monthly review counts with week and instruction-level drill-down.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsModalOpen(false)}
+                      className="rounded-xl border border-slate-600 bg-slate-900/70 px-3 py-1.5 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
+                    >
+                      Close
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsModalOpen(false)}
-                    className="rounded-xl border border-slate-600 bg-slate-900/70 px-3 py-1.5 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
-                  >
-                    Close
-                  </button>
-                </div>
 
-                <div className="min-h-0 overflow-y-auto pr-1">{renderExplorer(true)}</div>
+                  <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
+                    {renderExplorer(true)}
+                  </div>
+                </div>
               </div>
             </div>,
             document.body,
