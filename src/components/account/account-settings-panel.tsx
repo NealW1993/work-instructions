@@ -16,7 +16,10 @@ import { PinInput } from "@/components/ui/pin-input";
 import {
   ensureSessionStartTime,
   formatElapsedHhMmSs,
+  getSessionStartTime,
+  setSessionStartTime,
 } from "@/lib/session-timer";
+import { useSynchronizedNowMs } from "@/lib/second-ticker";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import type { ThemePreference } from "@/lib/types";
 
@@ -77,6 +80,16 @@ interface AccountSettingsPanelProps {
   initialThemePreference: ThemePreference;
   initialIconColor: string;
   initialTotalSignedInSeconds: number;
+  initialActiveSessionStartedAt: string | null;
+}
+
+function toTimestampMs(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 export function AccountSettingsPanel({
@@ -86,6 +99,7 @@ export function AccountSettingsPanel({
   initialThemePreference,
   initialIconColor,
   initialTotalSignedInSeconds,
+  initialActiveSessionStartedAt,
 }: AccountSettingsPanelProps) {
   const router = useRouter();
   const { setTheme } = useTheme();
@@ -110,9 +124,13 @@ export function AccountSettingsPanel({
   const [wantsPinChange, setWantsPinChange] = useState(false);
   const [pin, setPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
-  const [totalSignedInLabel, setTotalSignedInLabel] = useState(() =>
-    formatElapsedHhMmSs(Math.max(0, initialTotalSignedInSeconds) * 1000),
+  const synchronizedNowMs = useSynchronizedNowMs();
+  const serverSessionStartMs = useMemo(
+    () => toTimestampMs(initialActiveSessionStartedAt),
+    [initialActiveSessionStartedAt],
   );
+  const localSessionStartMs = getSessionStartTime();
+  const sessionStartedAtMs = serverSessionStartMs ?? localSessionStartMs;
 
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -144,6 +162,12 @@ export function AccountSettingsPanel({
     iconColorChanged ||
     pinChanged;
   const iconInitials = getInitials(normalizedFullName || savedFullName);
+  const totalSignedInLabel = useMemo(() => {
+    const baseMs = Math.max(0, initialTotalSignedInSeconds) * 1000;
+    const liveSessionMs =
+      sessionStartedAtMs !== null ? Math.max(0, synchronizedNowMs - sessionStartedAtMs) : 0;
+    return formatElapsedHhMmSs(baseMs + liveSessionMs);
+  }, [initialTotalSignedInSeconds, sessionStartedAtMs, synchronizedNowMs]);
 
   const releaseHistoryGuard = useCallback(() => {
     if (!historyGuardActiveRef.current) {
@@ -183,21 +207,13 @@ export function AccountSettingsPanel({
   }, [navigationModalOpen]);
 
   useEffect(() => {
-    const startedAt = ensureSessionStartTime();
-    const baseMs = Math.max(0, initialTotalSignedInSeconds) * 1000;
+    if (serverSessionStartMs !== null) {
+      setSessionStartTime(serverSessionStartMs);
+      return;
+    }
 
-    const updateTotalTime = () => {
-      const elapsedMs = Math.max(0, Date.now() - startedAt);
-      setTotalSignedInLabel(formatElapsedHhMmSs(baseMs + elapsedMs));
-    };
-
-    updateTotalTime();
-    const timer = window.setInterval(updateTotalTime, 1000);
-
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [initialTotalSignedInSeconds]);
+    ensureSessionStartTime();
+  }, [serverSessionStartMs]);
 
   useEffect(() => {
     if (!hasChanges) {

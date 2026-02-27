@@ -12,7 +12,9 @@ import {
   ensureSessionStartTime,
   formatElapsedHhMmSs,
   getSessionStartTime,
+  setSessionStartTime,
 } from "@/lib/session-timer";
+import { useSynchronizedNowMs } from "@/lib/second-ticker";
 import type { Profile } from "@/lib/types";
 import { persistActiveThemePreference } from "@/lib/theme-client";
 
@@ -49,16 +51,38 @@ function getInitials(value: string) {
   return `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase();
 }
 
+function toTimestampMs(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 export function UserAccountMenu({ profile }: UserAccountMenuProps) {
   const router = useRouter();
   const posthog = usePostHog();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
-  const [sessionElapsedLabel, setSessionElapsedLabel] = useState("00:00:00");
+  const synchronizedNowMs = useSynchronizedNowMs();
+  const serverSessionStartMs = useMemo(
+    () => toTimestampMs(profile.active_session_started_at),
+    [profile.active_session_started_at],
+  );
+  const localSessionStartMs = getSessionStartTime();
+  const sessionStartedAtMs = serverSessionStartMs ?? localSessionStartMs;
 
   const initials = useMemo(() => getInitials(profile.full_name), [profile.full_name]);
   const iconColor = useMemo(() => resolveIconColor(profile.icon_color), [profile.icon_color]);
+  const sessionElapsedLabel = useMemo(() => {
+    if (sessionStartedAtMs === null) {
+      return "00:00:00";
+    }
+
+    return formatElapsedHhMmSs(Math.max(0, synchronizedNowMs - sessionStartedAtMs));
+  }, [sessionStartedAtMs, synchronizedNowMs]);
 
   const touchServerSession = useCallback(
     async (endSession: boolean) => {
@@ -100,19 +124,13 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
   }, []);
 
   useEffect(() => {
-    const startedAt = ensureSessionStartTime();
+    if (serverSessionStartMs !== null) {
+      setSessionStartTime(serverSessionStartMs);
+      return;
+    }
 
-    const updateElapsed = () => {
-      setSessionElapsedLabel(formatElapsedHhMmSs(Date.now() - startedAt));
-    };
-
-    updateElapsed();
-    const timer = window.setInterval(updateElapsed, 1000);
-
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, []);
+    ensureSessionStartTime();
+  }, [serverSessionStartMs]);
 
   useEffect(() => {
     let cancelled = false;

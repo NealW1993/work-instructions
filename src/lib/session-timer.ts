@@ -14,11 +14,20 @@ function parseSessionStart(rawValue: string | null) {
 }
 
 export function setSessionStartNow() {
+  setSessionStartTime(Date.now());
+}
+
+export function setSessionStartTime(value: number) {
   if (typeof window === "undefined") {
     return;
   }
 
-  window.localStorage.setItem(SESSION_START_KEY, String(Date.now()));
+  const normalized = Math.floor(value);
+  if (!Number.isFinite(normalized) || normalized <= 0) {
+    return;
+  }
+
+  window.localStorage.setItem(SESSION_START_KEY, String(normalized));
 }
 
 export function clearSessionStart() {
