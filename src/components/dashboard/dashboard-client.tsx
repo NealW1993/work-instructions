@@ -2538,7 +2538,7 @@ export function DashboardClient({
               )}
             >
               <span>
-                Total ({totalDepartmentCount}/{totalInstructionCount})
+                Show Departments ({totalDepartmentCount}/{totalInstructionCount})
               </span>
               <ChevronRight
                 size={13}

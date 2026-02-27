@@ -43,8 +43,9 @@ interface InstructionRecord {
   created_by: string;
   updated_by: string;
   work_items:
-    | {
+      | {
         id: string;
+        department_id: string;
         part_id: string;
         item_title: string;
         departments:
@@ -56,8 +57,9 @@ interface InstructionRecord {
             }>
           | null;
       }
-    | Array<{
+      | Array<{
         id: string;
+        department_id: string;
         part_id: string;
         item_title: string;
         departments:
@@ -89,6 +91,21 @@ interface InstructionRevisionHistoryRow {
   created_at: string;
   updated_at: string;
   updated_by: string;
+}
+
+interface InstructionRevisionHistoryLookupRow extends InstructionRevisionHistoryRow {
+  work_items:
+    | {
+        part_id: string;
+        item_title: string;
+        department_id: string;
+      }
+    | Array<{
+        part_id: string;
+        item_title: string;
+        department_id: string;
+      }>
+    | null;
 }
 
 interface InstructionReviewSettingsRow {
@@ -245,6 +262,29 @@ function getDepartmentName(
   return relation.name;
 }
 
+function normalizeLookupValue(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function normalizeRevisionHistoryLookupWorkItem(
+  relation: InstructionRevisionHistoryLookupRow["work_items"],
+) {
+  if (!relation) {
+    return null;
+  }
+
+  if (Array.isArray(relation)) {
+    return relation[0] ?? null;
+  }
+
+  return relation;
+}
+
+function revisionHistoryRowSortValue(row: InstructionRevisionHistoryRow) {
+  const updatedAtValue = Date.parse(row.updated_at);
+  return Number.isFinite(updatedAtValue) ? updatedAtValue : 0;
+}
+
 function renderInstructionContent(value: string) {
   if (!value.trim()) {
     return null;
@@ -340,7 +380,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, work_item_id, is_archived, body_markdown, last_change_summary, revision, created_at, updated_at, created_by, updated_by, work_items(id, part_id, item_title, departments(name)), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
+      "id, work_item_id, is_archived, body_markdown, last_change_summary, revision, created_at, updated_at, created_by, updated_by, work_items(id, department_id, part_id, item_title, departments(name)), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -361,19 +401,99 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
     notFound();
   }
 
-  const { data: revisionHistoryData, error: revisionHistoryError } = await supabase
-    .from("work_instructions")
-    .select("id, revision, is_archived, created_at, updated_at, updated_by")
-    .eq("work_item_id", instruction.work_item_id)
-    .order("revision", { ascending: false })
-    .order("updated_at", { ascending: false });
+  const [
+    { data: revisionHistoryByWorkItemData, error: revisionHistoryByWorkItemError },
+    { data: revisionHistoryByPartAndDepartmentData, error: revisionHistoryByPartAndDepartmentError },
+  ] = await Promise.all([
+    supabase
+      .from("work_instructions")
+      .select("id, revision, is_archived, created_at, updated_at, updated_by")
+      .eq("work_item_id", instruction.work_item_id)
+      .order("revision", { ascending: false })
+      .order("updated_at", { ascending: false }),
+    supabase
+      .from("work_instructions")
+      .select(
+        "id, revision, is_archived, created_at, updated_at, updated_by, work_items!inner(part_id, item_title, department_id)",
+      )
+      .eq("work_items.department_id", workItem.department_id),
+  ]);
 
-  if (revisionHistoryError) {
-    throw new Error(revisionHistoryError.message);
+  if (revisionHistoryByWorkItemError) {
+    throw new Error(revisionHistoryByWorkItemError.message);
   }
 
-  const revisionHistoryRows =
-    (revisionHistoryData ?? []) as InstructionRevisionHistoryRow[];
+  if (revisionHistoryByPartAndDepartmentError) {
+    throw new Error(revisionHistoryByPartAndDepartmentError.message);
+  }
+
+  const normalizedWorkItemPartId = normalizeLookupValue(workItem.part_id);
+  const normalizedWorkItemItemTitle = normalizeLookupValue(workItem.item_title);
+  const revisionHistoryRowsByWorkItem =
+    (revisionHistoryByWorkItemData ?? []) as InstructionRevisionHistoryRow[];
+  const revisionHistoryRowsByPartAndDepartment =
+    (revisionHistoryByPartAndDepartmentData ?? []) as InstructionRevisionHistoryLookupRow[];
+
+  const revisionHistoryById = new Map<string, InstructionRevisionHistoryRow>();
+  for (const row of revisionHistoryRowsByWorkItem) {
+    revisionHistoryById.set(row.id, row);
+  }
+
+  for (const row of revisionHistoryRowsByPartAndDepartment) {
+    const rowWorkItem = normalizeRevisionHistoryLookupWorkItem(row.work_items);
+    if (!rowWorkItem) {
+      continue;
+    }
+
+    if (
+      normalizeLookupValue(rowWorkItem.part_id) !== normalizedWorkItemPartId ||
+      normalizeLookupValue(rowWorkItem.item_title) !== normalizedWorkItemItemTitle
+    ) {
+      continue;
+    }
+
+    revisionHistoryById.set(row.id, {
+      id: row.id,
+      revision: row.revision,
+      is_archived: row.is_archived,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      updated_by: row.updated_by,
+    });
+  }
+
+  const revisionHistoryRows = [...revisionHistoryById.values()].sort((first, second) => {
+    if (second.revision !== first.revision) {
+      return second.revision - first.revision;
+    }
+
+    if (first.is_archived !== second.is_archived) {
+      return Number(first.is_archived) - Number(second.is_archived);
+    }
+
+    return revisionHistoryRowSortValue(second) - revisionHistoryRowSortValue(first);
+  });
+
+  const dedupedRevisionHistoryRowsByRevision = new Map<number, InstructionRevisionHistoryRow>();
+  for (const row of revisionHistoryRows) {
+    if (!dedupedRevisionHistoryRowsByRevision.has(row.revision)) {
+      dedupedRevisionHistoryRowsByRevision.set(row.revision, row);
+    }
+  }
+
+  const dedupedRevisionHistoryRows = [...dedupedRevisionHistoryRowsByRevision.values()].sort(
+    (first, second) => {
+      if (second.revision !== first.revision) {
+        return second.revision - first.revision;
+      }
+
+      if (first.is_archived !== second.is_archived) {
+        return Number(first.is_archived) - Number(second.is_archived);
+      }
+
+      return revisionHistoryRowSortValue(second) - revisionHistoryRowSortValue(first);
+    },
+  );
 
   const { data: instructionChangeEventsData } = await supabase
     .from("instruction_change_events")
@@ -386,7 +506,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
     (instructionChangeEventsData ?? []) as InstructionChangeEventRow[];
 
   const profileIds = new Set<string>([instruction.created_by, instruction.updated_by]);
-  for (const revisionHistoryRow of revisionHistoryRows) {
+  for (const revisionHistoryRow of dedupedRevisionHistoryRows) {
     profileIds.add(revisionHistoryRow.updated_by);
   }
   for (const changeEvent of rawInstructionChangeEvents) {
@@ -403,16 +523,15 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
       : { data: null };
 
   const userMap = new Map((users ?? []).map((entry) => [entry.id, entry.full_name]));
-  const revisionHistoryEntries: InstructionRevisionHistoryEntry[] = revisionHistoryRows.map(
-    (entry) => ({
+  const revisionHistoryEntries: InstructionRevisionHistoryEntry[] =
+    dedupedRevisionHistoryRows.map((entry) => ({
       id: entry.id,
       revision: entry.revision,
       isArchived: entry.is_archived,
       createdAt: entry.created_at,
       updatedAt: entry.updated_at,
       updatedByName: userMap.get(entry.updated_by) ?? "Unknown",
-    }),
-  );
+    }));
 
   const instructionUpdateEvents: InstructionUpdateEvent[] =
     rawInstructionChangeEvents.length > 0
@@ -578,6 +697,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
                 currentInstructionId={instruction.id}
                 entries={revisionHistoryEntries}
                 canPromoteArchivedRevision={canPromoteArchivedRevision}
+                hideBaseRevision={instructionIsArchived}
               />
             </p>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">

@@ -21,6 +21,7 @@ interface InstructionRevisionHistoryControlProps {
   currentInstructionId: string;
   entries: InstructionRevisionHistoryEntry[];
   canPromoteArchivedRevision: boolean;
+  hideBaseRevision?: boolean;
 }
 
 interface PromoteInstructionResponse {
@@ -34,6 +35,7 @@ export function InstructionRevisionHistoryControl({
   currentInstructionId,
   entries,
   canPromoteArchivedRevision,
+  hideBaseRevision = false,
 }: InstructionRevisionHistoryControlProps) {
   const router = useRouter();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
@@ -45,10 +47,57 @@ export function InstructionRevisionHistoryControl({
     () => new Set(entries.map((entry) => entry.revision)).size,
     [entries],
   );
-  const historyEntries = useMemo(
-    () => entries.filter((entry) => entry.isArchived),
-    [entries],
+  const visibleEntries = useMemo(
+    () =>
+      entries
+        .filter((entry) => (hideBaseRevision ? entry.revision > 1 : true))
+        .sort((first, second) => {
+          if (second.revision !== first.revision) {
+            return second.revision - first.revision;
+          }
+
+          if (first.isArchived !== second.isArchived) {
+            return Number(first.isArchived) - Number(second.isArchived);
+          }
+
+          const firstUpdatedAt = Date.parse(first.updatedAt);
+          const secondUpdatedAt = Date.parse(second.updatedAt);
+          if (Number.isFinite(firstUpdatedAt) && Number.isFinite(secondUpdatedAt)) {
+            return secondUpdatedAt - firstUpdatedAt;
+          }
+
+          return 0;
+        }),
+    [entries, hideBaseRevision],
   );
+  const activeEntryId = useMemo(() => {
+    const activeEntries = visibleEntries.filter((entry) => !entry.isArchived);
+    if (activeEntries.length > 0) {
+      return activeEntries[0]?.id ?? null;
+    }
+
+    const activeEntriesFromAllRevisions = entries
+      .filter((entry) => !entry.isArchived)
+      .sort((first, second) => {
+        if (second.revision !== first.revision) {
+          return second.revision - first.revision;
+        }
+
+        const firstUpdatedAt = Date.parse(first.updatedAt);
+        const secondUpdatedAt = Date.parse(second.updatedAt);
+        if (Number.isFinite(firstUpdatedAt) && Number.isFinite(secondUpdatedAt)) {
+          return secondUpdatedAt - firstUpdatedAt;
+        }
+
+        return 0;
+      });
+
+    if (activeEntriesFromAllRevisions.length > 0) {
+      return activeEntriesFromAllRevisions[0]?.id ?? null;
+    }
+
+    return currentInstructionId;
+  }, [currentInstructionId, entries, visibleEntries]);
 
   useEffect(() => {
     setPortalReady(true);
@@ -71,7 +120,7 @@ export function InstructionRevisionHistoryControl({
     };
   }, [menuOpen]);
 
-  if (uniqueRevisionCount <= 1 || historyEntries.length === 0) {
+  if (uniqueRevisionCount <= 1 || visibleEntries.length === 0) {
     return null;
   }
 
@@ -135,8 +184,7 @@ export function InstructionRevisionHistoryControl({
                 <div className="grid gap-1">
                   <h3 className="text-lg font-bold text-slate-100">Revision History</h3>
                   <p className="text-sm text-slate-300">
-                    Select an older revision to view. Older revisions remain stored and hidden from
-                    dashboard/search.
+                    Select a revision to view. The active revision is marked Current.
                   </p>
                 </div>
 
@@ -147,8 +195,8 @@ export function InstructionRevisionHistoryControl({
                 ) : null}
 
                 <div className="grid max-h-[60vh] gap-2 overflow-y-auto pr-1">
-                  {historyEntries.map((entry) => {
-                    const isCurrent = entry.id === currentInstructionId;
+                  {visibleEntries.map((entry) => {
+                    const isCurrent = entry.id === activeEntryId;
 
                     return (
                       <article
@@ -166,7 +214,7 @@ export function InstructionRevisionHistoryControl({
                                 : "border-amber-500/40 bg-amber-500/15 text-amber-200"
                             }`}
                           >
-                            {isCurrent ? "Current" : "Archived"}
+                            {isCurrent ? "Current" : entry.isArchived ? "Archived" : "Active"}
                           </span>
                         </div>
 

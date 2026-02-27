@@ -65,10 +65,23 @@ interface DeleteResponsePayload {
 function getPartIdLabel(workItem: ArchivedInstructionWorkItemSummary) {
   const partId = workItem.part_id?.trim();
   if (!partId) {
-    return "Part ID N/A";
+    return "N/A";
   }
 
-  return `Part ID ${partId}`;
+  return partId;
+}
+
+function ArchivedCardHeading({ workItem }: { workItem: ArchivedInstructionWorkItemSummary }) {
+  return (
+    <span className="inline-flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+      <span className="text-lg font-bold text-slate-900 dark:text-slate-100">
+        {getPartIdLabel(workItem)}
+      </span>
+      <span className="text-base font-semibold text-slate-600 dark:text-slate-300">
+        | {workItem.department_name}
+      </span>
+    </span>
+  );
 }
 
 function getInstructionLabel(instruction: ArchivedInstructionListItem) {
@@ -454,9 +467,8 @@ export function ArchivedInstructionsPanel({
               >
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <p className="text-lg font-bold text-slate-900 dark:text-slate-100">
-                      {getPartIdLabel(instruction.workItem)} |{" "}
-                      {instruction.workItem.department_name}
+                    <p>
+                      <ArchivedCardHeading workItem={instruction.workItem} />
                     </p>
                     <p className="text-sm text-slate-600 dark:text-slate-300">
                       {instruction.workItem.item_title}
