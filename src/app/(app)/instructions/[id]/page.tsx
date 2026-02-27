@@ -13,6 +13,7 @@ import {
   InstructionRevisionHistoryControl,
 } from "@/components/instructions/instruction-revision-history-control";
 import { InstructionReviewControls } from "@/components/instructions/instruction-review-controls";
+import { InstructionViewTracker } from "@/components/instructions/instruction-view-tracker";
 import { LikeInstructionButton } from "@/components/instructions/like-instruction-button";
 import { PinInstructionButton } from "@/components/instructions/pin-instruction-button";
 import { RestoreArchivedInstructionButton } from "@/components/instructions/restore-archived-instruction-button";
@@ -665,6 +666,8 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
 
   return (
     <article className="grid gap-5">
+      <InstructionViewTracker instructionId={instruction.id} />
+
       <InstructionBackButton
         fallbackHref={instructionIsArchived ? "/instructions/archived" : "/dashboard"}
       />

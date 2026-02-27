@@ -95,7 +95,7 @@ const STATUS_FILTER_OPTIONS: Array<{
 }> = [
   { value: "all", label: "All review states" },
   { value: "needs_review", label: "Needs Review only" },
-  { value: "up_to_date", label: "Up To Date only" },
+  { value: "up_to_date", label: "Reviewed only" },
 ];
 
 const MS_IN_DAY = 24 * 60 * 60 * 1000;
@@ -111,7 +111,7 @@ function toSortableTimestamp(value: string) {
 }
 
 function getReviewStatusLabel(status: ReviewStatus) {
-  return status === "needs_review" ? "Needs Review" : "Up To Date";
+  return status === "needs_review" ? "Needs Review" : "Reviewed";
 }
 
 function getReviewStatusBadgeClass(status: ReviewStatus) {
@@ -167,6 +167,8 @@ function buildMonthBuckets(events: ReviewActivityEvent[]) {
     totalCount: 0,
     events: [],
   }));
+  const needsReviewInstructionIdsByMonth = monthBuckets.map(() => new Set<string>());
+  const reviewedInstructionIdsByMonth = monthBuckets.map(() => new Set<string>());
 
   for (const event of events) {
     const occurredAt = new Date(event.occurredAt);
@@ -178,15 +180,18 @@ function buildMonthBuckets(events: ReviewActivityEvent[]) {
     if (monthBucket) {
       monthBucket.events.push(event);
       monthBucket.totalCount += 1;
-      if (event.nextStatus === "needs_review") {
-        monthBucket.needsReviewCount += 1;
+      if (event.nextStatus === "needs_review" && event.instructionId) {
+        needsReviewInstructionIdsByMonth[monthBucket.monthIndex]?.add(event.instructionId);
       } else {
-        monthBucket.upToDateCount += 1;
+        reviewedInstructionIdsByMonth[monthBucket.monthIndex]?.add(event.instructionId);
       }
     }
   }
 
   for (const monthBucket of monthBuckets) {
+    monthBucket.needsReviewCount =
+      needsReviewInstructionIdsByMonth[monthBucket.monthIndex]?.size ?? 0;
+    monthBucket.upToDateCount = reviewedInstructionIdsByMonth[monthBucket.monthIndex]?.size ?? 0;
     monthBucket.events.sort(
       (first, second) =>
         toSortableTimestamp(second.occurredAt) - toSortableTimestamp(first.occurredAt),
@@ -251,6 +256,7 @@ export function InstructionReviewActivityChart({
     new Date().getUTCMonth(),
   );
   const [selectedWeekKey, setSelectedWeekKey] = useState<string | null>(null);
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [portalReady, setPortalReady] = useState(false);
 
@@ -354,6 +360,12 @@ export function InstructionReviewActivityChart({
     [events],
   );
   const totalUpToDateEvents = events.length - totalNeedsReviewEvents;
+  const monthlyAxisStep = Math.max(1, Math.ceil(maxMonthlyCount / 4));
+  const monthlyAxisTicks = useMemo(
+    () => Array.from({ length: 5 }, (_, index) => monthlyAxisStep * (4 - index)),
+    [monthlyAxisStep],
+  );
+  const monthlyAxisMax = monthlyAxisTicks[0] ?? 1;
   const selectedMonth = filteredMonthBuckets[selectedMonthIndex];
   const selectedMonthAllStates = monthBuckets[selectedMonthIndex];
   const selectedMonthEvents = useMemo(() => selectedMonth?.events ?? [], [selectedMonth]);
@@ -375,6 +387,10 @@ export function InstructionReviewActivityChart({
       return weekBuckets[0]?.key ?? null;
     });
   }, [weekBuckets]);
+
+  useEffect(() => {
+    setDetailsExpanded(false);
+  }, [selectedMonthIndex, selectedYear, statusFilter]);
 
   const selectedWeekEvents = useMemo(() => {
     if (!selectedWeekKey) {
@@ -455,7 +471,7 @@ export function InstructionReviewActivityChart({
             </span>
             <span className="inline-flex items-center gap-1.5">
               <span className="h-2.5 w-2.5 rounded-sm bg-gradient-to-t from-emerald-600 to-cyan-400" />
-              Up To Date
+              Reviewed
             </span>
           </div>
           <p className="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
@@ -469,82 +485,104 @@ export function InstructionReviewActivityChart({
             expanded ? "h-60" : "h-28",
           )}
         >
-          <div className="pointer-events-none absolute inset-0 grid grid-rows-4">
-            <span className="border-b border-dashed border-slate-300/70 dark:border-slate-700/70" />
-            <span className="border-b border-dashed border-slate-300/70 dark:border-slate-700/70" />
-            <span className="border-b border-dashed border-slate-300/70 dark:border-slate-700/70" />
-            <span className="border-b border-slate-300/70 dark:border-slate-700/70" />
-          </div>
-
-          <div className="relative z-10 grid h-full grid-cols-12 gap-1 px-1.5 pb-1 pt-2">
-            {monthBuckets.map((monthBucket) => {
-              const isSelected = selectedMonthIndex === monthBucket.monthIndex;
-              const filteredMonthBucket = filteredMonthBuckets[monthBucket.monthIndex];
-              const filteredMonthEventCount = filteredMonthBucket?.totalCount ?? 0;
-              const needsReviewBarHeight = getSeriesBarHeight(
-                monthBucket.needsReviewCount,
-                maxMonthlyCount,
-              );
-              const upToDateBarHeight = getSeriesBarHeight(
-                monthBucket.upToDateCount,
-                maxMonthlyCount,
-              );
-              const dimNeedsSeries = statusFilter === "up_to_date";
-              const dimUpToDateSeries = statusFilter === "needs_review";
-
-              return (
-                <button
-                  key={monthBucket.shortLabel}
-                  type="button"
-                  onClick={() => {
-                    setSelectedMonthIndex(monthBucket.monthIndex);
-                    if (!expanded) {
-                      setIsModalOpen(true);
-                    }
-                  }}
-                  className={cn(
-                    "group flex min-w-0 flex-col items-center justify-end rounded-md px-0.5 pb-1 pt-1 outline-none transition focus-visible:ring-2 focus-visible:ring-cyan-500/70",
-                    isSelected
-                      ? "bg-cyan-500/15 ring-1 ring-cyan-500/45"
-                      : "hover:bg-cyan-500/10",
-                  )}
-                  title={`${monthBucket.longLabel}: Needs Review ${monthBucket.needsReviewCount}, Up To Date ${monthBucket.upToDateCount}, Current filter ${filteredMonthEventCount}`}
+          <div className="grid h-full grid-cols-[2rem_minmax(0,1fr)] gap-2 px-1.5 pb-1 pt-2">
+            <div className="grid h-full grid-rows-5 items-end text-right text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+              {monthlyAxisTicks.map((tickValue, index) => (
+                <span
+                  key={`monthly-axis-${tickValue}-${index}`}
+                  className={index === monthlyAxisTicks.length - 1 ? "" : "translate-y-1"}
                 >
-                  <div className="flex h-full w-full items-end justify-center gap-[3px]">
-                    <span
-                      className={cn(
-                        "w-[42%] rounded-t-[4px] border border-amber-300/25 transition",
-                        isSelected
-                          ? "bg-gradient-to-t from-amber-700 to-amber-500"
-                          : "bg-amber-500/70 group-hover:bg-amber-400/90",
-                        dimNeedsSeries ? "opacity-30" : "opacity-100",
-                      )}
-                      style={{ height: `${needsReviewBarHeight}%` }}
-                    />
-                    <span
-                      className={cn(
-                        "w-[42%] rounded-t-[4px] border border-emerald-300/25 transition",
-                        isSelected
-                          ? "bg-gradient-to-t from-emerald-700 to-cyan-500"
-                          : "bg-cyan-500/70 group-hover:bg-cyan-400/90",
-                        dimUpToDateSeries ? "opacity-30" : "opacity-100",
-                      )}
-                      style={{ height: `${upToDateBarHeight}%` }}
-                    />
-                  </div>
+                  {tickValue}
+                </span>
+              ))}
+            </div>
+
+            <div className="relative min-w-0">
+              <div className="pointer-events-none absolute inset-0 grid grid-rows-5">
+                {monthlyAxisTicks.map((_, index) => (
                   <span
+                    key={`monthly-grid-${index}`}
                     className={cn(
-                      "mt-1 text-[10px] font-semibold leading-none",
-                      isSelected
-                        ? "text-cyan-700 dark:text-cyan-200"
-                        : "text-slate-600 dark:text-slate-300",
+                      "border-t border-dashed border-slate-300/70 dark:border-slate-700/70",
+                      index === monthlyAxisTicks.length - 1
+                        ? "border-b border-slate-300/70 dark:border-slate-700/70"
+                        : "",
                     )}
-                  >
-                    {monthBucket.shortLabel}
-                  </span>
-                </button>
-              );
-            })}
+                  />
+                ))}
+              </div>
+
+              <div className="relative z-10 grid h-full grid-cols-12 gap-1">
+                {monthBuckets.map((monthBucket) => {
+                  const isSelected = selectedMonthIndex === monthBucket.monthIndex;
+                  const filteredMonthBucket = filteredMonthBuckets[monthBucket.monthIndex];
+                  const filteredMonthEventCount = filteredMonthBucket?.totalCount ?? 0;
+                  const needsReviewBarHeight = getSeriesBarHeight(
+                    monthBucket.needsReviewCount,
+                    monthlyAxisMax,
+                  );
+                  const reviewedBarHeight = getSeriesBarHeight(
+                    monthBucket.upToDateCount,
+                    monthlyAxisMax,
+                  );
+                  const dimNeedsSeries = statusFilter === "up_to_date";
+                  const dimReviewedSeries = statusFilter === "needs_review";
+
+                  return (
+                    <button
+                      key={monthBucket.shortLabel}
+                      type="button"
+                      onClick={() => {
+                        setSelectedMonthIndex(monthBucket.monthIndex);
+                        if (!expanded) {
+                          setIsModalOpen(true);
+                        }
+                      }}
+                      className={cn(
+                        "group flex min-w-0 flex-col items-center justify-end rounded-md px-0.5 pb-1 pt-1 outline-none transition focus-visible:ring-2 focus-visible:ring-cyan-500/70",
+                        isSelected
+                          ? "bg-cyan-500/15 ring-1 ring-cyan-500/45"
+                          : "hover:bg-cyan-500/10",
+                      )}
+                      title={`${monthBucket.longLabel}: Needs Review ${monthBucket.needsReviewCount}, Reviewed ${monthBucket.upToDateCount}, Current filter ${filteredMonthEventCount}`}
+                    >
+                      <div className="flex h-full w-full items-end justify-center gap-[3px]">
+                        <span
+                          className={cn(
+                            "w-[42%] rounded-t-[4px] border border-amber-300/25 transition",
+                            isSelected
+                              ? "bg-gradient-to-t from-amber-700 to-amber-500"
+                              : "bg-amber-500/70 group-hover:bg-amber-400/90",
+                            dimNeedsSeries ? "opacity-30" : "opacity-100",
+                          )}
+                          style={{ height: `${needsReviewBarHeight}%` }}
+                        />
+                        <span
+                          className={cn(
+                            "w-[42%] rounded-t-[4px] border border-emerald-300/25 transition",
+                            isSelected
+                              ? "bg-gradient-to-t from-emerald-700 to-cyan-500"
+                              : "bg-cyan-500/70 group-hover:bg-cyan-400/90",
+                            dimReviewedSeries ? "opacity-30" : "opacity-100",
+                          )}
+                          style={{ height: `${reviewedBarHeight}%` }}
+                        />
+                      </div>
+                      <span
+                        className={cn(
+                          "mt-1 text-[10px] font-semibold leading-none",
+                          isSelected
+                            ? "text-cyan-700 dark:text-cyan-200"
+                            : "text-slate-600 dark:text-slate-300",
+                        )}
+                      >
+                        {monthBucket.shortLabel}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -552,7 +590,7 @@ export function InstructionReviewActivityChart({
       <p className="text-xs text-slate-500 dark:text-slate-400">
         {events.length} review event{events.length === 1 ? "" : "s"} for {selectedYear}
         {" "}(
-        {totalNeedsReviewEvents} Needs Review, {totalUpToDateEvents} Up To Date).{" "}
+        {totalNeedsReviewEvents} Needs Review, {totalUpToDateEvents} Reviewed).{" "}
         {filteredEvents.length} event{filteredEvents.length === 1 ? "" : "s"} match the active
         filter.
       </p>
@@ -564,14 +602,28 @@ export function InstructionReviewActivityChart({
             {totalMonthEvents === 1 ? "" : "s"}
             {statusFilter === "all" ? "" : ` (${getReviewStatusLabel(statusFilter)})`}
           </h3>
-          {selectedWeekKey ? (
-            <p className="text-xs text-slate-500 dark:text-slate-300">
-              Week: {weekBuckets.find((weekBucket) => weekBucket.key === selectedWeekKey)?.label}
-            </p>
-          ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            {selectedWeekKey ? (
+              <p className="text-xs text-slate-500 dark:text-slate-300">
+                Week: {weekBuckets.find((weekBucket) => weekBucket.key === selectedWeekKey)?.label}
+              </p>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => setDetailsExpanded((current) => !current)}
+              className="rounded-lg border border-slate-300/80 bg-white/80 px-2.5 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-800/70"
+            >
+              {detailsExpanded ? "Collapse review events" : "Expand review events"}
+            </button>
+          </div>
         </div>
 
-        {weekBuckets.length === 0 ? (
+        {!detailsExpanded ? (
+          <p className="rounded-lg border border-slate-300/70 bg-white/80 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300">
+            Review events are collapsed. Click Expand review events to drill into week and
+            instruction details.
+          </p>
+        ) : weekBuckets.length === 0 ? (
           <p className="rounded-lg border border-slate-300/70 bg-white/80 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300">
             No review activity in this month for the current filter.
           </p>

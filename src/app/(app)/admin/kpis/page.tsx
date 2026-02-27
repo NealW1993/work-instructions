@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Activity, Archive, ArrowLeft, BarChart3, FileText, Users } from "lucide-react";
 
+import { KpiInsightsPanel } from "@/components/admin/kpi-insights-panel";
 import { requireAuthenticatedUser } from "@/lib/auth";
 import { isSystemAdmin } from "@/lib/roles";
 import { formatElapsedHhMmSs } from "@/lib/session-timer";
@@ -498,6 +499,8 @@ export default async function SystemKpisPage() {
           tone="rose"
         />
       </div>
+
+      <KpiInsightsPanel />
 
       <section className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-6">
         <div className="flex flex-wrap items-end justify-between gap-2">
