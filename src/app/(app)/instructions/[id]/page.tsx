@@ -1,5 +1,3 @@
-/* eslint-disable @next/next/no-img-element */
-
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import ReactMarkdown from "react-markdown";
@@ -8,6 +6,8 @@ import sanitizeHtml from "sanitize-html";
 
 import { DeleteInstructionButton } from "@/components/instructions/delete-instruction-button";
 import { InstructionBackButton } from "@/components/instructions/instruction-back-button";
+import { InstructionBodyLightbox } from "@/components/instructions/instruction-body-lightbox";
+import { InstructionMediaSection } from "@/components/instructions/instruction-media-section";
 import {
   type InstructionRevisionHistoryEntry,
   InstructionRevisionHistoryControl,
@@ -804,42 +804,15 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
 
       <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
         <h2 className="text-xl font-bold">Work Instructions</h2>
-        {renderInstructionContent(instruction.body_markdown)}
+        <InstructionBodyLightbox>
+          {renderInstructionContent(instruction.body_markdown)}
+        </InstructionBodyLightbox>
       </section>
 
       {instruction.instruction_media.length > 0 ? (
         <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
           <h2 className="text-xl font-bold">Media</h2>
-          <div className="grid gap-4 md:grid-cols-2">
-            {instruction.instruction_media
-              .slice()
-              .sort((a, b) => a.sort_order - b.sort_order)
-              .map((media) => (
-                <figure
-                  key={media.id}
-                  className="overflow-hidden rounded-2xl border border-slate-300/70 bg-slate-50 dark:border-slate-700 dark:bg-slate-950"
-                >
-                  {media.media_type === "video" ? (
-                    <video
-                      src={media.public_url}
-                      controls
-                      className="max-h-[420px] w-full bg-black"
-                    />
-                  ) : (
-                    <img
-                      src={media.public_url}
-                      alt={media.caption ?? "Instruction media"}
-                      className="max-h-[420px] w-full object-cover"
-                    />
-                  )}
-                  {media.caption ? (
-                    <figcaption className="p-2 text-xs text-slate-600 dark:text-slate-300">
-                      {media.caption}
-                    </figcaption>
-                  ) : null}
-                </figure>
-              ))}
-          </div>
+          <InstructionMediaSection media={instruction.instruction_media} />
         </section>
       ) : null}
     </article>

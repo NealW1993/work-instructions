@@ -698,6 +698,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     {
       instructionId: string;
       label: string;
+      revision: number;
       newLikesCount: number;
       latestLikedAt: string;
     }
@@ -728,6 +729,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     likeHighlightByInstruction.set(instruction.id, {
       instructionId: instruction.id,
       label: `${getPartIdLabel(workItem.part_id)} | ${normalizeDepartmentName(workItem.departments)}`,
+      revision: instruction.revision,
       newLikesCount: 1,
       latestLikedAt: row.created_at,
     });
@@ -752,6 +754,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             .map((highlight) => ({
               instructionId: highlight.instructionId,
               label: highlight.label,
+              revision: highlight.revision,
               newLikesCount: highlight.newLikesCount,
             })),
         };

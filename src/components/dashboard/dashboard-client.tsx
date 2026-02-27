@@ -77,6 +77,7 @@ export interface DashboardLikeCelebrationHighlight {
   instructionId: string;
   label: string;
   newLikesCount: number;
+  revision: number;
 }
 
 export interface DashboardLikeCelebrationData {
@@ -3745,6 +3746,7 @@ export function DashboardClient({
                     {activeLikeCelebration.highlights.slice(0, 3).map((highlight) => (
                       <p key={highlight.instructionId} className="text-sm text-cyan-50">
                         <span className="font-semibold">{highlight.label}</span>
+                        <span className="text-cyan-300/80"> Rev {highlight.revision}</span>
                         <span className="text-cyan-200">
                           {" "}
                           +{highlight.newLikesCount}
