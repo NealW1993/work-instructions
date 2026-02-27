@@ -413,7 +413,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
   const renderDashboardControl = (mobile: boolean) => (
     <div
       data-dashboard-menu-root="true"
-      className={cn("relative inline-flex", mobile ? "max-w-full" : "")}
+      className={cn(mobile ? "inline-flex max-w-full" : "relative inline-flex")}
     >
       <Link
         href="/dashboard"
@@ -468,21 +468,14 @@ export function AppHeader({ profile }: { profile: Profile }) {
         <div
           className={cn(
             "absolute top-[calc(100%+0.5rem)] z-[90] grid gap-2 rounded-2xl border border-white/20 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-xl transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
-            mobile ? "left-1/2 -translate-x-1/2" : "left-0",
+            mobile ? "left-2 right-2" : "left-0",
             dashboardMenuEntered ? "pointer-events-auto" : "pointer-events-none",
           )}
           style={{
-            width: `${dashboardMenuWidth}px`,
-            maxWidth: mobile ? "94vw" : undefined,
+            ...(mobile ? {} : { width: `${dashboardMenuWidth}px` }),
             opacity: dashboardMenuEntered ? 1 : 0,
             filter: dashboardMenuEntered ? "blur(0px)" : "blur(6px)",
-            transform: dashboardMenuEntered
-              ? mobile
-                ? "translateX(-50%) translateY(0px) scale(1)"
-                : "translateY(0px) scale(1)"
-              : mobile
-                ? "translateX(-50%) translateY(-8px) scale(0.98)"
-                : "translateY(-8px) scale(0.98)",
+            transform: dashboardMenuEntered ? "translateY(0px) scale(1)" : "translateY(-8px) scale(0.98)",
             transformOrigin: mobile ? "top center" : "top left",
           }}
         >
@@ -603,7 +596,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
     return (
       <div
         data-instruction-menu-root="true"
-        className={cn("relative inline-flex", mobile ? "max-w-full" : "")}
+        className={cn(mobile ? "inline-flex max-w-full" : "relative inline-flex")}
       >
         <Link
           href="/instructions/new"
@@ -652,19 +645,13 @@ export function AppHeader({ profile }: { profile: Profile }) {
           <div
             className={cn(
               "absolute top-[calc(100%+0.5rem)] z-[90] grid gap-2 rounded-2xl border border-white/20 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-xl transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
-              mobile ? "left-1/2 w-[min(94vw,280px)]" : "left-0 w-[220px]",
+              mobile ? "left-2 right-2" : "left-0 w-[220px]",
               instructionMenuEntered ? "pointer-events-auto" : "pointer-events-none",
             )}
             style={{
               opacity: instructionMenuEntered ? 1 : 0,
               filter: instructionMenuEntered ? "blur(0px)" : "blur(6px)",
-              transform: instructionMenuEntered
-                ? mobile
-                  ? "translateX(-50%) translateY(0px) scale(1)"
-                  : "translateY(0px) scale(1)"
-                : mobile
-                  ? "translateX(-50%) translateY(-8px) scale(0.98)"
-                  : "translateY(-8px) scale(0.98)",
+              transform: instructionMenuEntered ? "translateY(0px) scale(1)" : "translateY(-8px) scale(0.98)",
               transformOrigin: mobile ? "top center" : "top left",
             }}
           >
@@ -712,7 +699,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
           <UserAccountMenu profile={profile} />
         </div>
 
-        <nav className="mt-2 flex flex-wrap items-center justify-center gap-2 md:hidden">
+        <nav className="relative mt-2 flex flex-wrap items-center justify-center gap-2 md:hidden">
           {renderDashboardControl(true)}
           {renderInstructionControl(true)}
         </nav>

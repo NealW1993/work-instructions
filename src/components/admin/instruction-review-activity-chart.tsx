@@ -116,8 +116,8 @@ function getReviewStatusLabel(status: ReviewStatus) {
 
 function getReviewStatusBadgeClass(status: ReviewStatus) {
   return status === "needs_review"
-    ? "border-amber-500/45 bg-amber-500/20 text-amber-100"
-    : "border-emerald-500/45 bg-emerald-500/20 text-emerald-100";
+    ? "border-amber-500/45 bg-amber-500/20 text-amber-800 dark:text-amber-100"
+    : "border-emerald-500/45 bg-emerald-500/20 text-emerald-800 dark:text-emerald-100";
 }
 
 function getReviewTransitionLabel(event: ReviewActivityEvent) {

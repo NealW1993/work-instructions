@@ -579,7 +579,7 @@ export function KpiInsightsPanel() {
                       <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
                         {instruction.partId} | {instruction.departmentName}
                       </p>
-                      <span className="rounded-full border border-amber-500/45 bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-100">
+                      <span className="rounded-full border border-amber-500/45 bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-100">
                         {instruction.reviewReason}
                       </span>
                     </div>
