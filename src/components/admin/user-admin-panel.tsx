@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { GripVertical } from "lucide-react";
+import { ChevronDown, ChevronRight, GripVertical } from "lucide-react";
 
 import { InstructionReviewActivityChart } from "@/components/admin/instruction-review-activity-chart";
 import { LocalDateTime } from "@/components/ui/local-date-time";
@@ -53,6 +53,13 @@ type ConfirmDialogState =
   | {
       kind: "delete-department";
       departmentId: string;
+      title: string;
+      description: string;
+      confirmLabel: string;
+    }
+  | {
+      kind: "save-all-departments";
+      departmentIds: string[];
       title: string;
       description: string;
       confirmLabel: string;
@@ -157,6 +164,8 @@ export function UserAdminPanel() {
   const [departmentOrderDirty, setDepartmentOrderDirty] = useState(false);
   const [draggedDepartmentId, setDraggedDepartmentId] = useState<string | null>(null);
   const [dragOverDepartmentId, setDragOverDepartmentId] = useState<string | null>(null);
+  const [departmentsCollapsed, setDepartmentsCollapsed] = useState(false);
+  const [departmentSavedFlash, setDepartmentSavedFlash] = useState<Record<string, boolean>>({});
   const [editingDepartmentOrderId, setEditingDepartmentOrderId] = useState<string | null>(
     null,
   );
@@ -839,6 +848,10 @@ export function UserAdminPanel() {
         "Department updated. Name, color, and existing assignments are now in sync.",
       );
       await fetchDepartments();
+      setDepartmentSavedFlash((current) => ({ ...current, [departmentId]: true }));
+      window.setTimeout(() => {
+        setDepartmentSavedFlash((current) => ({ ...current, [departmentId]: false }));
+      }, 2000);
     } catch (caughtError) {
       const normalizedMessage =
         caughtError instanceof Error ? caughtError.message : "Unable to update department";
@@ -952,6 +965,60 @@ export function UserAdminPanel() {
     }
   }
 
+  async function saveAllDirtyDepartments(departmentIds: string[]) {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    setConfirmDialog(null);
+
+    try {
+      const headers = await getAuthHeaders();
+      const toSave = departments.filter((d) => departmentIds.includes(d.id));
+
+      const results = await Promise.allSettled(
+        toSave.map((department) => {
+          const name = (departmentNameUpdates[department.id] ?? department.name).trim();
+          const rawColor = departmentColorUpdates[department.id] ?? department.color_hex;
+          const colorHex = normalizeColorHex(rawColor) ?? DEFAULT_DEPARTMENT_COLORS[0];
+          return fetch(`/api/departments/${department.id}`, {
+            method: "PATCH",
+            headers,
+            body: JSON.stringify({ name, colorHex }),
+          });
+        }),
+      );
+
+      const failCount = results.filter((r) => r.status === "rejected").length;
+      if (failCount > 0) {
+        throw new Error(`${failCount} department(s) failed to save.`);
+      }
+
+      const flashUpdate: Record<string, boolean> = {};
+      for (const id of departmentIds) {
+        flashUpdate[id] = true;
+      }
+      setDepartmentSavedFlash((current) => ({ ...current, ...flashUpdate }));
+      window.setTimeout(() => {
+        setDepartmentSavedFlash((current) => {
+          const next = { ...current };
+          for (const id of departmentIds) {
+            delete next[id];
+          }
+          return next;
+        });
+      }, 2000);
+
+      setMessage(`${toSave.length} department(s) updated.`);
+      await fetchDepartments();
+    } catch (caughtError) {
+      const normalizedMessage =
+        caughtError instanceof Error ? caughtError.message : "Unable to save departments";
+      setError(normalizedMessage);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function confirmDialogAction() {
     if (!confirmDialog) {
       return;
@@ -962,8 +1029,22 @@ export function UserAdminPanel() {
       return;
     }
 
+    if (confirmDialog.kind === "save-all-departments") {
+      await saveAllDirtyDepartments(confirmDialog.departmentIds);
+      return;
+    }
+
     await performDeleteDepartment(confirmDialog.departmentId);
   }
+
+  const dirtyDepartments = departments.filter((department) => {
+    const nameUpdate = departmentNameUpdates[department.id] ?? department.name;
+    const colorUpdate = departmentColorUpdates[department.id] ?? department.color_hex;
+    const nameDirty = nameUpdate.trim() !== department.name.trim();
+    const savedColor = normalizeColorHex(department.color_hex) ?? DEFAULT_DEPARTMENT_COLORS[0];
+    const currentColor = normalizeColorHex(colorUpdate) ?? DEFAULT_DEPARTMENT_COLORS[0];
+    return nameDirty || currentColor !== savedColor;
+  });
 
   return (
     <div className="grid gap-5">
@@ -1044,21 +1125,51 @@ export function UserAdminPanel() {
 
       <div className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-lg font-bold">Departments</h2>
           <button
             type="button"
-            disabled={busy || !departmentOrderDirty}
-            onClick={() => void saveDepartmentOrder()}
-            className="rounded-lg border border-cyan-500/35 px-3 py-1 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-50 dark:text-cyan-200"
+            onClick={() => setDepartmentsCollapsed((v) => !v)}
+            className="flex items-center gap-1.5 text-lg font-bold transition hover:opacity-80"
           >
-            Save Order
+            {departmentsCollapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
+            Departments
           </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {dirtyDepartments.length >= 2 && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setConfirmDialog({
+                    kind: "save-all-departments",
+                    departmentIds: dirtyDepartments.map((d) => d.id),
+                    title: `Save ${dirtyDepartments.length} department changes?`,
+                    description: "The following departments have unsaved changes.",
+                    confirmLabel: `Save All (${dirtyDepartments.length})`,
+                  });
+                }}
+                className="rounded-lg border border-amber-500/45 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-700 transition hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-50 dark:text-amber-300"
+              >
+                Save All ({dirtyDepartments.length})
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={busy || !departmentOrderDirty}
+              onClick={() => void saveDepartmentOrder()}
+              className="rounded-lg border border-cyan-500/35 px-3 py-1 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-50 dark:text-cyan-200"
+            >
+              Save Order
+            </button>
+          </div>
         </div>
-        <p className="text-xs text-slate-500 dark:text-slate-300">
-          Drag and drop to reorder, or double-click the order number to type a position.
-          Press Enter to move. Esc or blur cancels.
-        </p>
+        {!departmentsCollapsed && (
+          <p className="text-xs text-slate-500 dark:text-slate-300">
+            Drag and drop to reorder, or double-click the order number to type a position.
+            Press Enter to move. Esc or blur cancels.
+          </p>
+        )}
 
+        {!departmentsCollapsed && (
         <form
           noValidate
           onSubmit={handleCreateDepartment}
@@ -1117,8 +1228,9 @@ export function UserAdminPanel() {
             {busy ? "Working..." : "Add Department"}
           </button>
         </form>
+        )}
 
-        {departments.length === 0 ? (
+        {!departmentsCollapsed && (departments.length === 0 ? (
           <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
             No departments found.
           </p>
@@ -1129,16 +1241,16 @@ export function UserAdminPanel() {
                 normalizeColorHex(
                   departmentColorUpdates[department.id] ?? department.color_hex,
                 ) ?? DEFAULT_DEPARTMENT_COLORS[0];
+              const savedColor =
+                normalizeColorHex(department.color_hex) ?? DEFAULT_DEPARTMENT_COLORS[0];
+              const isDirty =
+                (departmentNameUpdates[department.id] ?? department.name).trim() !==
+                  department.name.trim() || departmentColor !== savedColor;
+              const isFlashing = !!departmentSavedFlash[department.id];
 
               return (
                 <div
                   key={department.id}
-                  draggable={!busy}
-                  onDragStart={(event) => {
-                    setDraggedDepartmentId(department.id);
-                    event.dataTransfer.effectAllowed = "move";
-                    event.dataTransfer.setData("text/plain", department.id);
-                  }}
                   onDragEnter={() => {
                     if (draggedDepartmentId && draggedDepartmentId !== department.id) {
                       setDragOverDepartmentId(department.id);
@@ -1162,10 +1274,6 @@ export function UserAdminPanel() {
                       reorderDepartments(sourceDepartmentId, department.id);
                     }
                   }}
-                  onDragEnd={() => {
-                    setDraggedDepartmentId(null);
-                    setDragOverDepartmentId(null);
-                  }}
                   style={{
                     borderColor: colorWithAlpha(departmentColor, 0.45),
                     backgroundColor: colorWithAlpha(departmentColor, 0.14),
@@ -1176,7 +1284,19 @@ export function UserAdminPanel() {
                     draggedDepartmentId === department.id ? "opacity-70" : "",
                   )}
                 >
-                  <div className="flex items-center gap-1 text-slate-500 dark:text-slate-300">
+                  <div
+                    draggable={!busy}
+                    onDragStart={(event) => {
+                      setDraggedDepartmentId(department.id);
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData("text/plain", department.id);
+                    }}
+                    onDragEnd={() => {
+                      setDraggedDepartmentId(null);
+                      setDragOverDepartmentId(null);
+                    }}
+                    className="flex cursor-grab items-center gap-1 text-slate-500 active:cursor-grabbing dark:text-slate-300"
+                  >
                     <GripVertical size={16} />
                     {editingDepartmentOrderId === department.id ? (
                       <input
@@ -1302,9 +1422,16 @@ export function UserAdminPanel() {
                     <button
                       type="button"
                       onClick={() => void updateDepartment(department.id)}
-                      className="rounded-lg border border-cyan-500/30 px-3 py-1 text-cyan-700 transition hover:bg-cyan-500/10 dark:text-cyan-300"
+                      className={cn(
+                        "rounded-lg border px-3 py-1 transition",
+                        isFlashing
+                          ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                          : isDirty
+                            ? "border-amber-500/50 bg-amber-500/15 font-semibold text-amber-700 dark:text-amber-300"
+                            : "border-cyan-500/30 text-cyan-700 hover:bg-cyan-500/10 dark:text-cyan-300",
+                      )}
                     >
-                      Save
+                      {isFlashing ? "Saved!" : "Save"}
                     </button>
                     <button
                       type="button"
@@ -1327,7 +1454,7 @@ export function UserAdminPanel() {
               );
             })}
           </div>
-        )}
+        ))}
       </div>
 
       <form
@@ -1546,10 +1673,55 @@ export function UserAdminPanel() {
       {confirmDialog && portalReady
         ? createPortal(
             <div className="dark fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
-              <div className="grid w-full max-w-md gap-4 rounded-2xl border border-rose-500/40 bg-slate-950/95 p-5 shadow-2xl">
+              <div
+                className={cn(
+                  "grid w-full max-w-md gap-4 rounded-2xl border p-5 shadow-2xl",
+                  confirmDialog.kind === "save-all-departments"
+                    ? "border-cyan-500/40 bg-slate-950/95"
+                    : "border-rose-500/40 bg-slate-950/95",
+                )}
+              >
                 <div className="grid gap-1">
                   <h3 className="text-lg font-bold text-slate-100">{confirmDialog.title}</h3>
                   <p className="text-sm text-slate-300">{confirmDialog.description}</p>
+                  {confirmDialog.kind === "save-all-departments" && (
+                    <ul className="mt-2 grid gap-1.5">
+                      {confirmDialog.departmentIds.map((id) => {
+                        const dept = departments.find((d) => d.id === id);
+                        if (!dept) return null;
+                        const newName = (departmentNameUpdates[id] ?? dept.name).trim();
+                        const newColor =
+                          normalizeColorHex(departmentColorUpdates[id] ?? dept.color_hex) ??
+                          DEFAULT_DEPARTMENT_COLORS[0];
+                        const nameChanged = newName !== dept.name.trim();
+                        const colorChanged =
+                          newColor !==
+                          (normalizeColorHex(dept.color_hex) ?? DEFAULT_DEPARTMENT_COLORS[0]);
+                        return (
+                          <li key={id} className="flex items-center gap-2 text-xs text-slate-300">
+                            <span
+                              className="h-3 w-3 flex-shrink-0 rounded-full"
+                              style={{ backgroundColor: newColor }}
+                            />
+                            <span>
+                              {nameChanged ? (
+                                <>
+                                  <span className="opacity-50 line-through">{dept.name}</span>
+                                  {" → "}
+                                  <span className="font-semibold text-slate-100">{newName}</span>
+                                </>
+                              ) : (
+                                <span>{dept.name}</span>
+                              )}
+                              {colorChanged && (
+                                <span className="ml-1 text-amber-400">(color changed)</span>
+                              )}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap justify-end gap-2">
@@ -1564,7 +1736,12 @@ export function UserAdminPanel() {
                     type="button"
                     disabled={busy}
                     onClick={() => void confirmDialogAction()}
-                    className="rounded-xl border border-rose-500/45 bg-rose-500/15 px-4 py-2 text-sm font-semibold text-rose-100 transition hover:bg-rose-500/25 disabled:cursor-not-allowed disabled:opacity-60"
+                    className={cn(
+                      "rounded-xl border px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60",
+                      confirmDialog.kind === "save-all-departments"
+                        ? "border-cyan-500/45 bg-cyan-500/15 text-cyan-100 hover:bg-cyan-500/25"
+                        : "border-rose-500/45 bg-rose-500/15 text-rose-100 hover:bg-rose-500/25",
+                    )}
                   >
                     {busy ? "Working..." : confirmDialog.confirmLabel}
                   </button>
