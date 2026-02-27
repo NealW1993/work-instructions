@@ -18,6 +18,7 @@ import {
 import { useSynchronizedNowMs } from "@/lib/second-ticker";
 import type { Profile } from "@/lib/types";
 import { persistActiveThemePreference } from "@/lib/theme-client";
+import { cn } from "@/lib/utils";
 
 interface UserAccountMenuProps {
   profile: Profile;
@@ -25,6 +26,8 @@ interface UserAccountMenuProps {
 
 const ICON_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 const DEFAULT_ICON_COLOR = "#0EA5E9";
+const ACCOUNT_MENU_ANIMATION_MS = 260;
+const ACCOUNT_MENU_MIN_WIDTH_PX = 270;
 
 function resolveIconColor(value: string | undefined) {
   if (!value) {
@@ -66,7 +69,12 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
   const posthog = usePostHog();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerButtonRef = useRef<HTMLButtonElement | null>(null);
+  const closeTimeoutRef = useRef<number | null>(null);
   const [open, setOpen] = useState(false);
+  const [menuMounted, setMenuMounted] = useState(false);
+  const [menuEntered, setMenuEntered] = useState(false);
+  const [menuWidth, setMenuWidth] = useState(ACCOUNT_MENU_MIN_WIDTH_PX);
   const synchronizedNowMs = useSynchronizedNowMs();
   const serverSessionStartMs = useMemo(
     () => toTimestampMs(profile.active_session_started_at),
@@ -84,6 +92,43 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
 
     return formatElapsedHhMmSs(Math.max(0, synchronizedNowMs - sessionStartedAtMs));
   }, [sessionStartedAtMs, synchronizedNowMs]);
+
+  const syncMenuWidth = useCallback(() => {
+    const triggerWidth = triggerButtonRef.current?.getBoundingClientRect().width ?? 0;
+    setMenuWidth(Math.max(Math.round(triggerWidth), ACCOUNT_MENU_MIN_WIDTH_PX));
+  }, []);
+
+  const closeMenu = useCallback(() => {
+    if (!menuMounted && !open) {
+      return;
+    }
+
+    if (closeTimeoutRef.current !== null) {
+      window.clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
+
+    setMenuEntered(false);
+    setOpen(false);
+    closeTimeoutRef.current = window.setTimeout(() => {
+      setMenuMounted(false);
+      closeTimeoutRef.current = null;
+    }, ACCOUNT_MENU_ANIMATION_MS);
+  }, [menuMounted, open]);
+
+  const openMenu = useCallback(() => {
+    if (closeTimeoutRef.current !== null) {
+      window.clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
+
+    syncMenuWidth();
+    setMenuMounted(true);
+    setOpen(true);
+    window.requestAnimationFrame(() => {
+      setMenuEntered(true);
+    });
+  }, [syncMenuWidth]);
 
   const touchServerSession = useCallback(
     async (endSession: boolean) => {
@@ -171,12 +216,12 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
         return;
       }
 
-      setOpen(false);
+      closeMenu();
     };
 
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setOpen(false);
+        closeMenu();
       }
     };
 
@@ -187,7 +232,45 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("keydown", handleEscape);
     };
-  }, [open]);
+  }, [closeMenu, open]);
+
+  useEffect(() => {
+    if (!menuMounted) {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => syncMenuWidth());
+    if (triggerButtonRef.current) {
+      observer.observe(triggerButtonRef.current);
+    }
+
+    const onWindowResize = () => syncMenuWidth();
+    window.addEventListener("resize", onWindowResize);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", onWindowResize);
+    };
+  }, [menuMounted, syncMenuWidth]);
+
+  useEffect(() => {
+    const frameId = window.requestAnimationFrame(() => {
+      syncMenuWidth();
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [syncMenuWidth, profile.full_name]);
+
+  useEffect(
+    () => () => {
+      if (closeTimeoutRef.current !== null) {
+        window.clearTimeout(closeTimeoutRef.current);
+      }
+    },
+    [],
+  );
 
   async function handleSignOut() {
     await finalizeServerSession().catch(async () => {
@@ -200,7 +283,7 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
     clearSessionStart();
     posthog?.reset();
     persistActiveThemePreference();
-    setOpen(false);
+    closeMenu();
     router.push("/login");
     router.refresh();
   }
@@ -208,8 +291,9 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
   return (
     <div ref={rootRef} className="relative">
       <button
+        ref={triggerButtonRef}
         type="button"
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => (open ? closeMenu() : openMenu())}
         aria-expanded={open}
         className="inline-flex items-center gap-2 rounded-full border border-slate-300/70 bg-white/80 px-3 py-1.5 text-sm font-semibold text-slate-800 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-100 dark:hover:bg-slate-900"
       >
@@ -223,8 +307,21 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
         <ChevronDown size={14} className={open ? "rotate-180 transition" : "transition"} />
       </button>
 
-      {open ? (
-        <div className="absolute right-0 z-40 mt-2 grid min-w-[270px] gap-3 rounded-2xl border border-white/20 bg-slate-950/95 p-3 shadow-2xl backdrop-blur-xl">
+      {menuMounted ? (
+        <div
+          className={cn(
+            "absolute right-0 z-[90] mt-2 grid gap-3 rounded-2xl border border-white/20 bg-slate-950/95 p-3 shadow-2xl backdrop-blur-xl transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
+            menuEntered ? "pointer-events-auto" : "pointer-events-none",
+          )}
+          style={{
+            width: `${menuWidth}px`,
+            maxWidth: "92vw",
+            opacity: menuEntered ? 1 : 0,
+            filter: menuEntered ? "blur(0px)" : "blur(6px)",
+            transform: menuEntered ? "translateY(0px) scale(1)" : "translateY(-8px) scale(0.98)",
+            transformOrigin: "top right",
+          }}
+        >
           <div className="rounded-xl border border-cyan-500/35 bg-cyan-500/12 p-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-cyan-200/90">
               Active Session
@@ -237,7 +334,7 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
 
           <Link
             href="/account"
-            onClick={() => setOpen(false)}
+            onClick={() => closeMenu()}
             className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
           >
             <Settings size={15} />
@@ -247,7 +344,7 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
           {isSystemAdmin(profile.role) ? (
             <Link
               href="/admin/users"
-              onClick={() => setOpen(false)}
+              onClick={() => closeMenu()}
               className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/40 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/25"
             >
               <SlidersHorizontal size={15} />

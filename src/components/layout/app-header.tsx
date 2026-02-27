@@ -13,7 +13,13 @@ import {
   Save,
   Undo2,
 } from "lucide-react";
-import { type MouseEvent as ReactMouseEvent, useCallback, useEffect, useState } from "react";
+import {
+  type MouseEvent as ReactMouseEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { UserAccountMenu } from "@/components/layout/user-account-menu";
 import {
@@ -31,6 +37,7 @@ import type { Profile } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const DASHBOARD_RETURN_STATE_KEY = "__dashboardInstructionReturnState";
+const MENU_ANIMATION_MS = 260;
 
 function isActivePath(pathname: string, href: string) {
   if (href === "/admin/users" && pathname.startsWith("/admin/")) {
@@ -49,11 +56,18 @@ export function AppHeader({ profile }: { profile: Profile }) {
   const router = useRouter();
   const [dashboardMenuOpen, setDashboardMenuOpen] = useState(false);
   const [dashboardMenuPathname, setDashboardMenuPathname] = useState(pathname);
+  const [dashboardMenuMounted, setDashboardMenuMounted] = useState(false);
+  const [dashboardMenuEntered, setDashboardMenuEntered] = useState(false);
+  const [dashboardMenuWidth, setDashboardMenuWidth] = useState(300);
   const [instructionMenuOpen, setInstructionMenuOpen] = useState(false);
   const [instructionMenuPathname, setInstructionMenuPathname] = useState(pathname);
+  const [instructionMenuMounted, setInstructionMenuMounted] = useState(false);
+  const [instructionMenuEntered, setInstructionMenuEntered] = useState(false);
   const [dashboardLayoutState, setDashboardLayoutState] = useState(
     DASHBOARD_LAYOUT_DEFAULT_STATE,
   );
+  const dashboardMenuCloseTimeoutRef = useRef<number | null>(null);
+  const instructionMenuCloseTimeoutRef = useRef<number | null>(null);
 
   const canCreateInstructions = canEditInstructions(profile.role);
   const canViewArchivedInstructions = isSystemAdmin(profile.role);
@@ -100,6 +114,153 @@ export function AppHeader({ profile }: { profile: Profile }) {
       ? "Close Customize Panel"
       : "Customize Dashboard";
 
+  const syncDashboardMenuWidth = useCallback(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const visibleDashboardRoot = [...document.querySelectorAll<HTMLElement>('[data-dashboard-menu-root="true"]')]
+      .find((element) => element.offsetParent !== null);
+    if (!visibleDashboardRoot) {
+      return;
+    }
+
+    const visibleInstructionRoot = [...document.querySelectorAll<HTMLElement>('[data-instruction-menu-root="true"]')]
+      .find((element) => element.offsetParent !== null);
+    const dashboardRect = visibleDashboardRoot.getBoundingClientRect();
+    const instructionRect = visibleInstructionRoot?.getBoundingClientRect() ?? null;
+    const targetWidth =
+      instructionRect && instructionRect.right > dashboardRect.left
+        ? Math.round(instructionRect.right - dashboardRect.left)
+        : 300;
+
+    setDashboardMenuWidth(Math.max(targetWidth, 300));
+  }, []);
+
+  const closeDashboardMenu = useCallback(() => {
+    if (!dashboardMenuMounted && !dashboardMenuOpen) {
+      return;
+    }
+
+    if (dashboardMenuCloseTimeoutRef.current !== null) {
+      window.clearTimeout(dashboardMenuCloseTimeoutRef.current);
+      dashboardMenuCloseTimeoutRef.current = null;
+    }
+
+    setDashboardMenuEntered(false);
+    setDashboardMenuOpen(false);
+
+    dashboardMenuCloseTimeoutRef.current = window.setTimeout(() => {
+      setDashboardMenuMounted(false);
+      dashboardMenuCloseTimeoutRef.current = null;
+    }, MENU_ANIMATION_MS);
+  }, [dashboardMenuMounted, dashboardMenuOpen]);
+
+  const openDashboardMenu = useCallback(() => {
+    if (dashboardMenuCloseTimeoutRef.current !== null) {
+      window.clearTimeout(dashboardMenuCloseTimeoutRef.current);
+      dashboardMenuCloseTimeoutRef.current = null;
+    }
+
+    syncDashboardMenuWidth();
+    setDashboardMenuPathname(pathname);
+    setDashboardMenuMounted(true);
+    setDashboardMenuOpen(true);
+    window.requestAnimationFrame(() => {
+      setDashboardMenuEntered(true);
+    });
+  }, [pathname, syncDashboardMenuWidth]);
+
+  const closeInstructionMenu = useCallback(() => {
+    if (!instructionMenuMounted && !instructionMenuOpen) {
+      return;
+    }
+
+    if (instructionMenuCloseTimeoutRef.current !== null) {
+      window.clearTimeout(instructionMenuCloseTimeoutRef.current);
+      instructionMenuCloseTimeoutRef.current = null;
+    }
+
+    setInstructionMenuEntered(false);
+    setInstructionMenuOpen(false);
+
+    instructionMenuCloseTimeoutRef.current = window.setTimeout(() => {
+      setInstructionMenuMounted(false);
+      instructionMenuCloseTimeoutRef.current = null;
+    }, MENU_ANIMATION_MS);
+  }, [instructionMenuMounted, instructionMenuOpen]);
+
+  const openInstructionMenu = useCallback(() => {
+    if (instructionMenuCloseTimeoutRef.current !== null) {
+      window.clearTimeout(instructionMenuCloseTimeoutRef.current);
+      instructionMenuCloseTimeoutRef.current = null;
+    }
+
+    setInstructionMenuPathname(pathname);
+    setInstructionMenuMounted(true);
+    setInstructionMenuOpen(true);
+    window.requestAnimationFrame(() => {
+      setInstructionMenuEntered(true);
+    });
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!dashboardMenuOpen || dashboardMenuPathname === pathname) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      closeDashboardMenu();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [closeDashboardMenu, dashboardMenuOpen, dashboardMenuPathname, pathname]);
+
+  useEffect(() => {
+    if (!instructionMenuOpen || instructionMenuPathname === pathname) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      closeInstructionMenu();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [closeInstructionMenu, instructionMenuOpen, instructionMenuPathname, pathname]);
+
+  useEffect(() => {
+    if (!dashboardMenuMounted) {
+      return;
+    }
+
+    const onWindowResize = () => {
+      syncDashboardMenuWidth();
+    };
+    const frameId = window.requestAnimationFrame(syncDashboardMenuWidth);
+    window.addEventListener("resize", onWindowResize);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", onWindowResize);
+    };
+  }, [dashboardMenuMounted, syncDashboardMenuWidth]);
+
+  useEffect(
+    () => () => {
+      if (dashboardMenuCloseTimeoutRef.current !== null) {
+        window.clearTimeout(dashboardMenuCloseTimeoutRef.current);
+      }
+      if (instructionMenuCloseTimeoutRef.current !== null) {
+        window.clearTimeout(instructionMenuCloseTimeoutRef.current);
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
     const handleDashboardLayoutState = (event: Event) => {
       const detail = (event as CustomEvent<DashboardLayoutStateEventDetail>).detail;
@@ -142,14 +303,14 @@ export function AppHeader({ profile }: { profile: Profile }) {
         return;
       }
 
-      setDashboardMenuOpen(false);
-      setInstructionMenuOpen(false);
+      closeDashboardMenu();
+      closeInstructionMenu();
     };
 
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setDashboardMenuOpen(false);
-        setInstructionMenuOpen(false);
+        closeDashboardMenu();
+        closeInstructionMenu();
       }
     };
 
@@ -160,7 +321,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("keydown", handleEscape);
     };
-  }, [dashboardMenuVisible, instructionMenuVisible]);
+  }, [closeDashboardMenu, closeInstructionMenu, dashboardMenuVisible, instructionMenuVisible]);
 
   const clearDashboardInstructionReturnState = useCallback(() => {
     try {
@@ -181,8 +342,8 @@ export function AppHeader({ profile }: { profile: Profile }) {
       }
 
       clearDashboardInstructionReturnState();
-      setDashboardMenuOpen(false);
-      setInstructionMenuOpen(false);
+      closeDashboardMenu();
+      closeInstructionMenu();
 
       if (!isDashboardActive) {
         return;
@@ -195,7 +356,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
         behavior: "auto",
       });
     },
-    [clearDashboardInstructionReturnState, isDashboardActive],
+    [clearDashboardInstructionReturnState, closeDashboardMenu, closeInstructionMenu, isDashboardActive],
   );
 
   const triggerDashboardAction = useCallback(
@@ -243,10 +404,10 @@ export function AppHeader({ profile }: { profile: Profile }) {
   const handleDashboardAction = useCallback(
     (command: DashboardLayoutCommand) => {
       triggerDashboardAction(command);
-      setDashboardMenuOpen(false);
-      setInstructionMenuOpen(false);
+      closeDashboardMenu();
+      closeInstructionMenu();
     },
-    [triggerDashboardAction],
+    [closeDashboardMenu, closeInstructionMenu, triggerDashboardAction],
   );
 
   const renderDashboardControl = (mobile: boolean) => (
@@ -276,16 +437,15 @@ export function AppHeader({ profile }: { profile: Profile }) {
             ? "Open dashboard options. Action required."
             : "Open dashboard options"
         }
-        onClick={() =>
-          setDashboardMenuOpen((current) => {
-            const next = !current;
-            if (next) {
-              setDashboardMenuPathname(pathname);
-              setInstructionMenuOpen(false);
-            }
-            return next;
-          })
-        }
+        onClick={() => {
+          if (dashboardMenuVisible) {
+            closeDashboardMenu();
+            return;
+          }
+
+          closeInstructionMenu();
+          openDashboardMenu();
+        }}
         className={cn(
           "relative inline-flex items-center rounded-r-xl border px-2.5 py-2 transition",
           isDashboardActive
@@ -304,12 +464,27 @@ export function AppHeader({ profile }: { profile: Profile }) {
         />
       </button>
 
-      {dashboardMenuVisible ? (
+      {dashboardMenuMounted ? (
         <div
           className={cn(
-            "absolute top-[calc(100%+0.5rem)] z-40 grid gap-2 rounded-2xl border border-white/20 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-xl",
-            mobile ? "left-1/2 w-[min(94vw,320px)] -translate-x-1/2" : "left-0 w-[300px]",
+            "absolute top-[calc(100%+0.5rem)] z-[90] grid gap-2 rounded-2xl border border-white/20 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-xl transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
+            mobile ? "left-1/2 -translate-x-1/2" : "left-0",
+            dashboardMenuEntered ? "pointer-events-auto" : "pointer-events-none",
           )}
+          style={{
+            width: `${dashboardMenuWidth}px`,
+            maxWidth: mobile ? "94vw" : undefined,
+            opacity: dashboardMenuEntered ? 1 : 0,
+            filter: dashboardMenuEntered ? "blur(0px)" : "blur(6px)",
+            transform: dashboardMenuEntered
+              ? mobile
+                ? "translateX(-50%) translateY(0px) scale(1)"
+                : "translateY(0px) scale(1)"
+              : mobile
+                ? "translateX(-50%) translateY(-8px) scale(0.98)"
+                : "translateY(-8px) scale(0.98)",
+            transformOrigin: mobile ? "top center" : "top left",
+          }}
         >
           <button
             type="button"
@@ -410,8 +585,8 @@ export function AppHeader({ profile }: { profile: Profile }) {
         <Link
           href="/instructions/new"
           onClick={() => {
-            setDashboardMenuOpen(false);
-            setInstructionMenuOpen(false);
+            closeDashboardMenu();
+            closeInstructionMenu();
           }}
           className={cn(
             "inline-flex items-center rounded-xl border px-4 py-2 text-sm font-semibold transition",
@@ -433,8 +608,8 @@ export function AppHeader({ profile }: { profile: Profile }) {
         <Link
           href="/instructions/new"
           onClick={() => {
-            setDashboardMenuOpen(false);
-            setInstructionMenuOpen(false);
+            closeDashboardMenu();
+            closeInstructionMenu();
           }}
           className={cn(
             "inline-flex items-center rounded-l-xl border border-r-0 px-4 py-2 text-sm font-semibold transition",
@@ -451,16 +626,15 @@ export function AppHeader({ profile }: { profile: Profile }) {
           aria-haspopup="menu"
           aria-expanded={instructionMenuVisible}
           aria-label="Open instruction options"
-          onClick={() =>
-            setInstructionMenuOpen((current) => {
-              const next = !current;
-              if (next) {
-                setInstructionMenuPathname(pathname);
-                setDashboardMenuOpen(false);
-              }
-              return next;
-            })
-          }
+          onClick={() => {
+            if (instructionMenuVisible) {
+              closeInstructionMenu();
+              return;
+            }
+
+            closeDashboardMenu();
+            openInstructionMenu();
+          }}
           className={cn(
             "inline-flex items-center rounded-r-xl border px-2.5 py-2 transition",
             instructionControlActive
@@ -474,16 +648,29 @@ export function AppHeader({ profile }: { profile: Profile }) {
           />
         </button>
 
-        {instructionMenuVisible ? (
+        {instructionMenuMounted ? (
           <div
             className={cn(
-              "absolute top-[calc(100%+0.5rem)] z-40 grid gap-2 rounded-2xl border border-white/20 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-xl",
-              mobile ? "left-1/2 w-[min(94vw,280px)] -translate-x-1/2" : "left-0 w-[220px]",
+              "absolute top-[calc(100%+0.5rem)] z-[90] grid gap-2 rounded-2xl border border-white/20 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-xl transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
+              mobile ? "left-1/2 w-[min(94vw,280px)]" : "left-0 w-[220px]",
+              instructionMenuEntered ? "pointer-events-auto" : "pointer-events-none",
             )}
+            style={{
+              opacity: instructionMenuEntered ? 1 : 0,
+              filter: instructionMenuEntered ? "blur(0px)" : "blur(6px)",
+              transform: instructionMenuEntered
+                ? mobile
+                  ? "translateX(-50%) translateY(0px) scale(1)"
+                  : "translateY(0px) scale(1)"
+                : mobile
+                  ? "translateX(-50%) translateY(-8px) scale(0.98)"
+                  : "translateY(-8px) scale(0.98)",
+              transformOrigin: mobile ? "top center" : "top left",
+            }}
           >
             <Link
               href="/instructions/archived"
-              onClick={() => setInstructionMenuOpen(false)}
+              onClick={() => closeInstructionMenu()}
               className={cn(
                 "inline-flex items-center rounded-xl border px-3 py-2 text-sm font-semibold transition",
                 isArchivedInstructionActive
@@ -500,7 +687,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
   };
 
   return (
-    <header className="sticky top-0 z-20 border-b border-white/20 bg-white/75 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/70">
+    <header className="sticky top-0 z-[80] border-b border-white/20 bg-white/75 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/70">
       <div className="mx-auto w-full max-w-7xl px-4 py-3 md:px-8">
         <div className="relative flex items-center justify-end">
           <Link

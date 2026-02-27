@@ -118,6 +118,7 @@ interface InstructionReviewStatusRow {
   status: "up_to_date" | "needs_review";
   last_calibrated_at: string;
   flagged_at: string | null;
+  updated_by: string;
 }
 
 const DEFAULT_REVIEW_WINDOW_DAYS = 30;
@@ -612,7 +613,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
       .maybeSingle<InstructionReviewSettingsRow>(),
     supabase
       .from("instruction_review_status")
-      .select("instruction_id, status, last_calibrated_at, flagged_at")
+      .select("instruction_id, status, last_calibrated_at, flagged_at, updated_by")
       .eq("instruction_id", instruction.id)
       .maybeSingle<InstructionReviewStatusRow>(),
   ]);
@@ -636,6 +637,22 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
         ? reviewStatusData.flagged_at
         : null,
   } as const;
+  const reviewStatusUpdatedById =
+    !reviewStatusError && reviewStatusData?.updated_by
+      ? reviewStatusData.updated_by
+      : instruction.updated_by;
+  const { data: reviewStatusUpdatedByProfile } =
+    reviewStatusUpdatedById && !userMap.has(reviewStatusUpdatedById)
+      ? await supabase
+          .from("profiles")
+          .select("full_name")
+          .eq("id", reviewStatusUpdatedById)
+          .maybeSingle<{ full_name: string }>()
+      : { data: null };
+  const reviewLastReviewedByName =
+    userMap.get(reviewStatusUpdatedById) ??
+    reviewStatusUpdatedByProfile?.full_name ??
+    "Unknown";
   const reviewAgeDays = toElapsedCalendarDaysUtc(reviewStatus.lastCalibratedAt);
   const reviewIsOutOfRange =
     reviewAgeDays !== null && reviewAgeDays >= reviewWindowDays;
@@ -652,7 +669,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
         fallbackHref={instructionIsArchived ? "/instructions/archived" : "/dashboard"}
       />
 
-      <header className="rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+      <header className="relative z-20 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
         {!instructionIsArchived && showReviewIndicator ? (
           <div
             className={`mb-4 rounded-2xl border px-4 py-3 ${
@@ -686,10 +703,24 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
         ) : null}
 
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="text-3xl font-extrabold text-slate-900 dark:text-slate-100">
-              {workItem.item_title}
-            </h1>
+          <div className="grid gap-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-3xl font-extrabold text-slate-900 dark:text-slate-100">
+                {workItem.item_title}
+              </h1>
+              {!instructionIsArchived ? (
+                <InstructionReviewControls
+                  instructionId={instruction.id}
+                  instructionUpdatedAt={instruction.updated_at}
+                  reviewWindowDays={reviewWindowDays}
+                  lastReviewedByName={reviewLastReviewedByName}
+                  initialStatus={reviewStatus.status}
+                  initialLastCalibratedAt={reviewStatus.lastCalibratedAt}
+                  initialFlaggedAt={reviewStatus.flaggedAt}
+                  className="shrink-0"
+                />
+              ) : null}
+            </div>
             <p className="text-sm text-slate-600 dark:text-slate-300">
               Part ID: <strong>{workItem.part_id}</strong> | Department:{" "}
               <strong>{departmentName}</strong> | Revision{" "}
@@ -719,63 +750,50 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
             </p>
           </div>
           <div className="grid gap-2 md:justify-items-end">
-            <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
+            <div className="grid w-full max-w-[14rem] justify-items-stretch gap-2 md:w-[14rem]">
+              <InstructionUpdatesPanel
+                events={instructionUpdateEvents}
+                className="h-fit w-full justify-center self-start"
+              />
               {!instructionIsArchived ? (
-                <InstructionReviewControls
+                <div className="grid grid-cols-2 gap-2">
+                  <LikeInstructionButton
+                    instructionId={instruction.id}
+                    userId={profile.id}
+                    initialLiked={Boolean(likedInstruction)}
+                    initialLikeCount={instructionLikeCount ?? 0}
+                    className="w-full justify-center px-2 py-1.5"
+                  />
+                  <PinInstructionButton
+                    instructionId={instruction.id}
+                    userId={profile.id}
+                    initialPinned={Boolean(pinnedInstruction)}
+                    className="w-full justify-center px-2 py-1.5"
+                  />
+                </div>
+              ) : null}
+              {showCompactEditorInstructionActions ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <Link
+                    href={`/instructions/${instruction.id}/fork`}
+                    className="inline-flex items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-2 py-1.5 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-200"
+                  >
+                    Fork
+                  </Link>
+                  <Link
+                    href={`/instructions/${instruction.id}/edit`}
+                    className="inline-flex items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-2 py-1.5 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-200"
+                  >
+                    Edit
+                  </Link>
+                </div>
+              ) : null}
+              {isSystemAdmin(profile.role) && !instructionIsArchived ? (
+                <DeleteInstructionButton
                   instructionId={instruction.id}
-                  instructionUpdatedAt={instruction.updated_at}
-                  reviewWindowDays={reviewWindowDays}
-                  initialStatus={reviewStatus.status}
-                  initialLastCalibratedAt={reviewStatus.lastCalibratedAt}
-                  initialFlaggedAt={reviewStatus.flaggedAt}
+                  className="w-full justify-center px-3 py-1.5 text-xs"
                 />
               ) : null}
-
-              <div className="grid w-full max-w-[14rem] justify-items-stretch gap-2 md:w-[14rem]">
-                <InstructionUpdatesPanel
-                  events={instructionUpdateEvents}
-                  className="h-fit w-full justify-center self-start"
-                />
-                {!instructionIsArchived ? (
-                  <div className="grid grid-cols-2 gap-2">
-                    <LikeInstructionButton
-                      instructionId={instruction.id}
-                      userId={profile.id}
-                      initialLiked={Boolean(likedInstruction)}
-                      initialLikeCount={instructionLikeCount ?? 0}
-                      className="w-full justify-center px-2 py-1.5"
-                    />
-                    <PinInstructionButton
-                      instructionId={instruction.id}
-                      userId={profile.id}
-                      initialPinned={Boolean(pinnedInstruction)}
-                      className="w-full justify-center px-2 py-1.5"
-                    />
-                  </div>
-                ) : null}
-                {showCompactEditorInstructionActions ? (
-                  <div className="grid grid-cols-2 gap-2">
-                    <Link
-                      href={`/instructions/${instruction.id}/fork`}
-                      className="inline-flex items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-2 py-1.5 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-200"
-                    >
-                      Fork
-                    </Link>
-                    <Link
-                      href={`/instructions/${instruction.id}/edit`}
-                      className="inline-flex items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-2 py-1.5 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-200"
-                    >
-                      Edit
-                    </Link>
-                  </div>
-                ) : null}
-                {isSystemAdmin(profile.role) && !instructionIsArchived ? (
-                  <DeleteInstructionButton
-                    instructionId={instruction.id}
-                    className="w-full justify-center px-3 py-1.5 text-xs"
-                  />
-                ) : null}
-              </div>
             </div>
           </div>
         </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckCircle2, ChevronDown, Loader2, TriangleAlert } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { LocalDateTime } from "@/components/ui/local-date-time";
@@ -12,6 +12,7 @@ interface InstructionReviewControlsProps {
   instructionId: string;
   instructionUpdatedAt: string;
   reviewWindowDays: number;
+  lastReviewedByName: string;
   initialStatus: "up_to_date" | "needs_review";
   initialLastCalibratedAt: string | null;
   initialFlaggedAt: string | null;
@@ -27,6 +28,7 @@ interface InstructionReviewStatusPayload {
 }
 
 const DEFAULT_REVIEW_WINDOW_DAYS = 30;
+const REVIEW_MENU_ANIMATION_MS = 260;
 
 function normalizeReviewWindowDays(value: number) {
   if (!Number.isInteger(value)) {
@@ -84,6 +86,7 @@ export function InstructionReviewControls({
   instructionId,
   instructionUpdatedAt,
   reviewWindowDays,
+  lastReviewedByName,
   initialStatus,
   initialLastCalibratedAt,
   initialFlaggedAt,
@@ -92,6 +95,7 @@ export function InstructionReviewControls({
   const router = useRouter();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const menuRootRef = useRef<HTMLDivElement | null>(null);
+  const menuCloseTimeoutRef = useRef<number | null>(null);
   const [status, setStatus] = useState<"up_to_date" | "needs_review">(initialStatus);
   const [lastCalibratedAt, setLastCalibratedAt] = useState<string>(
     initialLastCalibratedAt ?? instructionUpdatedAt,
@@ -101,6 +105,8 @@ export function InstructionReviewControls({
     null,
   );
   const [stateMenuOpen, setStateMenuOpen] = useState(false);
+  const [menuMounted, setMenuMounted] = useState(false);
+  const [menuEntered, setMenuEntered] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -112,6 +118,33 @@ export function InstructionReviewControls({
     daysSinceCalibration === null
       ? null
       : Math.max(0, normalizedReviewWindowDays - daysSinceCalibration);
+
+  const closeStateMenu = useCallback(() => {
+    if (menuCloseTimeoutRef.current !== null) {
+      window.clearTimeout(menuCloseTimeoutRef.current);
+      menuCloseTimeoutRef.current = null;
+    }
+
+    setMenuEntered(false);
+    setStateMenuOpen(false);
+    menuCloseTimeoutRef.current = window.setTimeout(() => {
+      setMenuMounted(false);
+      menuCloseTimeoutRef.current = null;
+    }, REVIEW_MENU_ANIMATION_MS);
+  }, []);
+
+  const openStateMenu = useCallback(() => {
+    if (menuCloseTimeoutRef.current !== null) {
+      window.clearTimeout(menuCloseTimeoutRef.current);
+      menuCloseTimeoutRef.current = null;
+    }
+
+    setMenuMounted(true);
+    setStateMenuOpen(true);
+    window.requestAnimationFrame(() => {
+      setMenuEntered(true);
+    });
+  }, []);
 
   async function getAuthHeaders() {
     const {
@@ -134,11 +167,11 @@ export function InstructionReviewControls({
     }
 
     if (nextStatus === status) {
-      setStateMenuOpen(false);
+      closeStateMenu();
       return;
     }
 
-    setStateMenuOpen(false);
+    closeStateMenu();
     setBusyStatus(nextStatus);
     setError(null);
     setMessage(null);
@@ -206,12 +239,12 @@ export function InstructionReviewControls({
         return;
       }
 
-      setStateMenuOpen(false);
+      closeStateMenu();
     };
 
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setStateMenuOpen(false);
+        closeStateMenu();
       }
     };
 
@@ -222,7 +255,16 @@ export function InstructionReviewControls({
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("keydown", handleEscape);
     };
-  }, [stateMenuOpen]);
+  }, [closeStateMenu, stateMenuOpen]);
+
+  useEffect(
+    () => () => {
+      if (menuCloseTimeoutRef.current !== null) {
+        window.clearTimeout(menuCloseTimeoutRef.current);
+      }
+    },
+    [],
+  );
 
   const statusSummary =
     status === "needs_review"
@@ -235,93 +277,112 @@ export function InstructionReviewControls({
             ? "Review check is due today."
             : `Next review check in ${daysUntilDue} day${daysUntilDue === 1 ? "" : "s"}.`;
 
-  return (
-    <div
-      className={cn(
-        "grid gap-2 rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50",
-        className,
-      )}
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <div
-          ref={menuRootRef}
-          className="relative inline-flex"
-        >
-          <div
-            className={cn(
-              "inline-flex overflow-hidden rounded-xl border",
-              status === "needs_review"
-                ? "border-amber-500/45 bg-amber-500/12 text-amber-800 dark:text-amber-200"
-                : "border-emerald-500/45 bg-emerald-500/12 text-emerald-800 dark:text-emerald-200",
-            )}
-          >
-            <span className="inline-flex items-center gap-1.5 border-r border-current/25 px-3 py-1.5 text-sm font-semibold">
-              {status === "needs_review" ? (
-                <TriangleAlert size={14} />
-              ) : (
-                <CheckCircle2 size={14} />
-              )}
-              {status === "needs_review" ? "Needs Review" : "Up To Date"}
-            </span>
-            <button
-              type="button"
-              aria-haspopup="menu"
-              aria-expanded={stateMenuOpen}
-              disabled={busyStatus !== null}
-              onClick={() => setStateMenuOpen((current) => !current)}
-              className="inline-flex items-center px-2.5 transition hover:bg-black/10 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-white/10"
-            >
-              {busyStatus ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <ChevronDown size={14} />
-              )}
-            </button>
-          </div>
+  const nextReviewCheckLabel =
+    daysUntilDue === null
+      ? "Next review check unavailable."
+      : daysUntilDue === 0
+        ? "Next review check due today."
+        : `Next review check in ${daysUntilDue} day${daysUntilDue === 1 ? "" : "s"}.`;
 
-          {stateMenuOpen ? (
-            <div className="absolute right-0 top-[calc(100%+0.35rem)] z-30 grid min-w-[190px] gap-1 rounded-xl border border-white/20 bg-slate-950/95 p-1.5 shadow-2xl backdrop-blur-xl">
-              <button
-                type="button"
-                disabled={status === "up_to_date" || busyStatus !== null}
-                onClick={() => void updateInstructionReviewStatus("up_to_date")}
-                className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/45 bg-emerald-500/15 px-2.5 py-1.5 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <CheckCircle2 size={13} />
-                Up To Date
-              </button>
-              <button
-                type="button"
-                disabled={status === "needs_review" || busyStatus !== null}
-                onClick={() => void updateInstructionReviewStatus("needs_review")}
-                className="inline-flex items-center gap-2 rounded-lg border border-amber-500/45 bg-amber-500/15 px-2.5 py-1.5 text-sm font-semibold text-amber-100 transition hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <TriangleAlert size={13} />
-                Needs Review
-              </button>
-            </div>
-          ) : null}
-        </div>
+  return (
+    <div ref={menuRootRef} className={cn("relative inline-flex", className)}>
+      <div
+        className={cn(
+          "inline-flex overflow-hidden rounded-xl border",
+          status === "needs_review"
+            ? "border-amber-500/45 bg-amber-500/12 text-amber-800 dark:text-amber-200"
+            : "border-emerald-500/45 bg-emerald-500/12 text-emerald-800 dark:text-emerald-200",
+        )}
+      >
+        <span className="inline-flex items-center gap-1.5 border-r border-current/25 px-3 py-1.5 text-sm font-semibold">
+          {status === "needs_review" ? (
+            <TriangleAlert size={14} />
+          ) : (
+            <CheckCircle2 size={14} />
+          )}
+          {status === "needs_review" ? "Needs Review" : "Up To Date"}
+        </span>
+        <button
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={stateMenuOpen}
+          disabled={busyStatus !== null}
+          onClick={() => {
+            if (stateMenuOpen) {
+              closeStateMenu();
+              return;
+            }
+
+            openStateMenu();
+          }}
+          className="inline-flex items-center px-2.5 transition hover:bg-black/10 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-white/10"
+        >
+          {busyStatus ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : (
+            <ChevronDown
+              size={14}
+              className={cn("transition", stateMenuOpen ? "rotate-180" : "")}
+            />
+          )}
+        </button>
       </div>
 
-      <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">{statusSummary}</p>
+      {menuMounted ? (
+        <div
+          className={cn(
+            "absolute right-0 top-[calc(100%+0.35rem)] z-[80] grid min-w-[270px] gap-2 rounded-xl border border-white/20 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-xl transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
+            menuEntered ? "pointer-events-auto" : "pointer-events-none",
+          )}
+          style={{
+            opacity: menuEntered ? 1 : 0,
+            filter: menuEntered ? "blur(0px)" : "blur(6px)",
+            transform: menuEntered ? "translateY(0px) scale(1)" : "translateY(-8px) scale(0.98)",
+            transformOrigin: "top right",
+          }}
+        >
+          <button
+            type="button"
+            disabled={status === "up_to_date" || busyStatus !== null}
+            onClick={() => void updateInstructionReviewStatus("up_to_date")}
+            className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/45 bg-emerald-500/15 px-2.5 py-1.5 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <CheckCircle2 size={13} />
+            Up To Date
+          </button>
+          <button
+            type="button"
+            disabled={status === "needs_review" || busyStatus !== null}
+            onClick={() => void updateInstructionReviewStatus("needs_review")}
+            className="inline-flex items-center gap-2 rounded-lg border border-amber-500/45 bg-amber-500/15 px-2.5 py-1.5 text-sm font-semibold text-amber-100 transition hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <TriangleAlert size={13} />
+            Needs Review
+          </button>
 
-      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-        Last review check: <LocalDateTime value={lastCalibratedAt} mode="dateTime" />
-      </p>
-      {flaggedAt ? (
-        <p className="text-[11px] text-slate-500 dark:text-slate-400">
-          Latest needs-review flag: <LocalDateTime value={flaggedAt} mode="dateTime" />
-        </p>
-      ) : null}
+          <div className="rounded-lg border border-white/15 bg-white/5 px-2.5 py-2 text-[11px] text-slate-200">
+            <p className="font-semibold">{nextReviewCheckLabel}</p>
+            <p className="mt-1 text-slate-300">
+              Last reviewed by <span className="font-semibold">{lastReviewedByName}</span>
+            </p>
+            <p className="text-slate-400">
+              Last review check: <LocalDateTime value={lastCalibratedAt} mode="dateTime" />
+            </p>
+            {flaggedAt ? (
+              <p className="text-slate-400">
+                Latest needs-review flag: <LocalDateTime value={flaggedAt} mode="dateTime" />
+              </p>
+            ) : null}
+          </div>
 
-      {message ? (
-        <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">
-          {message}
-        </p>
-      ) : null}
-      {error ? (
-        <p className="text-xs font-semibold text-rose-700 dark:text-rose-300">{error}</p>
+          <p className="text-[11px] font-semibold text-slate-300">{statusSummary}</p>
+          {message ? (
+            <p className="text-[11px] font-semibold text-emerald-300">{message}</p>
+          ) : null}
+          {error ? (
+            <p className="text-[11px] font-semibold text-rose-300">{error}</p>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
