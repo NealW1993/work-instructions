@@ -2486,8 +2486,10 @@ export function DashboardClient({
       return (
         <div
           className={cn(
-            "flex flex-wrap items-center justify-center sm:justify-end",
-            widgetSize === "compact" ? "w-full gap-2" : "gap-2",
+            "items-center",
+            widgetSize === "compact"
+              ? "flex w-full flex-nowrap gap-1.5 overflow-x-auto"
+              : "flex flex-wrap justify-center gap-2 sm:justify-end",
           )}
         >
           {isSystemAdmin ? (
@@ -3591,8 +3593,6 @@ export function DashboardClient({
             const isDragOverTarget =
               dragOverWidgetId === widget.id && draggedWidgetId !== widget.id;
             const widgetHeaderControls = renderWidgetHeaderControls(widget.id, widget.size);
-            const showFinderCompactSystemAdminSizeFirst =
-              isSystemAdmin && widget.id === "finder" && widget.size === "compact";
             const sizeControl = customizeOpen ? (
               <label
                 className={cn(
@@ -3683,11 +3683,10 @@ export function DashboardClient({
                     className={cn(
                       "flex flex-wrap items-center",
                       widget.size === "compact" ? "w-full gap-2" : "gap-2",
-                      showFinderCompactSystemAdminSizeFirst ? "flex-col items-start" : "",
                     )}
                   >
-                    {showFinderCompactSystemAdminSizeFirst ? sizeControl : widgetHeaderControls}
-                    {showFinderCompactSystemAdminSizeFirst ? widgetHeaderControls : sizeControl}
+                    {widgetHeaderControls}
+                    {sizeControl}
                   </div>
                 </div>
 

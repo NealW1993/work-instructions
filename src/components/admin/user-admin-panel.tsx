@@ -164,7 +164,8 @@ export function UserAdminPanel() {
   const [departmentOrderDirty, setDepartmentOrderDirty] = useState(false);
   const [draggedDepartmentId, setDraggedDepartmentId] = useState<string | null>(null);
   const [dragOverDepartmentId, setDragOverDepartmentId] = useState<string | null>(null);
-  const [departmentsCollapsed, setDepartmentsCollapsed] = useState(false);
+  const [departmentsCollapsed, setDepartmentsCollapsed] = useState(true);
+  const [usersCollapsed, setUsersCollapsed] = useState(true);
   const [departmentSavedFlash, setDepartmentSavedFlash] = useState<Record<string, boolean>>({});
   const [editingDepartmentOrderId, setEditingDepartmentOrderId] = useState<string | null>(
     null,
@@ -1131,7 +1132,7 @@ export function UserAdminPanel() {
             className="flex items-center gap-1.5 text-lg font-bold transition hover:opacity-80"
           >
             {departmentsCollapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
-            Departments
+            Department Management
           </button>
           <div className="flex flex-wrap items-center gap-2">
             {dirtyDepartments.length >= 2 && (
@@ -1457,12 +1458,26 @@ export function UserAdminPanel() {
         ))}
       </div>
 
-      <form
-        noValidate
-        onSubmit={handleCreateUser}
-        className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:grid-cols-2 md:p-7"
-      >
-        <h2 className="col-span-full text-lg font-bold">Create User</h2>
+      <div className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+        <div className="flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => setUsersCollapsed((v) => !v)}
+            className="flex items-center gap-1.5 text-lg font-bold transition hover:opacity-80"
+          >
+            {usersCollapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
+            User Management
+          </button>
+        </div>
+
+        {!usersCollapsed && (
+          <div className="grid gap-5">
+            <form
+              noValidate
+              onSubmit={handleCreateUser}
+              className="grid gap-3 md:grid-cols-2"
+            >
+              <h2 className="col-span-full text-lg font-bold">Create User</h2>
         <label className="grid gap-1 text-sm">
           <span>Full Name</span>
           <input
@@ -1544,10 +1559,12 @@ export function UserAdminPanel() {
         >
           {busy ? "Working..." : "Create User"}
         </button>
-      </form>
+            </form>
 
-      <div className="overflow-hidden rounded-3xl border border-white/30 bg-white/80 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70">
-        <div className="overflow-x-auto">
+            <div className="border-t border-slate-200/70 dark:border-slate-700/70" />
+
+            <div className="overflow-hidden rounded-xl">
+              <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-900/10 text-left dark:bg-white/10">
               <tr>
@@ -1667,7 +1684,10 @@ export function UserAdminPanel() {
               ))}
             </tbody>
           </table>
-        </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {confirmDialog && portalReady
