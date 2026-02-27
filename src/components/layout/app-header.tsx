@@ -689,7 +689,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
   return (
     <header className="sticky top-0 z-[80] border-b border-white/20 bg-white/75 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/70">
       <div className="mx-auto w-full max-w-7xl px-4 py-3 md:px-8">
-        <div className="relative flex items-center justify-end">
+        <div className="relative flex items-center justify-center md:justify-end">
           <Link
             href="/dashboard"
             onClick={handleDashboardLinkClick}

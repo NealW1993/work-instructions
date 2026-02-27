@@ -2486,7 +2486,7 @@ export function DashboardClient({
       return (
         <div
           className={cn(
-            "flex flex-wrap items-center justify-end",
+            "flex flex-wrap items-center justify-center sm:justify-end",
             widgetSize === "compact" ? "w-full gap-2" : "gap-2",
           )}
         >
@@ -3615,7 +3615,8 @@ export function DashboardClient({
                 data-dashboard-widget-id={widget.id}
                 className={cn(
                   getWidgetSpanClass(widget.size),
-                  "relative min-w-0 overflow-hidden rounded-3xl border border-white/30 bg-white/80 p-4 shadow-xl backdrop-blur-xl transition dark:border-white/10 dark:bg-slate-900/70 md:p-5",
+                  "relative min-w-0 overflow-hidden rounded-3xl border border-white/30 bg-white/80 shadow-xl backdrop-blur-xl transition dark:border-white/10 dark:bg-slate-900/70",
+                  widget.size === "compact" ? "p-3" : "p-4 md:p-5",
                   isDragging ? "scale-[0.99] opacity-70" : "",
                   isDragOverTarget
                     ? "ring-2 ring-cyan-400/80 ring-offset-2 ring-offset-transparent"
@@ -3635,7 +3636,7 @@ export function DashboardClient({
 
                 <div
                   className={cn(
-                    "mb-3 flex flex-col gap-2.5",
+                    widget.size === "compact" ? "mb-2 flex flex-col gap-2" : "mb-3 flex flex-col gap-2.5",
                     customizeOpen ? "pr-10" : "",
                     widget.size === "compact"
                       ? "items-start"
@@ -3658,7 +3659,7 @@ export function DashboardClient({
                       </button>
                     ) : null}
                     <div className="min-w-0">
-                      <h2 className="break-words text-xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
+                      <h2 className={cn("break-words font-extrabold tracking-tight text-slate-900 dark:text-slate-100", widget.size === "compact" ? "text-base" : "text-xl")}>
                         {definition.title}
                       </h2>
                     </div>
@@ -3667,7 +3668,7 @@ export function DashboardClient({
                   <div
                     className={cn(
                       "flex flex-wrap items-center",
-                      widget.size === "compact" ? "w-full gap-2 pt-1" : "gap-2",
+                      widget.size === "compact" ? "w-full gap-2" : "gap-2",
                       showFinderCompactSystemAdminSizeFirst ? "flex-col items-start" : "",
                     )}
                   >
