@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Activity, Archive, ArrowLeft, BarChart3, FileText, Users } from "lucide-react";
 
+import { KpiActivitySection } from "@/components/admin/kpi-activity-section";
 import { KpiInsightsPanel } from "@/components/admin/kpi-insights-panel";
 import { requireAuthenticatedUser } from "@/lib/auth";
 import { isSystemAdmin } from "@/lib/roles";
@@ -58,21 +59,7 @@ interface DepartmentInstructionBreakdown {
   totalCount: number;
 }
 
-interface ActivityDayPoint {
-  key: string;
-  label: string;
-  created: number;
-  updated: number;
-}
-
-interface ContributorPoint {
-  userId: string;
-  label: string;
-  updates: number;
-}
-
 const DEFAULT_DEPARTMENT_COLOR = "#0EA5E9";
-const ACTIVITY_TREND_DAYS = 14;
 
 function normalizeDepartmentColor(value: string | null | undefined) {
   const normalized = (value ?? "").trim().toUpperCase();
@@ -108,16 +95,6 @@ function addUtcDays(date: Date, daysToAdd: number) {
   return new Date(date.getTime() + daysToAdd * 24 * 60 * 60 * 1000);
 }
 
-function toUtcDateKey(date: Date) {
-  const year = date.getUTCFullYear();
-  const month = (date.getUTCMonth() + 1).toString().padStart(2, "0");
-  const day = date.getUTCDate().toString().padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function toShortUtcLabel(date: Date) {
-  return `${date.getUTCMonth() + 1}/${date.getUTCDate()}`;
-}
 
 function maxOf(values: number[]) {
   return values.length > 0 ? Math.max(...values) : 1;
@@ -352,92 +329,17 @@ export default async function SystemKpisPage() {
   const maxDepartmentTotal = maxOf(departmentBreakdown.map((entry) => entry.totalCount));
 
   const todayUtc = startOfUtcDay(now);
-  const trendStartUtc = addUtcDays(todayUtc, -(ACTIVITY_TREND_DAYS - 1));
-  const trendByDay = new Map<string, ActivityDayPoint>();
-  for (let index = 0; index < ACTIVITY_TREND_DAYS; index += 1) {
-    const dayDate = addUtcDays(trendStartUtc, index);
-    const key = toUtcDateKey(dayDate);
-    trendByDay.set(key, {
-      key,
-      label: toShortUtcLabel(dayDate),
-      created: 0,
-      updated: 0,
-    });
-  }
-
-  const contributorCounts = new Map<string, number>();
-  let createdLast30Days = 0;
-  let updatedLast30Days = 0;
-  let updatedLast7Days = 0;
   const sevenDaysAgoUtc = addUtcDays(todayUtc, -6);
+  let updatedLast7Days = 0;
 
   for (const event of changeEvents) {
+    if (event.event_type !== "updated") continue;
     const occurredAtMs = toTimestamp(event.occurred_at);
-    if (occurredAtMs === null) {
-      continue;
-    }
-
-    const occurredAt = new Date(occurredAtMs);
-    const eventType = event.event_type;
-
-    if (eventType === "created") {
-      createdLast30Days += 1;
-    }
-
-    if (eventType === "updated") {
-      updatedLast30Days += 1;
-      contributorCounts.set(
-        event.actor_user_id,
-        (contributorCounts.get(event.actor_user_id) ?? 0) + 1,
-      );
-
-      if (occurredAt >= sevenDaysAgoUtc) {
-        updatedLast7Days += 1;
-      }
-    }
-
-    if (occurredAt < trendStartUtc) {
-      continue;
-    }
-
-    const dayKey = toUtcDateKey(occurredAt);
-    const dayPoint = trendByDay.get(dayKey);
-    if (!dayPoint) {
-      continue;
-    }
-
-    if (eventType === "created") {
-      dayPoint.created += 1;
-    } else if (eventType === "updated") {
-      dayPoint.updated += 1;
+    if (occurredAtMs === null) continue;
+    if (new Date(occurredAtMs) >= sevenDaysAgoUtc) {
+      updatedLast7Days += 1;
     }
   }
-
-  const trendPoints = Array.from(trendByDay.values());
-  const maxTrendBarCount = maxOf(
-    trendPoints.flatMap((point) => [point.created, point.updated]),
-  );
-  const trendAxisStep = Math.max(1, Math.ceil(maxTrendBarCount / 4));
-  const trendAxisTicks = Array.from({ length: 5 }, (_, index) =>
-    trendAxisStep * (4 - index),
-  );
-  const trendAxisMax = trendAxisTicks[0] ?? 1;
-
-  const topContributors: ContributorPoint[] = Array.from(contributorCounts.entries())
-    .map(([userId, updates]) => ({
-      userId,
-      updates,
-      label: profileNameById.get(userId) ?? "Unknown User",
-    }))
-    .sort((a, b) => {
-      if (b.updates !== a.updates) {
-        return b.updates - a.updates;
-      }
-      return a.label.localeCompare(b.label);
-    })
-    .slice(0, 12);
-
-  const maxContributorUpdates = maxOf(topContributors.map((entry) => entry.updates));
   const activeInstructionCount = instructions.filter((entry) => !entry.is_archived).length;
   const archivedInstructionCount = instructions.filter((entry) => entry.is_archived).length;
 
@@ -567,8 +469,7 @@ export default async function SystemKpisPage() {
         )}
       </section>
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        <section className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-6">
+      <section className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-6">
           <div className="flex flex-wrap items-end justify-between gap-2">
             <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
               Instruction Load by Department
@@ -639,177 +540,7 @@ export default async function SystemKpisPage() {
           )}
         </section>
 
-        <section className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-6">
-          <div className="flex flex-wrap items-end justify-between gap-2">
-            <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
-              Activity Trend (Last 14 Days)
-            </h2>
-            <p className="text-xs text-slate-600 dark:text-slate-300">
-              Created and updated events.
-            </p>
-          </div>
-
-          <div className="grid gap-3">
-            <div className="flex items-center gap-3 text-xs text-slate-600 dark:text-slate-300">
-              <span className="inline-flex items-center gap-1">
-                <span className="h-2 w-2 rounded-sm bg-emerald-500" />
-                Created
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <span className="h-2 w-2 rounded-sm bg-cyan-500" />
-                Updated
-              </span>
-            </div>
-
-            <div className="rounded-xl border border-slate-300/70 bg-white/70 p-2 dark:border-slate-700 dark:bg-slate-900/50">
-              <div className="grid grid-cols-[2rem_minmax(0,1fr)] gap-2">
-                <div className="grid h-44 grid-rows-5 items-end text-right text-[10px] font-semibold text-slate-500 dark:text-slate-400">
-                  {trendAxisTicks.map((tickValue, index) => (
-                    <span
-                      key={`trend-axis-${tickValue}-${index}`}
-                      className={index === trendAxisTicks.length - 1 ? "" : "translate-y-1"}
-                    >
-                      {tickValue}
-                    </span>
-                  ))}
-                </div>
-
-                <div className="min-w-0">
-                  <div className="relative h-44">
-                    <div className="pointer-events-none absolute inset-0 grid grid-rows-5">
-                      {trendAxisTicks.map((_, index) => (
-                        <span
-                          key={`trend-grid-line-${index}`}
-                          className={cn(
-                            "border-t border-slate-300/35 dark:border-slate-700/45",
-                            index === trendAxisTicks.length - 1
-                              ? "border-b border-slate-300/35 dark:border-slate-700/45"
-                              : "",
-                          )}
-                        />
-                      ))}
-                    </div>
-
-                    <div className="relative grid h-44 grid-cols-14 items-end gap-1">
-                      {trendPoints.map((point) => {
-                        const createdHeight = (point.created / trendAxisMax) * 100;
-                        const updatedHeight = (point.updated / trendAxisMax) * 100;
-                        const totalEvents = point.created + point.updated;
-                        const trendTooltipTone: KpiTooltipTone =
-                          totalEvents === 0
-                            ? "violet"
-                            : point.updated >= point.created
-                              ? "cyan"
-                              : "emerald";
-
-                        return (
-                          <div
-                            key={point.key}
-                            tabIndex={0}
-                            className="group relative flex h-full items-end justify-center gap-1 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70"
-                          >
-                            <KpiDataTooltip
-                              align="center"
-                              tone={trendTooltipTone}
-                              title={`Activity on ${point.key}`}
-                              lines={[
-                                `${point.created} created event${point.created === 1 ? "" : "s"}.`,
-                                `${point.updated} updated event${point.updated === 1 ? "" : "s"}.`,
-                                `${totalEvents} total tracked changes.`,
-                              ]}
-                            />
-                            <span
-                              className="w-2 rounded-t bg-emerald-500/85"
-                              style={{
-                                height: `${Math.max(point.created > 0 ? createdHeight : 0, point.created > 0 ? 6 : 0)}%`,
-                              }}
-                              title={`${point.label}: ${point.created} created`}
-                            />
-                            <span
-                              className="w-2 rounded-t bg-cyan-500/85"
-                              style={{
-                                height: `${Math.max(point.updated > 0 ? updatedHeight : 0, point.updated > 0 ? 6 : 0)}%`,
-                              }}
-                              title={`${point.label}: ${point.updated} updated`}
-                            />
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="mt-1 grid grid-cols-14 gap-1">
-                    {trendPoints.map((point) => (
-                      <p
-                        key={`trend-label-${point.key}`}
-                        className="text-center text-[10px] text-slate-500 dark:text-slate-400"
-                      >
-                        {point.label}
-                      </p>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Last 30 days: {createdLast30Days} created, {updatedLast30Days} updated.
-            </p>
-          </div>
-        </section>
-      </div>
-
-      <section className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-6">
-        <div className="flex flex-wrap items-end justify-between gap-2">
-          <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
-            Top Contributors (Last 30 Days)
-          </h2>
-          <p className="text-xs text-slate-600 dark:text-slate-300">
-            Ranked by instruction update events.
-          </p>
-        </div>
-
-        {topContributors.length === 0 ? (
-          <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-            No recent update activity recorded.
-          </p>
-        ) : (
-          <div className="grid gap-2">
-            {topContributors.map((entry) => {
-              const width = (entry.updates / maxContributorUpdates) * 100;
-              const contributionSharePercent =
-                updatedLast30Days > 0 ? (entry.updates / updatedLast30Days) * 100 : 0;
-
-              return (
-                <article
-                  key={entry.userId}
-                  className="group relative grid gap-1 rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50"
-                >
-                  <KpiDataTooltip
-                    tone="violet"
-                    title={entry.label}
-                    lines={[
-                      `${entry.updates} update event${entry.updates === 1 ? "" : "s"} in the last 30 days.`,
-                      `${contributionSharePercent.toFixed(1)}% of all update activity.`,
-                      `Ranked among the top ${topContributors.length} contributors.`,
-                    ]}
-                  />
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <p className="font-semibold text-slate-800 dark:text-slate-100">{entry.label}</p>
-                    <p className="text-slate-600 dark:text-slate-300">{entry.updates} updates</p>
-                  </div>
-                  <div className="h-2 rounded-full bg-slate-300/40 dark:bg-slate-700/50">
-                    <div
-                      className="h-2 rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500"
-                      style={{ width: `${Math.max(width, 2)}%` }}
-                    />
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </section>
+        <KpiActivitySection />
     </section>
   );
 }
