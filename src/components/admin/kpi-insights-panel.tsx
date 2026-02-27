@@ -7,7 +7,7 @@ import { LocalDateTime } from "@/components/ui/local-date-time";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { cn } from "@/lib/utils";
 
-type InstructionViewPeriod = "year" | "month" | "week";
+type InstructionViewPeriod = "year" | "month" | "week" | "day";
 
 interface InstructionViewPoint {
   instructionId: string;
@@ -22,6 +22,7 @@ interface InstructionViewsPayload {
   year: number;
   month: number;
   weekStart: string | null;
+  day: string | null;
   range: {
     startAt: string;
     endAt: string;
@@ -104,6 +105,12 @@ function formatUtcMonthDay(date: Date) {
   return `${month} ${date.getUTCDate()}`;
 }
 
+function shiftDay(dateKey: string, deltaDays: number): string {
+  const d = new Date(`${dateKey}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + deltaDays);
+  return toUtcDateKey(d);
+}
+
 function buildWeekOptionsForMonth(year: number, month: number) {
   const monthIndex = month - 1;
   const monthStart = new Date(Date.UTC(year, monthIndex, 1, 0, 0, 0, 0));
@@ -137,6 +144,7 @@ export function KpiInsightsPanel() {
   const [year, setYear] = useState(() => new Date().getUTCFullYear());
   const [month, setMonth] = useState(() => new Date().getUTCMonth() + 1);
   const [weekStart, setWeekStart] = useState(() => toUtcDateKey(getUtcWeekStart(new Date())));
+  const [day, setDay] = useState(() => toUtcDateKey(new Date()));
   const [viewsPayload, setViewsPayload] = useState<InstructionViewsPayload | null>(null);
   const [viewsLoading, setViewsLoading] = useState(false);
   const [viewsError, setViewsError] = useState<string | null>(null);
@@ -192,6 +200,10 @@ export function KpiInsightsPanel() {
         params.set("weekStart", weekStart);
       }
 
+      if (period === "day") {
+        params.set("day", day);
+      }
+
       const headers = await getAuthHeaders();
       const response = await fetch(`/api/kpis/instruction-views?${params.toString()}`, {
         method: "GET",
@@ -221,7 +233,7 @@ export function KpiInsightsPanel() {
     } finally {
       setViewsLoading(false);
     }
-  }, [getAuthHeaders, month, period, weekStart, year]);
+  }, [getAuthHeaders, day, month, period, weekStart, year]);
 
   const fetchReviewCoverage = useCallback(async () => {
     setReviewCoverageLoading(true);
@@ -329,25 +341,28 @@ export function KpiInsightsPanel() {
               <option value="year">Year</option>
               <option value="month">Month</option>
               <option value="week">Week</option>
+              <option value="day">Day</option>
             </select>
           </label>
 
-          <label className="grid gap-1 text-xs">
-            <span className="font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
-              Year
-            </span>
-            <select
-              value={year}
-              onChange={(event) => setYear(Number.parseInt(event.target.value, 10))}
-              className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-            >
-              {yearOptions.map((optionYear) => (
-                <option key={optionYear} value={optionYear}>
-                  {optionYear}
-                </option>
-              ))}
-            </select>
-          </label>
+          {period !== "day" ? (
+            <label className="grid gap-1 text-xs">
+              <span className="font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
+                Year
+              </span>
+              <select
+                value={year}
+                onChange={(event) => setYear(Number.parseInt(event.target.value, 10))}
+                className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+              >
+                {yearOptions.map((optionYear) => (
+                  <option key={optionYear} value={optionYear}>
+                    {optionYear}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
 
           {period === "month" || period === "week" ? (
             <label className="grid gap-1 text-xs">
@@ -384,6 +399,38 @@ export function KpiInsightsPanel() {
                   </option>
                 ))}
               </select>
+            </label>
+          ) : null}
+
+          {period === "day" ? (
+            <label className="grid gap-1 text-xs">
+              <span className="font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
+                Day
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setDay(shiftDay(day, -1))}
+                  className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:hover:bg-slate-800"
+                  aria-label="Previous day"
+                >
+                  ‹
+                </button>
+                <input
+                  type="date"
+                  value={day}
+                  onChange={(event) => event.target.value && setDay(event.target.value)}
+                  className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                />
+                <button
+                  type="button"
+                  onClick={() => setDay(shiftDay(day, 1))}
+                  className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:hover:bg-slate-800"
+                  aria-label="Next day"
+                >
+                  ›
+                </button>
+              </div>
             </label>
           ) : null}
         </div>

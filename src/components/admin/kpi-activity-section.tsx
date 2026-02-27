@@ -1,8 +1,10 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 
+import { LocalDateTime } from "@/components/ui/local-date-time";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { cn } from "@/lib/utils";
 
@@ -30,6 +32,49 @@ interface ActivityApiResponse {
   totalUpdated: number;
   prevPeriodParams: string;
   nextPeriodParams: string;
+}
+
+interface ActivityDetailEvent {
+  eventId: string;
+  instructionId: string;
+  partId: string;
+  itemTitle: string;
+  departmentName: string;
+  actorName: string;
+  eventType: string;
+  occurredAt: string;
+  detail: string | null;
+}
+
+interface SelectedBucket {
+  point: ActivityTrendPoint;
+  from: string;
+  to: string;
+}
+
+function getBucketRange(period: ActivityPeriod, key: string): { from: string; to: string } {
+  if (period === "day") {
+    // key = "2026-02-27T14"
+    const base = new Date(`${key}:00:00.000Z`);
+    const next = new Date(base.getTime() + 60 * 60 * 1000);
+    return { from: base.toISOString(), to: next.toISOString() };
+  }
+  if (period === "year") {
+    // key = "2026-02"
+    const [yearStr, monthStr] = key.split("-");
+    const y = Number.parseInt(yearStr ?? "2000", 10);
+    const m = Number.parseInt(monthStr ?? "1", 10);
+    const from = new Date(Date.UTC(y, m - 1, 1)).toISOString();
+    const to = (m === 12
+      ? new Date(Date.UTC(y + 1, 0, 1))
+      : new Date(Date.UTC(y, m, 1))
+    ).toISOString();
+    return { from, to };
+  }
+  // week or month: key = "2026-02-27"
+  const from = new Date(`${key}T00:00:00.000Z`).toISOString();
+  const to = new Date(new Date(from).getTime() + 24 * 60 * 60 * 1000).toISOString();
+  return { from, to };
 }
 
 interface TooltipProps {
@@ -77,6 +122,11 @@ export function KpiActivitySection() {
   const [data, setData] = useState<ActivityApiResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedBucket, setSelectedBucket] = useState<SelectedBucket | null>(null);
+  const [drillEvents, setDrillEvents] = useState<ActivityDetailEvent[]>([]);
+  const [drillLoading, setDrillLoading] = useState(false);
+  const [drillError, setDrillError] = useState<string | null>(null);
+  const [drillTruncated, setDrillTruncated] = useState(false);
 
   const fetchData = useCallback(
     async (params: string) => {
@@ -141,6 +191,53 @@ export function KpiActivitySection() {
     if (data?.nextPeriodParams) setPeriodParams(data.nextPeriodParams);
   };
 
+  const fetchDrillData = useCallback(
+    async (from: string, to: string) => {
+      setDrillLoading(true);
+      setDrillError(null);
+      setDrillEvents([]);
+      setDrillTruncated(false);
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (!session?.access_token) throw new Error("Not authenticated.");
+
+        const params = new URLSearchParams({ from, to });
+        const response = await fetch(`/api/kpis/activity/detail?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => ({}))) as { error?: string };
+          throw new Error(payload.error ?? "Failed to load detail data.");
+        }
+
+        const result = (await response.json()) as { events: ActivityDetailEvent[]; truncated: boolean };
+        setDrillEvents(result.events);
+        setDrillTruncated(result.truncated);
+      } catch (err) {
+        setDrillError(err instanceof Error ? err.message : "Failed to load detail data.");
+      } finally {
+        setDrillLoading(false);
+      }
+    },
+    [supabase],
+  );
+
+  const handleBarClick = useCallback(
+    (point: ActivityTrendPoint) => {
+      const { from, to } = getBucketRange(currentPeriod, point.key);
+      setSelectedBucket({ point, from, to });
+      void fetchDrillData(from, to);
+    },
+    [currentPeriod, fetchDrillData],
+  );
+
+  const closeDrill = useCallback(() => setSelectedBucket(null), []);
+
+  const canUsePortal = typeof document !== "undefined";
+
   return (
     <>
       {/* Activity Trend */}
@@ -202,15 +299,18 @@ export function KpiActivitySection() {
           </p>
         ) : (
           <div className="grid gap-3">
-            <div className="flex items-center gap-3 text-xs text-slate-600 dark:text-slate-300">
-              <span className="inline-flex items-center gap-1">
-                <span className="h-2 w-2 rounded-sm bg-emerald-500" />
-                Created
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <span className="h-2 w-2 rounded-sm bg-cyan-500" />
-                Updated
-              </span>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-3 text-xs text-slate-600 dark:text-slate-300">
+                <span className="inline-flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-sm bg-emerald-500" />
+                  Created
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-sm bg-cyan-500" />
+                  Updated
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 dark:text-slate-500">Click a bar to drill down</p>
             </div>
 
             <div className="rounded-xl border border-slate-300/70 bg-white/70 p-2 dark:border-slate-700 dark:bg-slate-900/50">
@@ -268,11 +368,19 @@ export function KpiActivitySection() {
                           const createdH = (point.created / trendAxisMax) * 100;
                           const updatedH = (point.updated / trendAxisMax) * 100;
                           const total = point.created + point.updated;
+                          const isEmpty = total === 0;
                           return (
                             <div
                               key={point.key}
                               tabIndex={0}
-                              className="group relative flex h-full items-end justify-center gap-px rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70"
+                              role="button"
+                              aria-label={`${point.key}: ${total} events`}
+                              onClick={() => !isEmpty && handleBarClick(point)}
+                              onKeyDown={(e) => e.key === "Enter" && !isEmpty && handleBarClick(point)}
+                              className={cn(
+                                "group relative flex h-full items-end justify-center gap-px rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70",
+                                isEmpty ? "cursor-default" : "cursor-pointer",
+                              )}
                             >
                               <KpiTooltip
                                 align="center"
@@ -342,6 +450,95 @@ export function KpiActivitySection() {
           </div>
         )}
       </section>
+
+      {/* Drill-down modal */}
+      {canUsePortal && selectedBucket
+        ? createPortal(
+            <div
+              className="dark fixed inset-0 z-[210] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"
+              role="presentation"
+              onClick={closeDrill}
+            >
+              <article
+                className="flex w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-white/20 bg-slate-950/96 shadow-2xl"
+                style={{ maxHeight: "80dvh" }}
+                role="dialog"
+                aria-modal="true"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex shrink-0 items-start justify-between gap-3 border-b border-white/10 p-5">
+                  <div>
+                    <h2 className="text-base font-bold text-slate-100">{selectedBucket.point.key}</h2>
+                    <p className="mt-0.5 text-xs text-slate-400">
+                      {selectedBucket.point.created} created · {selectedBucket.point.updated} updated
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeDrill}
+                    aria-label="Close"
+                    className="rounded-lg p-1.5 text-slate-400 transition hover:bg-white/10 hover:text-slate-100"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+
+                <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                  {drillLoading ? (
+                    <div className="flex items-center justify-center py-10">
+                      <Loader2 size={22} className="animate-spin text-slate-400" />
+                    </div>
+                  ) : drillError ? (
+                    <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
+                      {drillError}
+                    </p>
+                  ) : drillEvents.length === 0 ? (
+                    <p className="text-center text-sm text-slate-400">No events in this time bucket.</p>
+                  ) : (
+                    <div className="grid gap-2">
+                      {drillTruncated ? (
+                        <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-300">
+                          Showing first 200 events. Narrow the period to see all events.
+                        </p>
+                      ) : null}
+                      {drillEvents.map((event) => (
+                        <div
+                          key={event.eventId}
+                          className="grid gap-0.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-sm font-semibold text-slate-100">
+                              {event.partId} · {event.itemTitle}
+                            </p>
+                            <span
+                              className={cn(
+                                "rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                                event.eventType === "created"
+                                  ? "border-emerald-500/40 bg-emerald-500/20 text-emerald-300"
+                                  : "border-cyan-500/40 bg-cyan-500/20 text-cyan-300",
+                              )}
+                            >
+                              {event.eventType}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-400">{event.departmentName}</p>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
+                            <span>{event.actorName}</span>
+                            <span>
+                              <LocalDateTime value={event.occurredAt} mode="dateTime" />
+                            </span>
+                            {event.detail ? <span className="italic">{event.detail}</span> : null}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </article>
+            </div>,
+            document.body,
+          )
+        : null}
 
       {/* Top Contributors */}
       <section className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-6">

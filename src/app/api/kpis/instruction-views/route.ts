@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getRequestProfile } from "@/lib/api-auth";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
-type InstructionViewPeriod = "year" | "month" | "week";
+type InstructionViewPeriod = "year" | "month" | "week" | "day";
 
 interface ViewDepartmentRelation {
   name: string | null;
@@ -64,11 +64,18 @@ function normalizeRequestedMonth(value: string | null) {
 }
 
 function normalizeRequestedPeriod(value: string | null): InstructionViewPeriod {
-  if (value === "month" || value === "week") {
+  if (value === "month" || value === "week" || value === "day") {
     return value;
   }
 
   return "year";
+}
+
+function normalizeDay(value: string | null) {
+  if (!value) return null;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
 }
 
 function getUtcWeekStart(date: Date) {
@@ -104,7 +111,23 @@ function buildRange(
   year: number,
   month: number,
   requestedWeekStart: Date | null,
+  requestedDay: Date | null,
 ) {
+  if (period === "day") {
+    const dayUtc = requestedDay ?? new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
+    const rangeStart = new Date(
+      Date.UTC(dayUtc.getUTCFullYear(), dayUtc.getUTCMonth(), dayUtc.getUTCDate(), 0, 0, 0, 0),
+    );
+    const rangeEnd = new Date(rangeStart.getTime() + 24 * 60 * 60 * 1000);
+    return {
+      startAt: rangeStart,
+      endAt: rangeEnd,
+      label: toUtcDateKey(rangeStart),
+      weekStart: null,
+      day: toUtcDateKey(rangeStart),
+    };
+  }
+
   if (period === "year") {
     const rangeStart = new Date(Date.UTC(year, 0, 1, 0, 0, 0, 0));
     const rangeEnd = new Date(Date.UTC(year + 1, 0, 1, 0, 0, 0, 0));
@@ -113,6 +136,7 @@ function buildRange(
       endAt: rangeEnd,
       label: `${year}`,
       weekStart: null,
+      day: null,
     };
   }
 
@@ -125,6 +149,7 @@ function buildRange(
       endAt: rangeEnd,
       label: `${year}-${String(month).padStart(2, "0")}`,
       weekStart: null,
+      day: null,
     };
   }
 
@@ -147,6 +172,7 @@ function buildRange(
     endAt: rangeEnd,
     label: `${toUtcDateKey(rangeStart)}..${toUtcDateKey(new Date(rangeEnd.getTime() - 1))}`,
     weekStart: toUtcDateKey(rangeStart),
+    day: null,
   };
 }
 
@@ -167,11 +193,13 @@ export async function GET(request: NextRequest) {
   const requestedMonth =
     normalizeRequestedMonth(request.nextUrl.searchParams.get("month")) ?? now.getUTCMonth() + 1;
   const requestedWeekStart = normalizeWeekStart(request.nextUrl.searchParams.get("weekStart"));
+  const requestedDay = normalizeDay(request.nextUrl.searchParams.get("day"));
   const range = buildRange(
     requestedPeriod,
     requestedYear,
     requestedMonth,
     requestedWeekStart,
+    requestedDay,
   );
 
   const supabaseAdmin = getSupabaseAdminClient();
@@ -244,6 +272,7 @@ export async function GET(request: NextRequest) {
     year: requestedYear,
     month: requestedMonth,
     weekStart: range.weekStart,
+    day: range.day,
     range: {
       startAt: range.startAt.toISOString(),
       endAt: range.endAt.toISOString(),
