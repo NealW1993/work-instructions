@@ -66,6 +66,20 @@ interface InstructionMediaRow {
   sort_order: number;
 }
 
+interface InstructionUpdateSourceMedia {
+  type: "image" | "video";
+  src: string;
+}
+
+interface MergeInstructionSourcePayload {
+  addedTextSnippet?: string;
+  removedTextSnippet?: string;
+  addedMedia?: InstructionUpdateSourceMedia[];
+  removedMedia?: InstructionUpdateSourceMedia[];
+  previousRevision?: number;
+  nextRevision?: number;
+}
+
 const DEFAULT_FIELD_SELECTION: MergeForkFieldSelection = {
   department: false,
   partId: false,
@@ -171,6 +185,273 @@ function toStorageCopyPath(
       : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   const dateFolder = new Date().toISOString().slice(0, 10);
   return `merged/${rootInstructionId}/${dateFolder}/${token}${extension}`;
+}
+
+const MAX_LINE_DIFF_ITEMS = 400;
+
+function normalizeDiffLine(value: string) {
+  return value
+    .replace(/\u00a0/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .trim();
+}
+
+function richTextToPlain(value: string) {
+  return value
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|h1|h2|h3|h4|h5|h6|blockquote|pre)>/gi, "\n")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .trim();
+}
+
+function extractDiffLines(content: string) {
+  return richTextToPlain(content)
+    .split(/\r?\n+/)
+    .map(normalizeDiffLine)
+    .filter(Boolean);
+}
+
+function extractTextChangeSnippet(previousBody: string, nextBody: string) {
+  const previousLines = extractDiffLines(previousBody);
+  const nextLines = extractDiffLines(nextBody);
+
+  if (
+    previousLines.length === nextLines.length &&
+    previousLines.every((line, index) => line === nextLines[index])
+  ) {
+    return {
+      addedTextSnippet: "",
+      removedTextSnippet: "",
+    };
+  }
+
+  if (previousLines.length > MAX_LINE_DIFF_ITEMS || nextLines.length > MAX_LINE_DIFF_ITEMS) {
+    return {
+      addedTextSnippet: nextLines.join("\n").trim(),
+      removedTextSnippet: previousLines.join("\n").trim(),
+    };
+  }
+
+  const previousLength = previousLines.length;
+  const nextLength = nextLines.length;
+  const lcs: number[][] = Array.from({ length: previousLength + 1 }, () =>
+    Array.from({ length: nextLength + 1 }, () => 0),
+  );
+
+  for (let previousIndex = previousLength - 1; previousIndex >= 0; previousIndex -= 1) {
+    for (let nextIndex = nextLength - 1; nextIndex >= 0; nextIndex -= 1) {
+      if (previousLines[previousIndex] === nextLines[nextIndex]) {
+        lcs[previousIndex]![nextIndex] = lcs[previousIndex + 1]![nextIndex + 1]! + 1;
+      } else {
+        lcs[previousIndex]![nextIndex] = Math.max(
+          lcs[previousIndex + 1]![nextIndex]!,
+          lcs[previousIndex]![nextIndex + 1]!,
+        );
+      }
+    }
+  }
+
+  const addedLines: string[] = [];
+  const removedLines: string[] = [];
+  let previousIndex = 0;
+  let nextIndex = 0;
+
+  while (previousIndex < previousLength && nextIndex < nextLength) {
+    if (previousLines[previousIndex] === nextLines[nextIndex]) {
+      previousIndex += 1;
+      nextIndex += 1;
+      continue;
+    }
+
+    if (lcs[previousIndex + 1]![nextIndex]! >= lcs[previousIndex]![nextIndex + 1]!) {
+      removedLines.push(previousLines[previousIndex]!);
+      previousIndex += 1;
+    } else {
+      addedLines.push(nextLines[nextIndex]!);
+      nextIndex += 1;
+    }
+  }
+
+  while (previousIndex < previousLength) {
+    removedLines.push(previousLines[previousIndex]!);
+    previousIndex += 1;
+  }
+
+  while (nextIndex < nextLength) {
+    addedLines.push(nextLines[nextIndex]!);
+    nextIndex += 1;
+  }
+
+  return {
+    addedTextSnippet: addedLines.join("\n").trim(),
+    removedTextSnippet: removedLines.join("\n").trim(),
+  };
+}
+
+function hasSourcePayloadData(sourcePayload: MergeInstructionSourcePayload) {
+  return Boolean(
+    sourcePayload.addedTextSnippet ||
+      sourcePayload.removedTextSnippet ||
+      (sourcePayload.addedMedia?.length ?? 0) > 0 ||
+      (sourcePayload.removedMedia?.length ?? 0) > 0 ||
+      sourcePayload.previousRevision !== undefined ||
+      sourcePayload.nextRevision !== undefined,
+  );
+}
+
+function normalizeComparableText(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function toMediaSourceEntry(row: InstructionMediaRow): InstructionUpdateSourceMedia | null {
+  const src = row.public_url?.trim() ?? "";
+  if (!src) {
+    return null;
+  }
+
+  return {
+    type: row.media_type,
+    src,
+  };
+}
+
+function buildMediaComparisonKey(row: InstructionMediaRow) {
+  const src = row.public_url?.trim() ?? "";
+  const caption = row.caption?.trim() ?? "";
+  return `${row.media_type}|${src}|${caption}|${row.sort_order}`;
+}
+
+function collectMediaSourceDiff(params: {
+  rootMediaRows: InstructionMediaRow[];
+  forkMediaRows: InstructionMediaRow[];
+}) {
+  const rootMediaByKey = new Map<string, InstructionUpdateSourceMedia>();
+  const forkMediaByKey = new Map<string, InstructionUpdateSourceMedia>();
+
+  for (const row of params.rootMediaRows) {
+    const sourceEntry = toMediaSourceEntry(row);
+    if (!sourceEntry) {
+      continue;
+    }
+    const key = buildMediaComparisonKey(row);
+    if (!rootMediaByKey.has(key)) {
+      rootMediaByKey.set(key, sourceEntry);
+    }
+  }
+
+  for (const row of params.forkMediaRows) {
+    const sourceEntry = toMediaSourceEntry(row);
+    if (!sourceEntry) {
+      continue;
+    }
+    const key = buildMediaComparisonKey(row);
+    if (!forkMediaByKey.has(key)) {
+      forkMediaByKey.set(key, sourceEntry);
+    }
+  }
+
+  const addedMedia = Array.from(forkMediaByKey.entries())
+    .filter(([key]) => !rootMediaByKey.has(key))
+    .map(([, entry]) => entry);
+
+  const removedMedia = Array.from(rootMediaByKey.entries())
+    .filter(([key]) => !forkMediaByKey.has(key))
+    .map(([, entry]) => entry);
+
+  return {
+    addedMedia,
+    removedMedia,
+  };
+}
+
+function buildMergeSourcePayload(params: {
+  mergedFields: MergeForkFieldSelection;
+  rootInstruction: InstructionLookupRow;
+  forkInstruction: InstructionLookupRow;
+  rootWorkItem: WorkItemLookupRow;
+  forkWorkItem: WorkItemLookupRow;
+  rootMediaRows: InstructionMediaRow[];
+  forkMediaRows: InstructionMediaRow[];
+  nextRevision: number;
+}) {
+  const sourcePayload: MergeInstructionSourcePayload = {};
+  const addedTextLines: string[] = [];
+  const removedTextLines: string[] = [];
+
+  if (params.mergedFields.partId) {
+    const previousPartId = params.rootWorkItem.part_id.trim();
+    const nextPartId = params.forkWorkItem.part_id.trim();
+    if (normalizeComparableText(previousPartId) !== normalizeComparableText(nextPartId)) {
+      removedTextLines.push(`Part ID: ${previousPartId || "(empty)"}`);
+      addedTextLines.push(`Part ID: ${nextPartId || "(empty)"}`);
+    }
+  }
+
+  if (params.mergedFields.itemTitle) {
+    const previousItemTitle = params.rootWorkItem.item_title.trim();
+    const nextItemTitle = params.forkWorkItem.item_title.trim();
+    if (normalizeComparableText(previousItemTitle) !== normalizeComparableText(nextItemTitle)) {
+      removedTextLines.push(`Title: ${previousItemTitle || "(empty)"}`);
+      addedTextLines.push(`Title: ${nextItemTitle || "(empty)"}`);
+    }
+  }
+
+  if (params.mergedFields.department) {
+    const previousDepartmentName = normalizeDepartmentName(params.rootWorkItem.departments).trim();
+    const nextDepartmentName = normalizeDepartmentName(params.forkWorkItem.departments).trim();
+    if (
+      normalizeComparableText(previousDepartmentName) !==
+      normalizeComparableText(nextDepartmentName)
+    ) {
+      removedTextLines.push(`Department: ${previousDepartmentName || "(empty)"}`);
+      addedTextLines.push(`Department: ${nextDepartmentName || "(empty)"}`);
+    }
+  }
+
+  if (params.mergedFields.body) {
+    const bodyTextSnippet = extractTextChangeSnippet(
+      params.rootInstruction.body_markdown,
+      params.forkInstruction.body_markdown,
+    );
+    if (bodyTextSnippet.removedTextSnippet) {
+      removedTextLines.push(bodyTextSnippet.removedTextSnippet);
+    }
+    if (bodyTextSnippet.addedTextSnippet) {
+      addedTextLines.push(bodyTextSnippet.addedTextSnippet);
+    }
+  }
+
+  if (removedTextLines.length > 0) {
+    sourcePayload.removedTextSnippet = removedTextLines.join("\n").trim();
+  }
+  if (addedTextLines.length > 0) {
+    sourcePayload.addedTextSnippet = addedTextLines.join("\n").trim();
+  }
+
+  if (params.mergedFields.revision) {
+    const previousRevision = Math.max(1, Number(params.rootInstruction.revision ?? 1));
+    const nextRevision = Math.max(1, Number(params.nextRevision ?? 1));
+    if (previousRevision !== nextRevision) {
+      sourcePayload.previousRevision = previousRevision;
+      sourcePayload.nextRevision = nextRevision;
+    }
+  }
+
+  if (params.mergedFields.media) {
+    const mediaDiff = collectMediaSourceDiff({
+      rootMediaRows: params.rootMediaRows,
+      forkMediaRows: params.forkMediaRows,
+    });
+    if (mediaDiff.addedMedia.length > 0) {
+      sourcePayload.addedMedia = mediaDiff.addedMedia;
+    }
+    if (mediaDiff.removedMedia.length > 0) {
+      sourcePayload.removedMedia = mediaDiff.removedMedia;
+    }
+  }
+
+  return hasSourcePayloadData(sourcePayload) ? sourcePayload : null;
 }
 
 export async function POST(
@@ -332,6 +613,8 @@ export async function POST(
   }
 
   const copiedMediaPaths: string[] = [];
+  let forkMediaRowsForDiff: InstructionMediaRow[] = [];
+  let rootMediaRowsForDiff: InstructionMediaRow[] = [];
   if (mergedFields.media) {
     const [
       { data: forkMediaData, error: forkMediaError },
@@ -344,7 +627,7 @@ export async function POST(
         .order("sort_order", { ascending: true }),
       supabaseAdmin
         .from("instruction_media")
-        .select("id, storage_path")
+        .select("id, storage_path, public_url, media_type, caption, sort_order")
         .eq("instruction_id", rootInstruction.id),
     ]);
 
@@ -356,7 +639,9 @@ export async function POST(
     }
 
     const forkMediaRows = (forkMediaData ?? []) as InstructionMediaRow[];
-    const rootMediaRows = (rootMediaData ?? []) as Array<{ id: string; storage_path: string }>;
+    const rootMediaRows = (rootMediaData ?? []) as InstructionMediaRow[];
+    forkMediaRowsForDiff = forkMediaRows;
+    rootMediaRowsForDiff = rootMediaRows;
     const mediaRowsToInsert: Array<{
       instruction_id: string;
       storage_path: string;
@@ -460,6 +745,19 @@ export async function POST(
     rootUpdatePayload.revision = Math.max(1, forkInstruction.revision);
   }
 
+  const nextRootRevision =
+    rootUpdatePayload.revision ?? Math.max(1, Number(rootInstruction.revision ?? 1));
+  const mergeSourcePayload = buildMergeSourcePayload({
+    mergedFields,
+    rootInstruction,
+    forkInstruction,
+    rootWorkItem,
+    forkWorkItem,
+    rootMediaRows: rootMediaRowsForDiff,
+    forkMediaRows: forkMediaRowsForDiff,
+    nextRevision: nextRootRevision,
+  });
+
   const { data: updatedRootInstructionData, error: updatedRootInstructionError } =
     await supabaseAdmin
       .from("work_instructions")
@@ -497,6 +795,7 @@ export async function POST(
     .update({
       merged_into_root_at: mergedAt,
       merge_count: Math.max(0, Number(forkInstruction.merge_count ?? 0)) + 1,
+      is_archived: true,
       updated_by: requester.id,
     })
     .eq("id", forkInstruction.id);
@@ -515,6 +814,7 @@ export async function POST(
     forkPartId: forkWorkItem.part_id,
     forkItemTitle: forkWorkItem.item_title,
     forkDepartmentName: normalizeDepartmentName(forkWorkItem.departments),
+    ...(mergeSourcePayload ?? {}),
   };
 
   const { error: mergeEventError } = await supabaseAdmin

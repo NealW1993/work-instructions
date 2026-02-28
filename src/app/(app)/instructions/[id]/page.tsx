@@ -92,8 +92,17 @@ interface ForkFamilyRow {
   created_at: string;
 }
 
+interface MergePreviewMediaRow {
+  public_url: string;
+  media_type: "image" | "video";
+  caption: string | null;
+  sort_order: number;
+}
+
 interface ForkRootLookupRow {
   id: string;
+  body_markdown: string;
+  revision: number;
   work_items:
     | {
         part_id: string;
@@ -122,6 +131,7 @@ interface ForkRootLookupRow {
           | null;
       }>
     | null;
+  instruction_media: MergePreviewMediaRow[] | null;
 }
 
 interface InstructionChangeEventRow {
@@ -345,6 +355,44 @@ function normalizeForkRootWorkItem(
   return relation;
 }
 
+function normalizeMergePreviewMediaRows(
+  rows: MergePreviewMediaRow[] | InstructionMedia[] | null | undefined,
+) {
+  if (!rows || rows.length === 0) {
+    return [] as Array<{
+      type: "image" | "video";
+      src: string;
+      caption: string | null;
+      sortOrder: number;
+    }>;
+  }
+
+  return rows
+    .map((row) => {
+      const source = row.public_url?.trim() ?? "";
+      if (!source) {
+        return null;
+      }
+
+      return {
+        type: row.media_type,
+        src: source,
+        caption: row.caption ?? null,
+        sortOrder: row.sort_order,
+      };
+    })
+    .filter(
+      (
+        row,
+      ): row is {
+        type: "image" | "video";
+        src: string;
+        caption: string | null;
+        sortOrder: number;
+      } => row !== null,
+    );
+}
+
 function revisionHistoryRowSortValue(row: InstructionRevisionHistoryRow) {
   const updatedAtValue = Date.parse(row.updated_at);
   return Number.isFinite(updatedAtValue) ? updatedAtValue : 0;
@@ -510,7 +558,9 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
     isForkInstruction
       ? supabase
           .from("work_instructions")
-          .select("id, work_items(part_id, item_title, department_id, departments(name))")
+          .select(
+            "id, body_markdown, revision, work_items(part_id, item_title, department_id, departments(name)), instruction_media(public_url, media_type, caption, sort_order)",
+          )
           .eq("id", forkFamilyRootId)
           .maybeSingle<ForkRootLookupRow>()
       : Promise.resolve({
@@ -530,6 +580,8 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const forkFamilyRows = (forkFamilyData ?? []) as ForkFamilyRow[];
   const forkRootLookup = (forkRootLookupData ?? null) as ForkRootLookupRow | null;
   const forkRootWorkItem = normalizeForkRootWorkItem(forkRootLookup?.work_items ?? null);
+  const forkRootMedia = normalizeMergePreviewMediaRows(forkRootLookup?.instruction_media ?? null);
+  const forkInstructionMedia = normalizeMergePreviewMediaRows(instruction.instruction_media);
   const forkRootDepartmentName = getDepartmentName(forkRootWorkItem?.departments);
   const forkCount = forkFamilyRows.length;
 
@@ -999,9 +1051,18 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
                   forkInstructionId={instruction.id}
                   forkNumber={instructionForkNumber}
                   rootInstructionId={forkFamilyRootId}
+                  forkPartId={workItem.part_id}
                   rootPartId={forkRootWorkItem?.part_id ?? workItem.part_id}
+                  forkItemTitle={workItem.item_title}
                   rootItemTitle={forkRootWorkItem?.item_title ?? workItem.item_title}
+                  forkDepartmentName={departmentName}
                   rootDepartmentName={forkRootDepartmentName}
+                  forkBodyMarkdown={instruction.body_markdown}
+                  rootBodyMarkdown={forkRootLookup?.body_markdown ?? ""}
+                  forkRevision={instruction.revision}
+                  rootRevision={forkRootLookup?.revision ?? instruction.revision}
+                  forkMedia={forkInstructionMedia}
+                  rootMedia={forkRootMedia}
                   className="w-full justify-center px-3 py-1.5 text-xs"
                 />
               ) : null}
