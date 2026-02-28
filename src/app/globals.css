@@ -145,6 +145,19 @@ h6 {
   margin-top: 1rem;
   margin-bottom: 0.5rem;
   font-weight: 700;
+  line-height: 1.25;
+}
+
+.prose-markdown h1 {
+  font-size: clamp(1.7rem, 1.55rem + 0.95vw, 2.3rem);
+}
+
+.prose-markdown h2 {
+  font-size: clamp(1.35rem, 1.25rem + 0.7vw, 1.8rem);
+}
+
+.prose-markdown h3 {
+  font-size: clamp(1.15rem, 1.05rem + 0.45vw, 1.45rem);
 }
 
 .prose-markdown p,
@@ -241,6 +254,8 @@ h6 {
 .prose-markdown figure {
   margin-top: 0.85rem;
   margin-bottom: 0.85rem;
+  padding-left: 0.85rem;
+  border-left: 2px solid color-mix(in oklab, var(--ring) 55%, transparent);
 }
 
 .prose-markdown figure img,
@@ -388,6 +403,19 @@ html:not(.dark) .review-note-modal-shell textarea:focus {
   margin-top: 0.8rem;
   margin-bottom: 0.45rem;
   font-weight: 700;
+  line-height: 1.25;
+}
+
+.tiptap-editor-content h1 {
+  font-size: clamp(1.7rem, 1.55rem + 0.9vw, 2.2rem);
+}
+
+.tiptap-editor-content h2 {
+  font-size: clamp(1.35rem, 1.25rem + 0.65vw, 1.75rem);
+}
+
+.tiptap-editor-content h3 {
+  font-size: clamp(1.15rem, 1.05rem + 0.45vw, 1.4rem);
 }
 
 .tiptap-editor-content ul,
@@ -450,6 +478,8 @@ html:not(.dark) .review-note-modal-shell textarea:focus {
 .tiptap-editor-content figure {
   margin-top: 0.75rem;
   margin-bottom: 0.75rem;
+  padding-left: 0.85rem;
+  border-left: 2px solid color-mix(in oklab, var(--ring) 55%, transparent);
 }
 
 .tiptap-editor-content figure img,

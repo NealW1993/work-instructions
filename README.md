@@ -84,6 +84,8 @@ Recommended:
 - `SYSTEM_ADMIN_EMAIL=you@company.com` for automatic first system-admin bootstrap
 - `SMTP_HOST=mailpit` and `SMTP_PORT=1025` for local email testing in Docker
 - `NEXT_PUBLIC_POSTHOG_KEY` if analytics is desired
+- `OPENAI_API_KEY` to enable AI instruction enhancement in the editor
+- `OPENAI_ENHANCE_MODEL=gpt-4.1-mini` (optional override)
 
 ## 2) Start local Supabase backend in Docker (recommended for local)
 

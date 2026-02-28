@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, UploadCloud } from "lucide-react";
+import { Loader2, Sparkles, UploadCloud } from "lucide-react";
 import { createPortal } from "react-dom";
 
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
@@ -105,6 +105,19 @@ interface FieldErrors {
   itemTitle: boolean;
   revision: boolean;
   body: boolean;
+}
+
+interface EnhanceInstructionResponse {
+  enhancedContent?: string;
+  originalContent?: string;
+  enhancementNotes?: string;
+  error?: string;
+}
+
+interface EnhancementComparisonState {
+  originalContent: string;
+  enhancedContent: string;
+  enhancementNotes: string;
 }
 
 const DEFAULT_FIELD_ERRORS: FieldErrors = {
@@ -692,6 +705,12 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null);
   const [revisionConflictModal, setRevisionConflictModal] =
     useState<RevisionConflictModalState | null>(null);
+  const [enhanceBusy, setEnhanceBusy] = useState(false);
+  const [enhanceError, setEnhanceError] = useState<string | null>(null);
+  const [enhancementNotice, setEnhancementNotice] = useState<string | null>(null);
+  const [enhancementComparison, setEnhancementComparison] =
+    useState<EnhancementComparisonState | null>(null);
+  const [enhancementModalOpen, setEnhancementModalOpen] = useState(false);
 
   const formRef = useRef<HTMLFormElement | null>(null);
   const partInputRef = useRef<HTMLInputElement | null>(null);
@@ -1093,12 +1112,126 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     window.location.assign(navigation.href);
   }
 
+  function handleCloseEnhancementModal() {
+    setEnhancementModalOpen(false);
+  }
+
+  function handleKeepOriginalInstructions() {
+    setEnhancementModalOpen(false);
+    setEnhancementNotice(
+      "Kept your original instructions. You can continue editing or run AI Enhance again.",
+    );
+  }
+
+  function handleApplyEnhancedInstructions() {
+    if (!enhancementComparison) {
+      return;
+    }
+
+    const normalizedEnhancedContent = normalizeEditorContent(
+      enhancementComparison.enhancedContent,
+    );
+    setBodyMarkdown(normalizedEnhancedContent);
+    setEnhancementModalOpen(false);
+    setEnhancementNotice(
+      "AI-enhanced instructions applied. Review the draft and keep editing before you save.",
+    );
+    if (richTextToPlain(normalizedEnhancedContent)) {
+      setFieldErrors((current) => ({
+        ...current,
+        body: false,
+      }));
+    }
+  }
+
+  async function handleEnhanceInstruction() {
+    const normalizedBody = normalizeEditorContent(bodyMarkdown);
+
+    if (!richTextToPlain(normalizedBody)) {
+      setFieldErrors((current) => ({
+        ...current,
+        body: true,
+      }));
+      setEnhanceError("Add instruction content before running AI Enhance.");
+      setEnhancementNotice(null);
+      setBodyFocusRequestKey((current) => current + 1);
+      return;
+    }
+
+    setEnhanceBusy(true);
+    setEnhanceError(null);
+    setEnhancementNotice(null);
+    setError(null);
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        throw new Error("Missing session token. Please sign in again.");
+      }
+
+      const response = await fetch("/api/instructions/enhance", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          instructionBody: normalizedBody,
+          partId: partId.trim(),
+          itemTitle: itemTitle.trim(),
+          departmentName: selectedDepartmentName,
+          revision,
+          mode,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as EnhanceInstructionResponse;
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to enhance instructions right now.");
+      }
+
+      const nextEnhancedContent = normalizeEditorContent(payload.enhancedContent ?? "");
+      if (!richTextToPlain(nextEnhancedContent)) {
+        throw new Error("AI enhancement returned empty content. Please try again.");
+      }
+
+      const nextOriginalContent = normalizeEditorContent(
+        payload.originalContent ?? normalizedBody,
+      );
+
+      setEnhancementComparison({
+        originalContent: nextOriginalContent,
+        enhancedContent: nextEnhancedContent,
+        enhancementNotes: payload.enhancementNotes?.trim() ?? "",
+      });
+      setEnhancementModalOpen(true);
+      setEnhancementNotice(
+        "AI enhancement is ready. Compare both versions and choose the one you want to keep.",
+      );
+    } catch (caughtError) {
+      const normalizedMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Unable to enhance instructions right now.";
+      setEnhanceError(normalizedMessage);
+      setEnhancementModalOpen(false);
+    } finally {
+      setEnhanceBusy(false);
+    }
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     setBusy(true);
     setMessage(null);
     setError(null);
+    setEnhanceError(null);
+    setEnhancementNotice(null);
     setFieldErrors(DEFAULT_FIELD_ERRORS);
     setRevisionConflictModal(null);
 
@@ -1657,6 +1790,40 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           </label>
         </div>
 
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-cyan-500/30 bg-cyan-500/5 px-3 py-2.5">
+          <div className="grid gap-0.5">
+            <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+              AI Enhance
+            </p>
+            <p className="text-xs text-slate-600 dark:text-slate-300">
+              Analyze this draft, improve structure and formatting, then choose your version.
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={busy || enhanceBusy}
+            onClick={() => {
+              void handleEnhanceInstruction();
+            }}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-100"
+          >
+            {enhanceBusy ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+            {enhanceBusy ? "Enhancing..." : "AI Enhance"}
+          </button>
+        </div>
+
+        {enhancementNotice ? (
+          <p className="rounded-xl border border-cyan-500/35 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-800 dark:text-cyan-100">
+            {enhancementNotice}
+          </p>
+        ) : null}
+
+        {enhanceError ? (
+          <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-200">
+            {enhanceError}
+          </p>
+        ) : null}
+
         <RichTextEditor
           label="Work Instructions"
           value={bodyMarkdown}
@@ -1688,6 +1855,80 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
               : "Create Instruction"}
         </button>
       </form>
+
+      {enhancementModalOpen && enhancementComparison && portalReady
+        ? createPortal(
+            <div className="dark fixed inset-0 z-[113] flex items-center justify-center overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
+              <div className="grid w-full max-w-6xl gap-4 rounded-2xl border border-cyan-500/40 bg-slate-950/95 p-4 shadow-2xl sm:p-5">
+                <div className="grid gap-1">
+                  <h3 className="text-lg font-bold text-slate-100">
+                    Compare Instruction Versions
+                  </h3>
+                  <p className="text-sm text-slate-300">
+                    Review both drafts and choose which version to continue editing.
+                  </p>
+                  {enhancementComparison.enhancementNotes ? (
+                    <p className="text-xs text-cyan-200">
+                      {enhancementComparison.enhancementNotes}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="grid gap-2 rounded-xl border border-slate-700/70 bg-slate-900/70 p-3">
+                    <p className="text-sm font-semibold text-slate-100">Your Version</p>
+                    <div className="max-h-[52vh] overflow-auto rounded-lg border border-slate-700/80 bg-slate-950/65 p-3">
+                      <div
+                        className="prose-markdown text-sm text-slate-200"
+                        dangerouslySetInnerHTML={{
+                          __html: enhancementComparison.originalContent,
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/10 p-3">
+                    <p className="text-sm font-semibold text-cyan-100">AI Enhanced Version</p>
+                    <div className="max-h-[52vh] overflow-auto rounded-lg border border-cyan-500/40 bg-slate-950/65 p-3">
+                      <div
+                        className="prose-markdown text-sm text-slate-100"
+                        dangerouslySetInnerHTML={{
+                          __html: enhancementComparison.enhancedContent,
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={handleKeepOriginalInstructions}
+                    className="rounded-xl border border-slate-600 bg-slate-900/70 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
+                  >
+                    Keep My Version
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleApplyEnhancedInstructions}
+                    className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/55 bg-cyan-500/20 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/30"
+                  >
+                    <Sparkles size={15} />
+                    Use AI Enhanced Version
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCloseEnhancementModal}
+                    className="rounded-xl border border-slate-500/60 bg-slate-900/60 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-slate-800"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
 
       {revisionConflictModal && portalReady
         ? createPortal(

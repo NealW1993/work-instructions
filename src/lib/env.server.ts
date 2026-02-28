@@ -6,6 +6,8 @@ export const serverEnv = {
   ...clientEnv,
   SUPABASE_URL_INTERNAL: process.env.SUPABASE_URL_INTERNAL ?? "",
   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+  OPENAI_API_KEY: process.env.OPENAI_API_KEY?.trim() ?? "",
+  OPENAI_ENHANCE_MODEL: process.env.OPENAI_ENHANCE_MODEL?.trim() ?? "gpt-4.1-mini",
   SMTP_HOST: process.env.SMTP_HOST ?? "mailpit",
   SMTP_PORT: Number.parseInt(process.env.SMTP_PORT ?? "1025", 10),
   SMTP_USER: process.env.SMTP_USER ?? "",
