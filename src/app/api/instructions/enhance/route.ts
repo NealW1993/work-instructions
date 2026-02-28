@@ -4,6 +4,7 @@ import sanitizeHtml from "sanitize-html";
 import { getRequestProfile } from "@/lib/api-auth";
 import { serverEnv } from "@/lib/env.server";
 import { canEditInstructions } from "@/lib/roles";
+import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 interface EnhanceInstructionRequestBody {
   instructionBody?: string;
@@ -11,6 +12,8 @@ interface EnhanceInstructionRequestBody {
   itemTitle?: string;
   departmentName?: string;
   revision?: number;
+  instructionId?: string;
+  sourceInstructionId?: string;
   mode?: "create" | "edit" | "fork" | string;
 }
 
@@ -28,6 +31,10 @@ interface OpenAICompletionResponse {
   error?: {
     message?: string;
   };
+}
+
+interface EnhancementInsertRow {
+  id: string;
 }
 
 const MAX_INPUT_CHARACTERS = 80_000;
@@ -198,6 +205,27 @@ function buildUserPrompt(params: {
   ].join("\n\n");
 }
 
+function normalizeEnhancementMode(value: string | null | undefined): "create" | "edit" | "fork" {
+  if (value === "edit" || value === "fork") {
+    return value;
+  }
+
+  return "create";
+}
+
+function normalizeUuid(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) {
+    return null;
+  }
+
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(trimmed)) {
+    return null;
+  }
+
+  return trimmed;
+}
+
 function parseEnhancementResult(rawContent: string): EnhanceInstructionResult | null {
   const trimmed = rawContent.trim();
   if (!trimmed) {
@@ -232,6 +260,7 @@ export async function POST(request: NextRequest) {
 
   const requestBody = (await request.json().catch(() => ({}))) as EnhanceInstructionRequestBody;
   const instructionBody = requestBody.instructionBody?.trim() ?? "";
+  const mode = normalizeEnhancementMode(requestBody.mode);
 
   if (!instructionBody) {
     return NextResponse.json(
@@ -269,7 +298,7 @@ export async function POST(request: NextRequest) {
       typeof requestBody.revision === "number" && Number.isInteger(requestBody.revision)
         ? requestBody.revision
         : null,
-    mode: requestBody.mode?.trim() || "unknown",
+    mode,
   });
 
   try {
@@ -340,12 +369,48 @@ export async function POST(request: NextRequest) {
     }
 
     const sanitizedOriginalContent = sanitizeRichHtml(normalizedOriginalContent).trim();
+    const supabaseAdmin = getSupabaseAdminClient();
+    const instructionId = normalizeUuid(requestBody.instructionId);
+    const sourceInstructionId = normalizeUuid(requestBody.sourceInstructionId);
+
+    const { data: insertedEnhancement, error: insertedEnhancementError } = await supabaseAdmin
+      .from("instruction_ai_enhancements")
+      .insert({
+        actor_user_id: requester.id,
+        instruction_id: instructionId,
+        source_instruction_id: sourceInstructionId,
+        mode,
+        part_id: requestBody.partId?.trim() ?? "",
+        item_title: requestBody.itemTitle?.trim() ?? "",
+        department_name: requestBody.departmentName?.trim() ?? "",
+        revision:
+          typeof requestBody.revision === "number" && Number.isInteger(requestBody.revision)
+            ? requestBody.revision
+            : null,
+        outcome: "generated",
+      })
+      .select("id")
+      .single();
+
+    const typedInsertedEnhancement = insertedEnhancement as EnhancementInsertRow | null;
+
+    if (insertedEnhancementError || !typedInsertedEnhancement) {
+      return NextResponse.json(
+        {
+          error:
+            insertedEnhancementError?.message ??
+            "Unable to record AI enhancement activity.",
+        },
+        { status: 500 },
+      );
+    }
 
     return NextResponse.json({
       originalContent: sanitizedOriginalContent,
       enhancedContent: sanitizedEnhancedContent,
       enhancementNotes:
         enhancement?.enhancement_notes?.trim() || "AI formatting and structure improvements applied.",
+      generationId: typedInsertedEnhancement.id,
     });
   } catch (caughtError) {
     const normalizedMessage =

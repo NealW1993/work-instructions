@@ -47,6 +47,9 @@ export interface WorkInstruction {
   notes_markdown: string;
   revision: number;
   last_change_summary?: string | null;
+  ai_assisted?: boolean;
+  ai_assisted_at?: string | null;
+  ai_assistance_last_event_id?: string | null;
   is_archived: boolean;
   created_by: string;
   updated_by: string;

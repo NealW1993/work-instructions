@@ -39,6 +39,8 @@ interface InstructionRecord {
   work_item_id: string;
   is_archived: boolean;
   body_markdown: string;
+  ai_assisted: boolean;
+  ai_assisted_at: string | null;
   last_change_summary: string | null;
   revision: number;
   created_at: string;
@@ -407,7 +409,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, work_item_id, is_archived, body_markdown, last_change_summary, revision, created_at, updated_at, created_by, updated_by, work_items(id, department_id, part_id, item_title, departments(name)), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
+      "id, work_item_id, is_archived, body_markdown, ai_assisted, ai_assisted_at, last_change_summary, revision, created_at, updated_at, created_by, updated_by, work_items(id, department_id, part_id, item_title, departments(name)), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -756,6 +758,11 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
               Part ID: <strong>{workItem.part_id}</strong> | Department:{" "}
               <strong>{departmentName}</strong> | Revision{" "}
               <strong>{instruction.revision}</strong>
+              {instruction.ai_assisted ? (
+                <span className="ml-2 inline-flex items-center rounded-full border border-cyan-500/45 bg-cyan-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-800 dark:text-cyan-100">
+                  Created With AI
+                </span>
+              ) : null}
               <span className="ml-1 inline-flex items-center gap-1 align-middle">
                 <InstructionRevisionHistoryControl
                   currentInstructionId={instruction.id}

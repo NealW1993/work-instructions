@@ -35,6 +35,24 @@ interface InstructionReviewSettingsResponse {
   updatedAt: string | null;
 }
 
+interface AiEnhancementUserKpiEntry {
+  userId: string;
+  label: string;
+  totalGenerations: number;
+  appliedGenerations: number;
+  unusedGenerations: number;
+  aiCreatedInstructions: number;
+}
+
+interface AiEnhancementKpiResponse {
+  totalGenerations: number;
+  totalAppliedGenerations: number;
+  totalUnusedGenerations: number;
+  totalAiCreatedInstructions: number;
+  users: AiEnhancementUserKpiEntry[];
+  generatedAt: string;
+}
+
 interface CreateUserFieldErrors {
   fullName: boolean;
   email: boolean;
@@ -160,6 +178,9 @@ export function UserAdminPanel() {
   const [reviewSettingsBusy, setReviewSettingsBusy] = useState(false);
   const [reviewWindowInputHasError, setReviewWindowInputHasError] = useState(false);
   const [reviewActivityReloadToken, setReviewActivityReloadToken] = useState(0);
+  const [aiKpiBusy, setAiKpiBusy] = useState(false);
+  const [aiKpiData, setAiKpiData] = useState<AiEnhancementKpiResponse | null>(null);
+  const [aiKpiError, setAiKpiError] = useState<string | null>(null);
 
   const [newDepartmentName, setNewDepartmentName] = useState("");
   const [newDepartmentNameHasError, setNewDepartmentNameHasError] = useState(false);
@@ -342,6 +363,43 @@ export function UserAdminPanel() {
     }
   }, [getAuthHeaders]);
 
+  const fetchAiEnhancementKpis = useCallback(async () => {
+    setAiKpiBusy(true);
+    setAiKpiError(null);
+
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/kpis/ai-enhancement", {
+        method: "GET",
+        headers,
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as
+        | AiEnhancementKpiResponse
+        | { error?: string };
+
+      if (!response.ok) {
+        throw new Error(
+          "error" in payload
+            ? payload.error ?? "Unable to load AI enhancement KPI data."
+            : "Unable to load AI enhancement KPI data.",
+        );
+      }
+
+      if ("users" in payload) {
+        setAiKpiData(payload);
+      }
+    } catch (caughtError) {
+      const normalizedMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Unable to load AI enhancement KPI data.";
+      setAiKpiError(normalizedMessage);
+    } finally {
+      setAiKpiBusy(false);
+    }
+  }, [getAuthHeaders]);
+
   useEffect(() => {
     setPortalReady(true);
   }, []);
@@ -352,9 +410,10 @@ export function UserAdminPanel() {
         fetchUsers(),
         fetchDepartments(),
         fetchInstructionReviewSettings(),
+        fetchAiEnhancementKpis(),
       ]);
     })();
-  }, [fetchDepartments, fetchInstructionReviewSettings, fetchUsers]);
+  }, [fetchAiEnhancementKpis, fetchDepartments, fetchInstructionReviewSettings, fetchUsers]);
 
   useEffect(() => {
     void (async () => {
@@ -1152,6 +1211,116 @@ export function UserAdminPanel() {
           getAuthHeaders={getAuthHeaders}
           reloadToken={reviewActivityReloadToken}
         />
+      </div>
+
+      <div className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-bold">AI Enhancement KPI</h2>
+          <button
+            type="button"
+            disabled={aiKpiBusy}
+            onClick={() => {
+              void fetchAiEnhancementKpis();
+            }}
+            className="rounded-lg border border-slate-300/70 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-100/70 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800/70"
+          >
+            {aiKpiBusy ? "Working..." : "Reload"}
+          </button>
+        </div>
+
+        <p className="text-sm text-slate-600 dark:text-slate-300">
+          Tracks AI generations, how many were not used, and how many saved instructions were
+          created with AI.
+        </p>
+
+        {aiKpiError ? (
+          <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-200">
+            {aiKpiError}
+          </p>
+        ) : null}
+
+        {aiKpiData ? (
+          <>
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+              <article className="rounded-xl border border-cyan-500/35 bg-cyan-500/10 p-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-cyan-800 dark:text-cyan-100">
+                  Total AI Generations
+                </p>
+                <p className="text-xl font-extrabold text-cyan-900 dark:text-cyan-100">
+                  {aiKpiData.totalGenerations}
+                </p>
+              </article>
+              <article className="rounded-xl border border-emerald-500/35 bg-emerald-500/10 p-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-100">
+                  Applied AI Generations
+                </p>
+                <p className="text-xl font-extrabold text-emerald-900 dark:text-emerald-100">
+                  {aiKpiData.totalAppliedGenerations}
+                </p>
+              </article>
+              <article className="rounded-xl border border-amber-500/35 bg-amber-500/10 p-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-100">
+                  Unused AI Generations
+                </p>
+                <p className="text-xl font-extrabold text-amber-900 dark:text-amber-100">
+                  {aiKpiData.totalUnusedGenerations}
+                </p>
+              </article>
+              <article className="rounded-xl border border-violet-500/35 bg-violet-500/10 p-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-violet-800 dark:text-violet-100">
+                  Instructions Created With AI
+                </p>
+                <p className="text-xl font-extrabold text-violet-900 dark:text-violet-100">
+                  {aiKpiData.totalAiCreatedInstructions}
+                </p>
+              </article>
+            </div>
+
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Last refreshed <LocalDateTime value={aiKpiData.generatedAt} mode="dateTime" />.
+            </p>
+
+            {aiKpiData.users.length === 0 ? (
+              <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+                No AI enhancement activity recorded yet.
+              </p>
+            ) : (
+              <div className="overflow-hidden rounded-xl border border-slate-300/70 dark:border-slate-700">
+                <div className="max-h-80 overflow-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-slate-900/10 text-left dark:bg-white/10">
+                      <tr>
+                        <th className="px-3 py-2">User</th>
+                        <th className="px-3 py-2">AI-Created Instructions</th>
+                        <th className="px-3 py-2">Unused AI Generations</th>
+                        <th className="px-3 py-2">Applied AI Generations</th>
+                        <th className="px-3 py-2">Total AI Generations</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {aiKpiData.users.map((entry) => (
+                        <tr
+                          key={entry.userId}
+                          className="border-t border-slate-200/70 dark:border-slate-800"
+                        >
+                          <td className="px-3 py-2 font-medium">{entry.label}</td>
+                          <td className="px-3 py-2">{entry.aiCreatedInstructions}</td>
+                          <td className="px-3 py-2">{entry.unusedGenerations}</td>
+                          <td className="px-3 py-2">{entry.appliedGenerations}</td>
+                          <td className="px-3 py-2">{entry.totalGenerations}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+            {aiKpiBusy ? "Loading AI enhancement KPI data..." : "No AI KPI data available yet."}
+          </p>
+        )}
       </div>
 
       <div

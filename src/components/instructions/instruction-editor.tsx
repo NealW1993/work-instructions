@@ -108,6 +108,7 @@ interface FieldErrors {
 }
 
 interface EnhanceInstructionResponse {
+  generationId?: string;
   enhancedContent?: string;
   originalContent?: string;
   enhancementNotes?: string;
@@ -115,6 +116,7 @@ interface EnhanceInstructionResponse {
 }
 
 interface EnhancementComparisonState {
+  generationId: string | null;
   originalContent: string;
   enhancedContent: string;
   enhancementNotes: string;
@@ -707,10 +709,10 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     useState<RevisionConflictModalState | null>(null);
   const [enhanceBusy, setEnhanceBusy] = useState(false);
   const [enhanceError, setEnhanceError] = useState<string | null>(null);
-  const [enhancementNotice, setEnhancementNotice] = useState<string | null>(null);
   const [enhancementComparison, setEnhancementComparison] =
     useState<EnhancementComparisonState | null>(null);
   const [enhancementModalOpen, setEnhancementModalOpen] = useState(false);
+  const [pendingAiEnhancementId, setPendingAiEnhancementId] = useState<string | null>(null);
 
   const formRef = useRef<HTMLFormElement | null>(null);
   const partInputRef = useRef<HTMLInputElement | null>(null);
@@ -1112,15 +1114,69 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     window.location.assign(navigation.href);
   }
 
+  async function updateEnhancementOutcome(
+    enhancementId: string,
+    outcome: "applied" | "discarded",
+    instructionId?: string | null,
+  ) {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      throw new Error("Missing session token. Please sign in again.");
+    }
+
+    const response = await fetch(`/api/instructions/enhance/${enhancementId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        outcome,
+        instructionId: instructionId ?? null,
+      }),
+    });
+
+    const payload = (await response.json().catch(() => ({}))) as { error?: string };
+    if (!response.ok) {
+      throw new Error(payload.error ?? "Unable to update AI enhancement usage status.");
+    }
+  }
+
   function handleCloseEnhancementModal() {
+    if (enhancementComparison?.generationId) {
+      void updateEnhancementOutcome(enhancementComparison.generationId, "discarded").catch(
+        (caughtError) => {
+          const normalizedMessage =
+            caughtError instanceof Error
+              ? caughtError.message
+              : "Unable to update AI enhancement usage status.";
+          setEnhanceError(normalizedMessage);
+        },
+      );
+    }
+
     setEnhancementModalOpen(false);
+    setEnhancementComparison(null);
   }
 
   function handleKeepOriginalInstructions() {
+    if (enhancementComparison?.generationId) {
+      void updateEnhancementOutcome(enhancementComparison.generationId, "discarded").catch(
+        (caughtError) => {
+          const normalizedMessage =
+            caughtError instanceof Error
+              ? caughtError.message
+              : "Unable to update AI enhancement usage status.";
+          setEnhanceError(normalizedMessage);
+        },
+      );
+    }
+
     setEnhancementModalOpen(false);
-    setEnhancementNotice(
-      "Kept your original instructions. You can continue editing or run AI Enhance again.",
-    );
+    setEnhancementComparison(null);
   }
 
   function handleApplyEnhancedInstructions() {
@@ -1133,14 +1189,30 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     );
     setBodyMarkdown(normalizedEnhancedContent);
     setEnhancementModalOpen(false);
-    setEnhancementNotice(
-      "AI-enhanced instructions applied. Review the draft and keep editing before you save.",
-    );
     if (richTextToPlain(normalizedEnhancedContent)) {
       setFieldErrors((current) => ({
         ...current,
         body: false,
       }));
+    }
+
+    const generationId = enhancementComparison.generationId;
+    setPendingAiEnhancementId(generationId);
+    setEnhancementComparison(null);
+    if (generationId) {
+      const currentInstructionId =
+        mode === "edit" ? (initialData?.instructionId ?? null) : null;
+      void updateEnhancementOutcome(
+        generationId,
+        "applied",
+        currentInstructionId,
+      ).catch((caughtError) => {
+        const normalizedMessage =
+          caughtError instanceof Error
+            ? caughtError.message
+            : "Unable to update AI enhancement usage status.";
+        setEnhanceError(normalizedMessage);
+      });
     }
   }
 
@@ -1153,14 +1225,12 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         body: true,
       }));
       setEnhanceError("Add instruction content before running AI Enhance.");
-      setEnhancementNotice(null);
       setBodyFocusRequestKey((current) => current + 1);
       return;
     }
 
     setEnhanceBusy(true);
     setEnhanceError(null);
-    setEnhancementNotice(null);
     setError(null);
 
     try {
@@ -1184,6 +1254,8 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           itemTitle: itemTitle.trim(),
           departmentName: selectedDepartmentName,
           revision,
+          instructionId: initialData?.instructionId ?? null,
+          sourceInstructionId: initialData?.sourceInstructionId ?? null,
           mode,
         }),
       });
@@ -1204,14 +1276,12 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       );
 
       setEnhancementComparison({
+        generationId: payload.generationId ?? null,
         originalContent: nextOriginalContent,
         enhancedContent: nextEnhancedContent,
         enhancementNotes: payload.enhancementNotes?.trim() ?? "",
       });
       setEnhancementModalOpen(true);
-      setEnhancementNotice(
-        "AI enhancement is ready. Compare both versions and choose the one you want to keep.",
-      );
     } catch (caughtError) {
       const normalizedMessage =
         caughtError instanceof Error
@@ -1231,7 +1301,6 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     setMessage(null);
     setError(null);
     setEnhanceError(null);
-    setEnhancementNotice(null);
     setFieldErrors(DEFAULT_FIELD_ERRORS);
     setRevisionConflictModal(null);
 
@@ -1420,6 +1489,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         mode === "edit" &&
         Boolean(initialData?.instructionId) &&
         revision !== (initialData?.revision ?? revision);
+      const aiEventIdForSave = pendingAiEnhancementId;
       let instructionId = initialData?.instructionId ?? "";
       const previousBodyForSummary = initialData?.bodyMarkdown ?? "";
       const previousRevisionForSummary = initialData?.revision ?? revision;
@@ -1484,17 +1554,36 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           archivedInstructionRollbackId = instructionToArchiveId;
         }
 
+        const insertPayload: {
+          work_item_id: string;
+          body_markdown: string;
+          notes_markdown: string;
+          revision: number;
+          last_change_summary: string;
+          created_by: string;
+          updated_by: string;
+          ai_assisted?: boolean;
+          ai_assisted_at?: string;
+          ai_assistance_last_event_id?: string;
+        } = {
+          work_item_id: typedWorkItem.id,
+          body_markdown: bodyMarkdown,
+          notes_markdown: "",
+          revision,
+          last_change_summary: changeSummary,
+          created_by: user.id,
+          updated_by: user.id,
+        };
+
+        if (aiEventIdForSave) {
+          insertPayload.ai_assisted = true;
+          insertPayload.ai_assisted_at = new Date().toISOString();
+          insertPayload.ai_assistance_last_event_id = aiEventIdForSave;
+        }
+
         const { data: insertedInstruction, error: insertInstructionError } = await supabase
           .from("work_instructions")
-          .insert({
-            work_item_id: typedWorkItem.id,
-            body_markdown: bodyMarkdown,
-            notes_markdown: "",
-            revision,
-            last_change_summary: changeSummary,
-            created_by: user.id,
-            updated_by: user.id,
-          })
+          .insert(insertPayload)
           .select("id, created_at")
           .single();
 
@@ -1553,16 +1642,34 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           }
         }
       } else {
+        const updatePayload: {
+          work_item_id: string;
+          body_markdown: string;
+          notes_markdown: string;
+          revision: number;
+          last_change_summary: string;
+          updated_by: string;
+          ai_assisted?: boolean;
+          ai_assisted_at?: string;
+          ai_assistance_last_event_id?: string;
+        } = {
+          work_item_id: typedWorkItem.id,
+          body_markdown: bodyMarkdown,
+          notes_markdown: "",
+          revision,
+          last_change_summary: changeSummary,
+          updated_by: user.id,
+        };
+
+        if (aiEventIdForSave) {
+          updatePayload.ai_assisted = true;
+          updatePayload.ai_assisted_at = new Date().toISOString();
+          updatePayload.ai_assistance_last_event_id = aiEventIdForSave;
+        }
+
         const { data: updatedInstruction, error: updateInstructionError } = await supabase
           .from("work_instructions")
-          .update({
-            work_item_id: typedWorkItem.id,
-            body_markdown: bodyMarkdown,
-            notes_markdown: "",
-            revision,
-            last_change_summary: changeSummary,
-            updated_by: user.id,
-          })
+          .update(updatePayload)
           .eq("id", instructionId)
           .select("updated_at")
           .single();
@@ -1596,6 +1703,23 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         } catch {
           // Capturing source snippets is best-effort and should not block saves.
         }
+      }
+
+      if (aiEventIdForSave) {
+        try {
+          await supabase
+            .from("instruction_ai_enhancements")
+            .update({
+              outcome: "applied",
+              outcome_at: new Date().toISOString(),
+              instruction_id: instructionId,
+            })
+            .eq("id", aiEventIdForSave)
+            .eq("actor_user_id", user.id);
+        } catch {
+          // Capturing final instruction linkage for AI usage is best-effort.
+        }
+        setPendingAiEnhancementId(null);
       }
 
       setMessage(
@@ -1811,12 +1935,6 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
             {enhanceBusy ? "Enhancing..." : "AI Enhance"}
           </button>
         </div>
-
-        {enhancementNotice ? (
-          <p className="rounded-xl border border-cyan-500/35 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-800 dark:text-cyan-100">
-            {enhancementNotice}
-          </p>
-        ) : null}
 
         {enhanceError ? (
           <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-200">
