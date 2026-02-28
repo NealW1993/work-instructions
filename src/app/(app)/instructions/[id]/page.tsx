@@ -9,6 +9,7 @@ import { InstructionBackButton } from "@/components/instructions/instruction-bac
 import { InstructionArchivedRedirectGuard } from "@/components/instructions/instruction-archived-redirect-guard";
 import { InstructionBodyLightbox } from "@/components/instructions/instruction-body-lightbox";
 import { InstructionMediaSection } from "@/components/instructions/instruction-media-section";
+import { InstructionForkMergeControl } from "@/components/instructions/instruction-fork-merge-control";
 import {
   type InstructionRevisionHistoryEntry,
   InstructionRevisionHistoryControl,
@@ -37,6 +38,10 @@ interface InstructionPageProps {
 interface InstructionRecord {
   id: string;
   work_item_id: string;
+  fork_root_instruction_id: string | null;
+  fork_number: number | null;
+  merged_into_root_at: string | null;
+  merge_count: number;
   is_archived: boolean;
   body_markdown: string;
   ai_assisted: boolean;
@@ -77,6 +82,46 @@ interface InstructionRecord {
           | null;
       }>;
   instruction_media: InstructionMedia[];
+}
+
+interface ForkFamilyRow {
+  id: string;
+  fork_number: number | null;
+  is_archived: boolean;
+  merged_into_root_at: string | null;
+  created_at: string;
+}
+
+interface ForkRootLookupRow {
+  id: string;
+  work_items:
+    | {
+        part_id: string;
+        item_title: string;
+        department_id: string;
+        departments:
+          | {
+              name: string;
+            }
+          | Array<{
+              name: string;
+            }>
+          | null;
+      }
+    | Array<{
+        part_id: string;
+        item_title: string;
+        department_id: string;
+        departments:
+          | {
+              name: string;
+            }
+          | Array<{
+              name: string;
+            }>
+          | null;
+      }>
+    | null;
 }
 
 interface InstructionChangeEventRow {
@@ -286,6 +331,20 @@ function normalizeRevisionHistoryLookupWorkItem(
   return relation;
 }
 
+function normalizeForkRootWorkItem(
+  relation: ForkRootLookupRow["work_items"],
+) {
+  if (!relation) {
+    return null;
+  }
+
+  if (Array.isArray(relation)) {
+    return relation[0] ?? null;
+  }
+
+  return relation;
+}
+
 function revisionHistoryRowSortValue(row: InstructionRevisionHistoryRow) {
   const updatedAtValue = Date.parse(row.updated_at);
   return Number.isFinite(updatedAtValue) ? updatedAtValue : 0;
@@ -409,7 +468,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, work_item_id, is_archived, body_markdown, ai_assisted, ai_assisted_at, last_change_summary, revision, created_at, updated_at, created_by, updated_by, work_items(id, department_id, part_id, item_title, departments(name)), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
+      "id, work_item_id, fork_root_instruction_id, fork_number, merged_into_root_at, merge_count, is_archived, body_markdown, ai_assisted, ai_assisted_at, last_change_summary, revision, created_at, updated_at, created_by, updated_by, work_items(id, department_id, part_id, item_title, departments(name)), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -425,27 +484,89 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const instruction = data as InstructionRecord;
   const workItem = getWorkItem(instruction.work_items);
   const departmentName = getDepartmentName(workItem?.departments);
+  const instructionForkNumber =
+    Number.isInteger(instruction.fork_number) && Number(instruction.fork_number) > 0
+      ? Number(instruction.fork_number)
+      : null;
+  const isForkInstruction =
+    Boolean(instruction.fork_root_instruction_id) && instructionForkNumber !== null;
+  const forkFamilyRootId = isForkInstruction
+    ? (instruction.fork_root_instruction_id as string)
+    : instruction.id;
 
   if (!workItem) {
     notFound();
   }
 
   const [
-    { data: revisionHistoryByWorkItemData, error: revisionHistoryByWorkItemError },
-    { data: revisionHistoryByPartAndDepartmentData, error: revisionHistoryByPartAndDepartmentError },
+    { data: forkFamilyData, error: forkFamilyError },
+    { data: forkRootLookupData, error: forkRootLookupError },
   ] = await Promise.all([
     supabase
       .from("work_instructions")
-      .select("id, revision, is_archived, created_at, updated_at, updated_by")
-      .eq("work_item_id", instruction.work_item_id)
-      .order("revision", { ascending: false })
-      .order("updated_at", { ascending: false }),
-    supabase
-      .from("work_instructions")
-      .select(
-        "id, revision, is_archived, created_at, updated_at, updated_by, work_items!inner(part_id, item_title, department_id)",
-      )
-      .eq("work_items.department_id", workItem.department_id),
+      .select("id, fork_number, is_archived, merged_into_root_at, created_at")
+      .eq("fork_root_instruction_id", forkFamilyRootId)
+      .order("fork_number", { ascending: true }),
+    isForkInstruction
+      ? supabase
+          .from("work_instructions")
+          .select("id, work_items(part_id, item_title, department_id, departments(name))")
+          .eq("id", forkFamilyRootId)
+          .maybeSingle<ForkRootLookupRow>()
+      : Promise.resolve({
+          data: null as ForkRootLookupRow | null,
+          error: null as { message?: string } | null,
+        }),
+  ]);
+
+  if (forkFamilyError) {
+    throw new Error(forkFamilyError.message);
+  }
+
+  if (forkRootLookupError) {
+    throw new Error(forkRootLookupError.message ?? "Unable to load fork root instruction.");
+  }
+
+  const forkFamilyRows = (forkFamilyData ?? []) as ForkFamilyRow[];
+  const forkRootLookup = (forkRootLookupData ?? null) as ForkRootLookupRow | null;
+  const forkRootWorkItem = normalizeForkRootWorkItem(forkRootLookup?.work_items ?? null);
+  const forkRootDepartmentName = getDepartmentName(forkRootWorkItem?.departments);
+  const forkCount = forkFamilyRows.length;
+
+  const [
+    { data: revisionHistoryByWorkItemData, error: revisionHistoryByWorkItemError },
+    {
+      data: revisionHistoryByPartAndDepartmentData,
+      error: revisionHistoryByPartAndDepartmentError,
+    },
+  ] = await Promise.all([
+    isForkInstruction
+      ? supabase
+          .from("work_instructions")
+          .select("id, revision, is_archived, created_at, updated_at, updated_by")
+          .eq("fork_root_instruction_id", forkFamilyRootId)
+          .eq("fork_number", instructionForkNumber as number)
+          .order("revision", { ascending: false })
+          .order("updated_at", { ascending: false })
+      : supabase
+          .from("work_instructions")
+          .select("id, revision, is_archived, created_at, updated_at, updated_by")
+          .eq("work_item_id", instruction.work_item_id)
+          .is("fork_root_instruction_id", null)
+          .order("revision", { ascending: false })
+          .order("updated_at", { ascending: false }),
+    isForkInstruction
+      ? Promise.resolve({
+          data: null as InstructionRevisionHistoryLookupRow[] | null,
+          error: null as { message?: string } | null,
+        })
+      : supabase
+          .from("work_instructions")
+          .select(
+            "id, revision, is_archived, created_at, updated_at, updated_by, work_items!inner(part_id, item_title, department_id)",
+          )
+          .eq("work_items.department_id", workItem.department_id)
+          .is("fork_root_instruction_id", null),
   ]);
 
   if (revisionHistoryByWorkItemError) {
@@ -735,12 +856,59 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
           </div>
         ) : null}
 
+        {isForkInstruction ? (
+          <div className="mb-4 rounded-2xl border border-cyan-500/45 bg-cyan-500/12 px-4 py-3">
+            <p className="text-sm font-bold text-slate-900 dark:text-slate-100">
+              Fork {instructionForkNumber}
+            </p>
+            <p className="text-xs text-slate-700 dark:text-slate-200">
+              This is a forked instruction branch. Merges always apply to the original instruction.
+              {forkRootLookup ? (
+                <>
+                  {" "}
+                  <Link
+                    href={`/instructions/${forkFamilyRootId}`}
+                    className="font-semibold text-cyan-800 underline underline-offset-2 transition hover:text-cyan-700 dark:text-cyan-200"
+                  >
+                    Open original
+                  </Link>
+                  .
+                </>
+              ) : null}
+            </p>
+            {instruction.merged_into_root_at ? (
+              <p className="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
+                Last merged into original on{" "}
+                <LocalDateTime value={instruction.merged_into_root_at} mode="dateTime" />.
+              </p>
+            ) : null}
+          </div>
+        ) : forkCount > 0 ? (
+          <div className="mb-4 rounded-2xl border border-violet-500/40 bg-violet-500/12 px-4 py-3">
+            <p className="text-sm font-bold text-slate-900 dark:text-slate-100">
+              Original Instruction
+            </p>
+            <p className="text-xs text-slate-700 dark:text-slate-200">
+              {forkCount} fork branch{forkCount === 1 ? "" : "es"} created from this instruction.
+            </p>
+          </div>
+        ) : null}
+
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="grid gap-1">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-3xl font-extrabold text-slate-900 dark:text-slate-100">
                 {workItem.item_title}
               </h1>
+              {isForkInstruction ? (
+                <span className="inline-flex items-center rounded-full border border-cyan-500/45 bg-cyan-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-800 dark:text-cyan-100">
+                  Fork {instructionForkNumber}
+                </span>
+              ) : forkCount > 0 ? (
+                <span className="inline-flex items-center rounded-full border border-violet-500/45 bg-violet-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-800 dark:text-violet-100">
+                  Original | {forkCount} Fork{forkCount === 1 ? "" : "s"}
+                </span>
+              ) : null}
               {!instructionIsArchived ? (
                 <InstructionReviewControls
                   instructionId={instruction.id}
@@ -826,6 +994,17 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
                   </Link>
                 </div>
               ) : null}
+              {showCompactEditorInstructionActions && isForkInstruction && instructionForkNumber ? (
+                <InstructionForkMergeControl
+                  forkInstructionId={instruction.id}
+                  forkNumber={instructionForkNumber}
+                  rootInstructionId={forkFamilyRootId}
+                  rootPartId={forkRootWorkItem?.part_id ?? workItem.part_id}
+                  rootItemTitle={forkRootWorkItem?.item_title ?? workItem.item_title}
+                  rootDepartmentName={forkRootDepartmentName}
+                  className="w-full justify-center px-3 py-1.5 text-xs"
+                />
+              ) : null}
               {isSystemAdmin(profile.role) && !instructionIsArchived ? (
                 <DeleteInstructionButton
                   instructionId={instruction.id}
@@ -848,6 +1027,74 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
         <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
           <h2 className="text-xl font-bold">Media</h2>
           <InstructionMediaSection media={instruction.instruction_media} />
+        </section>
+      ) : null}
+
+      {isForkInstruction || forkCount > 0 ? (
+        <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+          <div className="grid gap-1">
+            <h2 className="text-xl font-bold">Fork Branches</h2>
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              Branches are numbered per original instruction and always merge back to the original.
+            </p>
+          </div>
+
+          <div className="grid gap-2">
+            {isForkInstruction ? (
+              <Link
+                href={`/instructions/${forkFamilyRootId}`}
+                className="grid gap-1 rounded-xl border border-violet-500/40 bg-violet-500/10 px-3 py-2 transition hover:bg-violet-500/15"
+              >
+                <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  Original Instruction
+                </p>
+                <p className="text-xs text-slate-600 dark:text-slate-300">
+                  {forkRootWorkItem?.part_id ?? workItem.part_id} |{" "}
+                  {forkRootWorkItem?.item_title ?? workItem.item_title} | {forkRootDepartmentName}
+                </p>
+              </Link>
+            ) : null}
+
+            {forkFamilyRows.length > 0 ? (
+              forkFamilyRows.map((forkRow) => (
+                <Link
+                  key={forkRow.id}
+                  href={`/instructions/${forkRow.id}`}
+                  className="grid gap-1 rounded-xl border border-cyan-500/35 bg-cyan-500/10 px-3 py-2 transition hover:bg-cyan-500/15"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                      Fork {forkRow.fork_number ?? "?"}
+                    </p>
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                        forkRow.merged_into_root_at
+                          ? "border-emerald-500/45 bg-emerald-500/15 text-emerald-800 dark:text-emerald-200"
+                          : "border-amber-500/45 bg-amber-500/15 text-amber-800 dark:text-amber-200"
+                      }`}
+                    >
+                      {forkRow.merged_into_root_at ? "Merged" : "Open"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 dark:text-slate-300">
+                    Created <LocalDateTime value={forkRow.created_at} mode="dateTime" />
+                    {forkRow.merged_into_root_at ? (
+                      <>
+                        {" "}
+                        | Last merged{" "}
+                        <LocalDateTime value={forkRow.merged_into_root_at} mode="dateTime" />
+                      </>
+                    ) : null}
+                    {forkRow.is_archived ? " | Archived" : ""}
+                  </p>
+                </Link>
+              ))
+            ) : (
+              <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+                No fork branches have been created yet.
+              </p>
+            )}
+          </div>
         </section>
       ) : null}
     </article>

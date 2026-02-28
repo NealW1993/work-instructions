@@ -43,6 +43,10 @@ export interface WorkItem {
 export interface WorkInstruction {
   id: string;
   work_item_id: string;
+  fork_root_instruction_id?: string | null;
+  fork_number?: number | null;
+  merged_into_root_at?: string | null;
+  merge_count?: number;
   body_markdown: string;
   notes_markdown: string;
   revision: number;

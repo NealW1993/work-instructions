@@ -15,6 +15,10 @@ interface InstructionEditorProps {
   initialData?: {
     instructionId?: string;
     sourceInstructionId?: string;
+    forkRootInstructionId?: string | null;
+    forkNumber?: number | null;
+    mergedIntoRootAt?: string | null;
+    mergeCount?: number;
     workItemId?: string;
     departmentId?: string;
     partId: string;
@@ -665,6 +669,36 @@ function snapshotsAreEqual(a: EditorSnapshot, b: EditorSnapshot) {
   );
 }
 
+function normalizeOptionalUuid(value: string | null | undefined) {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) {
+    return null;
+  }
+
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      trimmed,
+    )
+  ) {
+    return null;
+  }
+
+  return trimmed;
+}
+
+function normalizePositiveInteger(value: unknown) {
+  if (!Number.isInteger(value)) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  if (parsed < 1) {
+    return null;
+  }
+
+  return parsed;
+}
+
 function getDepartmentNameFromRelation(
   relation: WorkItemSearchResult["departments"],
 ): string {
@@ -707,7 +741,6 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [portalReady, setPortalReady] = useState(false);
-  const [forkCanceledModalOpen, setForkCanceledModalOpen] = useState(false);
   const [navigationModalOpen, setNavigationModalOpen] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null);
   const [revisionConflictModal, setRevisionConflictModal] =
@@ -1350,12 +1383,6 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       Boolean(initialData?.instructionId) &&
       revision > currentRevision;
 
-    if (mode === "fork" && snapshotsAreEqual(currentSnapshot, initialSnapshot)) {
-      setForkCanceledModalOpen(true);
-      setBusy(false);
-      return;
-    }
-
     if (!normalizedDepartmentId) {
       setFieldErrors((current) => ({
         ...current,
@@ -1455,32 +1482,58 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         throw new Error(workItemError?.message ?? "Unable to save work item.");
       }
 
+      const existingForkRootInstructionId = normalizeOptionalUuid(
+        initialData?.forkRootInstructionId,
+      );
+      const existingForkNumber = normalizePositiveInteger(initialData?.forkNumber);
+      const editingForkBranch =
+        mode === "edit" && Boolean(existingForkRootInstructionId && existingForkNumber);
       let currentActiveInstruction: ActiveInstructionConflict | null = null;
 
       {
-        let duplicateCheckRequest = supabase
-          .from("work_instructions")
-          .select("id, revision")
-          .eq("is_archived", false)
-          .eq("work_item_id", typedWorkItem.id)
-          .limit(1);
+        let typedDuplicateInstruction: ActiveInstructionConflict | null = null;
 
-        if (mode === "edit" && initialData?.instructionId) {
-          duplicateCheckRequest = duplicateCheckRequest.neq("id", initialData.instructionId);
+        if (mode !== "fork") {
+          const duplicateCheckRequest = editingForkBranch
+            ? supabase
+                .from("work_instructions")
+                .select("id, revision")
+                .eq("is_archived", false)
+                .eq("fork_root_instruction_id", existingForkRootInstructionId as string)
+                .eq("fork_number", existingForkNumber as number)
+                .limit(1)
+            : supabase
+                .from("work_instructions")
+                .select("id, revision")
+                .eq("is_archived", false)
+                .eq("work_item_id", typedWorkItem.id)
+                .is("fork_root_instruction_id", null)
+                .limit(1);
+
+          const adjustedDuplicateCheckRequest =
+            mode === "edit" && initialData?.instructionId
+              ? duplicateCheckRequest.neq("id", initialData.instructionId)
+              : duplicateCheckRequest;
+
+          const { data: duplicateInstruction, error: duplicateCheckError } =
+            await adjustedDuplicateCheckRequest.maybeSingle();
+
+          if (duplicateCheckError) {
+            throw new Error(duplicateCheckError.message);
+          }
+
+          typedDuplicateInstruction =
+            (duplicateInstruction as ActiveInstructionConflict | null) ?? null;
         }
-
-        const { data: duplicateInstruction, error: duplicateCheckError } =
-          await duplicateCheckRequest.maybeSingle();
-
-        if (duplicateCheckError) {
-          throw new Error(duplicateCheckError.message);
-        }
-
-        const typedDuplicateInstruction =
-          (duplicateInstruction as ActiveInstructionConflict | null) ?? null;
 
         if (typedDuplicateInstruction) {
           currentActiveInstruction = typedDuplicateInstruction;
+
+          if (mode === "edit" && editingForkBranch) {
+            throw new Error(
+              "Another active revision already exists for this fork branch. Refresh and retry.",
+            );
+          }
 
           if (mode === "edit") {
             setFieldErrors((current) => ({
@@ -1519,17 +1572,6 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
               return;
             }
           }
-
-          if (mode === "fork") {
-            setFieldErrors((current) => ({
-              ...current,
-              itemTitle: true,
-            }));
-            itemTitleInputRef.current?.focus();
-            throw new Error(
-              "An active instruction already exists for this Part ID and title. Change Part ID or title before creating a fork.",
-            );
-          }
         }
       }
 
@@ -1541,8 +1583,13 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         mode === "edit" &&
         Boolean(initialData?.instructionId) &&
         revision !== (initialData?.revision ?? revision);
+      const existingForkMergeCount = Math.max(
+        0,
+        normalizePositiveInteger(initialData?.mergeCount) ?? 0,
+      );
       const aiEventIdForSave = pendingAiEnhancementId;
       let instructionId = initialData?.instructionId ?? "";
+      let createdForkNumber: number | null = null;
       const previousBodyForSummary = initialData?.bodyMarkdown ?? "";
       const previousRevisionForSummary = initialData?.revision ?? revision;
       const changeComputation =
@@ -1606,6 +1653,47 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           archivedInstructionRollbackId = instructionToArchiveId;
         }
 
+        let forkRootInstructionIdForInsert: string | null = null;
+        let forkNumberForInsert: number | null = null;
+        let mergeCountForInsert = 0;
+        let mergedIntoRootAtForInsert: string | null = null;
+
+        if (mode === "fork") {
+          const sourceRootInstructionId =
+            normalizeOptionalUuid(initialData?.forkRootInstructionId) ??
+            normalizeOptionalUuid(initialData?.sourceInstructionId);
+          if (!sourceRootInstructionId) {
+            throw new Error("Unable to determine the original instruction for this fork.");
+          }
+
+          const { data: latestForkBranch, error: latestForkBranchError } = await supabase
+            .from("work_instructions")
+            .select("fork_number")
+            .eq("fork_root_instruction_id", sourceRootInstructionId)
+            .order("fork_number", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (latestForkBranchError) {
+            throw new Error(latestForkBranchError.message);
+          }
+
+          const typedLatestForkBranch = latestForkBranch as { fork_number: number | null } | null;
+          const maxForkNumber = normalizePositiveInteger(
+            typedLatestForkBranch?.fork_number ?? null,
+          );
+
+          forkRootInstructionIdForInsert = sourceRootInstructionId;
+          forkNumberForInsert = (maxForkNumber ?? 0) + 1;
+          mergeCountForInsert = 0;
+          mergedIntoRootAtForInsert = null;
+        } else if (isEditRevisionBump && existingForkRootInstructionId && existingForkNumber) {
+          forkRootInstructionIdForInsert = existingForkRootInstructionId;
+          forkNumberForInsert = existingForkNumber;
+          mergeCountForInsert = existingForkMergeCount;
+          mergedIntoRootAtForInsert = initialData?.mergedIntoRootAt ?? null;
+        }
+
         const insertPayload: {
           work_item_id: string;
           body_markdown: string;
@@ -1614,6 +1702,10 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           last_change_summary: string;
           created_by: string;
           updated_by: string;
+          fork_root_instruction_id?: string | null;
+          fork_number?: number | null;
+          merge_count?: number;
+          merged_into_root_at?: string | null;
           ai_assisted?: boolean;
           ai_assisted_at?: string;
           ai_assistance_last_event_id?: string;
@@ -1627,6 +1719,14 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           updated_by: user.id,
         };
 
+        if (forkRootInstructionIdForInsert && forkNumberForInsert) {
+          insertPayload.fork_root_instruction_id = forkRootInstructionIdForInsert;
+          insertPayload.fork_number = forkNumberForInsert;
+          insertPayload.merge_count = mergeCountForInsert;
+          insertPayload.merged_into_root_at = mergedIntoRootAtForInsert;
+          createdForkNumber = forkNumberForInsert;
+        }
+
         if (aiEventIdForSave) {
           insertPayload.ai_assisted = true;
           insertPayload.ai_assisted_at = new Date().toISOString();
@@ -1636,11 +1736,15 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         const { data: insertedInstruction, error: insertInstructionError } = await supabase
           .from("work_instructions")
           .insert(insertPayload)
-          .select("id, created_at")
+          .select("id, created_at, fork_number")
           .single();
 
         const typedInstruction =
-          insertedInstruction as { id: string; created_at: string } | null;
+          insertedInstruction as {
+            id: string;
+            created_at: string;
+            fork_number: number | null;
+          } | null;
 
         if (insertInstructionError || !typedInstruction) {
           if (archivedInstructionRollbackId) {
@@ -1663,6 +1767,10 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         }
 
         instructionId = typedInstruction.id;
+        if (mode === "fork") {
+          createdForkNumber =
+            normalizePositiveInteger(typedInstruction.fork_number) ?? createdForkNumber;
+        }
         changeOccurredAt = typedInstruction.created_at ?? new Date().toISOString();
         changeEventType = "created";
         confirmedReplacementInstructionIdRef.current = null;
@@ -1757,6 +1865,36 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         }
       }
 
+      if (mode === "fork" && changeOccurredAt) {
+        try {
+          await supabase.from("instruction_change_events").upsert(
+            {
+              instruction_id: instructionId,
+              actor_user_id: user.id,
+              event_type: "created",
+              detail: `Fork ${createdForkNumber ?? "?"} created from original instruction.`,
+              revision,
+              occurred_at: changeOccurredAt,
+              source_payload: {
+                kind: "fork_created",
+                forkNumber: createdForkNumber,
+                sourceInstructionId: initialData?.sourceInstructionId ?? null,
+                rootInstructionId:
+                  initialData?.forkRootInstructionId ?? initialData?.sourceInstructionId ?? null,
+                partId: normalizedPartId,
+                itemTitle: itemTitle.trim(),
+                departmentName: selectedDepartmentName,
+              },
+            },
+            {
+              onConflict: "instruction_id,event_type,actor_user_id,occurred_at",
+            },
+          );
+        } catch {
+          // Fork tracking is best-effort and should not block saves.
+        }
+      }
+
       if (aiEventIdForSave) {
         try {
           await supabase
@@ -1780,7 +1918,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           : mode === "edit"
             ? "Instruction updated successfully."
             : mode === "fork"
-            ? "Instruction fork created successfully."
+            ? `Fork ${createdForkNumber ?? "?"} created successfully.`
             : "Instruction created successfully.",
       );
 
@@ -2249,48 +2387,6 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           )
         : null}
 
-      {forkCanceledModalOpen && portalReady
-        ? createPortal(
-            <div className="app-modal-shell fixed inset-0 z-[110] flex items-center justify-center overflow-y-auto bg-slate-950/70 p-4 backdrop-blur-sm sm:p-6">
-              <div className="grid w-full max-w-md gap-4 rounded-2xl border border-cyan-500/35 bg-slate-950/95 p-5 shadow-2xl max-h-[calc(100vh-2rem)] overflow-y-auto">
-                <div className="grid gap-1">
-                  <h3 className="text-lg font-bold text-slate-100">Fork canceled</h3>
-                  <p className="text-sm text-slate-300">
-                    No changes were detected, so a new fork was not created.
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setForkCanceledModalOpen(false)}
-                    className="rounded-xl border border-slate-600 bg-slate-900/70 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
-                  >
-                    Keep Editing
-                  </button>
-
-                  {initialData?.sourceInstructionId ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setForkCanceledModalOpen(false);
-                        navigationBypassRef.current = true;
-                        navigateWithGuardReleased(() => {
-                          router.push(`/instructions/${initialData.sourceInstructionId}`);
-                          router.refresh();
-                        });
-                      }}
-                      className="rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/25"
-                    >
-                      Back to Instruction
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
     </div>
   );
 }

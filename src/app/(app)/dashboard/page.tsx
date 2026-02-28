@@ -32,6 +32,8 @@ interface DashboardInstructionWorkItem {
 interface DashboardInstructionRow {
   id: string;
   revision: number;
+  fork_root_instruction_id: string | null;
+  fork_number: number | null;
   last_change_summary: string | null;
   created_at: string;
   updated_at: string;
@@ -63,6 +65,8 @@ interface DashboardInstructionChangeEventRow {
 interface DashboardWorkItemInstructionRow {
   id: string;
   revision: number;
+  fork_root_instruction_id: string | null;
+  fork_number: number | null;
   created_at: string;
   updated_at: string;
   created_by: string;
@@ -274,7 +278,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const searchRequest = supabase
     .from("work_items")
     .select(
-      "id, department_id, departments(name, color_hex), part_id, item_title, updated_at, work_instructions!inner(id, revision, created_at, updated_at, created_by, updated_by)",
+      "id, department_id, departments(name, color_hex), part_id, item_title, updated_at, work_instructions!inner(id, revision, fork_root_instruction_id, fork_number, created_at, updated_at, created_by, updated_by)",
     )
     .eq("work_instructions.is_archived", false)
     .order("updated_at", { ascending: false })
@@ -283,7 +287,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const newestRequest = supabase
     .from("work_instructions")
     .select(
-      "id, revision, last_change_summary, created_at, updated_at, created_by, updated_by, work_items(department_id, departments(name, color_hex), part_id, item_title)",
+      "id, revision, fork_root_instruction_id, fork_number, last_change_summary, created_at, updated_at, created_by, updated_by, work_items(department_id, departments(name, color_hex), part_id, item_title)",
     )
     .eq("is_archived", false)
     .order("created_at", { ascending: false })
@@ -292,7 +296,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const pinnedRequest = supabase
     .from("user_pinned_instructions")
     .select(
-      "created_at, work_instructions!inner(id, revision, last_change_summary, created_at, updated_at, created_by, updated_by, is_archived, work_items(department_id, departments(name, color_hex), part_id, item_title))",
+      "created_at, work_instructions!inner(id, revision, fork_root_instruction_id, fork_number, last_change_summary, created_at, updated_at, created_by, updated_by, is_archived, work_items(department_id, departments(name, color_hex), part_id, item_title))",
     )
     .eq("user_id", profile.id)
     .eq("work_instructions.is_archived", false)
@@ -302,7 +306,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const authoredLikesRequest = supabase
     .from("instruction_likes")
     .select(
-      "created_at, instruction_id, user_id, work_instructions!inner(id, revision, last_change_summary, created_at, updated_at, created_by, updated_by, is_archived, work_items(department_id, departments(name, color_hex), part_id, item_title))",
+      "created_at, instruction_id, user_id, work_instructions!inner(id, revision, fork_root_instruction_id, fork_number, last_change_summary, created_at, updated_at, created_by, updated_by, is_archived, work_items(department_id, departments(name, color_hex), part_id, item_title))",
     )
     .eq("work_instructions.created_by", profile.id)
     .eq("work_instructions.is_archived", false)
@@ -313,7 +317,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const historyInstructionsRequest = supabase
     .from("work_instructions")
     .select(
-      "id, revision, last_change_summary, created_at, updated_at, created_by, updated_by, work_items(department_id, departments(name, color_hex), part_id, item_title)",
+      "id, revision, fork_root_instruction_id, fork_number, last_change_summary, created_at, updated_at, created_by, updated_by, work_items(department_id, departments(name, color_hex), part_id, item_title)",
     )
     .eq("is_archived", false)
     .order("updated_at", { ascending: false })
@@ -468,6 +472,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     work_instructions: (item.work_instructions ?? []).map((instruction) => ({
       id: instruction.id,
       revision: instruction.revision,
+      fork_root_instruction_id: instruction.fork_root_instruction_id,
+      fork_number: instruction.fork_number,
       created_at: instruction.created_at,
       updated_at: instruction.updated_at,
       creator_id: instruction.created_by,
@@ -487,6 +493,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       return {
         id: instruction.id,
         revision: instruction.revision,
+        fork_root_instruction_id: instruction.fork_root_instruction_id,
+        fork_number: instruction.fork_number,
         created_at: instruction.created_at,
         updated_at: instruction.updated_at,
         creator_name: profileNameMap.get(instruction.created_by) ?? "Unknown",
@@ -516,6 +524,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       return {
         id: instruction.id,
         revision: instruction.revision,
+        fork_root_instruction_id: instruction.fork_root_instruction_id,
+        fork_number: instruction.fork_number,
         created_at: instruction.created_at,
         updated_at: instruction.updated_at,
         creator_name: profileNameMap.get(instruction.created_by) ?? "Unknown",
@@ -561,6 +571,8 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     likedInstructionsById.set(instruction.id, {
       id: instruction.id,
       revision: instruction.revision,
+      fork_root_instruction_id: instruction.fork_root_instruction_id,
+      fork_number: instruction.fork_number,
       created_at: instruction.created_at,
       updated_at: instruction.updated_at,
       creator_name: profileNameMap.get(instruction.created_by) ?? "Unknown",

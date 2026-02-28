@@ -23,6 +23,8 @@ interface ForkInstructionRecord {
   is_archived: boolean;
   body_markdown: string;
   revision: number;
+  fork_root_instruction_id: string | null;
+  fork_number: number | null;
   work_items: WorkItemRelation | WorkItemRelation[];
 }
 
@@ -47,7 +49,7 @@ export default async function ForkInstructionPage({ params }: ForkInstructionPag
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, is_archived, body_markdown, revision, work_items(id, department_id, part_id, item_title)",
+      "id, is_archived, body_markdown, revision, fork_root_instruction_id, fork_number, work_items(id, department_id, part_id, item_title)",
     )
     .eq("id", id)
     .eq("is_archived", false)
@@ -63,6 +65,8 @@ export default async function ForkInstructionPage({ params }: ForkInstructionPag
 
   const instruction = data as ForkInstructionRecord;
   const workItem = normalizeWorkItem(instruction.work_items);
+  const forkRootInstructionId =
+    instruction.fork_root_instruction_id ?? instruction.id;
 
   if (!workItem) {
     notFound();
@@ -86,6 +90,7 @@ export default async function ForkInstructionPage({ params }: ForkInstructionPag
         mode="fork"
         initialData={{
           sourceInstructionId: instruction.id,
+          forkRootInstructionId,
           departmentId: workItem.department_id,
           partId: workItem.part_id,
           itemTitle: workItem.item_title,

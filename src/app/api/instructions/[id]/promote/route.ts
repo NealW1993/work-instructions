@@ -8,6 +8,8 @@ interface WorkInstructionRow {
   work_item_id: string;
   is_archived: boolean;
   revision: number;
+  fork_root_instruction_id: string | null;
+  fork_number: number | null;
 }
 
 interface WorkItemRecord {
@@ -20,6 +22,8 @@ interface WorkItemRecord {
 interface WorkInstructionLookupRow {
   id: string;
   revision: number;
+  fork_root_instruction_id: string | null;
+  fork_number: number | null;
   work_items:
     | Pick<WorkItemRecord, "part_id" | "item_title" | "department_id">
     | Array<Pick<WorkItemRecord, "part_id" | "item_title" | "department_id">>
@@ -67,7 +71,7 @@ export async function POST(
 
   const { data: targetInstruction, error: targetInstructionError } = await supabaseAdmin
     .from("work_instructions")
-    .select("id, work_item_id, is_archived, revision")
+    .select("id, work_item_id, is_archived, revision, fork_root_instruction_id, fork_number")
     .eq("id", id)
     .maybeSingle<WorkInstructionRow>();
 
@@ -96,72 +100,102 @@ export async function POST(
     );
   }
 
-  const [
-    { data: activeInstructionsByWorkItem, error: activeInstructionsByWorkItemError },
-    { data: activeInstructionsByPartAndDepartment, error: activeInstructionsByPartAndDepartmentError },
-  ] = await Promise.all([
-    supabaseAdmin
+  const targetIsFork =
+    Boolean(targetInstruction.fork_root_instruction_id) &&
+    Number.isInteger(targetInstruction.fork_number) &&
+    Number(targetInstruction.fork_number) > 0;
+  let archivedInstructionIds: string[] = [];
+
+  if (targetIsFork) {
+    const { data: activeForkBranchRows, error: activeForkBranchRowsError } = await supabaseAdmin
       .from("work_instructions")
-      .select("id, revision")
-      .eq("work_item_id", targetInstruction.work_item_id)
+      .select("id")
       .eq("is_archived", false)
-      .neq("id", targetInstruction.id),
-    supabaseAdmin
-      .from("work_instructions")
-      .select("id, revision, work_items!inner(part_id, item_title, department_id)")
-      .eq("is_archived", false)
-      .neq("id", targetInstruction.id)
-      .eq("work_items.department_id", targetWorkItem.department_id),
-  ]);
+      .eq("fork_root_instruction_id", targetInstruction.fork_root_instruction_id as string)
+      .eq("fork_number", targetInstruction.fork_number as number)
+      .neq("id", targetInstruction.id);
 
-  if (activeInstructionsByWorkItemError) {
-    return NextResponse.json({ error: activeInstructionsByWorkItemError.message }, { status: 500 });
-  }
-
-  if (activeInstructionsByPartAndDepartmentError) {
-    return NextResponse.json(
-      { error: activeInstructionsByPartAndDepartmentError.message },
-      { status: 500 },
-    );
-  }
-
-  const normalizedTargetPartId = normalizeLookupValue(targetWorkItem.part_id);
-  const normalizedTargetItemTitle = normalizeLookupValue(targetWorkItem.item_title);
-  const activeInstructionRowsByWorkItem = (activeInstructionsByWorkItem ?? []) as Array<{
-    id: string;
-    revision: number;
-  }>;
-  const activeInstructionRowsByPartAndDepartment =
-    (activeInstructionsByPartAndDepartment ?? []) as WorkInstructionLookupRow[];
-  const matchedLegacyRows = activeInstructionRowsByPartAndDepartment
-    .map((entry) => {
-      const entryWorkItem = normalizeWorkItemRelation(entry.work_items);
-      if (!entryWorkItem) {
-        return null;
-      }
-
-      if (
-        normalizeLookupValue(entryWorkItem.part_id) !== normalizedTargetPartId ||
-        normalizeLookupValue(entryWorkItem.item_title) !== normalizedTargetItemTitle
-      ) {
-        return null;
-      }
-
-      return {
-        id: entry.id,
-        revision: entry.revision,
-      };
-    })
-    .filter((entry): entry is { id: string; revision: number } => entry !== null);
-
-  const activeInstructionById = new Map<string, { id: string; revision: number }>();
-  for (const entry of [...activeInstructionRowsByWorkItem, ...matchedLegacyRows]) {
-    if (!activeInstructionById.has(entry.id)) {
-      activeInstructionById.set(entry.id, entry);
+    if (activeForkBranchRowsError) {
+      return NextResponse.json({ error: activeForkBranchRowsError.message }, { status: 500 });
     }
-  }
 
-  const archivedInstructionIds = [...activeInstructionById.keys()];
+    archivedInstructionIds = (activeForkBranchRows ?? []).map((entry) => entry.id as string);
+  } else {
+    const [
+      { data: activeInstructionsByWorkItem, error: activeInstructionsByWorkItemError },
+      {
+        data: activeInstructionsByPartAndDepartment,
+        error: activeInstructionsByPartAndDepartmentError,
+      },
+    ] = await Promise.all([
+      supabaseAdmin
+        .from("work_instructions")
+        .select("id, revision")
+        .eq("work_item_id", targetInstruction.work_item_id)
+        .eq("is_archived", false)
+        .is("fork_root_instruction_id", null)
+        .neq("id", targetInstruction.id),
+      supabaseAdmin
+        .from("work_instructions")
+        .select("id, revision, fork_root_instruction_id, fork_number, work_items!inner(part_id, item_title, department_id)")
+        .eq("is_archived", false)
+        .is("fork_root_instruction_id", null)
+        .neq("id", targetInstruction.id)
+        .eq("work_items.department_id", targetWorkItem.department_id),
+    ]);
+
+    if (activeInstructionsByWorkItemError) {
+      return NextResponse.json(
+        { error: activeInstructionsByWorkItemError.message },
+        { status: 500 },
+      );
+    }
+
+    if (activeInstructionsByPartAndDepartmentError) {
+      return NextResponse.json(
+        { error: activeInstructionsByPartAndDepartmentError.message },
+        { status: 500 },
+      );
+    }
+
+    const normalizedTargetPartId = normalizeLookupValue(targetWorkItem.part_id);
+    const normalizedTargetItemTitle = normalizeLookupValue(targetWorkItem.item_title);
+    const activeInstructionRowsByWorkItem = (activeInstructionsByWorkItem ?? []) as Array<{
+      id: string;
+      revision: number;
+    }>;
+    const activeInstructionRowsByPartAndDepartment =
+      (activeInstructionsByPartAndDepartment ?? []) as WorkInstructionLookupRow[];
+    const matchedLegacyRows = activeInstructionRowsByPartAndDepartment
+      .map((entry) => {
+        const entryWorkItem = normalizeWorkItemRelation(entry.work_items);
+        if (!entryWorkItem) {
+          return null;
+        }
+
+        if (
+          normalizeLookupValue(entryWorkItem.part_id) !== normalizedTargetPartId ||
+          normalizeLookupValue(entryWorkItem.item_title) !== normalizedTargetItemTitle
+        ) {
+          return null;
+        }
+
+        return {
+          id: entry.id,
+          revision: entry.revision,
+        };
+      })
+      .filter((entry): entry is { id: string; revision: number } => entry !== null);
+
+    const activeInstructionById = new Map<string, { id: string; revision: number }>();
+    for (const entry of [...activeInstructionRowsByWorkItem, ...matchedLegacyRows]) {
+      if (!activeInstructionById.has(entry.id)) {
+        activeInstructionById.set(entry.id, entry);
+      }
+    }
+
+    archivedInstructionIds = [...activeInstructionById.keys()];
+  }
 
   if (archivedInstructionIds.length > 0) {
     const { error: archiveCurrentActiveError } = await supabaseAdmin

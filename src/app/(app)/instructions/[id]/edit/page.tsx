@@ -23,6 +23,10 @@ interface EditInstructionRecord {
   is_archived: boolean;
   body_markdown: string;
   revision: number;
+  fork_root_instruction_id: string | null;
+  fork_number: number | null;
+  merged_into_root_at: string | null;
+  merge_count: number | null;
   work_item_id: string;
   work_items: WorkItemRelation | WorkItemRelation[];
 }
@@ -48,7 +52,7 @@ export default async function EditInstructionPage({ params }: EditInstructionPag
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, is_archived, body_markdown, revision, work_item_id, work_items(id, department_id, part_id, item_title)",
+      "id, is_archived, body_markdown, revision, fork_root_instruction_id, fork_number, merged_into_root_at, merge_count, work_item_id, work_items(id, department_id, part_id, item_title)",
     )
     .eq("id", id)
     .eq("is_archived", false)
@@ -87,6 +91,10 @@ export default async function EditInstructionPage({ params }: EditInstructionPag
           itemTitle: workItem.item_title,
           bodyMarkdown: instruction.body_markdown,
           revision: instruction.revision,
+          forkRootInstructionId: instruction.fork_root_instruction_id,
+          forkNumber: instruction.fork_number,
+          mergedIntoRootAt: instruction.merged_into_root_at,
+          mergeCount: instruction.merge_count ?? 0,
         }}
       />
     </div>

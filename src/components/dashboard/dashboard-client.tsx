@@ -57,6 +57,8 @@ interface DashboardWorkItemSummary {
 export interface DashboardInstructionCardData {
   id: string;
   revision: number;
+  fork_root_instruction_id: string | null;
+  fork_number: number | null;
   created_at: string;
   updated_at: string;
   creator_name: string;
@@ -90,6 +92,8 @@ export interface DashboardLikeCelebrationData {
 export interface DashboardWorkItemInstructionData {
   id: string;
   revision: number;
+  fork_root_instruction_id: string | null;
+  fork_number: number | null;
   created_at: string;
   updated_at: string;
   creator_id: string;
@@ -456,6 +460,17 @@ function getPartIdLabel(workItem: DashboardWorkItemSummary) {
 
 function getLabelWithDepartment(workItem: DashboardWorkItemSummary) {
   return `${getPartIdLabel(workItem)} | ${workItem.department_name}`;
+}
+
+function getForkLabel(
+  forkNumber: number | null | undefined,
+  forkRootInstructionId: string | null | undefined,
+) {
+  if (!forkRootInstructionId || !Number.isInteger(forkNumber) || Number(forkNumber) < 1) {
+    return null;
+  }
+
+  return `Fork ${forkNumber}`;
 }
 
 function PartDepartmentHeading({ workItem }: { workItem: DashboardWorkItemSummary }) {
@@ -2862,7 +2877,20 @@ export function DashboardClient({
                           }}
                           className="rounded-xl border p-3 transition hover:brightness-105"
                         >
-                          <p className="font-semibold">Revision {instruction.revision}</p>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <p className="font-semibold">Revision {instruction.revision}</p>
+                            {getForkLabel(
+                              instruction.fork_number,
+                              instruction.fork_root_instruction_id,
+                            ) ? (
+                              <span className="inline-flex items-center rounded-full border border-cyan-500/45 bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-200">
+                                {getForkLabel(
+                                  instruction.fork_number,
+                                  instruction.fork_root_instruction_id,
+                                )}
+                              </span>
+                            ) : null}
+                          </div>
                           <p className="text-xs text-slate-500 dark:text-slate-400">
                             Created <LocalDateTime value={instruction.created_at} mode="date" /> by{" "}
                             {instruction.creator_name}
@@ -2911,6 +2939,17 @@ export function DashboardClient({
             >
               <div className="flex flex-wrap items-center gap-1.5">
                 <PartDepartmentHeading workItem={instruction.workItem} />
+                {getForkLabel(
+                  instruction.fork_number,
+                  instruction.fork_root_instruction_id,
+                ) ? (
+                  <span className="inline-flex items-center rounded-full border border-cyan-500/45 bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-200">
+                    {getForkLabel(
+                      instruction.fork_number,
+                      instruction.fork_root_instruction_id,
+                    )}
+                  </span>
+                ) : null}
                 {instructionReviewStatusByInstructionId[instruction.id]?.status ===
                   "needs_review" && (
                   <span className="inline-flex items-center gap-0.5 rounded-full border border-amber-500/45 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">
@@ -2961,6 +3000,17 @@ export function DashboardClient({
             >
               <div className="flex flex-wrap items-center gap-1.5">
                 <PartDepartmentHeading workItem={instruction.workItem} />
+                {getForkLabel(
+                  instruction.fork_number,
+                  instruction.fork_root_instruction_id,
+                ) ? (
+                  <span className="inline-flex items-center rounded-full border border-cyan-500/45 bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-200">
+                    {getForkLabel(
+                      instruction.fork_number,
+                      instruction.fork_root_instruction_id,
+                    )}
+                  </span>
+                ) : null}
                 {instructionReviewStatusByInstructionId[instruction.id]?.status ===
                   "needs_review" && (
                   <span className="inline-flex items-center gap-0.5 rounded-full border border-amber-500/45 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">
@@ -3071,8 +3121,19 @@ export function DashboardClient({
                 className="grid gap-1.5 rounded-xl border p-3 transition hover:brightness-105"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p>
+                  <p className="inline-flex flex-wrap items-center gap-1.5">
                     <PartDepartmentHeading workItem={entry.workItem} />
+                    {getForkLabel(
+                      entry.instruction.fork_number,
+                      entry.instruction.fork_root_instruction_id,
+                    ) ? (
+                      <span className="inline-flex items-center rounded-full border border-cyan-500/45 bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-200">
+                        {getForkLabel(
+                          entry.instruction.fork_number,
+                          entry.instruction.fork_root_instruction_id,
+                        )}
+                      </span>
+                    ) : null}
                   </p>
                   <span
                     className={cn(
@@ -3428,6 +3489,17 @@ export function DashboardClient({
               >
                 <div className="flex flex-wrap items-center gap-1.5">
                   <PartDepartmentHeading workItem={entry.workItem} />
+                  {getForkLabel(
+                    entry.instruction.fork_number,
+                    entry.instruction.fork_root_instruction_id,
+                  ) ? (
+                    <span className="inline-flex items-center rounded-full border border-cyan-500/45 bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-200">
+                      {getForkLabel(
+                        entry.instruction.fork_number,
+                        entry.instruction.fork_root_instruction_id,
+                      )}
+                    </span>
+                  ) : null}
                   {instructionReviewStatusByInstructionId[entry.instruction.id]?.status ===
                     "needs_review" && (
                     <span className="inline-flex items-center gap-0.5 rounded-full border border-amber-500/45 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">
