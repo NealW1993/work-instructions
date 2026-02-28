@@ -1,9 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { LocalDateTime } from "@/components/ui/local-date-time";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { cn } from "@/lib/utils";
 
@@ -33,25 +31,12 @@ interface InstructionViewsPayload {
   points: InstructionViewPoint[];
 }
 
-interface ReviewCoverageInstruction {
-  instructionId: string;
-  partId: string;
-  itemTitle: string;
-  departmentName: string;
-  reviewReason: string;
-  isFlagged: boolean;
-  isOutOfRange: boolean;
-  daysSinceCalibration: number | null;
-  overdueDays: number | null;
-  lastCalibratedAt: string;
-}
-
-interface ReviewCoveragePayload {
-  reviewWindowDays: number;
-  totalInstructions: number;
-  needsReviewCount: number;
-  reviewedCount: number;
-  needsReviewInstructions: ReviewCoverageInstruction[];
+interface KpiInsightsStoredFilters {
+  period: InstructionViewPeriod;
+  year: number;
+  month: number;
+  weekStart: string;
+  day: string;
 }
 
 const MONTH_OPTIONS = [
@@ -69,6 +54,7 @@ const MONTH_OPTIONS = [
   { value: 12, label: "Dec" },
 ] as const;
 
+const KPI_INSIGHTS_FILTERS_STORAGE_KEY = "admin.kpi.insights.filters";
 const MS_IN_DAY = 24 * 60 * 60 * 1000;
 const GRID_COLUMNS_BY_COUNT: Record<number, string> = {
   1: "grid-cols-1",
@@ -139,6 +125,22 @@ function getBarHeight(value: number, max: number) {
   return Math.max((value / max) * 100, 8);
 }
 
+function isInstructionViewPeriod(value: unknown): value is InstructionViewPeriod {
+  return value === "year" || value === "month" || value === "week" || value === "day";
+}
+
+function isValidMonth(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 12;
+}
+
+function isValidYear(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 2000 && value <= 9999;
+}
+
+function isValidUtcDateKey(value: unknown): value is string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
 export function KpiInsightsPanel() {
   const [period, setPeriod] = useState<InstructionViewPeriod>("year");
   const [year, setYear] = useState(() => new Date().getUTCFullYear());
@@ -148,11 +150,8 @@ export function KpiInsightsPanel() {
   const [viewsPayload, setViewsPayload] = useState<InstructionViewsPayload | null>(null);
   const [viewsLoading, setViewsLoading] = useState(false);
   const [viewsError, setViewsError] = useState<string | null>(null);
-  const [reviewCoveragePayload, setReviewCoveragePayload] =
-    useState<ReviewCoveragePayload | null>(null);
-  const [reviewCoverageLoading, setReviewCoverageLoading] = useState(false);
-  const [reviewCoverageError, setReviewCoverageError] = useState<string | null>(null);
-  const [showNeedsReviewList, setShowNeedsReviewList] = useState(false);
+  const [filtersHydrated, setFiltersHydrated] = useState(false);
+  const [filtersStorageKey, setFiltersStorageKey] = useState<string | null>(null);
 
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const currentYear = new Date().getUTCFullYear();
@@ -169,6 +168,79 @@ export function KpiInsightsPanel() {
     return years.sort((first, second) => second - first);
   }, [currentYear, year]);
   const weekOptions = useMemo(() => buildWeekOptionsForMonth(year, month), [month, year]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    void (async () => {
+      if (typeof window === "undefined") {
+        return;
+      }
+
+      let storageKey = KPI_INSIGHTS_FILTERS_STORAGE_KEY;
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (session?.user?.id) {
+          storageKey = `${KPI_INSIGHTS_FILTERS_STORAGE_KEY}.${session.user.id}`;
+        }
+      } catch {
+        // Local filter persistence should still work if session lookup fails.
+      }
+
+      if (!isActive) {
+        return;
+      }
+
+      setFiltersStorageKey(storageKey);
+
+      const storedValue = window.localStorage.getItem(storageKey);
+      if (storedValue) {
+        try {
+          const parsed = JSON.parse(storedValue) as Partial<KpiInsightsStoredFilters>;
+          if (isInstructionViewPeriod(parsed.period)) {
+            setPeriod(parsed.period);
+          }
+          if (isValidYear(parsed.year)) {
+            setYear(parsed.year);
+          }
+          if (isValidMonth(parsed.month)) {
+            setMonth(parsed.month);
+          }
+          if (isValidUtcDateKey(parsed.weekStart)) {
+            setWeekStart(parsed.weekStart);
+          }
+          if (isValidUtcDateKey(parsed.day)) {
+            setDay(parsed.day);
+          }
+        } catch {
+          // Ignore invalid persisted state and keep defaults.
+        }
+      }
+
+      setFiltersHydrated(true);
+    })();
+
+    return () => {
+      isActive = false;
+    };
+  }, [supabase]);
+
+  useEffect(() => {
+    if (!filtersHydrated || !filtersStorageKey || typeof window === "undefined") {
+      return;
+    }
+
+    const payload: KpiInsightsStoredFilters = {
+      period,
+      year,
+      month,
+      weekStart,
+      day,
+    };
+    window.localStorage.setItem(filtersStorageKey, JSON.stringify(payload));
+  }, [day, filtersHydrated, filtersStorageKey, month, period, weekStart, year]);
 
   const getAuthHeaders = useCallback(async () => {
     const {
@@ -233,43 +305,7 @@ export function KpiInsightsPanel() {
     } finally {
       setViewsLoading(false);
     }
-  }, [getAuthHeaders, day, month, period, weekStart, year]);
-
-  const fetchReviewCoverage = useCallback(async () => {
-    setReviewCoverageLoading(true);
-    setReviewCoverageError(null);
-
-    try {
-      const headers = await getAuthHeaders();
-      const response = await fetch("/api/kpis/review-coverage", {
-        method: "GET",
-        headers,
-      });
-
-      const payload = (await response.json().catch(() => ({}))) as
-        | ReviewCoveragePayload
-        | { error?: string };
-      if (!response.ok) {
-        throw new Error(
-          "error" in payload
-            ? payload.error ?? "Unable to load review coverage KPI data."
-            : "Unable to load review coverage KPI data.",
-        );
-      }
-
-      if ("needsReviewInstructions" in payload) {
-        setReviewCoveragePayload(payload);
-      }
-    } catch (caughtError) {
-      setReviewCoverageError(
-        caughtError instanceof Error
-          ? caughtError.message
-          : "Unable to load review coverage KPI data.",
-      );
-    } finally {
-      setReviewCoverageLoading(false);
-    }
-  }, [getAuthHeaders]);
+  }, [day, getAuthHeaders, month, period, weekStart, year]);
 
   useEffect(() => {
     if (period !== "week") {
@@ -287,12 +323,12 @@ export function KpiInsightsPanel() {
   }, [period, weekOptions, weekStart]);
 
   useEffect(() => {
-    void fetchInstructionViews();
-  }, [fetchInstructionViews]);
+    if (!filtersHydrated) {
+      return;
+    }
 
-  useEffect(() => {
-    void fetchReviewCoverage();
-  }, [fetchReviewCoverage]);
+    void fetchInstructionViews();
+  }, [fetchInstructionViews, filtersHydrated]);
 
   const visibleViewPoints = (viewsPayload?.points ?? []).slice(0, 12);
   const chartColumnClass =
@@ -303,14 +339,6 @@ export function KpiInsightsPanel() {
   const viewAxisTicks = Array.from({ length: 5 }, (_, index) => viewAxisStep * (4 - index));
   const viewAxisMax = viewAxisTicks[0] ?? 1;
 
-  const totalInstructions = reviewCoveragePayload?.totalInstructions ?? 0;
-  const needsReviewCount = reviewCoveragePayload?.needsReviewCount ?? 0;
-  const reviewedCount = reviewCoveragePayload?.reviewedCount ?? 0;
-  const donutRatio = totalInstructions > 0 ? needsReviewCount / totalInstructions : 0;
-  const donutRadius = 56;
-  const donutCircumference = 2 * Math.PI * donutRadius;
-  const donutArc = donutCircumference * donutRatio;
-
   return (
     <div className="grid gap-4">
       <section className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-6">
@@ -320,7 +348,7 @@ export function KpiInsightsPanel() {
           </h2>
           <button
             type="button"
-            disabled={viewsLoading}
+            disabled={viewsLoading || !filtersHydrated}
             onClick={() => void fetchInstructionViews()}
             className="rounded-xl border border-slate-300/70 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-800/70"
           >
@@ -414,7 +442,7 @@ export function KpiInsightsPanel() {
                   className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:hover:bg-slate-800"
                   aria-label="Previous day"
                 >
-                  ‹
+                  {"<"}
                 </button>
                 <input
                   type="date"
@@ -428,7 +456,7 @@ export function KpiInsightsPanel() {
                   className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:hover:bg-slate-800"
                   aria-label="Next day"
                 >
-                  ›
+                  {">"}
                 </button>
               </div>
             </label>
@@ -522,136 +550,6 @@ export function KpiInsightsPanel() {
             ? ` Showing top ${visibleViewPoints.length} instructions by view count.`
             : ""}
         </p>
-      </section>
-
-      <section className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-6">
-        <div className="flex flex-wrap items-end justify-between gap-2">
-          <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
-            Review Coverage
-          </h2>
-          <button
-            type="button"
-            disabled={reviewCoverageLoading}
-            onClick={() => void fetchReviewCoverage()}
-            className="rounded-xl border border-slate-300/70 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-800/70"
-          >
-            {reviewCoverageLoading ? "Loading..." : "Reload Coverage"}
-          </button>
-        </div>
-
-        {reviewCoverageError ? (
-          <p className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-200">
-            {reviewCoverageError}
-          </p>
-        ) : null}
-
-        <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
-          <div className="grid place-items-center rounded-2xl border border-slate-300/70 bg-white/70 p-4 dark:border-slate-700 dark:bg-slate-900/50">
-            <div className="relative h-36 w-36">
-              <svg viewBox="0 0 140 140" className="h-36 w-36">
-                <circle
-                  cx="70"
-                  cy="70"
-                  r={donutRadius}
-                  fill="none"
-                  stroke="rgba(148, 163, 184, 0.28)"
-                  strokeWidth="18"
-                />
-                {donutArc > 0 ? (
-                  <circle
-                    cx="70"
-                    cy="70"
-                    r={donutRadius}
-                    fill="none"
-                    stroke="rgba(245, 158, 11, 0.95)"
-                    strokeWidth="18"
-                    strokeLinecap="round"
-                    strokeDasharray={`${donutArc} ${donutCircumference - donutArc}`}
-                    transform="rotate(-90 70 70)"
-                  />
-                ) : null}
-              </svg>
-              <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
-                <p className="text-2xl font-extrabold text-slate-900 dark:text-slate-100">
-                  {needsReviewCount}
-                </p>
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
-                  Needs Review
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-2 grid gap-1 text-xs text-slate-600 dark:text-slate-300">
-              <p className="inline-flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 rounded-sm bg-amber-500" />
-                Needs Review: {needsReviewCount}
-              </p>
-              <p className="inline-flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 rounded-sm bg-slate-400" />
-                Reviewed: {reviewedCount}
-              </p>
-              <p>Total Instructions: {totalInstructions}</p>
-              <p>Review Window: {reviewCoveragePayload?.reviewWindowDays ?? 0} day(s)</p>
-            </div>
-          </div>
-
-          <div className="grid gap-2 rounded-2xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                Needs Review Drill-Down
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowNeedsReviewList((current) => !current)}
-                className="rounded-lg border border-slate-300/80 bg-white/80 px-2.5 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-800/70"
-              >
-                {showNeedsReviewList ? "Collapse list" : "Expand list"}
-              </button>
-            </div>
-
-            {!showNeedsReviewList ? (
-              <p className="rounded-lg border border-slate-300/70 bg-white/80 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300">
-                Drill-down is collapsed. Click Expand list to view instructions that currently
-                need review.
-              </p>
-            ) : reviewCoveragePayload?.needsReviewInstructions.length ? (
-              <div className="grid max-h-[22rem] gap-1 overflow-y-auto pr-1">
-                {reviewCoveragePayload.needsReviewInstructions.map((instruction) => (
-                  <Link
-                    key={instruction.instructionId}
-                    href={`/instructions/${instruction.instructionId}`}
-                    className="grid gap-1 rounded-lg border border-slate-300/70 bg-white/85 px-3 py-2 transition hover:border-amber-400/60 hover:bg-amber-500/10 dark:border-slate-700 dark:bg-slate-950/60 dark:hover:border-amber-500/50 dark:hover:bg-amber-500/15"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-1">
-                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                        {instruction.partId} | {instruction.departmentName}
-                      </p>
-                      <span className="rounded-full border border-amber-500/45 bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-100">
-                        {instruction.reviewReason}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-600 dark:text-slate-300">
-                      {instruction.itemTitle}
-                    </p>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Last review check:{" "}
-                      <LocalDateTime value={instruction.lastCalibratedAt} mode="dateTime" />
-                      {instruction.overdueDays !== null
-                        ? ` | Overdue by ${instruction.overdueDays} day${
-                            instruction.overdueDays === 1 ? "" : "s"
-                          }`
-                        : ""}
-                    </p>
-                  </Link>
-                ))}
-              </div>
-            ) : (
-              <p className="rounded-lg border border-slate-300/70 bg-white/80 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300">
-                No instructions currently require review.
-              </p>
-            )}
-          </div>
-        </div>
       </section>
     </div>
   );

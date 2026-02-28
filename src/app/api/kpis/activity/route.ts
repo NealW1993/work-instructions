@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
+import { canViewKpis } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export type ActivityPeriod = "day" | "week" | "month" | "year";
@@ -246,8 +247,8 @@ export async function GET(request: NextRequest) {
   if (!requester) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
-  if (requester.role !== "system_admin") {
-    return NextResponse.json({ error: "System admin privileges required." }, { status: 403 });
+  if (!canViewKpis(requester.role)) {
+    return NextResponse.json({ error: "Admin privileges required." }, { status: 403 });
   }
 
   const now = new Date();

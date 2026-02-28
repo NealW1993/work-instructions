@@ -10,6 +10,10 @@ export function isSystemAdmin(role: AppRole): boolean {
   return role === "system_admin";
 }
 
+export function canViewKpis(role: AppRole): boolean {
+  return role === "admin" || role === "system_admin";
+}
+
 export function roleLabel(role: AppRole): string {
   if (role === "system_admin") {
     return "System Admin";

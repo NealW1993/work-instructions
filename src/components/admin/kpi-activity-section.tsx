@@ -116,9 +116,23 @@ const PERIOD_BUTTONS: { value: ActivityPeriod; label: string }[] = [
   { value: "year", label: "Year" },
 ];
 
+const KPI_ACTIVITY_FILTER_STORAGE_KEY = "admin.kpi.activity.periodParams";
+
+function isValidActivityPeriodParams(value: unknown): value is string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return false;
+  }
+
+  const params = new URLSearchParams(value);
+  const period = params.get("period");
+  return period === "day" || period === "week" || period === "month" || period === "year";
+}
+
 export function KpiActivitySection() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [periodParams, setPeriodParams] = useState("period=week");
+  const [filtersHydrated, setFiltersHydrated] = useState(false);
+  const [filtersStorageKey, setFiltersStorageKey] = useState<string | null>(null);
   const [data, setData] = useState<ActivityApiResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -159,8 +173,58 @@ export function KpiActivitySection() {
   );
 
   useEffect(() => {
+    let isActive = true;
+
+    void (async () => {
+      if (typeof window === "undefined") {
+        return;
+      }
+
+      let storageKey = KPI_ACTIVITY_FILTER_STORAGE_KEY;
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (session?.user?.id) {
+          storageKey = `${KPI_ACTIVITY_FILTER_STORAGE_KEY}.${session.user.id}`;
+        }
+      } catch {
+        // Continue with a generic key if session lookup fails.
+      }
+
+      if (!isActive) {
+        return;
+      }
+
+      setFiltersStorageKey(storageKey);
+      const storedPeriodParams = window.localStorage.getItem(storageKey);
+      if (isValidActivityPeriodParams(storedPeriodParams)) {
+        setPeriodParams(storedPeriodParams);
+      }
+
+      setFiltersHydrated(true);
+    })();
+
+    return () => {
+      isActive = false;
+    };
+  }, [supabase]);
+
+  useEffect(() => {
+    if (!filtersHydrated || !filtersStorageKey || typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(filtersStorageKey, periodParams);
+  }, [filtersHydrated, filtersStorageKey, periodParams]);
+
+  useEffect(() => {
+    if (!filtersHydrated) {
+      return;
+    }
+
     void fetchData(periodParams);
-  }, [fetchData, periodParams]);
+  }, [fetchData, filtersHydrated, periodParams]);
 
   const currentPeriod = data?.period ?? "week";
   const periodLabel = data?.periodLabel ?? "";

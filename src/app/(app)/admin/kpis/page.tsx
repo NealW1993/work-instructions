@@ -2,10 +2,12 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Activity, Archive, ArrowLeft, BarChart3, FileText, Users } from "lucide-react";
 
+import { AiEnhancementKpiPanel } from "@/components/admin/ai-enhancement-kpi-panel";
 import { KpiActivitySection } from "@/components/admin/kpi-activity-section";
 import { KpiInsightsPanel } from "@/components/admin/kpi-insights-panel";
+import { ReviewCoverageKpiPanel } from "@/components/admin/review-coverage-kpi-panel";
 import { requireAuthenticatedUser } from "@/lib/auth";
-import { isSystemAdmin } from "@/lib/roles";
+import { canViewKpis, isSystemAdmin } from "@/lib/roles";
 import { formatElapsedHhMmSs } from "@/lib/session-timer";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { cn } from "@/lib/utils";
@@ -183,7 +185,7 @@ function KpiDataTooltip(props: {
 
 export default async function SystemKpisPage() {
   const { profile } = await requireAuthenticatedUser();
-  if (!isSystemAdmin(profile.role)) {
+  if (!canViewKpis(profile.role)) {
     redirect("/dashboard");
   }
 
@@ -354,13 +356,15 @@ export default async function SystemKpisPage() {
             Operations and usage metrics for your work instructions system.
           </p>
         </div>
-        <Link
-          href="/admin/users"
-          className="inline-flex items-center gap-2 rounded-xl border border-slate-300/70 bg-white/70 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-900"
-        >
-          <ArrowLeft size={16} />
-          Back to System Admin
-        </Link>
+        {isSystemAdmin(profile.role) ? (
+          <Link
+            href="/admin/users"
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-300/70 bg-white/70 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-900"
+          >
+            <ArrowLeft size={16} />
+            Back to System Admin
+          </Link>
+        ) : null}
       </header>
 
       {dataErrors.length > 0 ? (
@@ -403,6 +407,8 @@ export default async function SystemKpisPage() {
       </div>
 
       <KpiInsightsPanel />
+      <ReviewCoverageKpiPanel />
+      <AiEnhancementKpiPanel />
 
       <section className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-6">
         <div className="flex flex-wrap items-end justify-between gap-2">

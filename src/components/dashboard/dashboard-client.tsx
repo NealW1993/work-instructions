@@ -2783,7 +2783,11 @@ export function DashboardClient({
                   <button
                     key={department.id}
                     type="button"
-                    onClick={() => setSelectedDepartmentId(department.id)}
+                    onClick={() =>
+                      setSelectedDepartmentId((current) =>
+                        current === department.id ? "all" : department.id,
+                      )
+                    }
                     style={{
                       borderColor: colorWithAlpha(
                         department.color_hex,
@@ -3857,31 +3861,37 @@ export function DashboardClient({
                 ))}
               </div>
 
-              <div className="relative z-[1] grid w-full max-w-lg gap-4 rounded-3xl border border-cyan-400/45 bg-slate-950/95 p-6 text-center shadow-2xl">
+              <div className="relative z-[1] grid w-full max-w-lg gap-4 rounded-3xl border border-cyan-400/45 bg-white/95 p-6 text-center shadow-2xl dark:bg-slate-950/95">
                 <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full border border-cyan-300/50 bg-cyan-500/20">
                   <ThumbsUp
                     size={40}
-                    className="dashboard-like-celebration-thumb text-cyan-200"
+                    className="dashboard-like-celebration-thumb text-cyan-700 dark:text-cyan-200"
                   />
                 </div>
 
                 <div className="grid gap-1">
-                  <h3 className="text-2xl font-extrabold text-slate-50">
+                  <h3 className="text-2xl font-extrabold text-slate-900 dark:text-slate-50">
                     You got {activeLikeCelebration.newLikesCount} new like
                     {activeLikeCelebration.newLikesCount === 1 ? "" : "s"}.
                   </h3>
-                  <p className="text-sm text-cyan-100">
+                  <p className="text-sm text-cyan-700 dark:text-cyan-100">
                     Your teammates are appreciating your work instructions.
                   </p>
                 </div>
 
                 {activeLikeCelebration.highlights.length > 0 ? (
-                  <div className="grid gap-2 rounded-2xl border border-cyan-500/35 bg-cyan-500/10 p-3 text-left">
+                  <div className="grid gap-2 rounded-2xl border border-cyan-300/70 bg-cyan-100/85 p-3 text-left dark:border-cyan-500/35 dark:bg-cyan-500/10">
                     {activeLikeCelebration.highlights.slice(0, 3).map((highlight) => (
-                      <p key={highlight.instructionId} className="text-sm text-cyan-50">
+                      <p
+                        key={highlight.instructionId}
+                        className="text-sm text-slate-800 dark:text-cyan-50"
+                      >
                         <span className="font-semibold">{highlight.label}</span>
-                        <span className="text-cyan-300/80"> Rev {highlight.revision}</span>
-                        <span className="text-cyan-200">
+                        <span className="text-cyan-700/80 dark:text-cyan-300/80">
+                          {" "}
+                          Rev {highlight.revision}
+                        </span>
+                        <span className="text-cyan-800 dark:text-cyan-200">
                           {" "}
                           +{highlight.newLikesCount}
                         </span>
@@ -3894,7 +3904,7 @@ export function DashboardClient({
                   <button
                     type="button"
                     onClick={() => setLikeCelebrationOpen(false)}
-                    className="rounded-xl border border-cyan-400/45 bg-cyan-500/20 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/30"
+                    className="rounded-xl border border-cyan-400/45 bg-cyan-500/20 px-4 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/30 dark:text-cyan-100"
                   >
                     Nice
                   </button>

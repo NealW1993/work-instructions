@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import {
+  BarChart3,
   ChevronDown,
   Clock3,
   LogOut,
@@ -15,7 +16,7 @@ import { useRouter } from "next/navigation";
 import { usePostHog } from "posthog-js/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { isSystemAdmin } from "@/lib/roles";
+import { canViewKpis, isSystemAdmin } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
   clearSessionStart,
@@ -451,6 +452,17 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
             >
               <SlidersHorizontal size={15} />
               System Settings
+            </Link>
+          ) : null}
+
+          {canViewKpis(profile.role) ? (
+            <Link
+              href="/admin/kpis"
+              onClick={() => closeMenu()}
+              className="inline-flex items-center gap-2 rounded-xl border border-violet-500/40 bg-violet-500/15 px-3 py-2 text-sm font-semibold text-violet-100 transition hover:bg-violet-500/25"
+            >
+              <BarChart3 size={15} />
+              KPI Dashboard
             </Link>
           ) : null}
 
