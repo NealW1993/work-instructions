@@ -11,6 +11,13 @@ interface InstructionUpdateSourceMedia {
   src: string;
 }
 
+interface InstructionUpdateReviewStateChange {
+  previousStatus: "up_to_date" | "needs_review" | null;
+  nextStatus: "up_to_date" | "needs_review";
+  reviewOrigin: "user" | "system";
+  note?: string;
+}
+
 export interface InstructionUpdateSourcePayload {
   addedTextSnippet?: string;
   removedTextSnippet?: string;
@@ -19,6 +26,7 @@ export interface InstructionUpdateSourcePayload {
   previousRevision?: number;
   nextRevision?: number;
   mediaFormattingUpdated?: boolean;
+  reviewStateChange?: InstructionUpdateReviewStateChange;
 }
 
 export interface InstructionUpdateEvent {
@@ -47,8 +55,17 @@ function hasSourcePayloadData(sourcePayload: InstructionUpdateSourcePayload | nu
       (sourcePayload.removedMedia?.length ?? 0) > 0 ||
       sourcePayload.mediaFormattingUpdated ||
       sourcePayload.previousRevision !== undefined ||
-      sourcePayload.nextRevision !== undefined,
+      sourcePayload.nextRevision !== undefined ||
+      sourcePayload.reviewStateChange !== undefined,
   );
+}
+
+function getReviewStatusLabel(status: "up_to_date" | "needs_review") {
+  return status === "needs_review" ? "Needs Review" : "Up To Date";
+}
+
+function getReviewOriginLabel(origin: "user" | "system") {
+  return origin === "system" ? "System Counter" : "User Action";
 }
 
 function normalizeSnippetForComparison(value: string) {
@@ -299,6 +316,42 @@ export function InstructionUpdatesPanel({ events, className }: InstructionUpdate
 
           {hasSourcePayloadData(selectedSourceEvent.sourcePayload) ? (
             <div className="grid gap-3">
+              {selectedSourceEvent.sourcePayload?.reviewStateChange ? (
+                <div className="grid gap-1.5 rounded-lg border border-amber-500/35 bg-amber-500/10 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-amber-200">
+                    Review State Change
+                  </p>
+                  <p className="text-sm text-amber-100">
+                    {selectedSourceEvent.sourcePayload.reviewStateChange.previousStatus
+                      ? `${getReviewStatusLabel(selectedSourceEvent.sourcePayload.reviewStateChange.previousStatus)} to ${getReviewStatusLabel(selectedSourceEvent.sourcePayload.reviewStateChange.nextStatus)}`
+                      : `Set to ${getReviewStatusLabel(selectedSourceEvent.sourcePayload.reviewStateChange.nextStatus)}`}
+                  </p>
+                  <p className="text-xs text-amber-100/85">
+                    Origin:{" "}
+                    <span className="font-semibold">
+                      {getReviewOriginLabel(selectedSourceEvent.sourcePayload.reviewStateChange.reviewOrigin)}
+                    </span>
+                  </p>
+                  {selectedSourceEvent.sourcePayload.reviewStateChange.note ? (
+                    <div className="grid gap-1">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-amber-200/90">
+                        Review Comment
+                      </p>
+                      <p className="rounded-md border border-amber-500/35 bg-amber-500/15 px-2.5 py-2 text-sm text-amber-50">
+                        {selectedSourceEvent.sourcePayload.reviewStateChange.note}
+                      </p>
+                    </div>
+                  ) : selectedSourceEvent.sourcePayload.reviewStateChange.reviewOrigin ===
+                      "system" &&
+                    selectedSourceEvent.sourcePayload.reviewStateChange.nextStatus ===
+                      "needs_review" ? (
+                    <p className="text-xs text-amber-100/90">
+                      System counter marked this instruction as Needs Review.
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+
               {selectedSourceEvent.sourcePayload?.addedTextSnippet ? (
                 <div className="grid gap-1.5">
                   <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">

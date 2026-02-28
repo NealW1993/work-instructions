@@ -343,6 +343,22 @@ html:not(.dark) .auth-login-shell textarea:-webkit-autofill:focus {
   caret-color: #f8fafc !important;
 }
 
+/* Keep the review-note modal dark even when the app is in light mode. */
+html:not(.dark) .review-note-modal-shell textarea {
+  background-color: rgba(2, 6, 23, 0.7) !important;
+  color: #f8fafc !important;
+  border-color: rgba(148, 163, 184, 0.55) !important;
+}
+
+html:not(.dark) .review-note-modal-shell textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+html:not(.dark) .review-note-modal-shell textarea:focus {
+  border-color: rgba(245, 158, 11, 0.6) !important;
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.25) !important;
+}
+
 .tiptap-editor-content.ProseMirror {
   outline: none;
 }

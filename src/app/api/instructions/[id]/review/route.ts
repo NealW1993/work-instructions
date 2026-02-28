@@ -4,9 +4,12 @@ import { getRequestProfile } from "@/lib/api-auth";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 type InstructionReviewStatus = "up_to_date" | "needs_review";
+type InstructionReviewOrigin = "user" | "system";
 
 interface UpdateInstructionReviewBody {
   status?: unknown;
+  note?: unknown;
+  reviewOrigin?: unknown;
 }
 
 interface InstructionReviewStatusRecord {
@@ -18,8 +21,50 @@ interface InstructionReviewStatusRecord {
   updated_at: string;
 }
 
+const MAX_REVIEW_NOTE_CHARACTERS = 1200;
+
 function isInstructionReviewStatus(value: unknown): value is InstructionReviewStatus {
   return value === "up_to_date" || value === "needs_review";
+}
+
+function isInstructionReviewOrigin(value: unknown): value is InstructionReviewOrigin {
+  return value === "user" || value === "system";
+}
+
+function normalizeReviewNote(value: unknown) {
+  if (value === null || value === undefined) {
+    return {
+      note: null,
+      error: null,
+    };
+  }
+
+  if (typeof value !== "string") {
+    return {
+      note: null,
+      error: "note must be a string when provided.",
+    };
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return {
+      note: null,
+      error: null,
+    };
+  }
+
+  if (trimmed.length > MAX_REVIEW_NOTE_CHARACTERS) {
+    return {
+      note: null,
+      error: `note must be ${MAX_REVIEW_NOTE_CHARACTERS} characters or less.`,
+    };
+  }
+
+  return {
+    note: trimmed,
+    error: null,
+  };
 }
 
 export async function PATCH(
@@ -41,6 +86,29 @@ export async function PATCH(
       { status: 400 },
     );
   }
+
+  if (body.reviewOrigin !== undefined && !isInstructionReviewOrigin(body.reviewOrigin)) {
+    return NextResponse.json(
+      { error: "reviewOrigin must be either \"user\" or \"system\" when provided." },
+      { status: 400 },
+    );
+  }
+
+  const reviewOrigin: InstructionReviewOrigin =
+    isInstructionReviewOrigin(body.reviewOrigin) ? body.reviewOrigin : "user";
+
+  if (reviewOrigin === "system" && requester.role !== "system_admin") {
+    return NextResponse.json(
+      { error: "Only system admins can mark review events as system generated." },
+      { status: 403 },
+    );
+  }
+
+  const normalizedReviewNoteResult = normalizeReviewNote(body.note);
+  if (normalizedReviewNoteResult.error) {
+    return NextResponse.json({ error: normalizedReviewNoteResult.error }, { status: 400 });
+  }
+  const reviewNote = requestedStatus === "needs_review" ? normalizedReviewNoteResult.note : null;
 
   const { id } = await context.params;
   const supabaseAdmin = getSupabaseAdminClient();
@@ -105,8 +173,12 @@ export async function PATCH(
   if (existingStatus?.status !== requestedStatus) {
     const reviewStateDetail =
       requestedStatus === "needs_review"
-        ? "Review state changed to Needs Review."
-        : "Review state changed to Up To Date.";
+        ? reviewOrigin === "system"
+          ? "Review state changed to Needs Review by system counter."
+          : "Review state changed to Needs Review."
+        : reviewOrigin === "system"
+          ? "Review state changed to Up To Date by system counter."
+          : "Review state changed to Up To Date.";
 
     const { error: changeEventError } = await supabaseAdmin
       .from("instruction_change_events")
@@ -122,6 +194,8 @@ export async function PATCH(
             kind: "instruction_review_state",
             previousStatus: existingStatus?.status ?? null,
             nextStatus: requestedStatus,
+            reviewOrigin,
+            note: reviewNote,
           },
         },
         {

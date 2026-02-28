@@ -317,6 +317,8 @@ function normalizeInstructionUpdateSourcePayload(
   }
 
   const candidate = value as Record<string, unknown>;
+  const isReviewState = (state: unknown): state is "up_to_date" | "needs_review" =>
+    state === "up_to_date" || state === "needs_review";
   const normalizeMediaList = (
     mediaValue: unknown,
   ): Array<{ type: "image" | "video"; src: string }> => {
@@ -343,6 +345,25 @@ function normalizeInstructionUpdateSourcePayload(
       .filter((entry): entry is { type: "image" | "video"; src: string } => entry !== null);
   };
 
+  const reviewStateChange =
+    candidate.kind === "instruction_review_state" && isReviewState(candidate.nextStatus)
+      ? (() => {
+          const normalizedReviewOrigin: "user" | "system" =
+            candidate.reviewOrigin === "system" ? "system" : "user";
+          return {
+            previousStatus: isReviewState(candidate.previousStatus)
+              ? candidate.previousStatus
+              : null,
+            nextStatus: candidate.nextStatus,
+            reviewOrigin: normalizedReviewOrigin,
+            note:
+              typeof candidate.note === "string" && candidate.note.trim().length > 0
+                ? candidate.note.trim()
+                : undefined,
+          };
+        })()
+      : undefined;
+
   const normalizedPayload: InstructionUpdateSourcePayload = {
     addedTextSnippet:
       typeof candidate.addedTextSnippet === "string" ? candidate.addedTextSnippet : undefined,
@@ -362,6 +383,7 @@ function normalizeInstructionUpdateSourcePayload(
       typeof candidate.mediaFormattingUpdated === "boolean"
         ? candidate.mediaFormattingUpdated
         : undefined,
+    reviewStateChange,
   };
 
   const hasPayloadData =
@@ -371,7 +393,8 @@ function normalizeInstructionUpdateSourcePayload(
     (normalizedPayload.removedMedia?.length ?? 0) > 0 ||
     normalizedPayload.mediaFormattingUpdated === true ||
     normalizedPayload.previousRevision !== undefined ||
-    normalizedPayload.nextRevision !== undefined;
+    normalizedPayload.nextRevision !== undefined ||
+    normalizedPayload.reviewStateChange !== undefined;
 
   return hasPayloadData ? normalizedPayload : null;
 }

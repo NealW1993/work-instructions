@@ -3306,8 +3306,18 @@ export function DashboardClient({
                 }}
                 className="rounded-xl border p-3 transition hover:brightness-105"
               >
-                <p>
+                <div className="flex flex-wrap items-center gap-1.5">
                   <PartDepartmentHeading workItem={entry.workItem} />
+                  {instructionReviewStatusByInstructionId[entry.instruction.id]?.status ===
+                    "needs_review" && (
+                    <span className="inline-flex items-center gap-0.5 rounded-full border border-amber-500/45 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">
+                      <TriangleAlert size={10} />
+                      Needs Review
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {entry.workItem.item_title}
                 </p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   Revision {entry.instruction.revision} | Created{" "}
