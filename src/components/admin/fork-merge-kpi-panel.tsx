@@ -246,9 +246,29 @@ export function ForkMergeKpiPanel() {
   const contributors = data?.contributors ?? [];
   const currentPeriod = data?.period ?? "week";
   const currentPeriodLabel = data?.periodLabel ?? "";
-  const maxTrendValue = Math.max(
+  const axisMaxValue = Math.max(
     1,
     ...trendPoints.map((point) => Math.max(point.forksCreated, point.merges)),
+  );
+  const axisTickValuesAscending = useMemo(() => {
+    if (axisMaxValue <= 6) {
+      return Array.from({ length: axisMaxValue + 1 }, (_, index) => index);
+    }
+
+    const maxTickCount = 6;
+    const tickStep = Math.max(1, Math.ceil(axisMaxValue / (maxTickCount - 1)));
+    const ticks: number[] = [0];
+
+    for (let value = tickStep; value < axisMaxValue; value += tickStep) {
+      ticks.push(value);
+    }
+
+    ticks.push(axisMaxValue);
+    return ticks;
+  }, [axisMaxValue]);
+  const axisTickValuesDescending = useMemo(
+    () => [...axisTickValuesAscending].sort((first, second) => second - first),
+    [axisTickValuesAscending],
   );
   const labelStep = trendPoints.length <= 12 ? 1 : trendPoints.length <= 20 ? 2 : 4;
   const canUsePortal = typeof document !== "undefined";
@@ -387,24 +407,35 @@ export function ForkMergeKpiPanel() {
             </div>
           ) : (
             <div className="grid grid-cols-[2rem_minmax(0,1fr)] gap-2">
-              <div className="grid h-44 grid-rows-5 items-end text-right text-[10px] font-semibold text-slate-500 dark:text-slate-400">
-                {Array.from({ length: 5 }, (_, idx) => {
-                  const value = Math.ceil((maxTrendValue / 4) * (4 - idx));
+              <div className="relative h-44 text-right text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                {axisTickValuesDescending.map((value) => {
+                  const topPercent = 100 - (value / axisMaxValue) * 100;
+                  const edgeLabelClass =
+                    value === axisMaxValue
+                      ? "top-0 -translate-y-0"
+                      : value === 0
+                        ? "top-full -translate-y-full"
+                        : "-translate-y-1/2";
+
                   return (
-                    <span key={`fork-merge-axis-${idx}`}>{idx === 4 ? "0" : value}</span>
+                    <span
+                      key={`fork-merge-axis-${value}`}
+                      className={cn("absolute right-0", edgeLabelClass)}
+                      style={{ top: `${topPercent}%` }}
+                    >
+                      {value}
+                    </span>
                   );
                 })}
               </div>
               <div className="min-w-0">
                 <div className="relative h-44">
-                  <div className="pointer-events-none absolute inset-0 grid grid-rows-5">
-                    {Array.from({ length: 5 }, (_, idx) => (
+                  <div className="pointer-events-none absolute inset-0">
+                    {axisTickValuesDescending.map((value) => (
                       <span
-                        key={`fork-merge-grid-${idx}`}
-                        className={cn(
-                          "border-t border-slate-300/35 dark:border-slate-700/45",
-                          idx === 4 ? "border-b border-slate-300/35 dark:border-slate-700/45" : "",
-                        )}
+                        key={`fork-merge-grid-${value}`}
+                        className="absolute left-0 right-0 border-t border-slate-300/35 dark:border-slate-700/45"
+                        style={{ top: `${100 - (value / axisMaxValue) * 100}%` }}
                       />
                     ))}
                   </div>
@@ -418,8 +449,8 @@ export function ForkMergeKpiPanel() {
                   >
                     {trendPoints.map((point) => {
                       const total = point.forksCreated + point.merges;
-                      const forksHeight = (point.forksCreated / maxTrendValue) * 100;
-                      const mergesHeight = (point.merges / maxTrendValue) * 100;
+                      const forksHeight = (point.forksCreated / axisMaxValue) * 100;
+                      const mergesHeight = (point.merges / axisMaxValue) * 100;
                       const isEmpty = total === 0;
 
                       return (
@@ -446,20 +477,14 @@ export function ForkMergeKpiPanel() {
                             className="rounded-t bg-cyan-500/85"
                             style={{
                               width: "calc(50% - 1px)",
-                              height: `${Math.max(
-                                point.forksCreated > 0 ? forksHeight : 0,
-                                point.forksCreated > 0 ? 4 : 0,
-                              )}%`,
+                              height: `${point.forksCreated > 0 ? forksHeight : 0}%`,
                             }}
                           />
                           <span
                             className="rounded-t bg-emerald-500/85"
                             style={{
                               width: "calc(50% - 1px)",
-                              height: `${Math.max(
-                                point.merges > 0 ? mergesHeight : 0,
-                                point.merges > 0 ? 4 : 0,
-                              )}%`,
+                              height: `${point.merges > 0 ? mergesHeight : 0}%`,
                             }}
                           />
                         </button>
