@@ -158,6 +158,24 @@ function getSeriesBarHeight(count: number, maxCount: number): number {
   return Math.max((count / maxCount) * 100, 7);
 }
 
+function isInteractiveClickTarget(target: EventTarget | null) {
+  if (!(target instanceof Node)) {
+    return false;
+  }
+
+  const element =
+    target instanceof HTMLElement ? target : target.parentElement;
+  if (!element) {
+    return false;
+  }
+
+  return Boolean(
+    element.closest(
+      "button, a, input, select, textarea, label, [role='button'], [role='link']",
+    ),
+  );
+}
+
 function buildYearChartBuckets(events: ReviewActivityEvent[]): ChartBucket[] {
   const buckets: ChartBucket[] = MONTH_SHORT_LABELS.map((label, i) => ({
     key: String(i),
@@ -876,7 +894,16 @@ export function InstructionReviewActivityChart({
       </p>
 
       {/* Events section */}
-      <div className="grid gap-2 rounded-xl border border-slate-300/70 bg-white/60 p-3 dark:border-slate-700 dark:bg-slate-900/45">
+      <div
+        onClick={(event) => {
+          if (isInteractiveClickTarget(event.target)) {
+            return;
+          }
+
+          setDetailsExpanded((current) => !current);
+        }}
+        className="grid cursor-pointer gap-2 rounded-xl border border-slate-300/70 bg-white/60 p-3 dark:border-slate-700 dark:bg-slate-900/45"
+      >
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
             {selectedBucketLongLabel}:{" "}

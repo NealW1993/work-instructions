@@ -123,6 +123,24 @@ function normalizeReviewWindowDaysInput(value: string) {
   return parsed;
 }
 
+function isInteractiveClickTarget(target: EventTarget | null) {
+  if (!(target instanceof Node)) {
+    return false;
+  }
+
+  const element =
+    target instanceof HTMLElement ? target : target.parentElement;
+  if (!element) {
+    return false;
+  }
+
+  return Boolean(
+    element.closest(
+      "button, a, input, select, textarea, label, [role='button'], [role='link']",
+    ),
+  );
+}
+
 export function UserAdminPanel() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
@@ -1060,7 +1078,19 @@ export function UserAdminPanel() {
         </p>
       ) : null}
 
-      <div className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+      <div
+        onClick={(event) => {
+          if (isInteractiveClickTarget(event.target)) {
+            return;
+          }
+
+          setDepartmentsCollapsed((current) => !current);
+        }}
+        className={cn(
+          "grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7",
+          "cursor-pointer",
+        )}
+      >
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-lg font-bold">Instruction Review Window</h2>
           <button
@@ -1124,7 +1154,19 @@ export function UserAdminPanel() {
         />
       </div>
 
-      <div className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+      <div
+        onClick={(event) => {
+          if (isInteractiveClickTarget(event.target)) {
+            return;
+          }
+
+          setUsersCollapsed((current) => !current);
+        }}
+        className={cn(
+          "grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7",
+          "cursor-pointer",
+        )}
+      >
         <div className="flex flex-wrap items-center justify-between gap-2">
           <button
             type="button"
