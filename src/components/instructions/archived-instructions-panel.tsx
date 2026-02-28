@@ -23,6 +23,7 @@ export interface ArchivedInstructionListItem {
   updated_at: string;
   creator_name: string;
   updated_by_name: string;
+  fork_number: number | null;
   workItem: ArchivedInstructionWorkItemSummary;
 }
 
@@ -85,7 +86,11 @@ function ArchivedCardHeading({ workItem }: { workItem: ArchivedInstructionWorkIt
 }
 
 function getInstructionLabel(instruction: ArchivedInstructionListItem) {
-  return `${getPartIdLabel(instruction.workItem)} | ${instruction.workItem.department_name} | Revision ${instruction.revision}`;
+  const forkLabel =
+    instruction.fork_number && instruction.fork_number > 0
+      ? ` | Fork ${instruction.fork_number}`
+      : "";
+  return `${getPartIdLabel(instruction.workItem)} | ${instruction.workItem.department_name} | Revision ${instruction.revision}${forkLabel}`;
 }
 
 function normalizeSearchValue(instruction: ArchivedInstructionListItem) {
@@ -96,6 +101,7 @@ function normalizeSearchValue(instruction: ArchivedInstructionListItem) {
     instruction.creator_name,
     instruction.updated_by_name,
     `revision ${instruction.revision}`,
+    instruction.fork_number ? `fork ${instruction.fork_number}` : "",
   ]
     .join(" ")
     .toLowerCase();
@@ -478,6 +484,11 @@ export function ArchivedInstructionsPanel({
                     <span className="rounded-full border border-amber-500/35 bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:text-amber-200">
                       Archived
                     </span>
+                    {instruction.fork_number ? (
+                      <span className="rounded-full border border-cyan-500/35 bg-cyan-500/15 px-2.5 py-1 text-xs font-semibold text-cyan-800 dark:text-cyan-200">
+                        Fork {instruction.fork_number}
+                      </span>
+                    ) : null}
                     <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-400/35 bg-slate-900/8 px-2 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-900/12 dark:text-slate-200 dark:hover:bg-white/10">
                       <input
                         type="checkbox"

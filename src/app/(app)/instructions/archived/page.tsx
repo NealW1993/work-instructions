@@ -24,6 +24,8 @@ interface ArchivedInstructionRow {
   updated_at: string;
   created_by: string;
   updated_by: string;
+  fork_root_instruction_id: string | null;
+  fork_number: number | null;
   work_items: ArchivedInstructionWorkItemRow | ArchivedInstructionWorkItemRow[] | null;
 }
 
@@ -73,7 +75,7 @@ export default async function ArchivedInstructionsPage() {
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, revision, created_at, updated_at, created_by, updated_by, work_items(part_id, item_title, departments(name))",
+      "id, revision, created_at, updated_at, created_by, updated_by, fork_root_instruction_id, fork_number, work_items(part_id, item_title, departments(name))",
     )
     .eq("is_archived", true)
     .order("updated_at", { ascending: false })
@@ -118,6 +120,12 @@ export default async function ArchivedInstructionsPage() {
         updated_at: row.updated_at,
         creator_name: userNameMap.get(row.created_by) ?? "Unknown",
         updated_by_name: userNameMap.get(row.updated_by) ?? "Unknown",
+        fork_number:
+          row.fork_root_instruction_id &&
+          Number.isInteger(row.fork_number) &&
+          Number(row.fork_number) > 0
+            ? Number(row.fork_number)
+            : null,
         workItem: {
           department_name: normalizeDepartmentName(workItem.departments),
           part_id: workItem.part_id,
