@@ -1,7 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { ChevronDown, Clock3, LogOut, Settings, SlidersHorizontal } from "lucide-react";
+import {
+  ChevronDown,
+  Clock3,
+  LogOut,
+  Moon,
+  Settings,
+  SlidersHorizontal,
+  Sun,
+} from "lucide-react";
+import { useTheme } from "next-themes";
 import { useRouter } from "next/navigation";
 import { usePostHog } from "posthog-js/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -16,7 +25,7 @@ import {
   setSessionStartTime,
 } from "@/lib/session-timer";
 import { useSynchronizedNowMs } from "@/lib/second-ticker";
-import type { Profile } from "@/lib/types";
+import type { Profile, ThemePreference } from "@/lib/types";
 import { persistActiveThemePreference } from "@/lib/theme-client";
 import { cn } from "@/lib/utils";
 
@@ -67,14 +76,21 @@ function toTimestampMs(value: string | null | undefined) {
 export function UserAccountMenu({ profile }: UserAccountMenuProps) {
   const router = useRouter();
   const posthog = usePostHog();
+  const { setTheme } = useTheme();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerButtonRef = useRef<HTMLButtonElement | null>(null);
   const closeTimeoutRef = useRef<number | null>(null);
+  const themeUpdateRequestIdRef = useRef(0);
   const [open, setOpen] = useState(false);
   const [menuMounted, setMenuMounted] = useState(false);
   const [menuEntered, setMenuEntered] = useState(false);
   const [menuWidth, setMenuWidth] = useState(ACCOUNT_MENU_MIN_WIDTH_PX);
+  const [themePreference, setThemePreference] = useState<ThemePreference>(
+    profile.theme_preference ?? "dark",
+  );
+  const [themeToggleAnimationClass, setThemeToggleAnimationClass] = useState("");
+  const [themeSaving, setThemeSaving] = useState(false);
   const synchronizedNowMs = useSynchronizedNowMs();
   const serverSessionStartMs = useMemo(
     () => toTimestampMs(profile.active_session_started_at),
@@ -85,6 +101,7 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
 
   const initials = useMemo(() => getInitials(profile.full_name), [profile.full_name]);
   const iconColor = useMemo(() => resolveIconColor(profile.icon_color), [profile.icon_color]);
+  const isDarkTheme = themePreference === "dark";
   const sessionElapsedLabel = useMemo(() => {
     if (sessionStartedAtMs === null) {
       return "00:00:00";
@@ -92,6 +109,10 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
 
     return formatElapsedHhMmSs(Math.max(0, synchronizedNowMs - sessionStartedAtMs));
   }, [sessionStartedAtMs, synchronizedNowMs]);
+
+  useEffect(() => {
+    setThemePreference(profile.theme_preference ?? "dark");
+  }, [profile.theme_preference]);
 
   const syncMenuWidth = useCallback(() => {
     const triggerWidth = triggerButtonRef.current?.getBoundingClientRect().width ?? 0;
@@ -288,6 +309,50 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
     router.refresh();
   }
 
+  async function persistThemePreferenceToProfile(nextThemePreference: ThemePreference) {
+    const requestId = themeUpdateRequestIdRef.current + 1;
+    themeUpdateRequestIdRef.current = requestId;
+    setThemeSaving(true);
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        return;
+      }
+
+      await fetch("/api/auth/account", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          themePreference: nextThemePreference,
+        }),
+      });
+    } catch {
+      // Theme save is silent by design in this menu.
+    } finally {
+      if (themeUpdateRequestIdRef.current === requestId) {
+        setThemeSaving(false);
+      }
+    }
+  }
+
+  function handleThemeToggle() {
+    const nextThemePreference: ThemePreference = themePreference === "dark" ? "light" : "dark";
+    setThemeToggleAnimationClass(
+      nextThemePreference === "dark"
+        ? "theme-toggle-knob-to-dark"
+        : "theme-toggle-knob-to-light",
+    );
+    setThemePreference(nextThemePreference);
+    setTheme(nextThemePreference);
+    void persistThemePreferenceToProfile(nextThemePreference);
+  }
+
   return (
     <div ref={rootRef} className="relative">
       <button
@@ -340,6 +405,43 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
             <Settings size={15} />
             Account Settings
           </Link>
+
+          <button
+            type="button"
+            onClick={handleThemeToggle}
+            aria-label={`Switch to ${isDarkTheme ? "light" : "dark"} mode`}
+            aria-pressed={isDarkTheme}
+            className="inline-flex items-center justify-between gap-3 rounded-xl border border-cyan-500/40 bg-cyan-500/14 px-3 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/24"
+          >
+            <span className="inline-flex items-center gap-2">
+              {isDarkTheme ? <Moon size={15} /> : <Sun size={15} />}
+              Theme
+            </span>
+            <span className="inline-flex items-center gap-2">
+              <span className="text-xs uppercase tracking-wide text-cyan-100/85">
+                {isDarkTheme ? "Dark" : "Light"}
+              </span>
+              <span
+                className={cn(
+                  "relative inline-flex h-5 w-9 items-center rounded-full border transition-colors duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]",
+                  isDarkTheme
+                    ? "border-cyan-300/50 bg-cyan-400/45"
+                    : "border-slate-400/45 bg-slate-700/80",
+                )}
+              >
+                <span
+                  className={cn(
+                    "inline-flex h-3.5 w-3.5 rounded-full bg-white shadow-md will-change-transform",
+                    isDarkTheme ? "translate-x-[1.05rem]" : "translate-x-[0.2rem]",
+                    themeToggleAnimationClass,
+                  )}
+                />
+              </span>
+              {themeSaving ? (
+                <span className="h-1.5 w-1.5 rounded-full bg-cyan-200/85" />
+              ) : null}
+            </span>
+          </button>
 
           {isSystemAdmin(profile.role) ? (
             <Link

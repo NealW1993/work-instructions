@@ -550,3 +550,47 @@ html:not(.dark) .review-note-modal-shell textarea:focus {
   animation-timing-function: linear;
   animation-iteration-count: infinite;
 }
+
+@keyframes theme-toggle-knob-glide-to-dark {
+  0% {
+    transform: translateX(0.2rem);
+  }
+  52% {
+    transform: translateX(0.78rem);
+  }
+  64% {
+    transform: translateX(0.78rem);
+  }
+  86% {
+    transform: translateX(1.18rem);
+  }
+  100% {
+    transform: translateX(1.05rem);
+  }
+}
+
+@keyframes theme-toggle-knob-glide-to-light {
+  0% {
+    transform: translateX(1.05rem);
+  }
+  52% {
+    transform: translateX(0.47rem);
+  }
+  64% {
+    transform: translateX(0.47rem);
+  }
+  86% {
+    transform: translateX(0.12rem);
+  }
+  100% {
+    transform: translateX(0.2rem);
+  }
+}
+
+.theme-toggle-knob-to-dark {
+  animation: theme-toggle-knob-glide-to-dark 620ms cubic-bezier(0.2, 0.78, 0.16, 1.05) both;
+}
+
+.theme-toggle-knob-to-light {
+  animation: theme-toggle-knob-glide-to-light 620ms cubic-bezier(0.2, 0.78, 0.16, 1.05) both;
+}
