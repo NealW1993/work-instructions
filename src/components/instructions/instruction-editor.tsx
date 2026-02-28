@@ -819,6 +819,35 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     [releaseHistoryGuard],
   );
 
+  const navigateToInstructionAfterSave = useCallback(
+    (instructionId: string, mode: "push" | "replace") => {
+      navigateWithGuardReleased(() => {
+        // Ensure the destination instruction page starts at the top after saves.
+        window.scrollTo({
+          left: 0,
+          top: 0,
+          behavior: "auto",
+        });
+
+        if (mode === "replace") {
+          router.replace(`/instructions/${instructionId}`, { scroll: true });
+        } else {
+          router.push(`/instructions/${instructionId}`, { scroll: true });
+        }
+
+        router.refresh();
+        window.requestAnimationFrame(() => {
+          window.scrollTo({
+            left: 0,
+            top: 0,
+            behavior: "auto",
+          });
+        });
+      });
+    },
+    [navigateWithGuardReleased, router],
+  );
+
   useEffect(() => {
     hasUnsavedChangesRef.current = hasUnsavedChanges;
   }, [hasUnsavedChanges]);
@@ -1756,14 +1785,10 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       );
 
       navigationBypassRef.current = true;
-      navigateWithGuardReleased(() => {
-        if (isEditRevisionBump) {
-          router.replace(`/instructions/${instructionId}`);
-        } else {
-          router.push(`/instructions/${instructionId}`);
-        }
-        router.refresh();
-      });
+      navigateToInstructionAfterSave(
+        instructionId,
+        isEditRevisionBump ? "replace" : "push",
+      );
     } catch (caughtError) {
       confirmedRevisionBumpRef.current = false;
       confirmedReplacementInstructionIdRef.current = null;

@@ -7,11 +7,15 @@ import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 interface AiEnhancementEventRow {
   actor_user_id: string;
   outcome: "generated" | "applied" | "discarded" | string;
+  mode: "create" | "edit" | "fork" | string;
 }
 
-interface AiAssistedInstructionRow {
-  created_by: string;
-  ai_assisted: boolean;
+type InstructionDraftMode = "create" | "edit" | "fork";
+
+interface ModeBreakdown {
+  create: number;
+  edit: number;
+  fork: number;
 }
 
 interface ProfileRow {
@@ -26,10 +30,32 @@ interface UserAiStatsAccumulator {
   totalGenerations: number;
   appliedGenerations: number;
   unusedGenerations: number;
-  aiCreatedInstructions: number;
 }
 
 const MAX_KPI_ROWS = 100000;
+
+function createModeBreakdown(): ModeBreakdown {
+  return {
+    create: 0,
+    edit: 0,
+    fork: 0,
+  };
+}
+
+function isInstructionDraftMode(value: string): value is InstructionDraftMode {
+  return value === "create" || value === "edit" || value === "fork";
+}
+
+function incrementModeBreakdown(
+  breakdown: ModeBreakdown,
+  mode: string,
+) {
+  if (!isInstructionDraftMode(mode)) {
+    return;
+  }
+
+  breakdown[mode] += 1;
+}
 
 export async function GET(request: NextRequest) {
   const requester = await getRequestProfile(request);
@@ -45,7 +71,6 @@ export async function GET(request: NextRequest) {
   const [
     { data: profileRows, error: profileError },
     { data: enhancementRows, error: enhancementError },
-    { data: aiInstructionRows, error: aiInstructionError },
   ] = await Promise.all([
     supabaseAdmin
       .from("profiles")
@@ -54,13 +79,8 @@ export async function GET(request: NextRequest) {
       .range(0, 4999),
     supabaseAdmin
       .from("instruction_ai_enhancements")
-      .select("actor_user_id, outcome")
+      .select("actor_user_id, outcome, mode")
       .order("generated_at", { ascending: false })
-      .range(0, MAX_KPI_ROWS - 1),
-    supabaseAdmin
-      .from("work_instructions")
-      .select("created_by, ai_assisted")
-      .eq("ai_assisted", true)
       .range(0, MAX_KPI_ROWS - 1),
   ]);
 
@@ -70,13 +90,9 @@ export async function GET(request: NextRequest) {
   if (enhancementError) {
     return NextResponse.json({ error: enhancementError.message }, { status: 500 });
   }
-  if (aiInstructionError) {
-    return NextResponse.json({ error: aiInstructionError.message }, { status: 500 });
-  }
 
   const profiles = (profileRows ?? []) as ProfileRow[];
   const enhancements = (enhancementRows ?? []) as AiEnhancementEventRow[];
-  const aiInstructions = (aiInstructionRows ?? []) as AiAssistedInstructionRow[];
   const profileLabelById = new Map(
     profiles.map((profile) => [
       profile.id,
@@ -97,7 +113,6 @@ export async function GET(request: NextRequest) {
       totalGenerations: 0,
       appliedGenerations: 0,
       unusedGenerations: 0,
-      aiCreatedInstructions: 0,
     };
     byUser.set(userId, created);
     return created;
@@ -106,43 +121,38 @@ export async function GET(request: NextRequest) {
   let totalGenerations = 0;
   let totalAppliedGenerations = 0;
   let totalUnusedGenerations = 0;
-  let totalAiCreatedInstructions = 0;
+  const totalGenerationsByMode = createModeBreakdown();
+  const appliedGenerationsByMode = createModeBreakdown();
+  const unusedGenerationsByMode = createModeBreakdown();
 
   for (const event of enhancements) {
     totalGenerations += 1;
     const accumulator = ensureUserAccumulator(event.actor_user_id);
     accumulator.totalGenerations += 1;
+    incrementModeBreakdown(totalGenerationsByMode, event.mode);
 
     if (event.outcome === "applied") {
       totalAppliedGenerations += 1;
       accumulator.appliedGenerations += 1;
+      incrementModeBreakdown(appliedGenerationsByMode, event.mode);
     } else if (event.outcome === "discarded") {
       totalUnusedGenerations += 1;
       accumulator.unusedGenerations += 1;
+      incrementModeBreakdown(unusedGenerationsByMode, event.mode);
     }
-  }
-
-  for (const instruction of aiInstructions) {
-    if (!instruction.ai_assisted) {
-      continue;
-    }
-
-    totalAiCreatedInstructions += 1;
-    const accumulator = ensureUserAccumulator(instruction.created_by);
-    accumulator.aiCreatedInstructions += 1;
   }
 
   const users = [...byUser.values()].sort((first, second) => {
-    if (second.aiCreatedInstructions !== first.aiCreatedInstructions) {
-      return second.aiCreatedInstructions - first.aiCreatedInstructions;
+    if (second.totalGenerations !== first.totalGenerations) {
+      return second.totalGenerations - first.totalGenerations;
+    }
+
+    if (second.appliedGenerations !== first.appliedGenerations) {
+      return second.appliedGenerations - first.appliedGenerations;
     }
 
     if (second.unusedGenerations !== first.unusedGenerations) {
       return second.unusedGenerations - first.unusedGenerations;
-    }
-
-    if (second.totalGenerations !== first.totalGenerations) {
-      return second.totalGenerations - first.totalGenerations;
     }
 
     return first.label.localeCompare(second.label);
@@ -152,7 +162,9 @@ export async function GET(request: NextRequest) {
     totalGenerations,
     totalAppliedGenerations,
     totalUnusedGenerations,
-    totalAiCreatedInstructions,
+    totalGenerationsByMode,
+    appliedGenerationsByMode,
+    unusedGenerationsByMode,
     users,
     generatedAt: new Date().toISOString(),
   });
