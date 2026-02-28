@@ -18,6 +18,7 @@ interface AdminUser {
   full_name: string;
   role: AppRole;
   is_active: boolean;
+  inactivity_timeout_minutes: number | null;
   created_at: string;
 }
 
@@ -123,6 +124,24 @@ function normalizeReviewWindowDaysInput(value: string) {
   return parsed;
 }
 
+function normalizeInactivityTimeoutInput(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized || normalized === "never") {
+    return null;
+  }
+
+  if (!/^\d+$/.test(normalized)) {
+    return undefined;
+  }
+
+  const parsed = Number.parseInt(normalized, 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 10080) {
+    return undefined;
+  }
+
+  return parsed;
+}
+
 function isInteractiveClickTarget(target: EventTarget | null) {
   if (!(target instanceof Node)) {
     return false;
@@ -204,6 +223,9 @@ export function UserAdminPanel() {
   const [pinUpdates, setPinUpdates] = useState<Record<string, string>>({});
   const [roleUpdates, setRoleUpdates] = useState<Record<string, AppRole>>({});
   const [employeeIdUpdates, setEmployeeIdUpdates] = useState<Record<string, string>>({});
+  const [inactivityTimeoutUpdates, setInactivityTimeoutUpdates] = useState<Record<string, string>>(
+    {},
+  );
   const [portalReady, setPortalReady] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
 
@@ -752,6 +774,62 @@ export function UserAdminPanel() {
     } catch (caughtError) {
       const normalizedMessage =
         caughtError instanceof Error ? caughtError.message : "Unable to update employee ID";
+      setError(normalizedMessage);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateInactivityTimeout(userId: string) {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const rawValue =
+        inactivityTimeoutUpdates[userId] ??
+        (() => {
+          const defaultMinutes = users.find((user) => user.id === userId)?.inactivity_timeout_minutes;
+          return defaultMinutes === null || defaultMinutes === undefined
+            ? "never"
+            : String(defaultMinutes);
+        })();
+      const normalizedTimeout = normalizeInactivityTimeoutInput(rawValue);
+
+      if (normalizedTimeout === undefined) {
+        throw new Error(
+          "Auto sign-out timeout must be 'Never' or a whole number of minutes between 1 and 10080.",
+        );
+      }
+
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/users/${userId}/inactivity-timeout`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          inactivityTimeoutMinutes: normalizedTimeout,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to update auto sign-out timeout.");
+      }
+
+      setMessage(
+        normalizedTimeout === null
+          ? "Auto sign-out timeout updated to Never."
+          : `Auto sign-out timeout updated to ${normalizedTimeout} minute${normalizedTimeout === 1 ? "" : "s"}.`,
+      );
+      await fetchUsers();
+    } catch (caughtError) {
+      const normalizedMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Unable to update auto sign-out timeout.";
       setError(normalizedMessage);
     } finally {
       setBusy(false);
@@ -1614,6 +1692,7 @@ export function UserAdminPanel() {
                 <th className="px-3 py-2">Email</th>
                 <th className="px-3 py-2">Employee ID</th>
                 <th className="px-3 py-2">Role</th>
+                <th className="px-3 py-2">Auto Sign Out</th>
                 <th className="px-3 py-2">PIN Reset</th>
                 <th className="px-3 py-2">Created</th>
                 <th className="px-3 py-2">Actions</th>
@@ -1669,6 +1748,47 @@ export function UserAdminPanel() {
                       <button
                         type="button"
                         onClick={() => void updateRole(user.id)}
+                        className="rounded-lg border border-cyan-500/30 px-2 py-1 text-cyan-700 transition hover:bg-cyan-500/10 dark:text-cyan-300"
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <input
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={
+                          inactivityTimeoutUpdates[user.id] ??
+                          (user.inactivity_timeout_minutes === null
+                            ? "never"
+                            : String(user.inactivity_timeout_minutes))
+                        }
+                        onChange={(event) =>
+                          setInactivityTimeoutUpdates((current) => ({
+                            ...current,
+                            [user.id]: event.target.value,
+                          }))
+                        }
+                        placeholder="never or minutes"
+                        className="w-36 rounded-lg border border-slate-300 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-950"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setInactivityTimeoutUpdates((current) => ({
+                            ...current,
+                            [user.id]: "never",
+                          }))
+                        }
+                        className="rounded-lg border border-slate-400/45 px-2 py-1 text-slate-700 transition hover:bg-slate-500/10 dark:text-slate-200"
+                      >
+                        Never
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void updateInactivityTimeout(user.id)}
                         className="rounded-lg border border-cyan-500/30 px-2 py-1 text-cyan-700 transition hover:bg-cyan-500/10 dark:text-cyan-300"
                       >
                         Save

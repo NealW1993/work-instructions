@@ -855,12 +855,16 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   const navigateToInstructionAfterSave = useCallback(
     (instructionId: string, mode: "push" | "replace") => {
       navigateWithGuardReleased(() => {
+        const ensureTopScroll = () => {
+          window.scrollTo({
+            left: 0,
+            top: 0,
+            behavior: "auto",
+          });
+        };
+
         // Ensure the destination instruction page starts at the top after saves.
-        window.scrollTo({
-          left: 0,
-          top: 0,
-          behavior: "auto",
-        });
+        ensureTopScroll();
 
         if (mode === "replace") {
           router.replace(`/instructions/${instructionId}`, { scroll: true });
@@ -870,12 +874,10 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
         router.refresh();
         window.requestAnimationFrame(() => {
-          window.scrollTo({
-            left: 0,
-            top: 0,
-            behavior: "auto",
-          });
+          ensureTopScroll();
         });
+        window.setTimeout(ensureTopScroll, 120);
+        window.setTimeout(ensureTopScroll, 320);
       });
     },
     [navigateWithGuardReleased, router],

@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
 
   const { data, error } = await supabaseAdmin
     .from("profiles")
-    .select("id, email, employee_id, full_name, role, is_active, created_at")
+    .select("id, email, employee_id, full_name, role, is_active, created_at, inactivity_timeout_minutes")
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -178,7 +178,7 @@ export async function POST(request: NextRequest) {
 
   const { data: profile } = await supabaseAdmin
     .from("profiles")
-    .select("id, email, employee_id, full_name, role, is_active, created_at, updated_at")
+    .select("id, email, employee_id, full_name, role, is_active, created_at, updated_at, inactivity_timeout_minutes")
     .eq("id", userId)
     .single<Profile>();
 

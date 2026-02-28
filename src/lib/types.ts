@@ -26,6 +26,7 @@ export interface Profile {
   authored_likes_seen_at?: string;
   total_signed_in_seconds?: number;
   active_session_started_at?: string | null;
+  inactivity_timeout_minutes?: number | null;
   created_at: string;
   updated_at: string;
 }

@@ -12,7 +12,7 @@ import { clearSessionStart, getSessionStartTime } from "@/lib/session-timer";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { persistActiveThemePreference } from "@/lib/theme-client";
 
-const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
+const DEFAULT_INACTIVITY_TIMEOUT_MINUTES = 15;
 
 const ACTIVITY_EVENTS = [
   "mousemove",
@@ -24,12 +24,42 @@ const ACTIVITY_EVENTS = [
   "click",
 ] as const;
 
-export function InactivitySignOut() {
+interface InactivitySignOutProps {
+  inactivityTimeoutMinutes?: number | null;
+}
+
+function normalizeInactivityTimeoutMinutes(value: number | null | undefined) {
+  if (value === null) {
+    return null;
+  }
+
+  if (!Number.isInteger(value)) {
+    return DEFAULT_INACTIVITY_TIMEOUT_MINUTES;
+  }
+
+  const parsed = Number(value);
+  if (parsed < 1 || parsed > 10080) {
+    return DEFAULT_INACTIVITY_TIMEOUT_MINUTES;
+  }
+
+  return parsed;
+}
+
+export function InactivitySignOut({ inactivityTimeoutMinutes }: InactivitySignOutProps) {
   const router = useRouter();
   const posthog = usePostHog();
 
   useEffect(() => {
-    let timeoutId: ReturnType<typeof setTimeout>;
+    const resolvedTimeoutMinutes = normalizeInactivityTimeoutMinutes(
+      inactivityTimeoutMinutes,
+    );
+
+    if (resolvedTimeoutMinutes === null) {
+      return;
+    }
+
+    const timeoutMs = resolvedTimeoutMinutes * 60 * 1000;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     async function handleSignOut() {
       const supabase = getSupabaseBrowserClient();
@@ -77,8 +107,10 @@ export function InactivitySignOut() {
     }
 
     function resetTimer() {
-      clearTimeout(timeoutId);
-      timeoutId = setTimeout(handleSignOut, INACTIVITY_TIMEOUT_MS);
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+      }
+      timeoutId = setTimeout(handleSignOut, timeoutMs);
     }
 
     // Start the timer and listen for activity
@@ -88,13 +120,14 @@ export function InactivitySignOut() {
     }
 
     return () => {
-      clearTimeout(timeoutId);
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+      }
       for (const event of ACTIVITY_EVENTS) {
         window.removeEventListener(event, resetTimer);
       }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [inactivityTimeoutMinutes, posthog, router]);
 
   return null;
 }
