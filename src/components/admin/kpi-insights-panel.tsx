@@ -122,7 +122,7 @@ function getBarHeight(value: number, max: number) {
     return 0;
   }
 
-  return Math.min(96, Math.max((value / max) * 100, 6));
+  return Math.min(100, Math.max((value / max) * 100, 0));
 }
 
 function isInstructionViewPeriod(value: unknown): value is InstructionViewPeriod {
@@ -338,6 +338,9 @@ export function KpiInsightsPanel() {
   const viewAxisStep = Math.max(1, Math.ceil(maxViewCount / 4));
   const viewAxisTicks = Array.from({ length: 5 }, (_, index) => viewAxisStep * (4 - index));
   const viewAxisMax = viewAxisTicks[0] ?? 1;
+  const viewAxisTickOffsets = viewAxisTicks.map((_, index) =>
+    viewAxisTicks.length <= 1 ? 0 : (index / (viewAxisTicks.length - 1)) * 100,
+  );
 
   return (
     <div className="grid gap-4">
@@ -470,12 +473,20 @@ export function KpiInsightsPanel() {
         ) : null}
 
         <div className="rounded-xl border border-slate-300/70 bg-white/70 p-2 dark:border-slate-700 dark:bg-slate-900/55">
-          <div className="grid grid-cols-[2rem_minmax(0,1fr)] gap-2">
-            <div className="grid h-48 grid-rows-5 items-end text-right text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+          <div className="grid grid-cols-[2.75rem_minmax(0,1fr)] gap-2">
+            <div className="relative h-48">
               {viewAxisTicks.map((tickValue, index) => (
                 <span
                   key={`views-axis-${tickValue}-${index}`}
-                  className={index === viewAxisTicks.length - 1 ? "" : "translate-y-1"}
+                  className={cn(
+                    "absolute right-0 text-right text-[10px] font-semibold leading-none text-slate-500 dark:text-slate-400",
+                    index === 0
+                      ? "translate-y-0"
+                      : index === viewAxisTicks.length - 1
+                        ? "-translate-y-full"
+                        : "-translate-y-1/2",
+                  )}
+                  style={{ top: `${viewAxisTickOffsets[index] ?? 0}%` }}
                 >
                   {tickValue}
                 </span>
@@ -484,16 +495,17 @@ export function KpiInsightsPanel() {
 
             <div className="min-w-0">
               <div className="relative h-48 overflow-hidden">
-                <div className="pointer-events-none absolute inset-0 grid grid-rows-5">
-                  {viewAxisTicks.map((_, index) => (
+                <div className="pointer-events-none absolute inset-0">
+                  {viewAxisTickOffsets.map((offset, index) => (
                     <span
                       key={`views-grid-${index}`}
-                      className={cn(
-                        "border-t border-slate-300/35 dark:border-slate-700/45",
-                        index === viewAxisTicks.length - 1
-                          ? "border-b border-slate-300/35 dark:border-slate-700/45"
-                          : "",
-                      )}
+                      className="absolute left-0 right-0 border-t border-slate-300/35 dark:border-slate-700/45"
+                      style={{
+                        top:
+                          index === viewAxisTickOffsets.length - 1
+                            ? "calc(100% - 1px)"
+                            : `${offset}%`,
+                      }}
                     />
                   ))}
                 </div>

@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Activity, Archive, ArrowLeft, BarChart3, FileText, Users } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 
 import { AiEnhancementKpiPanel } from "@/components/admin/ai-enhancement-kpi-panel";
 import { KpiActivitySection } from "@/components/admin/kpi-activity-section";
 import { KpiInsightsPanel } from "@/components/admin/kpi-insights-panel";
+import { KpiSummaryCards, type KpiSummaryCardConfig } from "@/components/admin/kpi-summary-cards";
 import { ReviewCoverageKpiPanel } from "@/components/admin/review-coverage-kpi-panel";
 import { requireAuthenticatedUser } from "@/lib/auth";
 import { canViewKpis, isSystemAdmin } from "@/lib/roles";
@@ -100,31 +101,6 @@ function addUtcDays(date: Date, daysToAdd: number) {
 
 function maxOf(values: number[]) {
   return values.length > 0 ? Math.max(...values) : 1;
-}
-
-function KpiSummaryCard(props: {
-  label: string;
-  value: string;
-  icon: React.ReactNode;
-  tone: "cyan" | "emerald" | "amber" | "violet" | "rose";
-}) {
-  const toneClasses: Record<typeof props.tone, string> = {
-    cyan: "border-cyan-500/40 bg-cyan-500/10 text-cyan-900 dark:text-cyan-100",
-    emerald: "border-emerald-500/40 bg-emerald-500/10 text-emerald-900 dark:text-emerald-100",
-    amber: "border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-100",
-    violet: "border-violet-500/40 bg-violet-500/10 text-violet-900 dark:text-violet-100",
-    rose: "border-rose-500/40 bg-rose-500/10 text-rose-900 dark:text-rose-100",
-  };
-
-  return (
-    <article className={`grid gap-1 rounded-2xl border p-4 ${toneClasses[props.tone]}`}>
-      <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide opacity-90">
-        {props.icon}
-        {props.label}
-      </p>
-      <p className="text-2xl font-extrabold">{props.value}</p>
-    </article>
-  );
 }
 
 type KpiTooltipTone = "cyan" | "emerald" | "amber" | "violet" | "rose";
@@ -241,10 +217,6 @@ export default async function SystemKpisPage() {
     changeEventsError?.message ?? null,
   ].filter((message): message is string => Boolean(message));
 
-  const profileNameById = new Map(
-    profiles.map((entry) => [entry.id, entry.full_name.trim() || entry.email]),
-  );
-
   const usageByActiveUsers: UsageByUser[] = profiles
     .filter((entry) => entry.is_active)
     .map((entry) => {
@@ -344,6 +316,75 @@ export default async function SystemKpisPage() {
   }
   const activeInstructionCount = instructions.filter((entry) => !entry.is_archived).length;
   const archivedInstructionCount = instructions.filter((entry) => entry.is_archived).length;
+  const totalInstructionCount = activeInstructionCount + archivedInstructionCount;
+  const activeUsersWithLiveSession = usageByActiveUsers.filter((entry) => entry.activeSession).length;
+  const averageUsagePerActiveUserSeconds =
+    usageByActiveUsers.length > 0
+      ? Math.round(totalUsageSecondsAcrossActiveUsers / usageByActiveUsers.length)
+      : 0;
+  const summaryCards: KpiSummaryCardConfig[] = [
+    {
+      id: "active-users",
+      label: "Active Users",
+      value: String(usageByActiveUsers.length),
+      tone: "cyan",
+      details: [
+        `${usageByActiveUsers.length} active user profile${
+          usageByActiveUsers.length === 1 ? "" : "s"
+        } currently included in KPI tracking.`,
+        `${activeUsersWithLiveSession} active user session${
+          activeUsersWithLiveSession === 1 ? "" : "s"
+        } currently running live.`,
+        `${formatDurationFromSeconds(totalUsageSecondsAcrossActiveUsers)} total tracked active-user time.`,
+      ],
+    },
+    {
+      id: "active-instructions",
+      label: "Active Instructions",
+      value: String(activeInstructionCount),
+      tone: "emerald",
+      details: [
+        `${activeInstructionCount} instruction${activeInstructionCount === 1 ? "" : "s"} currently visible in active workflows.`,
+        `${archivedInstructionCount} instruction${archivedInstructionCount === 1 ? "" : "s"} currently archived.`,
+        `${totalInstructionCount} total instruction${totalInstructionCount === 1 ? "" : "s"} across the system.`,
+      ],
+    },
+    {
+      id: "archived-instructions",
+      label: "Archived Instructions",
+      value: String(archivedInstructionCount),
+      tone: "amber",
+      details: [
+        `${archivedInstructionCount} archived instruction${archivedInstructionCount === 1 ? "" : "s"} retained for history.`,
+        `${activeInstructionCount} active instruction${activeInstructionCount === 1 ? "" : "s"} still available for daily use.`,
+        `${totalInstructionCount} total instruction${totalInstructionCount === 1 ? "" : "s"} in all statuses.`,
+      ],
+    },
+    {
+      id: "updates-last-7-days",
+      label: "Updates (Last 7 Days)",
+      value: String(updatedLast7Days),
+      tone: "violet",
+      details: [
+        `${updatedLast7Days} update event${updatedLast7Days === 1 ? "" : "s"} recorded in the trailing 7-day UTC window.`,
+        `Window start: ${sevenDaysAgoUtc.toISOString().slice(0, 10)} UTC.`,
+        `Window end: ${todayUtc.toISOString().slice(0, 10)} UTC.`,
+      ],
+    },
+    {
+      id: "total-active-user-time",
+      label: "Total Active User Time",
+      value: formatDurationFromSeconds(totalUsageSecondsAcrossActiveUsers),
+      tone: "rose",
+      details: [
+        `${formatDurationFromSeconds(totalUsageSecondsAcrossActiveUsers)} total active-user time from all tracked sessions.`,
+        `${formatDurationFromSeconds(averageUsagePerActiveUserSeconds)} average tracked time per active user.`,
+        `${usageByActiveUsers.length} active user profile${
+          usageByActiveUsers.length === 1 ? "" : "s"
+        } included in the aggregate.`,
+      ],
+    },
+  ];
 
   return (
     <section className="grid gap-4">
@@ -373,38 +414,7 @@ export default async function SystemKpisPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <KpiSummaryCard
-          label="Active Users"
-          value={String(usageByActiveUsers.length)}
-          icon={<Users size={14} />}
-          tone="cyan"
-        />
-        <KpiSummaryCard
-          label="Active Instructions"
-          value={String(activeInstructionCount)}
-          icon={<FileText size={14} />}
-          tone="emerald"
-        />
-        <KpiSummaryCard
-          label="Archived Instructions"
-          value={String(archivedInstructionCount)}
-          icon={<Archive size={14} />}
-          tone="amber"
-        />
-        <KpiSummaryCard
-          label="Updates (Last 7 Days)"
-          value={String(updatedLast7Days)}
-          icon={<Activity size={14} />}
-          tone="violet"
-        />
-        <KpiSummaryCard
-          label="Total Active User Time"
-          value={formatDurationFromSeconds(totalUsageSecondsAcrossActiveUsers)}
-          icon={<BarChart3 size={14} />}
-          tone="rose"
-        />
-      </div>
+      <KpiSummaryCards cards={summaryCards} />
 
       <KpiInsightsPanel />
       <ReviewCoverageKpiPanel />
