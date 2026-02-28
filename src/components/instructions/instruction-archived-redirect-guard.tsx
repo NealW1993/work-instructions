@@ -10,24 +10,6 @@ interface InstructionArchivedRedirectGuardProps {
   instructionIsArchived: boolean;
 }
 
-function isBackForwardNavigation() {
-  const navigationEntries = window.performance.getEntriesByType("navigation");
-  const navigationEntry = navigationEntries[0];
-  if (
-    navigationEntry &&
-    typeof (navigationEntry as PerformanceNavigationTiming).type === "string"
-  ) {
-    return (
-      (navigationEntry as PerformanceNavigationTiming).type === "back_forward"
-    );
-  }
-
-  const legacyNavigation = (window.performance as Performance & {
-    navigation?: { type?: number };
-  }).navigation;
-  return legacyNavigation?.type === 2;
-}
-
 export function InstructionArchivedRedirectGuard({
   instructionId,
   instructionIsArchived,
@@ -36,10 +18,6 @@ export function InstructionArchivedRedirectGuard({
 
   useEffect(() => {
     if (!instructionIsArchived) {
-      return;
-    }
-
-    if (!isBackForwardNavigation()) {
       return;
     }
 

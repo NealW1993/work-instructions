@@ -99,6 +99,11 @@ interface RevisionConflictModalState {
   departmentName: string;
 }
 
+interface RevisionBumpConfirmationState {
+  currentRevision: number;
+  nextRevision: number;
+}
+
 interface FieldErrors {
   department: boolean;
   partId: boolean;
@@ -707,6 +712,8 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null);
   const [revisionConflictModal, setRevisionConflictModal] =
     useState<RevisionConflictModalState | null>(null);
+  const [revisionBumpConfirmationModal, setRevisionBumpConfirmationModal] =
+    useState<RevisionBumpConfirmationState | null>(null);
   const [enhanceBusy, setEnhanceBusy] = useState(false);
   const [enhanceError, setEnhanceError] = useState<string | null>(null);
   const [enhancementComparison, setEnhancementComparison] =
@@ -724,6 +731,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   const pendingNavigationRef = useRef<PendingNavigation | null>(null);
   const navigationBypassRef = useRef(false);
   const confirmedReplacementInstructionIdRef = useRef<string | null>(null);
+  const confirmedRevisionBumpRef = useRef(false);
 
   const initialSnapshot = useMemo(
     () =>
@@ -1303,9 +1311,15 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     setEnhanceError(null);
     setFieldErrors(DEFAULT_FIELD_ERRORS);
     setRevisionConflictModal(null);
+    setRevisionBumpConfirmationModal(null);
 
     const normalizedPartId = partId.trim();
     const normalizedDepartmentId = departmentId.trim();
+    const currentRevision = initialData?.revision ?? revision;
+    const hasEditRevisionBump =
+      mode === "edit" &&
+      Boolean(initialData?.instructionId) &&
+      revision > currentRevision;
 
     if (mode === "fork" && snapshotsAreEqual(currentSnapshot, initialSnapshot)) {
       setForkCanceledModalOpen(true);
@@ -1358,6 +1372,15 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       }));
       setError("Instruction steps are required.");
       setBodyFocusRequestKey((current) => current + 1);
+      setBusy(false);
+      return;
+    }
+
+    if (hasEditRevisionBump && !confirmedRevisionBumpRef.current) {
+      setRevisionBumpConfirmationModal({
+        currentRevision,
+        nextRevision: revision,
+      });
       setBusy(false);
       return;
     }
@@ -1734,10 +1757,15 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
       navigationBypassRef.current = true;
       navigateWithGuardReleased(() => {
-        router.push(`/instructions/${instructionId}`);
+        if (isEditRevisionBump) {
+          router.replace(`/instructions/${instructionId}`);
+        } else {
+          router.push(`/instructions/${instructionId}`);
+        }
         router.refresh();
       });
     } catch (caughtError) {
+      confirmedRevisionBumpRef.current = false;
       confirmedReplacementInstructionIdRef.current = null;
       setError(normalizeSubmissionError(caughtError));
       navigationBypassRef.current = false;
@@ -1899,6 +1927,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
               value={revision}
               onChange={(event) => {
                 setRevision(Number.parseInt(event.target.value || "0", 10));
+                confirmedRevisionBumpRef.current = false;
                 if (fieldErrors.revision) {
                   setFieldErrors((current) => ({
                     ...current,
@@ -2107,6 +2136,52 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                     className="rounded-xl border border-emerald-500/45 bg-emerald-500/20 px-4 py-2 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/30"
                   >
                     Continue
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+
+      {revisionBumpConfirmationModal && portalReady
+        ? createPortal(
+            <div className="app-modal-shell fixed inset-0 z-[112] flex items-center justify-center overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
+              <div className="grid w-full max-w-md gap-4 rounded-2xl border border-cyan-500/45 bg-slate-950/95 p-5 shadow-2xl">
+                <div className="grid gap-2">
+                  <h3 className="text-lg font-bold text-slate-100">Create new revision?</h3>
+                  <p className="text-sm text-slate-300">
+                    You are changing this instruction from revision{" "}
+                    {revisionBumpConfirmationModal.currentRevision} to revision{" "}
+                    {revisionBumpConfirmationModal.nextRevision}.
+                  </p>
+                  <p className="text-sm text-slate-300">
+                    Saving will archive the current active revision and create a new active
+                    instruction revision.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      confirmedRevisionBumpRef.current = false;
+                      setRevisionBumpConfirmationModal(null);
+                    }}
+                    className="rounded-xl border border-slate-600 bg-slate-900/70 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      confirmedRevisionBumpRef.current = true;
+                      setRevisionBumpConfirmationModal(null);
+                      formRef.current?.requestSubmit();
+                    }}
+                    className="rounded-xl border border-emerald-500/45 bg-emerald-500/20 px-4 py-2 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/30"
+                  >
+                    Continue and Save
                   </button>
                 </div>
               </div>

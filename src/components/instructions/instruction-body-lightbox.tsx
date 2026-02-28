@@ -10,11 +10,7 @@ interface InstructionBodyLightboxProps {
 
 export function InstructionBodyLightbox({ children }: InstructionBodyLightboxProps) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
-  const [canUsePortal, setCanUsePortal] = useState(false);
-
-  useEffect(() => {
-    setCanUsePortal(true);
-  }, []);
+  const canUsePortal = typeof document !== "undefined";
 
   useEffect(() => {
     if (!lightboxSrc) return;
@@ -70,7 +66,6 @@ export function InstructionBodyLightbox({ children }: InstructionBodyLightboxPro
 
   return (
     <>
-      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
       <div onClick={handleClick} className="[&_img]:cursor-zoom-in">
         {children}
       </div>

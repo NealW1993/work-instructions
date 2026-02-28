@@ -122,7 +122,7 @@ function getBarHeight(value: number, max: number) {
     return 0;
   }
 
-  return Math.max((value / max) * 100, 8);
+  return Math.min(96, Math.max((value / max) * 100, 6));
 }
 
 function isInstructionViewPeriod(value: unknown): value is InstructionViewPeriod {
@@ -483,7 +483,7 @@ export function KpiInsightsPanel() {
             </div>
 
             <div className="min-w-0">
-              <div className="relative h-48">
+              <div className="relative h-48 overflow-hidden">
                 <div className="pointer-events-none absolute inset-0 grid grid-rows-5">
                   {viewAxisTicks.map((_, index) => (
                     <span

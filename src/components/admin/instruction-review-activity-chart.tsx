@@ -57,6 +57,15 @@ interface InstructionReviewActivityChartProps {
   reloadToken?: number;
 }
 
+interface StoredReviewActivityFilters {
+  period: ReviewPeriod;
+  selectedYear: number;
+  selectedPeriodMonth: number;
+  selectedPeriodWeekStart: string;
+  selectedPeriodDay: string;
+  statusFilter: ReviewStatusFilter;
+}
+
 const MONTH_SHORT_LABELS = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -85,6 +94,7 @@ const PERIOD_BUTTONS: Array<{ value: ReviewPeriod; label: string }> = [
 ];
 
 const MS_IN_DAY = 24 * 60 * 60 * 1000;
+const REVIEW_ACTIVITY_FILTER_STORAGE_KEY = "admin.review.activity.filters";
 
 function getUtcWeekStart(date: Date): Date {
   const utcDay = date.getUTCDay();
@@ -154,8 +164,58 @@ function getReviewTransitionLabel(event: ReviewActivityEvent): string {
 }
 
 function getSeriesBarHeight(count: number, maxCount: number): number {
-  if (count <= 0 || maxCount <= 0) return 2;
-  return Math.max((count / maxCount) * 100, 7);
+  if (count <= 0 || maxCount <= 0) return 0;
+  return Math.min(96, Math.max((count / maxCount) * 100, 6));
+}
+
+function isReviewPeriod(value: unknown): value is ReviewPeriod {
+  return value === "year" || value === "month" || value === "week" || value === "day";
+}
+
+function isReviewStatusFilter(value: unknown): value is ReviewStatusFilter {
+  return value === "all" || value === "up_to_date" || value === "needs_review";
+}
+
+function isValidYear(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 2000 && value <= 2100;
+}
+
+function isValidMonth(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 12;
+}
+
+function isValidUtcDateKey(value: unknown): value is string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function decodeBase64Url(value: string): string {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  const paddingLength = (4 - (normalized.length % 4)) % 4;
+  const padded = normalized + "=".repeat(paddingLength);
+  return atob(padded);
+}
+
+function getUserIdFromAuthHeaders(headers: Record<string, string>): string | null {
+  const authorizationHeader = headers.Authorization ?? headers.authorization;
+  if (!authorizationHeader || !authorizationHeader.startsWith("Bearer ")) {
+    return null;
+  }
+
+  const token = authorizationHeader.slice(7).trim();
+  const tokenParts = token.split(".");
+  if (tokenParts.length < 2) {
+    return null;
+  }
+
+  try {
+    const decodedPayload = decodeBase64Url(tokenParts[1] ?? "");
+    const parsedPayload = JSON.parse(decodedPayload) as { sub?: unknown };
+    const subject =
+      typeof parsedPayload.sub === "string" ? parsedPayload.sub.trim() : "";
+    return subject || null;
+  } catch {
+    return null;
+  }
 }
 
 function isInteractiveClickTarget(target: EventTarget | null) {
@@ -399,6 +459,8 @@ export function InstructionReviewActivityChart({
   const [events, setEvents] = useState<ReviewActivityEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [filtersHydrated, setFiltersHydrated] = useState(false);
+  const [filtersStorageKey, setFiltersStorageKey] = useState<string | null>(null);
 
   // Unified bucket selection
   const [selectedBucketKey, setSelectedBucketKey] = useState<string | null>(() =>
@@ -416,6 +478,90 @@ export function InstructionReviewActivityChart({
     }
     return years;
   }, [selectedYear]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    void (async () => {
+      if (typeof window === "undefined") {
+        return;
+      }
+
+      let storageKey = REVIEW_ACTIVITY_FILTER_STORAGE_KEY;
+      try {
+        const headers = await getAuthHeaders();
+        const userId = getUserIdFromAuthHeaders(headers);
+        if (userId) {
+          storageKey = `${REVIEW_ACTIVITY_FILTER_STORAGE_KEY}.${userId}`;
+        }
+      } catch {
+        // Continue with generic local filter key if auth headers are unavailable.
+      }
+
+      if (!isActive) {
+        return;
+      }
+
+      setFiltersStorageKey(storageKey);
+      const storedValue = window.localStorage.getItem(storageKey);
+      if (storedValue) {
+        try {
+          const parsed = JSON.parse(storedValue) as Partial<StoredReviewActivityFilters>;
+          if (isReviewPeriod(parsed.period)) {
+            setPeriod(parsed.period);
+          }
+          if (isValidYear(parsed.selectedYear)) {
+            setSelectedYear(parsed.selectedYear);
+          }
+          if (isValidMonth(parsed.selectedPeriodMonth)) {
+            setSelectedPeriodMonth(parsed.selectedPeriodMonth);
+          }
+          if (isValidUtcDateKey(parsed.selectedPeriodWeekStart)) {
+            setSelectedPeriodWeekStart(parsed.selectedPeriodWeekStart);
+          }
+          if (isValidUtcDateKey(parsed.selectedPeriodDay)) {
+            setSelectedPeriodDay(parsed.selectedPeriodDay);
+          }
+          if (isReviewStatusFilter(parsed.statusFilter)) {
+            setStatusFilter(parsed.statusFilter);
+          }
+        } catch {
+          // Ignore invalid persisted state and keep defaults.
+        }
+      }
+
+      setFiltersHydrated(true);
+    })();
+
+    return () => {
+      isActive = false;
+    };
+  }, [getAuthHeaders]);
+
+  useEffect(() => {
+    if (!filtersHydrated || !filtersStorageKey || typeof window === "undefined") {
+      return;
+    }
+
+    const payload: StoredReviewActivityFilters = {
+      period,
+      selectedYear,
+      selectedPeriodMonth,
+      selectedPeriodWeekStart,
+      selectedPeriodDay,
+      statusFilter,
+    };
+    window.localStorage.setItem(filtersStorageKey, JSON.stringify(payload));
+  }, [
+    filtersHydrated,
+    filtersStorageKey,
+    period,
+    selectedPeriodDay,
+    selectedPeriodMonth,
+    selectedPeriodWeekStart,
+    selectedYear,
+    statusFilter,
+  ]);
 
   const fetchActivityEvents = useCallback(async () => {
     setLoading(true);
@@ -443,8 +589,12 @@ export function InstructionReviewActivityChart({
   }, [getAuthHeaders, selectedYear]);
 
   useEffect(() => {
+    if (!filtersHydrated) {
+      return;
+    }
+
     void fetchActivityEvents();
-  }, [fetchActivityEvents, reloadToken]);
+  }, [fetchActivityEvents, filtersHydrated, reloadToken]);
 
   // Keep year synced when navigating week/day into a different year
   useEffect(() => {
@@ -544,7 +694,10 @@ export function InstructionReviewActivityChart({
     () => activeBuckets.find((b) => b.key === selectedBucketKey) ?? null,
     [activeBuckets, selectedBucketKey],
   );
-  const selectedBucketEvents = selectedBucket?.events ?? [];
+  const selectedBucketEvents = useMemo(
+    () => selectedBucket?.events ?? [],
+    [selectedBucket],
+  );
 
   // Year-view week sub-buckets
   const weekSubBuckets = useMemo(
@@ -748,7 +901,7 @@ export function InstructionReviewActivityChart({
 
         <button
           type="button"
-          disabled={loading}
+          disabled={loading || !filtersHydrated}
           onClick={() => void fetchActivityEvents()}
           className="self-end rounded-lg border border-slate-300/70 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100/80 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:text-slate-100 dark:hover:bg-slate-800/70"
         >
@@ -833,14 +986,14 @@ export function InstructionReviewActivityChart({
                       type="button"
                       onClick={() => setSelectedBucketKey(bucket.key)}
                       className={cn(
-                        "group flex h-full min-w-0 flex-col items-center justify-end rounded-md px-0.5 pb-1 pt-1 outline-none transition focus-visible:ring-2 focus-visible:ring-cyan-500/70",
+                        "group grid h-full min-w-0 grid-rows-[minmax(0,1fr)_auto] items-end rounded-md px-0.5 pb-1 pt-1 outline-none transition focus-visible:ring-2 focus-visible:ring-cyan-500/70",
                         isSelected
                           ? "bg-cyan-500/15 ring-1 ring-cyan-500/45"
                           : "hover:bg-cyan-500/10",
                       )}
                       title={`${bucket.label}: Needs Review ${bucket.needsReviewCount}, Reviewed ${bucket.upToDateCount}`}
                     >
-                      <div className="flex h-full w-full items-end justify-center gap-[3px]">
+                      <div className="flex min-h-0 w-full items-end justify-center gap-[3px]">
                         <span
                           className={cn(
                             "w-[42%] rounded-t-[4px] border border-amber-300/25 transition",

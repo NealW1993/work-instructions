@@ -14,11 +14,7 @@ interface InstructionMediaSectionProps {
 export function InstructionMediaSection({ media }: InstructionMediaSectionProps) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [lightboxCaption, setLightboxCaption] = useState<string | null>(null);
-  const [canUsePortal, setCanUsePortal] = useState(false);
-
-  useEffect(() => {
-    setCanUsePortal(true);
-  }, []);
+  const canUsePortal = typeof document !== "undefined";
 
   useEffect(() => {
     if (!lightboxSrc) return;

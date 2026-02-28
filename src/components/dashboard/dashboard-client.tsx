@@ -461,10 +461,10 @@ function getLabelWithDepartment(workItem: DashboardWorkItemSummary) {
 function PartDepartmentHeading({ workItem }: { workItem: DashboardWorkItemSummary }) {
   return (
     <span className="inline-flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-      <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+      <span className="text-sm font-bold text-slate-900 dark:text-slate-100">
         {getPartIdLabel(workItem)}
       </span>
-      <span className="text-xs font-medium text-slate-600 dark:text-slate-300">
+      <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
         | {workItem.department_name}
       </span>
     </span>
@@ -2661,16 +2661,6 @@ export function DashboardClient({
                       ? "Hide Departments"
                       : `Show Departments (${totalDepartmentCount}/${totalInstructionCount})`}
                   </span>
-                  <span
-                    className={cn(
-                      "rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
-                      departmentInsightExpanded
-                        ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-800 dark:text-cyan-200"
-                        : "border-slate-400/40 bg-slate-200/70 text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300",
-                    )}
-                  >
-                    {departmentInsightExpanded ? "On" : "Off"}
-                  </span>
                 </button>
               </div>
               <p className="px-3 pt-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
@@ -2845,7 +2835,7 @@ export function DashboardClient({
                         <h3 className="leading-tight">
                           <PartDepartmentHeading workItem={item} />
                         </h3>
-                        <p className="text-sm text-slate-600 dark:text-slate-300">
+                        <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
                           {item.item_title}
                         </p>
                       </div>
@@ -2929,7 +2919,7 @@ export function DashboardClient({
                   </span>
                 )}
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
+              <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
                 {instruction.workItem.item_title}
               </p>
               <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -2979,7 +2969,7 @@ export function DashboardClient({
                   </span>
                 )}
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
+              <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
                 {instruction.workItem.item_title}
               </p>
               <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -3095,7 +3085,7 @@ export function DashboardClient({
                     {entry.isFlagged ? "Needs review" : "Out of range"}
                   </span>
                 </div>
-                <p className="text-xs text-slate-600 dark:text-slate-300">
+                <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
                   {entry.workItem.item_title}
                 </p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -3158,7 +3148,10 @@ export function DashboardClient({
                 <PartDepartmentHeading workItem={event.workItem} />
               </p>
               <p className="text-xs text-slate-600 dark:text-slate-300">
-                <span className="font-semibold">Instruction:</span> {event.workItem.item_title}
+                <span className="font-semibold">Instruction:</span>{" "}
+                <span className="font-bold text-slate-900 dark:text-slate-100">
+                  {event.workItem.item_title}
+                </span>
               </p>
               <p className="text-xs text-slate-600 dark:text-slate-300">{event.detail}</p>
 
@@ -3261,7 +3254,9 @@ export function DashboardClient({
 
                     <p className="text-xs text-slate-600 dark:text-slate-300">
                       <span className="font-semibold">Instruction:</span>{" "}
-                      {event.workItem.item_title}
+                      <span className="font-bold text-slate-900 dark:text-slate-100">
+                        {event.workItem.item_title}
+                      </span>
                     </p>
 
                     <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
@@ -3441,7 +3436,7 @@ export function DashboardClient({
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
+                <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
                   {entry.workItem.item_title}
                 </p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">

@@ -90,7 +90,6 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
   const [themePreference, setThemePreference] = useState<ThemePreference>(
     profile.theme_preference ?? "dark",
   );
-  const [themeToggleAnimationClass, setThemeToggleAnimationClass] = useState("");
   const [themeSaving, setThemeSaving] = useState(false);
   const synchronizedNowMs = useSynchronizedNowMs();
   const serverSessionStartMs = useMemo(
@@ -344,11 +343,6 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
 
   function handleThemeToggle() {
     const nextThemePreference: ThemePreference = themePreference === "dark" ? "light" : "dark";
-    setThemeToggleAnimationClass(
-      nextThemePreference === "dark"
-        ? "theme-toggle-knob-to-dark"
-        : "theme-toggle-knob-to-light",
-    );
     setThemePreference(nextThemePreference);
     setTheme(nextThemePreference);
     void persistThemePreferenceToProfile(nextThemePreference);
@@ -424,7 +418,7 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
               </span>
               <span
                 className={cn(
-                  "relative inline-flex h-5 w-9 items-center rounded-full border transition-colors duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]",
+                  "relative inline-flex h-5 w-9 shrink-0 overflow-hidden rounded-full border transition-colors duration-300 ease-out",
                   isDarkTheme
                     ? "border-cyan-300/50 bg-cyan-400/45"
                     : "border-slate-400/45 bg-slate-700/80",
@@ -432,9 +426,8 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
               >
                 <span
                   className={cn(
-                    "inline-flex h-3.5 w-3.5 rounded-full bg-white shadow-md will-change-transform",
-                    isDarkTheme ? "translate-x-[1.05rem]" : "translate-x-[0.2rem]",
-                    themeToggleAnimationClass,
+                    "absolute left-[2px] top-[2px] h-3.5 w-3.5 rounded-full bg-white shadow-md transition-transform duration-300 ease-out",
+                    isDarkTheme ? "translate-x-[14px]" : "translate-x-0",
                   )}
                 />
               </span>
