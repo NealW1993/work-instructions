@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   GripVertical,
   Info,
@@ -206,6 +207,9 @@ const CELEBRATION_CONFETTI_COLORS = [
 const DEFAULT_SYSTEM_HISTORY_ROW_LIMIT = 15;
 const SYSTEM_HISTORY_ROW_LIMIT_OPTIONS = [5, 15, 30, 45, 60] as const;
 const SYSTEM_HISTORY_ROW_LIMIT_STORAGE_KEY = "dashboard.systemHistoryRowLimit";
+const FINDER_DEPARTMENT_INSIGHT_VISIBILITY_STORAGE_KEY =
+  "dashboard.finder.departmentInsightVisible";
+const FINDER_SELECTED_DEPARTMENT_STORAGE_KEY = "dashboard.finder.selectedDepartmentId";
 const RECENT_UPDATES_EVENT_LIMIT = 20;
 const DEFAULT_REVIEW_WINDOW_DAYS = 30;
 
@@ -760,11 +764,12 @@ export function DashboardClient({
   const suppressNextPopStateRef = useRef(false);
   const navigationBypassRef = useRef(false);
   const returnStateAppliedRef = useRef(false);
+  const finderActionsMenuRef = useRef<HTMLDivElement | null>(null);
+  const finderPreferencesHydratedRef = useRef(false);
   const [query, setQuery] = useState(initialQuery);
   const [selectedDepartmentId, setSelectedDepartmentId] = useState("all");
   const [departmentInsightExpanded, setDepartmentInsightExpanded] = useState(false);
-  const [departmentInsightSummaryTooltipVisible, setDepartmentInsightSummaryTooltipVisible] =
-    useState(false);
+  const [finderActionsMenuOpen, setFinderActionsMenuOpen] = useState(false);
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [draggedWidgetId, setDraggedWidgetId] = useState<DashboardWidgetId | null>(null);
   const [dragOverWidgetId, setDragOverWidgetId] = useState<DashboardWidgetId | null>(null);
@@ -870,6 +875,30 @@ export function DashboardClient({
 
   useEffect(() => {
     setPortalReady(true);
+  }, []);
+
+  useEffect(() => {
+    try {
+      const storedDepartmentInsightVisibility = window.localStorage.getItem(
+        FINDER_DEPARTMENT_INSIGHT_VISIBILITY_STORAGE_KEY,
+      );
+      if (storedDepartmentInsightVisibility === "1") {
+        setDepartmentInsightExpanded(true);
+      } else if (storedDepartmentInsightVisibility === "0") {
+        setDepartmentInsightExpanded(false);
+      }
+
+      const storedDepartmentId = window.localStorage.getItem(
+        FINDER_SELECTED_DEPARTMENT_STORAGE_KEY,
+      );
+      if (storedDepartmentId && storedDepartmentId.trim().length > 0) {
+        setSelectedDepartmentId(storedDepartmentId);
+      }
+    } catch {
+      // Persisted dashboard preferences are best-effort.
+    } finally {
+      finderPreferencesHydratedRef.current = true;
+    }
   }, []);
 
   useEffect(() => {
@@ -998,6 +1027,33 @@ export function DashboardClient({
       // Persisted dashboard preferences are best-effort.
     }
   }, [systemHistoryRowLimit]);
+
+  useEffect(() => {
+    if (!finderPreferencesHydratedRef.current) {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(
+        FINDER_DEPARTMENT_INSIGHT_VISIBILITY_STORAGE_KEY,
+        departmentInsightExpanded ? "1" : "0",
+      );
+    } catch {
+      // Persisted dashboard preferences are best-effort.
+    }
+  }, [departmentInsightExpanded]);
+
+  useEffect(() => {
+    if (!finderPreferencesHydratedRef.current) {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(FINDER_SELECTED_DEPARTMENT_STORAGE_KEY, selectedDepartmentId);
+    } catch {
+      // Persisted dashboard preferences are best-effort.
+    }
+  }, [selectedDepartmentId]);
 
   useEffect(() => {
     try {
@@ -2479,6 +2535,40 @@ export function DashboardClient({
     };
   }, [departmentDrilldownDepartmentId, impactDrilldownKey, navigationModalOpen]);
 
+  useEffect(() => {
+    if (!finderActionsMenuOpen) {
+      return;
+    }
+
+    const handleOutsidePointerDown = (event: MouseEvent | TouchEvent) => {
+      const eventTarget = event.target as Node | null;
+      if (!eventTarget) {
+        return;
+      }
+
+      if (finderActionsMenuRef.current?.contains(eventTarget)) {
+        return;
+      }
+
+      setFinderActionsMenuOpen(false);
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setFinderActionsMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleOutsidePointerDown);
+    document.addEventListener("touchstart", handleOutsidePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleOutsidePointerDown);
+      document.removeEventListener("touchstart", handleOutsidePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [finderActionsMenuOpen]);
+
   function renderWidgetHeaderControls(
     widgetId: DashboardWidgetId,
     widgetSize: DashboardWidgetSize,
@@ -2488,74 +2578,105 @@ export function DashboardClient({
         <div
           className={cn(
             "items-center",
-            widgetSize === "compact"
-              ? "flex w-full flex-nowrap gap-1.5 overflow-x-auto"
-              : "flex flex-wrap justify-center gap-2 sm:justify-end",
+            widgetSize === "compact" ? "flex w-full justify-end" : "flex justify-end",
           )}
         >
-          {isSystemAdmin ? (
-            <Link
-              href="/instructions/archived"
-              className={cn(
-                "inline-flex items-center justify-center whitespace-nowrap rounded-xl border border-slate-400/35 bg-slate-900/10 text-xs font-semibold text-slate-700 transition hover:bg-slate-900/15 dark:text-slate-200 dark:hover:bg-white/10",
-                widgetSize === "compact" ? "px-2.5 py-1.5" : "px-3 py-1.5",
-              )}
-            >
-              Archived
-            </Link>
-          ) : null}
-          {canEdit ? (
-            <Link
-              href="/instructions/new"
-              className={cn(
-                "inline-flex items-center justify-center whitespace-nowrap rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-xs font-semibold text-white transition hover:brightness-110",
-                widgetSize === "compact" ? "px-2.5 py-1.5" : "px-3 py-1.5",
-              )}
-            >
-              Create Instruction
-            </Link>
-          ) : null}
-          <div className="group relative">
+          <div ref={finderActionsMenuRef} className="relative">
             <button
               type="button"
-              onPointerDown={(event) => {
-                if (event.pointerType !== "mouse") {
-                  setDepartmentInsightSummaryTooltipVisible(false);
-                }
-              }}
-              onPointerEnter={(event) => {
-                if (event.pointerType === "mouse") {
-                  setDepartmentInsightSummaryTooltipVisible(true);
-                }
-              }}
-              onPointerLeave={() => setDepartmentInsightSummaryTooltipVisible(false)}
-              onClick={() => setDepartmentInsightExpanded((current) => !current)}
-              aria-expanded={departmentInsightExpanded}
-              aria-controls="finder-department-insight-slider"
-              aria-label={`Department insight summary: ${departmentInsightSummary}`}
+              onClick={() => setFinderActionsMenuOpen((current) => !current)}
+              aria-haspopup="menu"
+              aria-expanded={finderActionsMenuOpen}
+              aria-controls="finder-actions-menu"
               className={cn(
-                "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition",
-                departmentInsightExpanded
-                  ? "border-cyan-500/55 bg-cyan-500/15 text-cyan-800 dark:text-cyan-200"
-                  : "border-slate-400/30 bg-slate-900/10 text-slate-700 dark:bg-white/10 dark:text-slate-200",
+                "inline-flex shrink-0 items-stretch overflow-hidden rounded-full border border-slate-400/35 bg-slate-900/10 text-xs font-semibold text-slate-700 transition hover:bg-slate-900/15 dark:bg-white/10 dark:text-slate-100 dark:hover:bg-white/15",
+                widgetSize === "compact" ? "h-8" : "h-9",
               )}
             >
-              <span>
-                Show Departments ({totalDepartmentCount}/{totalInstructionCount})
-              </span>
-              <ChevronRight
-                size={13}
+              <span
                 className={cn(
-                  "transition-transform duration-300",
-                  departmentInsightExpanded ? "rotate-90" : "",
+                  "inline-flex items-center whitespace-nowrap",
+                  widgetSize === "compact" ? "px-3" : "px-3.5",
                 )}
-              />
+              >
+                Finder Actions
+              </span>
+              <span className="inline-flex items-center justify-center border-l border-slate-400/35 px-2.5 dark:border-slate-600/70">
+                <ChevronDown
+                  size={14}
+                  className={cn(
+                    "transition-transform duration-300",
+                    finderActionsMenuOpen ? "rotate-180" : "",
+                  )}
+                />
+              </span>
             </button>
-            {departmentInsightSummaryTooltipVisible ? (
-              <p className="pointer-events-none absolute right-0 top-full z-10 mt-1 w-max max-w-[260px] rounded-lg border border-cyan-500/45 bg-slate-950/95 px-2.5 py-1 text-[11px] font-semibold text-cyan-100 shadow-lg">
-                ({departmentInsightSummary})
+
+            <div
+              id="finder-actions-menu"
+              role="menu"
+              aria-label="Finder actions"
+              aria-hidden={!finderActionsMenuOpen}
+              className={cn(
+                "absolute right-0 top-full z-50 mt-2 w-[min(19rem,calc(100vw-2rem))] origin-top-right rounded-2xl border border-slate-300/70 bg-white/95 p-2 shadow-2xl backdrop-blur transition dark:border-slate-700 dark:bg-slate-950/95",
+                finderActionsMenuOpen
+                  ? "pointer-events-auto scale-100 opacity-100"
+                  : "pointer-events-none scale-95 opacity-0",
+              )}
+            >
+              <div className="grid gap-1">
+                {isSystemAdmin ? (
+                  <Link
+                    href="/instructions/archived"
+                    role="menuitem"
+                    onClick={() => setFinderActionsMenuOpen(false)}
+                    className="inline-flex w-full items-center justify-between rounded-xl border border-transparent px-3 py-2 text-left text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-100/80 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-900"
+                  >
+                    <span>Archived</span>
+                  </Link>
+                ) : null}
+
+                {canEdit ? (
+                  <Link
+                    href="/instructions/new"
+                    role="menuitem"
+                    onClick={() => setFinderActionsMenuOpen(false)}
+                    className="inline-flex w-full items-center justify-between rounded-xl border border-transparent px-3 py-2 text-left text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-100/80 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-900"
+                  >
+                    <span>Create Instruction</span>
+                  </Link>
+                ) : null}
+
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setDepartmentInsightExpanded((current) => !current);
+                    setFinderActionsMenuOpen(false);
+                  }}
+                  className="inline-flex w-full items-center justify-between rounded-xl border border-transparent px-3 py-2 text-left text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-100/80 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-900"
+                >
+                  <span>
+                    {departmentInsightExpanded
+                      ? "Hide Departments"
+                      : `Show Departments (${totalDepartmentCount}/${totalInstructionCount})`}
+                  </span>
+                  <span
+                    className={cn(
+                      "rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                      departmentInsightExpanded
+                        ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-800 dark:text-cyan-200"
+                        : "border-slate-400/40 bg-slate-200/70 text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300",
+                    )}
+                  >
+                    {departmentInsightExpanded ? "On" : "Off"}
+                  </span>
+                </button>
+              </div>
+              <p className="px-3 pt-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                {departmentInsightSummary}
               </p>
-            ) : null}
+            </div>
           </div>
         </div>
       );
@@ -3640,7 +3761,10 @@ export function DashboardClient({
                 data-dashboard-widget-id={widget.id}
                 className={cn(
                   getWidgetSpanClass(widget.size),
-                  "relative min-w-0 overflow-hidden rounded-3xl border border-white/30 bg-white/80 shadow-xl backdrop-blur-xl transition dark:border-white/10 dark:bg-slate-900/70",
+                  "relative min-w-0 rounded-3xl border border-white/30 bg-white/80 shadow-xl backdrop-blur-xl transition dark:border-white/10 dark:bg-slate-900/70",
+                  widget.id === "finder" && finderActionsMenuOpen
+                    ? "z-40 overflow-visible"
+                    : "overflow-hidden",
                   widget.size === "compact" ? "p-3" : "p-4 md:p-5",
                   isDragging ? "scale-[0.99] opacity-70" : "",
                   isDragOverTarget

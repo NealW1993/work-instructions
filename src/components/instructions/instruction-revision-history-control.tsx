@@ -224,18 +224,20 @@ export function InstructionRevisionHistoryControl({
                         </p>
 
                         <div className="flex flex-wrap justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setMenuOpen(false);
-                              router.push(`/instructions/${entry.id}`);
-                              router.refresh();
-                            }}
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/15 px-3 py-1.5 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/25"
-                          >
-                            <Eye size={12} />
-                            View Revision
-                          </button>
+                          {!isCurrent ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setMenuOpen(false);
+                                router.push(`/instructions/${entry.id}`);
+                                router.refresh();
+                              }}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/15 px-3 py-1.5 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/25"
+                            >
+                              <Eye size={12} />
+                              View Revision
+                            </button>
+                          ) : null}
 
                           {canPromoteArchivedRevision && entry.isArchived && !isCurrent ? (
                             <button

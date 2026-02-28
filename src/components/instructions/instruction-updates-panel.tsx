@@ -68,6 +68,29 @@ function getReviewOriginLabel(origin: "user" | "system") {
   return origin === "system" ? "System Counter" : "User Action";
 }
 
+function getUpdateCardDetail(event: InstructionUpdateEvent) {
+  const reviewStateChange = event.sourcePayload?.reviewStateChange;
+  if (reviewStateChange) {
+    return getReviewStatusLabel(reviewStateChange.nextStatus);
+  }
+
+  const normalizedDetail = event.detail.trim().toLowerCase();
+  if (normalizedDetail.startsWith("review state changed to")) {
+    if (normalizedDetail.includes("needs review")) {
+      return "Needs Review";
+    }
+
+    if (
+      normalizedDetail.includes("up to date") ||
+      normalizedDetail.includes("up-to-date")
+    ) {
+      return "Up To Date";
+    }
+  }
+
+  return event.detail;
+}
+
 function normalizeSnippetForComparison(value: string) {
   return value.replace(/\s+/g, " ").trim().toLowerCase();
 }
@@ -273,7 +296,7 @@ export function InstructionUpdatesPanel({ events, className }: InstructionUpdate
                       View Source
                     </button>
                   </div>
-                  <p className="mt-1 text-sm text-slate-200">{event.detail}</p>
+                  <p className="mt-1 text-sm text-slate-200">{getUpdateCardDetail(event)}</p>
                 </article>
               ))}
             </div>
