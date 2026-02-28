@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { CheckCircle2, ChevronDown, Loader2, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -465,7 +465,7 @@ export function InstructionReviewControls({
       {canUsePortal && needsReviewModalOpen
         ? createPortal(
             <div
-              className="review-note-modal-shell dark fixed inset-0 z-[125] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"
+              className="review-note-modal-shell app-modal-shell fixed inset-0 z-[125] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"
               role="presentation"
               onClick={closeNeedsReviewModal}
             >
@@ -534,3 +534,4 @@ export function InstructionReviewControls({
     </>
   );
 }
+

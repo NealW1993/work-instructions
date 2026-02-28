@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -455,7 +455,7 @@ export function KpiActivitySection() {
       {canUsePortal && selectedBucket
         ? createPortal(
             <div
-              className="dark fixed inset-0 z-[210] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"
+              className="app-modal-shell fixed inset-0 z-[210] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"
               role="presentation"
               onClick={closeDrill}
             >
@@ -470,7 +470,7 @@ export function KpiActivitySection() {
                   <div>
                     <h2 className="text-base font-bold text-slate-100">{selectedBucket.point.key}</h2>
                     <p className="mt-0.5 text-xs text-slate-400">
-                      {selectedBucket.point.created} created · {selectedBucket.point.updated} updated
+                      {selectedBucket.point.created} created Â· {selectedBucket.point.updated} updated
                     </p>
                   </div>
                   <button
@@ -508,7 +508,7 @@ export function KpiActivitySection() {
                         >
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <p className="text-sm font-semibold text-slate-100">
-                              {event.partId} · {event.itemTitle}
+                              {event.partId} Â· {event.itemTitle}
                             </p>
                             <span
                               className={cn(
@@ -601,3 +601,4 @@ export function KpiActivitySection() {
     </>
   );
 }
+

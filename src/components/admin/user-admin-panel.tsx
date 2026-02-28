@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -1903,7 +1903,7 @@ export function UserAdminPanel() {
 
       {confirmDialog && portalReady
         ? createPortal(
-            <div className="dark fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+            <div className="app-modal-shell fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
               <div
                 className={cn(
                   "grid w-full max-w-md gap-4 rounded-2xl border p-5 shadow-2xl",
@@ -1938,7 +1938,7 @@ export function UserAdminPanel() {
                               {nameChanged ? (
                                 <>
                                   <span className="opacity-50 line-through">{dept.name}</span>
-                                  {" → "}
+                                  {" â†’ "}
                                   <span className="font-semibold text-slate-100">{newName}</span>
                                 </>
                               ) : (
@@ -1985,3 +1985,4 @@ export function UserAdminPanel() {
     </div>
   );
 }
+

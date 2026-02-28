@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { Eye, History, Loader2, RotateCcw } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -179,7 +179,7 @@ export function InstructionRevisionHistoryControl({
 
       {menuOpen && portalReady
         ? createPortal(
-            <div className="dark fixed inset-0 z-[125] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm">
+            <div className="app-modal-shell fixed inset-0 z-[125] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm">
               <div className="grid w-full max-w-xl gap-4 rounded-2xl border border-cyan-500/45 bg-slate-950/95 p-5 shadow-2xl">
                 <div className="grid gap-1">
                   <h3 className="text-lg font-bold text-slate-100">Revision History</h3>
@@ -277,3 +277,4 @@ export function InstructionRevisionHistoryControl({
     </>
   );
 }
+

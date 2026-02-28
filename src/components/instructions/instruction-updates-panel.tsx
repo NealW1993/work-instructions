@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
@@ -232,7 +232,7 @@ export function InstructionUpdatesPanel({ events, className }: InstructionUpdate
 
   const updatesModal = showUpdates ? (
     <div
-      className="dark fixed inset-0 z-[210] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"
+      className="app-modal-shell fixed inset-0 z-[210] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"
       role="presentation"
       onClick={() => {
         setShowUpdates(false);
@@ -308,7 +308,7 @@ export function InstructionUpdatesPanel({ events, className }: InstructionUpdate
 
   const sourceModal = selectedSourceEvent ? (
     <div
-      className="dark fixed inset-0 z-[220] overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm"
+      className="app-modal-shell fixed inset-0 z-[220] overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm"
       role="presentation"
       onClick={() => setSelectedSourceEventId(null)}
     >
@@ -480,3 +480,4 @@ export function InstructionUpdatesPanel({ events, className }: InstructionUpdate
     </>
   );
 }
+

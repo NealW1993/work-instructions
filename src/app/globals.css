@@ -358,15 +358,78 @@ html:not(.dark) .auth-login-shell textarea:-webkit-autofill:focus {
   caret-color: #f8fafc !important;
 }
 
-/* Keep the review-note modal dark even when the app is in light mode. */
+html:not(.dark) .app-modal-shell {
+  background-color: rgba(15, 23, 42, 0.28) !important;
+}
+
+html:not(.dark) .app-modal-shell > :first-child {
+  background-color: rgba(255, 255, 255, 0.97) !important;
+  border-color: rgba(148, 163, 184, 0.45) !important;
+  color: #0f172a !important;
+}
+
+html:not(.dark) .app-modal-shell > :first-child .text-slate-100,
+html:not(.dark) .app-modal-shell > :first-child .text-slate-200,
+html:not(.dark) .app-modal-shell > :first-child .text-white {
+  color: #0f172a !important;
+}
+
+html:not(.dark) .app-modal-shell > :first-child .text-slate-300,
+html:not(.dark) .app-modal-shell > :first-child .text-slate-400,
+html:not(.dark) .app-modal-shell > :first-child .text-slate-500 {
+  color: #475569 !important;
+}
+
+html:not(.dark) .app-modal-shell > :first-child .text-cyan-100,
+html:not(.dark) .app-modal-shell > :first-child .text-cyan-200 {
+  color: #0e7490 !important;
+}
+
+html:not(.dark) .app-modal-shell > :first-child .text-emerald-100,
+html:not(.dark) .app-modal-shell > :first-child .text-emerald-200 {
+  color: #047857 !important;
+}
+
+html:not(.dark) .app-modal-shell > :first-child .text-amber-100,
+html:not(.dark) .app-modal-shell > :first-child .text-amber-200 {
+  color: #b45309 !important;
+}
+
+html:not(.dark) .app-modal-shell > :first-child .text-rose-100,
+html:not(.dark) .app-modal-shell > :first-child .text-rose-200 {
+  color: #be123c !important;
+}
+
+html:not(.dark) .app-modal-shell > :first-child [class*="bg-slate-950"] {
+  background-color: rgba(255, 255, 255, 0.98) !important;
+}
+
+html:not(.dark) .app-modal-shell > :first-child [class*="bg-slate-900"] {
+  background-color: rgba(248, 250, 252, 0.96) !important;
+}
+
+html:not(.dark) .app-modal-shell > :first-child [class*="bg-slate-800"] {
+  background-color: rgba(241, 245, 249, 0.94) !important;
+}
+
+html:not(.dark) .app-modal-shell > :first-child [class*="bg-black"] {
+  background-color: rgba(241, 245, 249, 0.94) !important;
+}
+
+html:not(.dark) .app-modal-shell > :first-child [class*="border-slate-700"],
+html:not(.dark) .app-modal-shell > :first-child [class*="border-slate-600"],
+html:not(.dark) .app-modal-shell > :first-child [class*="border-white"] {
+  border-color: rgba(148, 163, 184, 0.45) !important;
+}
+
 html:not(.dark) .review-note-modal-shell textarea {
-  background-color: rgba(2, 6, 23, 0.7) !important;
-  color: #f8fafc !important;
+  background-color: rgba(248, 250, 252, 0.96) !important;
+  color: #0f172a !important;
   border-color: rgba(148, 163, 184, 0.55) !important;
 }
 
 html:not(.dark) .review-note-modal-shell textarea::placeholder {
-  color: #94a3b8 !important;
+  color: #64748b !important;
 }
 
 html:not(.dark) .review-note-modal-shell textarea:focus {
@@ -509,6 +572,25 @@ html:not(.dark) .review-note-modal-shell textarea:focus {
   pointer-events: none;
   float: left;
   height: 0;
+}
+
+.ai-enhancement-compare-preview,
+.ai-enhancement-compare-preview * {
+  color: #dbe6f3 !important;
+}
+
+.ai-enhancement-compare-preview h1,
+.ai-enhancement-compare-preview h2,
+.ai-enhancement-compare-preview h3,
+.ai-enhancement-compare-preview strong,
+.ai-enhancement-compare-preview b {
+  color: #f5f9ff !important;
+}
+
+.ai-enhancement-compare-preview blockquote,
+.ai-enhancement-compare-preview code,
+.ai-enhancement-compare-preview pre {
+  color: #d3dff0 !important;
 }
 
 @keyframes instruction-like-thumb-pop {

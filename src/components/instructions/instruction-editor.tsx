@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -1976,7 +1976,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
       {enhancementModalOpen && enhancementComparison && portalReady
         ? createPortal(
-            <div className="dark fixed inset-0 z-[113] flex items-center justify-center overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
+            <div className="app-modal-shell fixed inset-0 z-[113] flex items-center justify-center overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
               <div className="grid w-full max-w-6xl gap-4 rounded-2xl border border-cyan-500/40 bg-slate-950/95 p-4 shadow-2xl sm:p-5">
                 <div className="grid gap-1">
                   <h3 className="text-lg font-bold text-slate-100">
@@ -1997,7 +1997,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                     <p className="text-sm font-semibold text-slate-100">Your Version</p>
                     <div className="max-h-[52vh] overflow-auto rounded-lg border border-slate-700/80 bg-slate-950/65 p-3">
                       <div
-                        className="prose-markdown text-sm text-slate-200"
+                        className="prose-markdown ai-enhancement-compare-preview text-sm text-slate-100"
                         dangerouslySetInnerHTML={{
                           __html: enhancementComparison.originalContent,
                         }}
@@ -2009,7 +2009,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                     <p className="text-sm font-semibold text-cyan-100">AI Enhanced Version</p>
                     <div className="max-h-[52vh] overflow-auto rounded-lg border border-cyan-500/40 bg-slate-950/65 p-3">
                       <div
-                        className="prose-markdown text-sm text-slate-100"
+                        className="prose-markdown ai-enhancement-compare-preview text-sm text-slate-100"
                         dangerouslySetInnerHTML={{
                           __html: enhancementComparison.enhancedContent,
                         }}
@@ -2050,7 +2050,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
       {revisionConflictModal && portalReady
         ? createPortal(
-            <div className="dark fixed inset-0 z-[112] flex items-center justify-center overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
+            <div className="app-modal-shell fixed inset-0 z-[112] flex items-center justify-center overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
               <div className="grid w-full max-w-lg gap-4 rounded-2xl border border-cyan-500/45 bg-slate-950/95 p-5 shadow-2xl">
                 <div className="grid gap-2">
                   <h3 className="text-lg font-bold text-slate-100">
@@ -2117,7 +2117,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
       {navigationModalOpen && portalReady
         ? createPortal(
-            <div className="dark fixed inset-0 z-[111] flex items-center justify-center overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
+            <div className="app-modal-shell fixed inset-0 z-[111] flex items-center justify-center overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
               <div className="grid w-full max-w-md gap-4 rounded-2xl border border-amber-500/45 bg-slate-950/95 p-5 shadow-2xl">
                 <div className="grid gap-1">
                   <h3 className="text-lg font-bold text-slate-100">Discard unsaved changes?</h3>
@@ -2151,7 +2151,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
       {forkCanceledModalOpen && portalReady
         ? createPortal(
-            <div className="dark fixed inset-0 z-[110] flex items-center justify-center overflow-y-auto bg-slate-950/70 p-4 backdrop-blur-sm sm:p-6">
+            <div className="app-modal-shell fixed inset-0 z-[110] flex items-center justify-center overflow-y-auto bg-slate-950/70 p-4 backdrop-blur-sm sm:p-6">
               <div className="grid w-full max-w-md gap-4 rounded-2xl border border-cyan-500/35 bg-slate-950/95 p-5 shadow-2xl max-h-[calc(100vh-2rem)] overflow-y-auto">
                 <div className="grid gap-1">
                   <h3 className="text-lg font-bold text-slate-100">Fork canceled</h3>
@@ -2194,3 +2194,4 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     </div>
   );
 }
+
