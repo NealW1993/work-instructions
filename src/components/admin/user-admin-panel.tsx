@@ -31,6 +31,19 @@ interface AdminDepartment {
   updated_at: string;
 }
 
+interface AdminSuggestedTool {
+  id: string;
+  name: string;
+  toolType: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface SuggestedToolsResponse {
+  suggestedTools: AdminSuggestedTool[];
+  toolTypes: string[];
+}
+
 interface InstructionReviewSettingsResponse {
   reviewWindowDays: number;
   updatedAt: string | null;
@@ -63,6 +76,13 @@ type ConfirmDialogState =
   | {
       kind: "save-all-departments";
       departmentIds: string[];
+      title: string;
+      description: string;
+      confirmLabel: string;
+    }
+  | {
+      kind: "delete-suggested-tool";
+      toolId: string;
       title: string;
       description: string;
       confirmLabel: string;
@@ -144,6 +164,10 @@ function normalizeInactivityTimeoutInput(value: string) {
   return parsed;
 }
 
+function normalizeSuggestedToolInput(value: string) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
 function getUserSettingSavedKey(userId: string, field: UserSettingField) {
   return `${userId}:${field}`;
 }
@@ -200,6 +224,13 @@ export function UserAdminPanel() {
   const [reviewSettingsBusy, setReviewSettingsBusy] = useState(false);
   const [reviewWindowInputHasError, setReviewWindowInputHasError] = useState(false);
   const [reviewActivityReloadToken, setReviewActivityReloadToken] = useState(0);
+  const [suggestedTools, setSuggestedTools] = useState<AdminSuggestedTool[]>([]);
+  const [suggestedToolTypes, setSuggestedToolTypes] = useState<string[]>([]);
+  const [suggestedToolsCollapsed, setSuggestedToolsCollapsed] = useState(true);
+  const [newSuggestedToolName, setNewSuggestedToolName] = useState("");
+  const [newSuggestedToolType, setNewSuggestedToolType] = useState("");
+  const [newSuggestedToolNameHasError, setNewSuggestedToolNameHasError] = useState(false);
+  const [newSuggestedToolTypeHasError, setNewSuggestedToolTypeHasError] = useState(false);
 
   const [newDepartmentName, setNewDepartmentName] = useState("");
   const [newDepartmentNameHasError, setNewDepartmentNameHasError] = useState(false);
@@ -231,6 +262,7 @@ export function UserAdminPanel() {
   const [editingDepartmentOrderValue, setEditingDepartmentOrderValue] = useState("");
   const usersRefreshTimeoutRef = useRef<number | null>(null);
   const departmentsRefreshTimeoutRef = useRef<number | null>(null);
+  const suggestedToolsRefreshTimeoutRef = useRef<number | null>(null);
 
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
@@ -387,6 +419,33 @@ export function UserAdminPanel() {
     }
   }, [getAuthHeaders]);
 
+  const fetchSuggestedTools = useCallback(async () => {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/suggested-tools", {
+        method: "GET",
+        headers,
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      } & Partial<SuggestedToolsResponse>;
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to load suggested tools.");
+      }
+
+      setSuggestedTools(payload.suggestedTools ?? []);
+      setSuggestedToolTypes(payload.toolTypes ?? []);
+    } catch (caughtError) {
+      const normalizedMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Unable to load suggested tools.";
+      setError(normalizedMessage);
+    }
+  }, [getAuthHeaders]);
+
   useEffect(() => {
     setPortalReady(true);
   }, []);
@@ -430,9 +489,10 @@ export function UserAdminPanel() {
         fetchUsers(),
         fetchDepartments(),
         fetchInstructionReviewSettings(),
+        fetchSuggestedTools(),
       ]);
     })();
-  }, [fetchDepartments, fetchInstructionReviewSettings, fetchUsers]);
+  }, [fetchDepartments, fetchInstructionReviewSettings, fetchSuggestedTools, fetchUsers]);
 
   useEffect(() => {
     void (async () => {
@@ -470,6 +530,20 @@ export function UserAdminPanel() {
     }, 450);
   }, [departmentOrderDirty, fetchDepartments]);
 
+  const scheduleSuggestedToolsRefresh = useCallback(() => {
+    if (
+      typeof window === "undefined" ||
+      suggestedToolsRefreshTimeoutRef.current !== null
+    ) {
+      return;
+    }
+
+    suggestedToolsRefreshTimeoutRef.current = window.setTimeout(() => {
+      suggestedToolsRefreshTimeoutRef.current = null;
+      void fetchSuggestedTools();
+    }, 450);
+  }, [fetchSuggestedTools]);
+
   useEffect(() => {
     const usersChannel = supabase
       .channel("admin-users-live")
@@ -489,6 +563,15 @@ export function UserAdminPanel() {
       )
       .subscribe();
 
+    const suggestedToolsChannel = supabase
+      .channel("admin-suggested-tools-live")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "suggested_tools" },
+        () => scheduleSuggestedToolsRefresh(),
+      )
+      .subscribe();
+
     return () => {
       if (usersRefreshTimeoutRef.current !== null) {
         window.clearTimeout(usersRefreshTimeoutRef.current);
@@ -498,10 +581,20 @@ export function UserAdminPanel() {
         window.clearTimeout(departmentsRefreshTimeoutRef.current);
         departmentsRefreshTimeoutRef.current = null;
       }
+      if (suggestedToolsRefreshTimeoutRef.current !== null) {
+        window.clearTimeout(suggestedToolsRefreshTimeoutRef.current);
+        suggestedToolsRefreshTimeoutRef.current = null;
+      }
       void supabase.removeChannel(usersChannel);
       void supabase.removeChannel(departmentsChannel);
+      void supabase.removeChannel(suggestedToolsChannel);
     };
-  }, [scheduleDepartmentsRefresh, scheduleUsersRefresh, supabase]);
+  }, [
+    scheduleDepartmentsRefresh,
+    scheduleSuggestedToolsRefresh,
+    scheduleUsersRefresh,
+    supabase,
+  ]);
 
   function getNextDepartmentColor() {
     const usedColors = new Set(
@@ -639,6 +732,95 @@ export function UserAdminPanel() {
       setError(normalizedMessage);
     } finally {
       setReviewSettingsBusy(false);
+    }
+  }
+
+  async function handleCreateSuggestedTool(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    setNewSuggestedToolNameHasError(false);
+    setNewSuggestedToolTypeHasError(false);
+
+    try {
+      const normalizedName = normalizeSuggestedToolInput(newSuggestedToolName);
+      const normalizedType = normalizeSuggestedToolInput(newSuggestedToolType);
+
+      if (!normalizedName) {
+        setNewSuggestedToolNameHasError(true);
+        throw new Error("Suggested tool name is required.");
+      }
+
+      if (!normalizedType) {
+        setNewSuggestedToolTypeHasError(true);
+        throw new Error("Tool type is required.");
+      }
+
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/suggested-tools", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          name: normalizedName,
+          toolType: normalizedType,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to create suggested tool.");
+      }
+
+      setMessage("Suggested tool added.");
+      setNewSuggestedToolName("");
+      setNewSuggestedToolType("");
+      await fetchSuggestedTools();
+    } catch (caughtError) {
+      const normalizedMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Unable to create suggested tool.";
+      setError(normalizedMessage);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function performDeleteSuggestedTool(toolId: string) {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/suggested-tools/${toolId}`, {
+        method: "DELETE",
+        headers,
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to delete suggested tool.");
+      }
+
+      setMessage("Suggested tool deleted.");
+      setConfirmDialog(null);
+      await fetchSuggestedTools();
+    } catch (caughtError) {
+      const normalizedMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Unable to delete suggested tool.";
+      setError(normalizedMessage);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -1202,6 +1384,11 @@ export function UserAdminPanel() {
       return;
     }
 
+    if (confirmDialog.kind === "delete-suggested-tool") {
+      await performDeleteSuggestedTool(confirmDialog.toolId);
+      return;
+    }
+
     await performDeleteDepartment(confirmDialog.departmentId);
   }
 
@@ -1213,6 +1400,23 @@ export function UserAdminPanel() {
     const currentColor = normalizeColorHex(colorUpdate) ?? DEFAULT_DEPARTMENT_COLORS[0];
     return nameDirty || currentColor !== savedColor;
   });
+  const suggestedToolTypeOptions = useMemo(() => {
+    const values = new Set<string>();
+    for (const toolType of suggestedToolTypes) {
+      const normalized = normalizeSuggestedToolInput(toolType);
+      if (normalized) {
+        values.add(normalized);
+      }
+    }
+    for (const tool of suggestedTools) {
+      const normalized = normalizeSuggestedToolInput(tool.toolType);
+      if (normalized) {
+        values.add(normalized);
+      }
+    }
+
+    return Array.from(values).sort((first, second) => first.localeCompare(second));
+  }, [suggestedToolTypes, suggestedTools]);
 
   return (
     <div className="grid gap-5">
@@ -1289,6 +1493,139 @@ export function UserAdminPanel() {
           getAuthHeaders={getAuthHeaders}
           reloadToken={reviewActivityReloadToken}
         />
+      </div>
+
+      <div
+        onClick={(event) => {
+          if (isInteractiveClickTarget(event.target)) {
+            return;
+          }
+
+          setSuggestedToolsCollapsed((current) => !current);
+        }}
+        className={cn(
+          "grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7",
+          "cursor-pointer",
+        )}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => setSuggestedToolsCollapsed((current) => !current)}
+            className="flex items-center gap-1.5 text-lg font-bold transition hover:opacity-80"
+          >
+            {suggestedToolsCollapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
+            Suggested Tools
+          </button>
+          <span className="rounded-full border border-cyan-500/35 bg-cyan-500/10 px-2 py-0.5 text-xs font-semibold text-cyan-800 dark:text-cyan-200">
+            {suggestedTools.length}
+          </span>
+        </div>
+
+        {!suggestedToolsCollapsed ? (
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            Add suggested tools and categories used for instruction sanity checks. Tool type
+            auto-suggests from values already saved in the database.
+          </p>
+        ) : null}
+
+        {!suggestedToolsCollapsed ? (
+          <form
+            noValidate
+            onSubmit={handleCreateSuggestedTool}
+            className="grid gap-2 md:max-w-3xl md:grid-cols-[minmax(0,1fr)_220px_auto] md:items-end"
+          >
+            <label className="grid gap-1 text-sm">
+              <span>Tool Name</span>
+              <input
+                value={newSuggestedToolName}
+                onChange={(event) => {
+                  setNewSuggestedToolName(event.target.value);
+                  if (newSuggestedToolNameHasError && event.target.value.trim()) {
+                    setNewSuggestedToolNameHasError(false);
+                  }
+                }}
+                placeholder="Torque wrench, caliper, bore scope..."
+                className={getInputClass(newSuggestedToolNameHasError)}
+              />
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span>Tool Type</span>
+              <input
+                list="suggested-tool-type-options"
+                value={newSuggestedToolType}
+                onChange={(event) => {
+                  setNewSuggestedToolType(event.target.value);
+                  if (newSuggestedToolTypeHasError && event.target.value.trim()) {
+                    setNewSuggestedToolTypeHasError(false);
+                  }
+                }}
+                placeholder="Measurement, setup, safety..."
+                className={getInputClass(newSuggestedToolTypeHasError)}
+              />
+              <datalist id="suggested-tool-type-options">
+                {suggestedToolTypeOptions.map((toolType) => (
+                  <option key={toolType} value={toolType} />
+                ))}
+              </datalist>
+            </label>
+            <button
+              type="submit"
+              disabled={busy}
+              className="rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {busy ? "Working..." : "Add Tool"}
+            </button>
+          </form>
+        ) : null}
+
+        {!suggestedToolsCollapsed ? (
+          suggestedTools.length === 0 ? (
+            <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+              No suggested tools have been configured yet.
+            </p>
+          ) : (
+            <div className="grid gap-2">
+              {suggestedTools.map((tool) => (
+                <div
+                  key={tool.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-300/70 bg-white/70 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/50"
+                >
+                  <div className="grid gap-0.5">
+                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                      {tool.name}
+                    </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Type: {tool.toolType}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Updated <LocalDateTime value={tool.updatedAt} mode="dateTime" />
+                    </p>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() =>
+                        setConfirmDialog({
+                          kind: "delete-suggested-tool",
+                          toolId: tool.id,
+                          title: `Delete suggested tool "${tool.name}"?`,
+                          description:
+                            "This removes it from future instruction sanity-check dropdowns.",
+                          confirmLabel: "Delete Tool",
+                        })
+                      }
+                      className="rounded-lg border border-rose-500/40 px-2 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-40 dark:text-rose-300"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        ) : null}
       </div>
 
       <div

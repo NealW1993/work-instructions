@@ -15,6 +15,10 @@ import {
   InstructionRevisionHistoryControl,
 } from "@/components/instructions/instruction-revision-history-control";
 import { InstructionReviewControls } from "@/components/instructions/instruction-review-controls";
+import {
+  type SuggestedToolOption,
+  SuggestedToolsDropdown,
+} from "@/components/instructions/suggested-tools-dropdown";
 import { InstructionViewTracker } from "@/components/instructions/instruction-view-tracker";
 import { LikeInstructionButton } from "@/components/instructions/like-instruction-button";
 import { PinInstructionButton } from "@/components/instructions/pin-instruction-button";
@@ -178,6 +182,12 @@ interface InstructionReviewStatusRow {
   last_calibrated_at: string;
   flagged_at: string | null;
   updated_by: string;
+}
+
+interface SuggestedToolRow {
+  id: string;
+  name: string;
+  tool_type: string;
 }
 
 const DEFAULT_REVIEW_WINDOW_DAYS = 30;
@@ -789,6 +799,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
     { count: instructionLikeCount },
     { data: reviewSettingsData, error: reviewSettingsError },
     { data: reviewStatusData, error: reviewStatusError },
+    { data: suggestedToolsData, error: suggestedToolsError },
   ] = await Promise.all([
     supabase
       .from("user_pinned_instructions")
@@ -816,7 +827,22 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
       .select("instruction_id, status, last_calibrated_at, flagged_at, updated_by")
       .eq("instruction_id", instruction.id)
       .maybeSingle<InstructionReviewStatusRow>(),
+    supabase
+      .from("suggested_tools")
+      .select("id, name, tool_type")
+      .order("tool_type", { ascending: true })
+      .order("name", { ascending: true }),
   ]);
+
+  const suggestedTools: SuggestedToolOption[] = !suggestedToolsError
+    ? ((suggestedToolsData ?? []) as SuggestedToolRow[])
+        .map((tool) => ({
+          id: tool.id,
+          name: tool.name.trim(),
+          toolType: tool.tool_type.trim(),
+        }))
+        .filter((tool) => tool.name.length > 0 && tool.toolType.length > 0)
+    : [];
 
   const reviewWindowDays =
     !reviewSettingsError
@@ -1000,6 +1026,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
           </div>
           <div className="grid gap-2 md:justify-items-end">
             <div className="grid w-full max-w-[14rem] justify-items-stretch gap-2 md:w-[14rem]">
+              <SuggestedToolsDropdown tools={suggestedTools} className="w-full" />
               <InstructionUpdatesPanel
                 events={instructionUpdateEvents}
                 className="h-fit w-full justify-center self-start"
