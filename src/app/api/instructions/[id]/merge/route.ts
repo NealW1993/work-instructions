@@ -81,12 +81,12 @@ interface MergeInstructionSourcePayload {
 }
 
 const DEFAULT_FIELD_SELECTION: MergeForkFieldSelection = {
-  department: false,
-  partId: false,
-  itemTitle: false,
+  department: true,
+  partId: true,
+  itemTitle: true,
   body: true,
   revision: true,
-  media: false,
+  media: true,
 };
 
 function normalizeForkMergeMode(value: unknown): ForkMergeMode {

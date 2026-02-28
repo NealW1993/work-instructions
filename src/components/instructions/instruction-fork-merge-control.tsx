@@ -61,12 +61,12 @@ interface InstructionForkMergeControlProps {
 }
 
 const DEFAULT_FIELDS: ForkMergeFieldSelection = {
-  department: false,
-  partId: false,
-  itemTitle: false,
+  department: true,
+  partId: true,
+  itemTitle: true,
   body: true,
   revision: true,
-  media: false,
+  media: true,
 };
 
 const ALL_FIELDS: ForkMergeFieldSelection = {
