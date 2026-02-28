@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { X } from "lucide-react";
+import { createPortal } from "react-dom";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { cn } from "@/lib/utils";
@@ -29,6 +31,17 @@ interface InstructionViewsPayload {
   totalViews: number;
   totalInstructionsViewed: number;
   points: InstructionViewPoint[];
+}
+
+interface InstructionViewContributor {
+  userId: string | null;
+  label: string;
+  viewCount: number;
+}
+
+interface InstructionViewDetailPayload {
+  totalViews: number;
+  contributors: InstructionViewContributor[];
 }
 
 interface KpiInsightsStoredFilters {
@@ -152,6 +165,11 @@ export function KpiInsightsPanel() {
   const [viewsError, setViewsError] = useState<string | null>(null);
   const [filtersHydrated, setFiltersHydrated] = useState(false);
   const [filtersStorageKey, setFiltersStorageKey] = useState<string | null>(null);
+  const [selectedPoint, setSelectedPoint] = useState<InstructionViewPoint | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailTotalViews, setDetailTotalViews] = useState(0);
+  const [detailContributors, setDetailContributors] = useState<InstructionViewContributor[]>([]);
 
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const currentYear = new Date().getUTCFullYear();
@@ -307,6 +325,57 @@ export function KpiInsightsPanel() {
     }
   }, [day, getAuthHeaders, month, period, weekStart, year]);
 
+  const fetchInstructionViewDetail = useCallback(
+    async (point: InstructionViewPoint) => {
+      setDetailLoading(true);
+      setDetailError(null);
+      try {
+        const params = new URLSearchParams({
+          instructionId: point.instructionId,
+          period,
+          year: String(year),
+          month: String(month),
+        });
+        if (period === "week") {
+          params.set("weekStart", weekStart);
+        }
+        if (period === "day") {
+          params.set("day", day);
+        }
+
+        const headers = await getAuthHeaders();
+        const response = await fetch(`/api/kpis/instruction-views/detail?${params.toString()}`, {
+          method: "GET",
+          headers,
+        });
+        const payload = (await response.json().catch(() => ({}))) as
+          | InstructionViewDetailPayload
+          | { error?: string };
+        if (!response.ok) {
+          throw new Error(
+            "error" in payload
+              ? payload.error ?? "Unable to load instruction view detail."
+              : "Unable to load instruction view detail.",
+          );
+        }
+
+        if ("contributors" in payload) {
+          setDetailContributors(payload.contributors);
+          setDetailTotalViews(payload.totalViews);
+        }
+      } catch (caughtError) {
+        setDetailError(
+          caughtError instanceof Error
+            ? caughtError.message
+            : "Unable to load instruction view detail.",
+        );
+      } finally {
+        setDetailLoading(false);
+      }
+    },
+    [day, getAuthHeaders, month, period, weekStart, year],
+  );
+
   useEffect(() => {
     if (period !== "week") {
       return;
@@ -330,6 +399,31 @@ export function KpiInsightsPanel() {
     void fetchInstructionViews();
   }, [fetchInstructionViews, filtersHydrated]);
 
+  useEffect(() => {
+    if (!selectedPoint) {
+      return;
+    }
+
+    setDetailTotalViews(selectedPoint.viewCount);
+    setDetailContributors([]);
+    void fetchInstructionViewDetail(selectedPoint);
+  }, [fetchInstructionViewDetail, selectedPoint]);
+
+  useEffect(() => {
+    if (!selectedPoint) {
+      return;
+    }
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSelectedPoint(null);
+      }
+    };
+
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [selectedPoint]);
+
   const visibleViewPoints = (viewsPayload?.points ?? []).slice(0, 12);
   const chartColumnClass =
     GRID_COLUMNS_BY_COUNT[Math.max(1, Math.min(visibleViewPoints.length, 12))] ??
@@ -341,6 +435,7 @@ export function KpiInsightsPanel() {
   const viewAxisTickOffsets = viewAxisTicks.map((_, index) =>
     viewAxisTicks.length <= 1 ? 0 : (index / (viewAxisTicks.length - 1)) * 100,
   );
+  const canUsePortal = typeof document !== "undefined";
 
   return (
     <div className="grid gap-4">
@@ -472,6 +567,10 @@ export function KpiInsightsPanel() {
           </p>
         ) : null}
 
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          Tip: Click any bar to see user view contribution details.
+        </p>
+
         <div className="rounded-xl border border-slate-300/70 bg-white/70 p-2 dark:border-slate-700 dark:bg-slate-900/55">
           <div className="grid grid-cols-[2.75rem_minmax(0,1fr)] gap-2">
             <div className="relative h-48">
@@ -522,16 +621,18 @@ export function KpiInsightsPanel() {
                     </p>
                   ) : (
                     visibleViewPoints.map((point) => (
-                      <div
+                      <button
                         key={point.instructionId}
-                        className="group relative flex h-full items-end justify-center rounded-md"
+                        type="button"
+                        onClick={() => setSelectedPoint(point)}
+                        className="group relative flex h-full items-end justify-center rounded-md outline-none transition hover:brightness-105 focus-visible:ring-2 focus-visible:ring-cyan-500/70"
+                        title={`${point.partId} | ${point.itemTitle} (${point.departmentName}) - ${point.viewCount} views`}
                       >
                         <span
                           className="w-full rounded-t-md border border-cyan-300/35 bg-gradient-to-t from-cyan-700 to-cyan-500"
                           style={{ height: `${getBarHeight(point.viewCount, viewAxisMax)}%` }}
-                          title={`${point.partId} | ${point.itemTitle} (${point.departmentName}) - ${point.viewCount} views`}
                         />
-                      </div>
+                      </button>
                     ))
                   )}
                 </div>
@@ -563,6 +664,85 @@ export function KpiInsightsPanel() {
             : ""}
         </p>
       </section>
+
+      {canUsePortal && selectedPoint
+        ? createPortal(
+            <div
+              className="app-modal-shell fixed inset-0 z-[220] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"
+              role="presentation"
+              onClick={() => setSelectedPoint(null)}
+            >
+              <article
+                className="w-full max-w-xl rounded-2xl border border-white/20 bg-slate-950/96 shadow-2xl"
+                role="dialog"
+                aria-modal="true"
+                aria-label={`${selectedPoint.partId} view contributors`}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="flex items-start justify-between gap-3 border-b border-white/10 p-5">
+                  <div className="grid gap-1">
+                    <h3 className="text-base font-bold text-slate-100">
+                      {selectedPoint.partId} | {selectedPoint.itemTitle}
+                    </h3>
+                    <p className="text-xs text-slate-300">{selectedPoint.departmentName}</p>
+                    <p className="text-sm font-semibold text-cyan-200">
+                      {detailTotalViews} total view{detailTotalViews === 1 ? "" : "s"} in this range
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPoint(null)}
+                    aria-label="Close instruction view detail modal"
+                    className="rounded-lg p-1.5 text-slate-400 transition hover:bg-white/10 hover:text-slate-100"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                <div className="grid gap-2 p-5">
+                  {detailLoading ? (
+                    <p className="rounded-xl border border-slate-700 bg-white/5 px-3 py-2 text-sm text-slate-300">
+                      Loading contributor details...
+                    </p>
+                  ) : detailError ? (
+                    <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
+                      {detailError}
+                    </p>
+                  ) : detailContributors.length === 0 ? (
+                    <p className="rounded-xl border border-slate-700 bg-white/5 px-3 py-2 text-sm text-slate-300">
+                      No user-level view details found for this range.
+                    </p>
+                  ) : (
+                    <div className="grid max-h-72 gap-2 overflow-y-auto pr-1">
+                      <p className="text-xs text-slate-400">
+                        Contributors are listed by highest view count first.
+                      </p>
+                      {detailContributors.map((contributor, index) => {
+                        const contributionPercent =
+                          detailTotalViews > 0 ? (contributor.viewCount / detailTotalViews) * 100 : 0;
+                        return (
+                          <div
+                            key={`${selectedPoint.instructionId}-${contributor.userId ?? "unknown"}`}
+                            className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2"
+                          >
+                            <p className="text-sm font-semibold text-slate-100">
+                              #{index + 1} {contributor.label}
+                            </p>
+                            <p className="text-sm text-cyan-200">
+                              {contributor.viewCount} view{contributor.viewCount === 1 ? "" : "s"} (
+                              {contributionPercent.toFixed(1)}%)
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </article>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

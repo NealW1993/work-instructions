@@ -1488,7 +1488,19 @@ export function UserAdminPanel() {
         ))}
       </div>
 
-      <div className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+      <div
+        onClick={(event) => {
+          if (isInteractiveClickTarget(event.target)) {
+            return;
+          }
+
+          setUsersCollapsed((current) => !current);
+        }}
+        className={cn(
+          "grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7",
+          "cursor-pointer",
+        )}
+      >
         <div className="flex items-center justify-between gap-2">
           <button
             type="button"

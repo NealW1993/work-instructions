@@ -20,6 +20,7 @@ interface ReviewCoverageWorkItemRelation {
 
 interface ReviewCoverageInstructionRow {
   id: string;
+  revision: number;
   updated_at: string;
   work_items: ReviewCoverageWorkItemRelation | ReviewCoverageWorkItemRelation[] | null;
 }
@@ -101,7 +102,7 @@ export async function GET(request: NextRequest) {
 
   const { data: instructionRows, error: instructionRowsError } = await supabaseAdmin
     .from("work_instructions")
-    .select("id, updated_at, work_items!inner(part_id, item_title, departments(name))")
+    .select("id, revision, updated_at, work_items!inner(part_id, item_title, departments(name))")
     .eq("is_archived", false)
     .range(0, 9999);
 
@@ -158,6 +159,7 @@ export async function GET(request: NextRequest) {
 
       return {
         instructionId: instruction.id,
+        revision: instruction.revision,
         partId: workItem?.part_id?.trim() || "N/A",
         itemTitle: workItem?.item_title?.trim() || "Untitled work instruction",
         departmentName: department?.name?.trim() || "Unknown Department",
@@ -172,11 +174,12 @@ export async function GET(request: NextRequest) {
     .filter(
       (
         entry,
-      ): entry is {
-        instructionId: string;
-        partId: string;
-        itemTitle: string;
-        departmentName: string;
+        ): entry is {
+          instructionId: string;
+          revision: number;
+          partId: string;
+          itemTitle: string;
+          departmentName: string;
         reviewReason: string;
         isFlagged: boolean;
         isOutOfRange: boolean;

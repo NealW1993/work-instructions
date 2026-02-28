@@ -8,6 +8,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 interface ReviewCoverageInstruction {
   instructionId: string;
+  revision: number;
   partId: string;
   itemTitle: string;
   departmentName: string;
@@ -146,11 +147,11 @@ export function ReviewCoverageKpiPanel() {
                 />
               ) : null}
             </svg>
-            <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
-              <p className="text-2xl font-extrabold text-slate-900 dark:text-slate-100">
+            <div className="pointer-events-none absolute inset-0 text-center">
+              <p className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-2xl font-extrabold text-slate-900 dark:text-slate-100">
                 {needsReviewCount}
               </p>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
+              <p className="absolute bottom-3 left-1/2 -translate-x-1/2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
                 Needs Review
               </p>
             </div>
@@ -199,7 +200,7 @@ export function ReviewCoverageKpiPanel() {
                 >
                   <div className="flex flex-wrap items-center justify-between gap-1">
                     <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                      {instruction.partId} | {instruction.departmentName}
+                      {instruction.partId} | Rev {instruction.revision} | {instruction.departmentName}
                     </p>
                     <span className="rounded-full border border-amber-500/45 bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-100">
                       {instruction.reviewReason}

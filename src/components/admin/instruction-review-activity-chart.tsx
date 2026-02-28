@@ -970,7 +970,7 @@ export function InstructionReviewActivityChart({
                   display: "grid",
                   gridTemplateColumns: `repeat(${activeBuckets.length}, minmax(0, 1fr))`,
                   gap: activeBuckets.length > 20 ? "1px" : "3px",
-                  alignItems: "end",
+                  alignItems: "stretch",
                 }}
               >
                 {activeBuckets.map((bucket, i) => {
