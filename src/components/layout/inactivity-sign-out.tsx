@@ -4,6 +4,10 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { usePostHog } from "posthog-js/react";
 
+import {
+  getCurrentBrowserPathWithSearch,
+  saveAutoLogoutRouteForUser,
+} from "@/lib/last-route-restore";
 import { clearSessionStart, getSessionStartTime } from "@/lib/session-timer";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { persistActiveThemePreference } from "@/lib/theme-client";
@@ -36,6 +40,14 @@ export function InactivitySignOut() {
           : null;
 
       try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        const currentPath = getCurrentBrowserPathWithSearch();
+        if (user?.id && currentPath) {
+          saveAutoLogoutRouteForUser(user.id, currentPath, window.scrollX, window.scrollY);
+        }
+
         const response = await fetch("/api/auth/session/end", {
           method: "POST",
           headers: { "Content-Type": "application/json" },

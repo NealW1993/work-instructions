@@ -165,7 +165,7 @@ function getReviewTransitionLabel(event: ReviewActivityEvent): string {
 
 function getSeriesBarHeight(count: number, maxCount: number): number {
   if (count <= 0 || maxCount <= 0) return 0;
-  return Math.min(96, Math.max((count / maxCount) * 100, 6));
+  return Math.min(100, Math.max((count / maxCount) * 100, 0));
 }
 
 function isReviewPeriod(value: unknown): value is ReviewPeriod {
@@ -651,12 +651,17 @@ export function InstructionReviewActivityChart({
     () => Math.max(...activeBuckets.flatMap((b) => [b.needsReviewCount, b.upToDateCount]), 1),
     [activeBuckets],
   );
-  const axisStep = Math.max(1, Math.ceil(maxCount / 4));
-  const axisTicks = useMemo(
-    () => Array.from({ length: 5 }, (_, i) => axisStep * (4 - i)),
-    [axisStep],
+  const axisMax = maxCount;
+  const axisTicks = useMemo(() => {
+    const ticks = Array.from({ length: 5 }, (_, index) =>
+      Math.ceil((axisMax * (4 - index)) / 4),
+    );
+    ticks[ticks.length - 1] = 0;
+    return ticks;
+  }, [axisMax]);
+  const axisTickOffsets = axisTicks.map((_, index) =>
+    axisTicks.length <= 1 ? 0 : (index / (axisTicks.length - 1)) * 100,
   );
-  const axisMax = axisTicks[0] ?? 1;
   const labelStep =
     period === "year" || period === "week" ? 1 : period === "month" ? 4 : 4;
 
@@ -933,13 +938,21 @@ export function InstructionReviewActivityChart({
           </p>
         </div>
 
-        <div className="grid grid-cols-[2rem_minmax(0,1fr)] gap-2">
+        <div className="grid grid-cols-[2.5rem_minmax(0,1fr)] gap-2">
           {/* Y-axis */}
-          <div className="grid h-44 grid-rows-5 items-end text-right text-[10px] font-semibold text-slate-500 dark:text-slate-400">
-            {axisTicks.map((tick, i) => (
+          <div className="relative h-44">
+            {axisTicks.map((tick, index) => (
               <span
-                key={`axis-${tick}-${i}`}
-                className={i === axisTicks.length - 1 ? "" : "translate-y-1"}
+                key={`axis-${tick}-${index}`}
+                className={cn(
+                  "absolute right-0 text-right text-[10px] font-semibold leading-none text-slate-500 dark:text-slate-400",
+                  index === 0
+                    ? "translate-y-0"
+                    : index === axisTicks.length - 1
+                      ? "-translate-y-full"
+                      : "-translate-y-1/2",
+                )}
+                style={{ top: `${axisTickOffsets[index] ?? 0}%` }}
               >
                 {tick}
               </span>
@@ -949,31 +962,30 @@ export function InstructionReviewActivityChart({
           <div className="min-w-0">
             <div className="relative h-44 overflow-hidden rounded-lg border border-slate-300/70 bg-white/75 dark:border-slate-700 dark:bg-slate-950/40">
               {/* Grid lines */}
-              <div className="pointer-events-none absolute inset-0 grid grid-rows-5">
-                {axisTicks.map((_, i) => (
+              <div className="pointer-events-none absolute inset-0">
+                {axisTickOffsets.map((offset, index) => (
                   <span
-                    key={`grid-${i}`}
-                    className={cn(
-                      "border-t border-dashed border-slate-300/70 dark:border-slate-700/70",
-                      i === axisTicks.length - 1
-                        ? "border-b border-slate-300/70 dark:border-slate-700/70"
-                        : "",
-                    )}
+                    key={`grid-${index}`}
+                    className="absolute left-0 right-0 border-t border-dashed border-slate-300/70 dark:border-slate-700/70"
+                    style={{
+                      top:
+                        index === axisTickOffsets.length - 1
+                          ? "calc(100% - 1px)"
+                          : `${offset}%`,
+                    }}
                   />
                 ))}
               </div>
 
               {/* Bars */}
               <div
-                className="relative z-10 h-full px-1"
+                className="relative z-10 grid h-full items-end px-1"
                 style={{
-                  display: "grid",
-                  gridTemplateColumns: `repeat(${activeBuckets.length}, minmax(0, 1fr))`,
+                  gridTemplateColumns: `repeat(${Math.max(activeBuckets.length, 1)}, minmax(0, 1fr))`,
                   gap: activeBuckets.length > 20 ? "1px" : "3px",
-                  alignItems: "stretch",
                 }}
               >
-                {activeBuckets.map((bucket, i) => {
+                {activeBuckets.map((bucket) => {
                   const isSelected = selectedBucketKey === bucket.key;
                   const dimNeeds = statusFilter === "up_to_date";
                   const dimReviewed = statusFilter === "needs_review";
@@ -986,54 +998,65 @@ export function InstructionReviewActivityChart({
                       type="button"
                       onClick={() => setSelectedBucketKey(bucket.key)}
                       className={cn(
-                        "group grid h-full min-w-0 grid-rows-[minmax(0,1fr)_auto] items-end rounded-md px-0.5 pb-1 pt-1 outline-none transition focus-visible:ring-2 focus-visible:ring-cyan-500/70",
+                        "group flex h-full min-w-0 items-end justify-center gap-[3px] rounded-md px-0.5 pb-1 pt-1 outline-none transition focus-visible:ring-2 focus-visible:ring-cyan-500/70",
                         isSelected
                           ? "bg-cyan-500/15 ring-1 ring-cyan-500/45"
                           : "hover:bg-cyan-500/10",
                       )}
                       title={`${bucket.label}: Needs Review ${bucket.needsReviewCount}, Reviewed ${bucket.upToDateCount}`}
                     >
-                      <div className="flex min-h-0 w-full items-end justify-center gap-[3px]">
-                        <span
-                          className={cn(
-                            "w-[42%] rounded-t-[4px] border border-amber-300/25 transition",
-                            isSelected
-                              ? "bg-gradient-to-t from-amber-700 to-amber-500"
-                              : "bg-amber-500/70 group-hover:bg-amber-400/90",
-                            dimNeeds ? "opacity-30" : "opacity-100",
-                          )}
-                          style={{ height: `${needsH}%` }}
-                        />
-                        <span
-                          className={cn(
-                            "w-[42%] rounded-t-[4px] border border-emerald-300/25 transition",
-                            isSelected
-                              ? "bg-gradient-to-t from-emerald-700 to-cyan-500"
-                              : "bg-cyan-500/70 group-hover:bg-cyan-400/90",
-                            dimReviewed ? "opacity-30" : "opacity-100",
-                          )}
-                          style={{ height: `${reviewedH}%` }}
-                        />
-                      </div>
-                      {i % labelStep === 0 ? (
-                        <span
-                          className={cn(
-                            "mt-1 text-[10px] font-semibold leading-none",
-                            isSelected
-                              ? "text-cyan-700 dark:text-cyan-200"
-                              : "text-slate-600 dark:text-slate-300",
-                          )}
-                        >
-                          {bucket.label}
-                        </span>
-                      ) : (
-                        <span className="mt-1 h-[10px]" />
-                      )}
+                      <span
+                        className={cn(
+                          "w-[42%] rounded-t-[4px] border border-amber-300/25 transition",
+                          isSelected
+                            ? "bg-gradient-to-t from-amber-700 to-amber-500"
+                            : "bg-amber-500/70 group-hover:bg-amber-400/90",
+                          dimNeeds ? "opacity-30" : "opacity-100",
+                        )}
+                        style={{ height: `${needsH}%` }}
+                      />
+                      <span
+                        className={cn(
+                          "w-[42%] rounded-t-[4px] border border-emerald-300/25 transition",
+                          isSelected
+                            ? "bg-gradient-to-t from-emerald-700 to-cyan-500"
+                            : "bg-cyan-500/70 group-hover:bg-cyan-400/90",
+                          dimReviewed ? "opacity-30" : "opacity-100",
+                        )}
+                        style={{ height: `${reviewedH}%` }}
+                      />
                     </button>
                   );
                 })}
               </div>
             </div>
+
+            {activeBuckets.length > 0 ? (
+              <div
+                className="mt-1 grid gap-0"
+                style={{
+                  gridTemplateColumns: `repeat(${Math.max(activeBuckets.length, 1)}, minmax(0, 1fr))`,
+                }}
+              >
+                {activeBuckets.map((bucket, index) =>
+                  index % labelStep === 0 ? (
+                    <span
+                      key={`label-${bucket.key}`}
+                      className={cn(
+                        "truncate px-0.5 text-center text-[10px] font-semibold leading-none",
+                        selectedBucketKey === bucket.key
+                          ? "text-cyan-700 dark:text-cyan-200"
+                          : "text-slate-600 dark:text-slate-300",
+                      )}
+                    >
+                      {bucket.label}
+                    </span>
+                  ) : (
+                    <span key={`label-${bucket.key}`} className="h-[10px]" />
+                  ),
+                )}
+              </div>
+            ) : null}
           </div>
         </div>
       </div>

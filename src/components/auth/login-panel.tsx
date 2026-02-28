@@ -5,6 +5,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useEffect, useRef, useState } from "react";
 
 import { PinInput } from "@/components/ui/pin-input";
+import {
+  popAutoLogoutRouteForUser,
+  savePendingPostLoginScrollRestore,
+} from "@/lib/last-route-restore";
 import { setSessionStartNow } from "@/lib/session-timer";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isValidEmployeeId, normalizeEmployeeId } from "@/lib/utils";
@@ -20,6 +24,84 @@ async function parseJsonResponse(response: Response) {
   }
 
   return payload;
+}
+
+function isSafeRestorePath(path: string) {
+  const normalizedPath = path.trim();
+  if (!normalizedPath.startsWith("/")) {
+    return false;
+  }
+
+  if (
+    normalizedPath.startsWith("/login") ||
+    normalizedPath.startsWith("/api") ||
+    normalizedPath.startsWith("/_next")
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+async function doesRouteExistForCurrentSession(path: string) {
+  if (!isSafeRestorePath(path)) {
+    return false;
+  }
+
+  try {
+    const targetUrl = new URL(path, window.location.origin);
+    const response = await fetch(targetUrl.toString(), {
+      method: "GET",
+      credentials: "same-origin",
+      cache: "no-store",
+      redirect: "follow",
+    });
+
+    if (!response.ok || response.status === 404) {
+      return false;
+    }
+
+    const finalUrl = new URL(response.url, window.location.origin);
+    if (finalUrl.pathname === "/login") {
+      return false;
+    }
+
+    if (targetUrl.pathname !== "/dashboard" && finalUrl.pathname === "/dashboard") {
+      return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resolvePostLoginDestination(userId: string) {
+  const fallback = {
+    path: "/dashboard",
+    scrollX: 0,
+    scrollY: 0,
+  };
+
+  const storedRoute = popAutoLogoutRouteForUser(userId);
+  if (!storedRoute) {
+    return fallback;
+  }
+
+  if (!isSafeRestorePath(storedRoute.path)) {
+    return fallback;
+  }
+
+  const routeExists = await doesRouteExistForCurrentSession(storedRoute.path);
+  if (!routeExists) {
+    return fallback;
+  }
+
+  return {
+    path: storedRoute.path,
+    scrollX: storedRoute.scrollX,
+    scrollY: storedRoute.scrollY,
+  };
 }
 
 export function LoginPanel() {
@@ -139,7 +221,22 @@ export function LoginPanel() {
       console.warn("Unable to sync session start:", touchSessionError.message);
     }
 
-    router.push("/dashboard");
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const destination = user
+      ? await resolvePostLoginDestination(user.id)
+      : {
+          path: "/dashboard",
+          scrollX: 0,
+          scrollY: 0,
+        };
+
+    if (destination.scrollX > 0 || destination.scrollY > 0) {
+      savePendingPostLoginScrollRestore(destination.path, destination.scrollX, destination.scrollY);
+    }
+
+    router.push(destination.path);
   }
 
   async function handlePinLogin(event: FormEvent<HTMLFormElement>) {

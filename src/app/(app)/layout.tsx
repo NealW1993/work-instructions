@@ -1,6 +1,7 @@
 import { PostHogIdentify } from "@/components/analytics/posthog-identify";
 import { AppHeader } from "@/components/layout/app-header";
 import { InactivitySignOut } from "@/components/layout/inactivity-sign-out";
+import { PostLoginScrollRestore } from "@/components/layout/post-login-scroll-restore";
 import { ThemePreferenceSync } from "@/components/layout/theme-preference-sync";
 import { requireAuthenticatedUser } from "@/lib/auth";
 
@@ -21,6 +22,7 @@ export default async function AppLayout({
       />
       <ThemePreferenceSync themePreference={profile.theme_preference ?? "dark"} />
       <InactivitySignOut />
+      <PostLoginScrollRestore />
       <AppHeader profile={profile} />
       <main className="mx-auto w-full min-w-0 max-w-7xl px-4 py-6 md:px-8 md:py-8">
         {children}
