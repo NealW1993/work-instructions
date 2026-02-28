@@ -6,6 +6,7 @@ import sanitizeHtml from "sanitize-html";
 
 import { DeleteInstructionButton } from "@/components/instructions/delete-instruction-button";
 import { InstructionBackButton } from "@/components/instructions/instruction-back-button";
+import { InstructionArchivedRedirectGuard } from "@/components/instructions/instruction-archived-redirect-guard";
 import { InstructionBodyLightbox } from "@/components/instructions/instruction-body-lightbox";
 import { InstructionMediaSection } from "@/components/instructions/instruction-media-section";
 import {
@@ -689,6 +690,10 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
 
   return (
     <article className="grid gap-5">
+      <InstructionArchivedRedirectGuard
+        instructionId={instruction.id}
+        instructionIsArchived={instructionIsArchived}
+      />
       <InstructionViewTracker instructionId={instruction.id} />
 
       <InstructionBackButton

@@ -6,6 +6,7 @@ import { Loader2, UploadCloud } from "lucide-react";
 import { createPortal } from "react-dom";
 
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
+import { registerArchivedInstructionRedirect } from "@/components/instructions/instruction-archived-redirect-state";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { cn, escapeLikeQuery } from "@/lib/utils";
 
@@ -1313,6 +1314,23 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
               ? (initialData?.instructionId ?? null)
               : null;
         let archivedInstructionRollbackId: string | null = null;
+        let carriedPinCreatedAt: string | null = null;
+
+        if (instructionToArchiveId) {
+          const { data: existingPin, error: existingPinError } = await supabase
+            .from("user_pinned_instructions")
+            .select("created_at")
+            .eq("user_id", user.id)
+            .eq("instruction_id", instructionToArchiveId)
+            .maybeSingle();
+
+          if (existingPinError) {
+            throw new Error(existingPinError.message ?? "Unable to read pinned instruction state.");
+          }
+
+          const typedExistingPin = existingPin as { created_at: string } | null;
+          carriedPinCreatedAt = typedExistingPin?.created_at ?? null;
+        }
 
         if (instructionToArchiveId) {
           const { error: archiveCurrentInstructionError } = await supabase
@@ -1374,6 +1392,33 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         changeOccurredAt = typedInstruction.created_at ?? new Date().toISOString();
         changeEventType = "created";
         confirmedReplacementInstructionIdRef.current = null;
+
+        if (instructionToArchiveId) {
+          registerArchivedInstructionRedirect(instructionToArchiveId, instructionId);
+
+          if (carriedPinCreatedAt) {
+            const { error: pinCarryInsertError } = await supabase
+              .from("user_pinned_instructions")
+              .upsert(
+                {
+                  user_id: user.id,
+                  instruction_id: instructionId,
+                  created_at: carriedPinCreatedAt,
+                },
+                {
+                  onConflict: "user_id,instruction_id",
+                },
+              );
+
+            if (!pinCarryInsertError) {
+              await supabase
+                .from("user_pinned_instructions")
+                .delete()
+                .eq("user_id", user.id)
+                .eq("instruction_id", instructionToArchiveId);
+            }
+          }
+        }
       } else {
         const { data: updatedInstruction, error: updateInstructionError } = await supabase
           .from("work_instructions")
