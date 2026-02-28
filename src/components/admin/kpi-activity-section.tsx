@@ -470,7 +470,7 @@ export function KpiActivitySection() {
                   <div>
                     <h2 className="text-base font-bold text-slate-100">{selectedBucket.point.key}</h2>
                     <p className="mt-0.5 text-xs text-slate-400">
-                      {selectedBucket.point.created} created Â· {selectedBucket.point.updated} updated
+                      {selectedBucket.point.created} created | {selectedBucket.point.updated} updated
                     </p>
                   </div>
                   <button
@@ -508,14 +508,14 @@ export function KpiActivitySection() {
                         >
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <p className="text-sm font-semibold text-slate-100">
-                              {event.partId} Â· {event.itemTitle}
+                              {event.partId} | {event.itemTitle}
                             </p>
                             <span
                               className={cn(
                                 "rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
                                 event.eventType === "created"
-                                  ? "border-emerald-500/40 bg-emerald-500/20 text-emerald-300"
-                                  : "border-cyan-500/40 bg-cyan-500/20 text-cyan-300",
+                                  ? "border-emerald-500/40 bg-emerald-500/20 text-emerald-700 dark:text-emerald-300"
+                                  : "border-cyan-500/40 bg-cyan-500/20 text-cyan-700 dark:text-cyan-300",
                               )}
                             >
                               {event.eventType}

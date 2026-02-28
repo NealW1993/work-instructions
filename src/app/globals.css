@@ -574,25 +574,6 @@ html:not(.dark) .review-note-modal-shell textarea:focus {
   height: 0;
 }
 
-.ai-enhancement-compare-preview,
-.ai-enhancement-compare-preview * {
-  color: #dbe6f3 !important;
-}
-
-.ai-enhancement-compare-preview h1,
-.ai-enhancement-compare-preview h2,
-.ai-enhancement-compare-preview h3,
-.ai-enhancement-compare-preview strong,
-.ai-enhancement-compare-preview b {
-  color: #f5f9ff !important;
-}
-
-.ai-enhancement-compare-preview blockquote,
-.ai-enhancement-compare-preview code,
-.ai-enhancement-compare-preview pre {
-  color: #d3dff0 !important;
-}
-
 @keyframes instruction-like-thumb-pop {
   0% {
     transform: scale(1);

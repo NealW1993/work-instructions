@@ -340,16 +340,16 @@ export function InstructionUpdatesPanel({ events, className }: InstructionUpdate
           {hasSourcePayloadData(selectedSourceEvent.sourcePayload) ? (
             <div className="grid gap-3">
               {selectedSourceEvent.sourcePayload?.reviewStateChange ? (
-                <div className="grid gap-1.5 rounded-lg border border-amber-500/35 bg-amber-500/10 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-amber-200">
+                <div className="grid gap-1.5 rounded-lg border border-amber-300/70 bg-amber-100/80 p-3 dark:border-amber-500/35 dark:bg-amber-500/10">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-200">
                     Review State Change
                   </p>
-                  <p className="text-sm text-amber-100">
+                  <p className="text-sm text-amber-900 dark:text-amber-100">
                     {selectedSourceEvent.sourcePayload.reviewStateChange.previousStatus
                       ? `${getReviewStatusLabel(selectedSourceEvent.sourcePayload.reviewStateChange.previousStatus)} to ${getReviewStatusLabel(selectedSourceEvent.sourcePayload.reviewStateChange.nextStatus)}`
                       : `Set to ${getReviewStatusLabel(selectedSourceEvent.sourcePayload.reviewStateChange.nextStatus)}`}
                   </p>
-                  <p className="text-xs text-amber-100/85">
+                  <p className="text-xs text-amber-800/90 dark:text-amber-100/85">
                     Origin:{" "}
                     <span className="font-semibold">
                       {getReviewOriginLabel(selectedSourceEvent.sourcePayload.reviewStateChange.reviewOrigin)}
@@ -357,10 +357,10 @@ export function InstructionUpdatesPanel({ events, className }: InstructionUpdate
                   </p>
                   {selectedSourceEvent.sourcePayload.reviewStateChange.note ? (
                     <div className="grid gap-1">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-amber-200/90">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-amber-800/90 dark:text-amber-200/90">
                         Review Comment
                       </p>
-                      <p className="rounded-md border border-amber-500/35 bg-amber-500/15 px-2.5 py-2 text-sm text-amber-50">
+                      <p className="rounded-md border border-amber-300/80 bg-amber-100/95 px-2.5 py-2 text-sm text-amber-950 dark:border-amber-500/35 dark:bg-amber-500/15 dark:text-amber-50">
                         {selectedSourceEvent.sourcePayload.reviewStateChange.note}
                       </p>
                     </div>
@@ -368,7 +368,7 @@ export function InstructionUpdatesPanel({ events, className }: InstructionUpdate
                       "system" &&
                     selectedSourceEvent.sourcePayload.reviewStateChange.nextStatus ===
                       "needs_review" ? (
-                    <p className="text-xs text-amber-100/90">
+                    <p className="text-xs text-amber-800/90 dark:text-amber-100/90">
                       System counter marked this instruction as Needs Review.
                     </p>
                   ) : null}
@@ -437,7 +437,7 @@ export function InstructionUpdatesPanel({ events, className }: InstructionUpdate
 
               {(selectedSourceEvent.sourcePayload?.previousRevision !== undefined ||
                 selectedSourceEvent.sourcePayload?.nextRevision !== undefined) ? (
-                <p className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+                <p className="rounded-lg border border-amber-300/70 bg-amber-100/80 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/35 dark:bg-amber-500/10 dark:text-amber-100">
                   Revision {selectedSourceEvent.sourcePayload?.previousRevision ?? "?"} to{" "}
                   {selectedSourceEvent.sourcePayload?.nextRevision ?? "?"}
                 </p>

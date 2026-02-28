@@ -1997,7 +1997,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                     <p className="text-sm font-semibold text-slate-100">Your Version</p>
                     <div className="max-h-[52vh] overflow-auto rounded-lg border border-slate-700/80 bg-slate-950/65 p-3">
                       <div
-                        className="prose-markdown ai-enhancement-compare-preview text-sm text-slate-100"
+                        className="prose-markdown text-sm text-slate-900 dark:text-slate-100"
                         dangerouslySetInnerHTML={{
                           __html: enhancementComparison.originalContent,
                         }}
@@ -2009,7 +2009,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                     <p className="text-sm font-semibold text-cyan-100">AI Enhanced Version</p>
                     <div className="max-h-[52vh] overflow-auto rounded-lg border border-cyan-500/40 bg-slate-950/65 p-3">
                       <div
-                        className="prose-markdown ai-enhancement-compare-preview text-sm text-slate-100"
+                        className="prose-markdown text-sm text-slate-900 dark:text-slate-100"
                         dangerouslySetInnerHTML={{
                           __html: enhancementComparison.enhancedContent,
                         }}
