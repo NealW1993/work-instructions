@@ -43,6 +43,8 @@ interface CreateUserFieldErrors {
   pin: boolean;
 }
 
+type UserSettingField = "employeeId" | "role" | "inactivityTimeout" | "pin";
+
 type ConfirmDialogState =
   | {
       kind: "delete-user";
@@ -142,6 +144,25 @@ function normalizeInactivityTimeoutInput(value: string) {
   return parsed;
 }
 
+function getUserSettingSavedKey(userId: string, field: UserSettingField) {
+  return `${userId}:${field}`;
+}
+
+function SavedRibbonOverlay({ visible }: { visible: boolean }) {
+  if (!visible) {
+    return null;
+  }
+
+  return (
+    <span className="pointer-events-none absolute inset-0 overflow-hidden rounded-lg">
+      <span className="user-setting-saved-ribbon-layer absolute inset-y-0 -left-1/2 w-[200%] bg-emerald-500/35" />
+      <span className="user-setting-saved-ribbon-text absolute inset-y-0 -left-1/2 flex w-[200%] items-center justify-center text-[11px] font-extrabold uppercase tracking-[0.2em] text-emerald-950 dark:text-emerald-50">
+        Saved
+      </span>
+    </span>
+  );
+}
+
 function isInteractiveClickTarget(target: EventTarget | null) {
   if (!(target instanceof Node)) {
     return false;
@@ -226,8 +247,10 @@ export function UserAdminPanel() {
   const [inactivityTimeoutUpdates, setInactivityTimeoutUpdates] = useState<Record<string, string>>(
     {},
   );
+  const [userSettingSavedFlash, setUserSettingSavedFlash] = useState<Record<string, boolean>>({});
   const [portalReady, setPortalReady] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
+  const userSettingSavedTimeoutIdsRef = useRef<number[]>([]);
 
   const getAuthHeaders = useCallback(async () => {
     const {
@@ -366,6 +389,39 @@ export function UserAdminPanel() {
 
   useEffect(() => {
     setPortalReady(true);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      for (const timeoutId of userSettingSavedTimeoutIdsRef.current) {
+        window.clearTimeout(timeoutId);
+      }
+      userSettingSavedTimeoutIdsRef.current = [];
+    };
+  }, []);
+
+  const triggerUserSettingSavedFlash = useCallback((userId: string, field: UserSettingField) => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const key = getUserSettingSavedKey(userId, field);
+    setUserSettingSavedFlash((current) => ({
+      ...current,
+      [key]: true,
+    }));
+
+    const timeoutId = window.setTimeout(() => {
+      setUserSettingSavedFlash((current) => ({
+        ...current,
+        [key]: false,
+      }));
+      userSettingSavedTimeoutIdsRef.current = userSettingSavedTimeoutIdsRef.current.filter(
+        (currentId) => currentId !== timeoutId,
+      );
+    }, 6200);
+
+    userSettingSavedTimeoutIdsRef.current.push(timeoutId);
   }, []);
 
   useEffect(() => {
@@ -684,6 +740,12 @@ export function UserAdminPanel() {
 
       setMessage("Role updated.");
       await fetchUsers();
+      setRoleUpdates((current) => {
+        const next = { ...current };
+        delete next[userId];
+        return next;
+      });
+      triggerUserSettingSavedFlash(userId, "role");
     } catch (caughtError) {
       const normalizedMessage =
         caughtError instanceof Error ? caughtError.message : "Unable to update role";
@@ -725,6 +787,7 @@ export function UserAdminPanel() {
         ...current,
         [userId]: "",
       }));
+      triggerUserSettingSavedFlash(userId, "pin");
     } catch (caughtError) {
       const normalizedMessage =
         caughtError instanceof Error ? caughtError.message : "Unable to update PIN";
@@ -766,11 +829,13 @@ export function UserAdminPanel() {
       }
 
       setMessage("Employee ID updated.");
-      setEmployeeIdUpdates((current) => ({
-        ...current,
-        [userId]: employeeId,
-      }));
       await fetchUsers();
+      setEmployeeIdUpdates((current) => {
+        const next = { ...current };
+        delete next[userId];
+        return next;
+      });
+      triggerUserSettingSavedFlash(userId, "employeeId");
     } catch (caughtError) {
       const normalizedMessage =
         caughtError instanceof Error ? caughtError.message : "Unable to update employee ID";
@@ -825,6 +890,12 @@ export function UserAdminPanel() {
           : `Auto sign-out timeout updated to ${normalizedTimeout} minute${normalizedTimeout === 1 ? "" : "s"}.`,
       );
       await fetchUsers();
+      setInactivityTimeoutUpdates((current) => {
+        const next = { ...current };
+        delete next[userId];
+        return next;
+      });
+      triggerUserSettingSavedFlash(userId, "inactivityTimeout");
     } catch (caughtError) {
       const normalizedMessage =
         caughtError instanceof Error
@@ -1699,29 +1770,76 @@ export function UserAdminPanel() {
               </tr>
             </thead>
             <tbody>
-              {users.map((user) => (
+              {users.map((user) => {
+                const employeeDraft = employeeIdUpdates[user.id] ?? user.employee_id ?? "";
+                const employeeCurrent = user.employee_id ?? "";
+                const employeeDirty = normalizeEmployeeId(employeeDraft) !== employeeCurrent;
+                const employeeSavedFlash = Boolean(
+                  userSettingSavedFlash[getUserSettingSavedKey(user.id, "employeeId")],
+                );
+
+                const roleDraft = roleUpdates[user.id] ?? user.role;
+                const roleDirty = roleDraft !== user.role;
+                const roleSavedFlash = Boolean(
+                  userSettingSavedFlash[getUserSettingSavedKey(user.id, "role")],
+                );
+
+                const timeoutCurrent =
+                  user.inactivity_timeout_minutes === null
+                    ? "never"
+                    : Number.isInteger(user.inactivity_timeout_minutes)
+                      ? String(user.inactivity_timeout_minutes)
+                      : "15";
+                const timeoutDraft = inactivityTimeoutUpdates[user.id] ?? timeoutCurrent;
+                const timeoutDirty =
+                  timeoutDraft.trim().toLowerCase() !== timeoutCurrent.trim().toLowerCase();
+                const timeoutSavedFlash = Boolean(
+                  userSettingSavedFlash[getUserSettingSavedKey(user.id, "inactivityTimeout")],
+                );
+
+                const pinDraft = pinUpdates[user.id] ?? "";
+                const pinDirty = pinDraft.trim().length > 0;
+                const pinSavedFlash = Boolean(
+                  userSettingSavedFlash[getUserSettingSavedKey(user.id, "pin")],
+                );
+
+                return (
                 <tr key={user.id} className="border-t border-slate-200/70 dark:border-slate-800">
                   <td className="px-3 py-2 font-medium">{user.full_name}</td>
                   <td className="px-3 py-2">{user.email}</td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-2">
-                      <input
-                        value={employeeIdUpdates[user.id] ?? user.employee_id ?? ""}
-                        onChange={(event) =>
-                          setEmployeeIdUpdates((current) => ({
-                            ...current,
-                            [user.id]: normalizeEmployeeId(event.target.value),
-                          }))
-                        }
-                        inputMode="numeric"
-                        pattern="[0-9]{1,6}"
-                        maxLength={6}
-                        className="rounded-lg border border-slate-300 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-950"
-                      />
+                      <div className="relative">
+                        <input
+                          value={employeeDraft}
+                          onChange={(event) =>
+                            setEmployeeIdUpdates((current) => ({
+                              ...current,
+                              [user.id]: normalizeEmployeeId(event.target.value),
+                            }))
+                          }
+                          inputMode="numeric"
+                          pattern="[0-9]{1,6}"
+                          maxLength={6}
+                          className={cn(
+                            "rounded-lg border border-slate-300 bg-white px-2 py-1 transition dark:border-slate-700 dark:bg-slate-950",
+                            employeeDirty
+                              ? "border-emerald-500/55 ring-2 ring-emerald-500/20"
+                              : "",
+                          )}
+                        />
+                        <SavedRibbonOverlay visible={employeeSavedFlash} />
+                      </div>
                       <button
                         type="button"
+                        disabled={busy || !employeeDirty}
                         onClick={() => void updateEmployeeId(user.id)}
-                        className="rounded-lg border border-cyan-500/30 px-2 py-1 text-cyan-700 transition hover:bg-cyan-500/10 dark:text-cyan-300"
+                        className={cn(
+                          "rounded-lg border px-2 py-1 transition disabled:cursor-not-allowed disabled:opacity-60",
+                          employeeDirty
+                            ? "border-emerald-500/55 bg-emerald-500/15 font-semibold text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-300"
+                            : "border-cyan-500/30 text-cyan-700 hover:bg-cyan-500/10 dark:text-cyan-300",
+                        )}
                       >
                         Save
                       </button>
@@ -1729,26 +1847,40 @@ export function UserAdminPanel() {
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-2">
-                      <select
-                        value={roleUpdates[user.id] ?? user.role}
-                        onChange={(event) =>
-                          setRoleUpdates((current) => ({
-                            ...current,
-                            [user.id]: event.target.value as AppRole,
-                          }))
-                        }
-                        className="rounded-lg border border-slate-300 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-950"
-                      >
-                        {ROLE_OPTIONS.map((role) => (
-                          <option key={role} value={role}>
-                            {role}
-                          </option>
-                        ))}
-                      </select>
+                      <div className="relative">
+                        <select
+                          value={roleDraft}
+                          onChange={(event) =>
+                            setRoleUpdates((current) => ({
+                              ...current,
+                              [user.id]: event.target.value as AppRole,
+                            }))
+                          }
+                          className={cn(
+                            "rounded-lg border border-slate-300 bg-white px-2 py-1 transition dark:border-slate-700 dark:bg-slate-950",
+                            roleDirty
+                              ? "border-emerald-500/55 ring-2 ring-emerald-500/20"
+                              : "",
+                          )}
+                        >
+                          {ROLE_OPTIONS.map((role) => (
+                            <option key={role} value={role}>
+                              {role}
+                            </option>
+                          ))}
+                        </select>
+                        <SavedRibbonOverlay visible={roleSavedFlash} />
+                      </div>
                       <button
                         type="button"
+                        disabled={busy || !roleDirty}
                         onClick={() => void updateRole(user.id)}
-                        className="rounded-lg border border-cyan-500/30 px-2 py-1 text-cyan-700 transition hover:bg-cyan-500/10 dark:text-cyan-300"
+                        className={cn(
+                          "rounded-lg border px-2 py-1 transition disabled:cursor-not-allowed disabled:opacity-60",
+                          roleDirty
+                            ? "border-emerald-500/55 bg-emerald-500/15 font-semibold text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-300"
+                            : "border-cyan-500/30 text-cyan-700 hover:bg-cyan-500/10 dark:text-cyan-300",
+                        )}
                       >
                         Save
                       </button>
@@ -1756,24 +1888,27 @@ export function UserAdminPanel() {
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-2">
-                      <input
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        value={
-                          inactivityTimeoutUpdates[user.id] ??
-                          (user.inactivity_timeout_minutes === null
-                            ? "never"
-                            : String(user.inactivity_timeout_minutes))
-                        }
-                        onChange={(event) =>
-                          setInactivityTimeoutUpdates((current) => ({
-                            ...current,
-                            [user.id]: event.target.value,
-                          }))
-                        }
-                        placeholder="never or minutes"
-                        className="w-36 rounded-lg border border-slate-300 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-950"
-                      />
+                      <div className="relative">
+                        <input
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          value={timeoutDraft}
+                          onChange={(event) =>
+                            setInactivityTimeoutUpdates((current) => ({
+                              ...current,
+                              [user.id]: event.target.value,
+                            }))
+                          }
+                          placeholder="never or minutes"
+                          className={cn(
+                            "w-36 rounded-lg border border-slate-300 bg-white px-2 py-1 transition dark:border-slate-700 dark:bg-slate-950",
+                            timeoutDirty
+                              ? "border-emerald-500/55 ring-2 ring-emerald-500/20"
+                              : "",
+                          )}
+                        />
+                        <SavedRibbonOverlay visible={timeoutSavedFlash} />
+                      </div>
                       <button
                         type="button"
                         onClick={() =>
@@ -1788,8 +1923,14 @@ export function UserAdminPanel() {
                       </button>
                       <button
                         type="button"
+                        disabled={busy || !timeoutDirty}
                         onClick={() => void updateInactivityTimeout(user.id)}
-                        className="rounded-lg border border-cyan-500/30 px-2 py-1 text-cyan-700 transition hover:bg-cyan-500/10 dark:text-cyan-300"
+                        className={cn(
+                          "rounded-lg border px-2 py-1 transition disabled:cursor-not-allowed disabled:opacity-60",
+                          timeoutDirty
+                            ? "border-emerald-500/55 bg-emerald-500/15 font-semibold text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-300"
+                            : "border-cyan-500/30 text-cyan-700 hover:bg-cyan-500/10 dark:text-cyan-300",
+                        )}
                       >
                         Save
                       </button>
@@ -1797,20 +1938,32 @@ export function UserAdminPanel() {
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-2">
-                      <PinInput
-                        value={pinUpdates[user.id] ?? ""}
-                        onChange={(value) =>
-                          setPinUpdates((current) => ({
-                            ...current,
-                            [user.id]: value,
-                          }))
-                        }
-                        className="w-28 rounded-lg px-2 py-1 tracking-[0.25em]"
-                      />
+                      <div className="relative">
+                        <PinInput
+                          value={pinDraft}
+                          onChange={(value) =>
+                            setPinUpdates((current) => ({
+                              ...current,
+                              [user.id]: value,
+                            }))
+                          }
+                          className={cn(
+                            "w-28 rounded-lg px-2 py-1 tracking-[0.25em] transition",
+                            pinDirty ? "border-emerald-500/55 ring-2 ring-emerald-500/20" : "",
+                          )}
+                        />
+                        <SavedRibbonOverlay visible={pinSavedFlash} />
+                      </div>
                       <button
                         type="button"
+                        disabled={busy || !pinDirty}
                         onClick={() => void updatePin(user.id)}
-                        className="rounded-lg border border-cyan-500/30 px-2 py-1 text-cyan-700 transition hover:bg-cyan-500/10 dark:text-cyan-300"
+                        className={cn(
+                          "rounded-lg border px-2 py-1 transition disabled:cursor-not-allowed disabled:opacity-60",
+                          pinDirty
+                            ? "border-emerald-500/55 bg-emerald-500/15 font-semibold text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-300"
+                            : "border-cyan-500/30 text-cyan-700 hover:bg-cyan-500/10 dark:text-cyan-300",
+                        )}
                       >
                         Set PIN
                       </button>
@@ -1843,7 +1996,8 @@ export function UserAdminPanel() {
                     </button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
               </div>
@@ -1851,6 +2005,53 @@ export function UserAdminPanel() {
           </div>
         )}
       </div>
+
+      <style jsx global>{`
+        @keyframes userSettingSavedRibbonSweep {
+          0% {
+            transform: translateX(-52%);
+            opacity: 0;
+          }
+          14% {
+            opacity: 1;
+          }
+          65% {
+            opacity: 1;
+          }
+          100% {
+            transform: translateX(52%);
+            opacity: 0;
+          }
+        }
+
+        .user-setting-saved-ribbon-layer {
+          animation: userSettingSavedRibbonSweep 2.2s cubic-bezier(0.2, 0.9, 0.25, 1) forwards;
+          filter: saturate(1.15);
+        }
+
+        @keyframes userSettingSavedRibbonTextSweep {
+          0% {
+            transform: translateX(-52%);
+            opacity: 0;
+          }
+          10% {
+            opacity: 1;
+          }
+          82% {
+            opacity: 1;
+          }
+          100% {
+            transform: translateX(52%);
+            opacity: 0;
+          }
+        }
+
+        .user-setting-saved-ribbon-text {
+          animation: userSettingSavedRibbonTextSweep 4.95s cubic-bezier(0.2, 0.9, 0.25, 1)
+            forwards;
+          text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+        }
+      `}</style>
 
       {confirmDialog && portalReady
         ? createPortal(

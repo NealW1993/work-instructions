@@ -935,15 +935,6 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
               </p>
             ) : null}
           </div>
-        ) : forkCount > 0 ? (
-          <div className="mb-4 rounded-2xl border border-violet-500/40 bg-violet-500/12 px-4 py-3">
-            <p className="text-sm font-bold text-slate-900 dark:text-slate-100">
-              Original Instruction
-            </p>
-            <p className="text-xs text-slate-700 dark:text-slate-200">
-              {forkCount} fork branch{forkCount === 1 ? "" : "es"} created from this instruction.
-            </p>
-          </div>
         ) : null}
 
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
