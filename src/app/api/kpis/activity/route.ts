@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
 import { canViewKpis } from "@/lib/roles";
@@ -74,36 +74,34 @@ function normalizeMonth(value: string | null, fallback: number): number {
 
 function normalizeDay(value: string | null): Date | null {
   if (!value) return null;
-  const parsed = new Date(`${value}T00:00:00.000Z`);
+  const parsed = new Date(`${value}T00:00:00`);
   if (Number.isNaN(parsed.getTime())) return null;
-  return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
+  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
 }
 
 function normalizeWeekStart(value: string | null): Date | null {
   if (!value) return null;
-  const parsed = new Date(`${value}T00:00:00.000Z`);
+  const parsed = new Date(`${value}T00:00:00`);
   if (Number.isNaN(parsed.getTime())) return null;
   return getMondayOf(parsed);
 }
 
 function getMondayOf(date: Date): Date {
-  const utcDay = date.getUTCDay();
-  const mondayOffset = (utcDay + 6) % 7;
-  return new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() - mondayOffset),
-  );
+  const day = date.getDay();
+  const mondayOffset = (day + 6) % 7;
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() - mondayOffset);
 }
 
 function toDateKey(date: Date): string {
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function toMonthKey(date: Date): string {
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function toHourKey(date: Date): string {
-  return `${toDateKey(date)}T${String(date.getUTCHours()).padStart(2, "0")}`;
+  return `${toDateKey(date)}T${String(date.getHours()).padStart(2, "0")}`;
 }
 
 function formatHourLabel(hour: number): string {
@@ -132,11 +130,11 @@ function buildRange(
   now: Date,
 ): ActivityRange {
   if (period === "day") {
-    const todayUtc = day ?? new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const todayUtc = day ?? new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const nextDayUtc = new Date(todayUtc.getTime() + 24 * 60 * 60 * 1000);
     const prevDay = new Date(todayUtc.getTime() - 24 * 60 * 60 * 1000);
     const dayKey = toDateKey(todayUtc);
-    const label = `${MONTH_FULL[todayUtc.getUTCMonth()]} ${todayUtc.getUTCDate()}, ${todayUtc.getUTCFullYear()}`;
+    const label = `${MONTH_FULL[todayUtc.getMonth()]} ${todayUtc.getDate()}, ${todayUtc.getFullYear()}`;
     return {
       startAt: todayUtc,
       endAt: nextDayUtc,
@@ -162,12 +160,12 @@ function buildRange(
     const we = new Date(ws.getTime() + 7 * 24 * 60 * 60 * 1000);
     const lastDay = new Date(we.getTime() - 24 * 60 * 60 * 1000);
     const prevWs = new Date(ws.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const labelStart = `${MONTH_SHORT[ws.getUTCMonth()]} ${ws.getUTCDate()}`;
-    const labelEnd = `${MONTH_SHORT[lastDay.getUTCMonth()]} ${lastDay.getUTCDate()}, ${lastDay.getUTCFullYear()}`;
+    const labelStart = `${MONTH_SHORT[ws.getMonth()]} ${ws.getDate()}`;
+    const labelEnd = `${MONTH_SHORT[lastDay.getMonth()]} ${lastDay.getDate()}, ${lastDay.getFullYear()}`;
     return {
       startAt: ws,
       endAt: we,
-      label: `${labelStart} – ${labelEnd}`,
+      label: `${labelStart} - ${labelEnd}`,
       prevParams: `period=week&weekStart=${toDateKey(prevWs)}`,
       nextParams: `period=week&weekStart=${toDateKey(we)}`,
       buildPoints() {
@@ -175,7 +173,7 @@ function buildRange(
           const dayDate = new Date(ws.getTime() + d * 24 * 60 * 60 * 1000);
           return {
             key: toDateKey(dayDate),
-            label: `${dayDate.getUTCMonth() + 1}/${dayDate.getUTCDate()}`,
+            label: `${dayDate.getMonth() + 1}/${dayDate.getDate()}`,
             created: 0,
             updated: 0,
           };
@@ -189,8 +187,8 @@ function buildRange(
 
   if (period === "month") {
     const monthIndex = month - 1;
-    const rangeStart = new Date(Date.UTC(year, monthIndex, 1));
-    const rangeEnd = new Date(Date.UTC(year, monthIndex + 1, 1));
+    const rangeStart = new Date(year, monthIndex, 1);
+    const rangeEnd = new Date(year, monthIndex + 1, 1);
     const daysInMonth = Math.round((rangeEnd.getTime() - rangeStart.getTime()) / (24 * 60 * 60 * 1000));
     const prevMonth = month === 1 ? 12 : month - 1;
     const prevYear = month === 1 ? year - 1 : year;
@@ -207,7 +205,7 @@ function buildRange(
           const dayDate = new Date(rangeStart.getTime() + d * 24 * 60 * 60 * 1000);
           return {
             key: toDateKey(dayDate),
-            label: `${dayDate.getUTCMonth() + 1}/${dayDate.getUTCDate()}`,
+            label: `${dayDate.getMonth() + 1}/${dayDate.getDate()}`,
             created: 0,
             updated: 0,
           };
@@ -220,8 +218,8 @@ function buildRange(
   }
 
   // year (default)
-  const rangeStart = new Date(Date.UTC(year, 0, 1));
-  const rangeEnd = new Date(Date.UTC(year + 1, 0, 1));
+  const rangeStart = new Date(year, 0, 1);
+  const rangeEnd = new Date(year + 1, 0, 1);
   return {
     startAt: rangeStart,
     endAt: rangeEnd,
@@ -254,8 +252,8 @@ export async function GET(request: NextRequest) {
   const now = new Date();
   const sp = request.nextUrl.searchParams;
   const period = normalizePeriod(sp.get("period"));
-  const year = normalizeYear(sp.get("year"), now.getUTCFullYear());
-  const month = normalizeMonth(sp.get("month"), now.getUTCMonth() + 1);
+  const year = normalizeYear(sp.get("year"), now.getFullYear());
+  const month = normalizeMonth(sp.get("month"), now.getMonth() + 1);
   const day = normalizeDay(sp.get("day"));
   const weekStart = normalizeWeekStart(sp.get("weekStart"));
   const range = buildRange(period, year, month, day, weekStart, now);

@@ -91,12 +91,21 @@ function formatDurationFromSeconds(totalSeconds: number) {
   return formatElapsedHhMmSs(Math.max(0, totalSeconds) * 1000);
 }
 
-function startOfUtcDay(date: Date) {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+function startOfSystemDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
-function addUtcDays(date: Date, daysToAdd: number) {
-  return new Date(date.getTime() + daysToAdd * 24 * 60 * 60 * 1000);
+function addSystemDays(date: Date, daysToAdd: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + daysToAdd);
+  return next;
+}
+
+function formatSystemDate(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 
@@ -168,6 +177,7 @@ export default async function SystemKpisPage() {
 
   const supabaseAdmin = getSupabaseAdminClient();
   const now = new Date();
+  const systemTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "system timezone";
   const nowMs = now.getTime();
   const thirtyDaysAgoIso = new Date(nowMs - 30 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -303,18 +313,30 @@ export default async function SystemKpisPage() {
 
   const maxDepartmentTotal = maxOf(departmentBreakdown.map((entry) => entry.totalCount));
 
-  const todayUtc = startOfUtcDay(now);
-  const sevenDaysAgoUtc = addUtcDays(todayUtc, -6);
+  const profileLabelById = new Map(
+    profiles.map((entry) => [entry.id, entry.full_name.trim() || entry.email]),
+  );
+  const todaySystem = startOfSystemDay(now);
+  const tomorrowSystem = addSystemDays(todaySystem, 1);
+  const sevenDaysAgoSystem = addSystemDays(todaySystem, -6);
   let updatedLast7Days = 0;
+  const recentUpdateContributors = new Set<string>();
 
   for (const event of changeEvents) {
     if (event.event_type !== "updated") continue;
     const occurredAtMs = toTimestamp(event.occurred_at);
     if (occurredAtMs === null) continue;
-    if (new Date(occurredAtMs) >= sevenDaysAgoUtc) {
+    const occurredAt = new Date(occurredAtMs);
+    if (occurredAt >= sevenDaysAgoSystem && occurredAt < tomorrowSystem) {
       updatedLast7Days += 1;
+      recentUpdateContributors.add(
+        profileLabelById.get(event.actor_user_id) ?? "Unknown User",
+      );
     }
   }
+  const recentUpdateContributorNames = [...recentUpdateContributors].sort((a, b) =>
+    a.localeCompare(b),
+  );
   const activeInstructionCount = instructions.filter((entry) => !entry.is_archived).length;
   const archivedInstructionCount = instructions.filter((entry) => entry.is_archived).length;
   const totalInstructionCount = activeInstructionCount + archivedInstructionCount;
@@ -367,9 +389,12 @@ export default async function SystemKpisPage() {
       value: String(updatedLast7Days),
       tone: "violet",
       details: [
-        `${updatedLast7Days} update event${updatedLast7Days === 1 ? "" : "s"} recorded in the trailing 7-day UTC window.`,
-        `Window start: ${sevenDaysAgoUtc.toISOString().slice(0, 10)} UTC.`,
-        `Window end: ${todayUtc.toISOString().slice(0, 10)} UTC.`,
+        `${updatedLast7Days} update event${updatedLast7Days === 1 ? "" : "s"} recorded in the trailing 7-day ${systemTimeZone} window.`,
+        `Window start: ${formatSystemDate(sevenDaysAgoSystem)} ${systemTimeZone}.`,
+        `Window end: ${formatSystemDate(todaySystem)} ${systemTimeZone}.`,
+        recentUpdateContributorNames.length > 0
+          ? `Contributors: ${recentUpdateContributorNames.join(", ")}.`
+          : "Contributors: none recorded in this window.",
       ],
     },
     {

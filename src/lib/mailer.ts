@@ -63,26 +63,41 @@ export async function sendAnonymousFeedbackEmail(options: {
 export async function sendLoginHelpRequestEmail(options: {
   to: string;
   name: string;
+  requesterEmail?: string | null;
+  sourceLabel?: string;
+  replyTo?: string;
   message: string;
 }) {
   const mailer = getTransporter();
   const submittedAt = new Date().toISOString();
   const safeName = escapeHtml(options.name);
+  const safeEmail = escapeHtml(options.requesterEmail?.trim() ?? "");
+  const sourceLabel = options.sourceLabel?.trim() || "Login Page";
   const safeMessage = escapeHtml(options.message);
+  const hasEmail = safeEmail.length > 0;
 
   await mailer.sendMail({
     from: serverEnv.SMTP_FROM,
     to: options.to,
-    subject: "Login Help Request",
+    replyTo: options.replyTo?.trim() || undefined,
+    subject: "User Help Request",
     text:
-      "Help request received from the login page.\n\n" +
+      "Help request received.\n\n" +
+      `Source: ${sourceLabel}\n` +
       `Name: ${options.name}\n` +
+      (options.requesterEmail ? `Email: ${options.requesterEmail}\n` : "") +
       `Submitted at (UTC): ${submittedAt}\n\n` +
       options.message,
     html: `
       <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111;">
-        <h2>Login Help Request</h2>
+        <h2>User Help Request</h2>
+        <p><strong>Source:</strong> ${escapeHtml(sourceLabel)}</p>
         <p><strong>Name:</strong> ${safeName}</p>
+        ${
+          hasEmail
+            ? `<p><strong>Email:</strong> ${safeEmail}</p>`
+            : ""
+        }
         <p><strong>Submitted at (UTC):</strong> ${submittedAt}</p>
         <p style="white-space:pre-wrap;">${safeMessage}</p>
       </div>

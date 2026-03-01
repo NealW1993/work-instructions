@@ -64,6 +64,7 @@ interface SuggestedToolOption {
   id: string;
   name: string;
   sortOrder: number;
+  isActive: boolean;
 }
 
 interface InstructionChangeSourceMedia {
@@ -927,7 +928,9 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   const selectedToolSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
   const commonToolOptions = useMemo(
     () =>
-      [...suggestedTools].sort(
+      suggestedTools
+        .filter((tool) => tool.isActive)
+        .sort(
         (first, second) =>
           first.sortOrder - second.sortOrder || first.name.localeCompare(second.name),
       ),
@@ -1205,34 +1208,82 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     setDepartmentId(departments[0].id);
   }, [departmentId, departments]);
 
-  const loadSuggestedTools = useCallback(async () => {
-    const { data: toolData, error: toolError } = await supabase
-      .from("suggested_tools")
-      .select("id, name, sort_order")
-      .order("sort_order", { ascending: true })
-      .order("name", { ascending: true });
+  const loadSuggestedTools = useCallback(
+    async (preservedToolIds: string[] = []) => {
+      const { data: activeToolData, error: activeToolError } = await supabase
+        .from("suggested_tools")
+        .select("id, name, sort_order, is_active")
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true })
+        .order("name", { ascending: true });
 
-    if (toolError) {
-      throw toolError;
-    }
+      if (activeToolError) {
+        throw activeToolError;
+      }
 
-    const nextTools = ((toolData ?? []) as Array<{
-      id: string;
-      name: string;
-      sort_order: number;
-    }>).map((tool) => ({
-      id: tool.id,
-      name: tool.name,
-      sortOrder: tool.sort_order ?? 0,
-    }));
+      const activeRows = (activeToolData ?? []) as Array<{
+        id: string;
+        name: string;
+        sort_order: number;
+        is_active: boolean;
+      }>;
+      const missingSelectedIds = preservedToolIds.filter(
+        (toolId) => !activeRows.some((tool) => tool.id === toolId),
+      );
 
-    setSuggestedTools(nextTools);
-    setSelectedToolIds((current) =>
-      current.filter((toolId) => nextTools.some((tool) => tool.id === toolId)),
-    );
+      let preservedRows: Array<{
+        id: string;
+        name: string;
+        sort_order: number;
+        is_active: boolean;
+      }> = [];
 
-    return nextTools;
-  }, [supabase]);
+      if (missingSelectedIds.length > 0) {
+        const { data: selectedToolData, error: selectedToolError } = await supabase
+          .from("suggested_tools")
+          .select("id, name, sort_order, is_active")
+          .in("id", missingSelectedIds);
+
+        if (selectedToolError) {
+          throw selectedToolError;
+        }
+
+        preservedRows = (selectedToolData ?? []) as Array<{
+          id: string;
+          name: string;
+          sort_order: number;
+          is_active: boolean;
+        }>;
+      }
+
+      const mergedRows = [...activeRows];
+      for (const row of preservedRows) {
+        if (!mergedRows.some((tool) => tool.id === row.id)) {
+          mergedRows.push(row);
+        }
+      }
+
+      const nextTools = mergedRows
+        .map((tool) => ({
+          id: tool.id,
+          name: tool.name,
+          sortOrder: tool.sort_order ?? 0,
+          isActive: tool.is_active !== false,
+        }))
+        .sort(
+          (first, second) =>
+            first.sortOrder - second.sortOrder || first.name.localeCompare(second.name),
+        );
+
+      setSuggestedTools(nextTools);
+      setSelectedToolIds((current) =>
+        current.filter((toolId) => nextTools.some((tool) => tool.id === toolId)),
+      );
+
+      return nextTools;
+    },
+    [supabase],
+  );
 
   useEffect(() => {
     let isActive = true;
@@ -1241,7 +1292,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
     void (async () => {
       try {
-        const nextTools = await loadSuggestedTools();
+        const nextTools = await loadSuggestedTools(initialData?.suggestedToolIds ?? []);
         if (!isActive) {
           return;
         }
@@ -1266,7 +1317,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     return () => {
       isActive = false;
     };
-  }, [loadSuggestedTools]);
+  }, [initialData?.suggestedToolIds, loadSuggestedTools]);
 
   useEffect(() => {
     if (!toolPickerToolId) {
@@ -1461,7 +1512,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       }
 
       const insertedToolId = payload.tool?.id ?? null;
-      const nextTools = await loadSuggestedTools();
+      const nextTools = await loadSuggestedTools(selectedToolIds);
 
       setNewSuggestedToolName("");
       if (insertedToolId && nextTools.some((tool) => tool.id === insertedToolId)) {
@@ -2707,6 +2758,11 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                         title="Click to remove"
                         >
                         <span>{tool.name}</span>
+                        {!tool.isActive ? (
+                          <span className="rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-200">
+                            Hidden
+                          </span>
+                        ) : null}
                         <span className="opacity-70">x</span>
                       </button>
                     ))}

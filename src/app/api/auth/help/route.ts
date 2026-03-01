@@ -1,17 +1,36 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
+import { getRequestProfile } from "@/lib/api-auth";
 import { serverEnv } from "@/lib/env.server";
 import { sendLoginHelpRequestEmail } from "@/lib/mailer";
 
 interface HelpBody {
   name?: string;
   message?: string;
+  source?: string;
 }
 
-export async function POST(request: Request) {
+function normalizeSourceLabel(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (!normalized) {
+    return null;
+  }
+
+  return normalized.slice(0, 80);
+}
+
+export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => ({}))) as HelpBody;
-  const name = body.name?.trim() ?? "";
   const message = body.message?.trim() ?? "";
+  const authProfile = await getRequestProfile(request);
+  const name = authProfile ? authProfile.full_name.trim() : body.name?.trim() ?? "";
+  const requesterEmail = authProfile ? authProfile.email.trim().toLowerCase() : "";
+  const sourceLabel =
+    normalizeSourceLabel(body.source) ?? (authProfile ? "Account Menu" : "Login Page");
 
   if (!name) {
     return NextResponse.json({ error: "Name is required." }, { status: 400 });
@@ -44,6 +63,9 @@ export async function POST(request: Request) {
     await sendLoginHelpRequestEmail({
       to: adminEmail,
       name,
+      requesterEmail: requesterEmail || null,
+      sourceLabel,
+      replyTo: requesterEmail || undefined,
       message,
     });
 

@@ -54,8 +54,8 @@ interface SelectedBucket {
 
 function getBucketRange(period: ActivityPeriod, key: string): { from: string; to: string } {
   if (period === "day") {
-    // key = "2026-02-27T14"
-    const base = new Date(`${key}:00:00.000Z`);
+    // key = "2026-02-27T14" in system-local time
+    const base = new Date(`${key}:00:00`);
     const next = new Date(base.getTime() + 60 * 60 * 1000);
     return { from: base.toISOString(), to: next.toISOString() };
   }
@@ -64,15 +64,12 @@ function getBucketRange(period: ActivityPeriod, key: string): { from: string; to
     const [yearStr, monthStr] = key.split("-");
     const y = Number.parseInt(yearStr ?? "2000", 10);
     const m = Number.parseInt(monthStr ?? "1", 10);
-    const from = new Date(Date.UTC(y, m - 1, 1)).toISOString();
-    const to = (m === 12
-      ? new Date(Date.UTC(y + 1, 0, 1))
-      : new Date(Date.UTC(y, m, 1))
-    ).toISOString();
+    const from = new Date(y, m - 1, 1).toISOString();
+    const to = (m === 12 ? new Date(y + 1, 0, 1) : new Date(y, m, 1)).toISOString();
     return { from, to };
   }
-  // week or month: key = "2026-02-27"
-  const from = new Date(`${key}T00:00:00.000Z`).toISOString();
+  // week or month: key = "2026-02-27" in system-local time
+  const from = new Date(`${key}T00:00:00`).toISOString();
   const to = new Date(new Date(from).getTime() + 24 * 60 * 60 * 1000).toISOString();
   return { from, to };
 }

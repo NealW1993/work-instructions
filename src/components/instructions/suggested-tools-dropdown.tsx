@@ -92,7 +92,7 @@ export function SuggestedToolsDropdown({ tools, className }: SuggestedToolsDropd
         aria-expanded={open}
       >
         <Wrench size={14} />
-        Suggested Tools
+        Tool List
         <span className="rounded-full border border-cyan-500/45 bg-cyan-500/15 px-1.5 py-0.5 text-[10px]">
           {totalCount}
         </span>
@@ -106,7 +106,7 @@ export function SuggestedToolsDropdown({ tools, className }: SuggestedToolsDropd
         <div className="absolute right-0 z-40 mt-2 grid w-[min(24rem,90vw)] gap-3 rounded-xl border border-slate-300/80 bg-white/95 p-3 shadow-2xl backdrop-blur-xl dark:border-slate-700/80 dark:bg-slate-900/95">
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-              Session Sanity Check
+              Tool List
             </p>
             <button
               type="button"
@@ -119,7 +119,7 @@ export function SuggestedToolsDropdown({ tools, className }: SuggestedToolsDropd
 
           {groupedTools.length === 0 ? (
             <p className="rounded-lg border border-slate-300/70 bg-slate-100/80 px-2.5 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300">
-              No suggested tools configured yet.
+              No tools in this list yet.
             </p>
           ) : (
             <div className="grid max-h-72 gap-2 overflow-y-auto pr-1">

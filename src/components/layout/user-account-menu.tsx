@@ -3,6 +3,7 @@
 import Link from "next/link";
 import {
   BarChart3,
+  CircleHelp,
   ChevronDown,
   Clock3,
   LogOut,
@@ -14,7 +15,7 @@ import {
 import { useTheme } from "next-themes";
 import { useRouter } from "next/navigation";
 import { usePostHog } from "posthog-js/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { canViewKpis, isSystemAdmin } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -91,6 +92,11 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
     profile.theme_preference ?? "dark",
   );
   const [themeSaving, setThemeSaving] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpMessage, setHelpMessage] = useState("");
+  const [helpBusy, setHelpBusy] = useState(false);
+  const [helpStatus, setHelpStatus] = useState<string | null>(null);
+  const [helpError, setHelpError] = useState<string | null>(null);
   const synchronizedNowMs = useSynchronizedNowMs();
   const serverSessionStartMs = useMemo(
     () => toTimestampMs(profile.active_session_started_at),
@@ -256,6 +262,23 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
   }, [closeMenu, open]);
 
   useEffect(() => {
+    if (!helpOpen) {
+      return;
+    }
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setHelpOpen(false);
+      }
+    };
+
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [helpOpen]);
+
+  useEffect(() => {
     if (!menuMounted) {
       return;
     }
@@ -346,6 +369,55 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
     setThemePreference(nextThemePreference);
     setTheme(nextThemePreference);
     void persistThemePreferenceToProfile(nextThemePreference);
+  }
+
+  async function handleSubmitHelpRequest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const normalizedMessage = helpMessage.trim();
+    if (!normalizedMessage) {
+      setHelpError("Please enter a help request message.");
+      setHelpStatus(null);
+      return;
+    }
+
+    setHelpBusy(true);
+    setHelpError(null);
+    setHelpStatus(null);
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error("Missing session token. Please sign in again.");
+      }
+
+      const response = await fetch("/api/auth/help", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          message: normalizedMessage,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to send help request.");
+      }
+
+      setHelpStatus("Message sent to system admin.");
+      setHelpMessage("");
+    } catch (caughtError) {
+      setHelpError(
+        caughtError instanceof Error ? caughtError.message : "Unable to send help request.",
+      );
+    } finally {
+      setHelpBusy(false);
+    }
   }
 
   return (
@@ -461,12 +533,158 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
 
           <button
             type="button"
+            onClick={() => {
+              closeMenu();
+              setHelpOpen(true);
+              setHelpError(null);
+              setHelpStatus(null);
+            }}
+            className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/35 bg-cyan-500/10 px-3 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/20"
+          >
+            <CircleHelp size={15} />
+            Help Chat
+          </button>
+
+          <button
+            type="button"
             onClick={() => void handleSignOut()}
             className="inline-flex items-center gap-2 rounded-xl border border-rose-500/45 bg-rose-500/15 px-3 py-2 text-sm font-semibold text-rose-100 transition hover:bg-rose-500/25"
           >
             <LogOut size={15} />
             Logout
           </button>
+        </div>
+      ) : null}
+
+      {helpOpen ? (
+        <div
+          className={cn(
+            "app-modal-shell fixed inset-0 z-[210] flex items-center justify-center p-4 backdrop-blur-sm",
+            isDarkTheme ? "bg-slate-950/75" : "bg-slate-900/35",
+          )}
+          role="presentation"
+          onClick={() => setHelpOpen(false)}
+        >
+          <article
+            role="dialog"
+            aria-modal="true"
+            aria-label="Help Chat"
+            onClick={(event) => event.stopPropagation()}
+            className={cn(
+              "grid w-full max-w-lg gap-3 rounded-2xl border p-4 shadow-2xl",
+              isDarkTheme
+                ? "border-white/15 bg-slate-950/95 text-slate-100"
+                : "border-slate-300/80 bg-white text-slate-900",
+            )}
+          >
+            <div className="grid gap-1">
+              <h3 className="text-lg font-bold">Help Chat</h3>
+              <p
+                className={cn(
+                  "text-sm",
+                  isDarkTheme ? "text-slate-300" : "text-slate-600",
+                )}
+              >
+                Send a direct help request to system admin. Replies will go to your account email.
+              </p>
+            </div>
+
+            {helpStatus ? (
+              <p
+                className={cn(
+                  "rounded-xl border p-2 text-sm",
+                  isDarkTheme
+                    ? "border-emerald-400/45 bg-emerald-500/15 text-emerald-100"
+                    : "border-emerald-500/40 bg-emerald-500/10 text-emerald-700",
+                )}
+              >
+                {helpStatus}
+              </p>
+            ) : null}
+            {helpError ? (
+              <p
+                className={cn(
+                  "rounded-xl border p-2 text-sm",
+                  isDarkTheme
+                    ? "border-rose-400/45 bg-rose-500/15 text-rose-100"
+                    : "border-rose-500/40 bg-rose-500/10 text-rose-700",
+                )}
+              >
+                {helpError}
+              </p>
+            ) : null}
+
+            <form className="grid gap-3" onSubmit={handleSubmitHelpRequest}>
+              <div className="grid gap-1">
+                <span
+                  className={cn(
+                    "text-xs font-semibold uppercase tracking-wide",
+                    isDarkTheme ? "text-slate-300" : "text-slate-500",
+                  )}
+                >
+                  Sending as
+                </span>
+                <p className="text-sm font-semibold">{profile.full_name}</p>
+                <p
+                  className={cn(
+                    "text-xs",
+                    isDarkTheme ? "text-slate-400" : "text-slate-600",
+                  )}
+                >
+                  {profile.email}
+                </p>
+              </div>
+
+              <label
+                className={cn(
+                  "grid gap-1 text-sm",
+                  isDarkTheme ? "text-slate-200" : "text-slate-700",
+                )}
+              >
+                <span>Message</span>
+                <textarea
+                  value={helpMessage}
+                  onChange={(event) => setHelpMessage(event.target.value)}
+                  rows={6}
+                  maxLength={4000}
+                  placeholder="How can we help?"
+                  className={cn(
+                    "rounded-xl border px-3 py-2 outline-none transition",
+                    isDarkTheme
+                      ? "border-white/15 bg-black/45 text-slate-100 focus:border-slate-300"
+                      : "border-slate-300 bg-white text-slate-900 focus:border-cyan-500",
+                  )}
+                />
+              </label>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setHelpOpen(false)}
+                  className={cn(
+                    "rounded-xl border px-3 py-2 text-sm font-semibold transition",
+                    isDarkTheme
+                      ? "border-white/20 bg-black/45 text-slate-100 hover:bg-white/10"
+                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100",
+                  )}
+                >
+                  Close
+                </button>
+                <button
+                  type="submit"
+                  disabled={helpBusy}
+                  className={cn(
+                    "rounded-xl px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-70",
+                    isDarkTheme
+                      ? "bg-cyan-500/35 text-cyan-100 hover:bg-cyan-500/45"
+                      : "bg-cyan-600 text-white hover:bg-cyan-500",
+                  )}
+                >
+                  {helpBusy ? "Sending..." : "Send Help Request"}
+                </button>
+              </div>
+            </form>
+          </article>
         </div>
       ) : null}
     </div>

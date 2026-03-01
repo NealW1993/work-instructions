@@ -34,6 +34,7 @@ interface SuggestedToolRow {
   category_id: string;
   subcategory_id: string | null;
   sort_order: number;
+  is_active: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -144,6 +145,17 @@ export async function GET(request: NextRequest) {
   }
 
   const supabaseAdmin = getSupabaseAdminClient();
+  const includeInactive =
+    request.nextUrl.searchParams.get("includeInactive") === "true" &&
+    isSystemAdmin(auth.profile.role);
+  let toolsQuery = supabaseAdmin
+    .from("suggested_tools")
+    .select("id, name, category_id, subcategory_id, sort_order, is_active, created_at, updated_at");
+
+  if (!includeInactive) {
+    toolsQuery = toolsQuery.eq("is_active", true);
+  }
+
   const [
     { data: categoryData, error: categoryError },
     { data: subcategoryData, error: subcategoryError },
@@ -159,11 +171,7 @@ export async function GET(request: NextRequest) {
       .select("id, category_id, name, sort_order, created_at, updated_at")
       .order("sort_order", { ascending: true })
       .order("name", { ascending: true }),
-    supabaseAdmin
-      .from("suggested_tools")
-      .select("id, name, category_id, subcategory_id, sort_order, created_at, updated_at")
-      .order("sort_order", { ascending: true })
-      .order("name", { ascending: true }),
+    toolsQuery.order("name", { ascending: true }).order("sort_order", { ascending: true }),
   ]);
 
   if (categoryError) {
@@ -201,6 +209,7 @@ export async function GET(request: NextRequest) {
     categoryId: row.category_id,
     subcategoryId: row.subcategory_id,
     sortOrder: row.sort_order,
+    isActive: row.is_active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }));
@@ -309,16 +318,17 @@ export async function POST(request: NextRequest) {
       category_id: categoryId,
       subcategory_id: subcategoryId,
       sort_order: sortOrder,
+      is_active: true,
       created_by: auth.profile.id,
     })
-    .select("id, name, category_id, subcategory_id, sort_order, created_at, updated_at")
+    .select("id, name, category_id, subcategory_id, sort_order, is_active, created_at, updated_at")
     .maybeSingle<SuggestedToolRow>();
 
   const insertedTool = data as SuggestedToolRow | null;
 
   if (error?.code === "23505") {
     return NextResponse.json(
-      { error: "This tool already exists in the selected category/sub-category." },
+      { error: "This common tool already exists." },
       { status: 409 },
     );
   }
@@ -341,6 +351,7 @@ export async function POST(request: NextRequest) {
       categoryId: insertedTool.category_id,
       subcategoryId: insertedTool.subcategory_id,
       sortOrder: insertedTool.sort_order,
+      isActive: insertedTool.is_active,
       createdAt: insertedTool.created_at,
       updatedAt: insertedTool.updated_at,
     },
