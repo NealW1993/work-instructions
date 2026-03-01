@@ -294,7 +294,7 @@ export function UserAdminPanel() {
   const [userSettingSavedFlash, setUserSettingSavedFlash] = useState<Record<string, boolean>>({});
   const [portalReady, setPortalReady] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
-  const userSettingSavedTimeoutIdsRef = useRef<number[]>([]);
+  const userSettingSavedTimeoutIdsRef = useRef<Record<string, number>>({});
 
   const getAuthHeaders = useCallback(async () => {
     const {
@@ -469,10 +469,10 @@ export function UserAdminPanel() {
 
   useEffect(() => {
     return () => {
-      for (const timeoutId of userSettingSavedTimeoutIdsRef.current) {
+      for (const timeoutId of Object.values(userSettingSavedTimeoutIdsRef.current)) {
         window.clearTimeout(timeoutId);
       }
-      userSettingSavedTimeoutIdsRef.current = [];
+      userSettingSavedTimeoutIdsRef.current = {};
     };
   }, []);
 
@@ -482,22 +482,24 @@ export function UserAdminPanel() {
     }
 
     const key = getUserSettingSavedKey(userId, field);
-    setUserSettingSavedFlash((current) => ({
-      ...current,
-      [key]: true,
-    }));
+    const existingTimeoutId = userSettingSavedTimeoutIdsRef.current[key];
+    if (typeof existingTimeoutId === "number") {
+      window.clearTimeout(existingTimeoutId);
+    }
+    setUserSettingSavedFlash((current) => ({ ...current, [key]: false }));
+    window.requestAnimationFrame(() => {
+      setUserSettingSavedFlash((current) => ({ ...current, [key]: true }));
+    });
 
     const timeoutId = window.setTimeout(() => {
       setUserSettingSavedFlash((current) => ({
         ...current,
         [key]: false,
       }));
-      userSettingSavedTimeoutIdsRef.current = userSettingSavedTimeoutIdsRef.current.filter(
-        (currentId) => currentId !== timeoutId,
-      );
+      delete userSettingSavedTimeoutIdsRef.current[key];
     }, 6200);
 
-    userSettingSavedTimeoutIdsRef.current.push(timeoutId);
+    userSettingSavedTimeoutIdsRef.current[key] = timeoutId;
   }, []);
 
   useEffect(() => {
@@ -1168,13 +1170,13 @@ export function UserAdminPanel() {
           ? "Auto sign-out timeout updated to Never."
           : `Auto sign-out timeout updated to ${normalizedTimeout} minute${normalizedTimeout === 1 ? "" : "s"}.`,
       );
-      await fetchUsers();
       setInactivityTimeoutUpdates((current) => {
         const next = { ...current };
         delete next[userId];
         return next;
       });
       triggerUserSettingSavedFlash(userId, "inactivityTimeout");
+      await fetchUsers();
     } catch (caughtError) {
       const normalizedMessage =
         caughtError instanceof Error

@@ -2,7 +2,12 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronDown, ChevronRight, Loader2, Sparkles, UploadCloud } from "lucide-react";
+import {
+  Loader2,
+  SlidersHorizontal,
+  Sparkles,
+  UploadCloud,
+} from "lucide-react";
 import { createPortal } from "react-dom";
 
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
@@ -329,23 +334,6 @@ function normalizeSubmissionError(error: unknown) {
 
 function normalizeSnapshotValue(value: string) {
   return value.trim();
-}
-
-function isInteractiveClickTarget(target: EventTarget | null) {
-  if (!(target instanceof Node)) {
-    return false;
-  }
-
-  const element = target instanceof HTMLElement ? target : target.parentElement;
-  if (!element) {
-    return false;
-  }
-
-  return Boolean(
-    element.closest(
-      "button, a, input, select, textarea, label, [role='button'], [role='link']",
-    ),
-  );
 }
 
 function parseToolNameList(value: string) {
@@ -822,7 +810,6 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     parseToolNameList(initialData?.uncommonTools ?? ""),
   );
   const [uncommonToolsInput, setUncommonToolsInput] = useState("");
-  const [toolsPanelCollapsed, setToolsPanelCollapsed] = useState(true);
   const [toolCatalogBusy, setToolCatalogBusy] = useState(false);
   const [toolCatalogError, setToolCatalogError] = useState<string | null>(null);
   const [toolSetupBusy, setToolSetupBusy] = useState(false);
@@ -2567,32 +2554,23 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           </label>
         </div>
 
-        <div
-          className="grid gap-2 rounded-2xl border border-cyan-500/30 bg-cyan-500/5 px-3 py-3.5"
-          onClick={(event) => {
-            if (isInteractiveClickTarget(event.target)) {
-              return;
-            }
-
-            setToolsPanelCollapsed((current) => !current);
-          }}
-        >
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <button
-              type="button"
-              onClick={() => setToolsPanelCollapsed((current) => !current)}
-              className="inline-flex items-center gap-1.5 text-left text-sm font-semibold text-slate-800 transition hover:opacity-80 dark:text-slate-100"
-            >
-              {toolsPanelCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
-              Tool List
-            </button>
-            <span className="rounded-full border border-cyan-500/40 bg-cyan-500/15 px-2 py-0.5 text-[11px] font-semibold text-cyan-800 dark:text-cyan-200">
-              {toolListCount} in Tool List
+        <details className="group relative order-first">
+          <summary className="flex list-none justify-end [&::-webkit-details-marker]:hidden">
+            <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-500/35 bg-cyan-500/10 text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-100">
+              <SlidersHorizontal size={17} />
+              <span className="sr-only">Open instruction tools and AI controls</span>
             </span>
-          </div>
-
-          {!toolsPanelCollapsed ? (
-            <>
+          </summary>
+          <div className="mt-2 grid gap-3">
+            <div className="grid gap-2 rounded-2xl border border-cyan-500/30 bg-cyan-500/5 px-3 py-3.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  Tool List
+                </p>
+                <span className="rounded-full border border-cyan-500/40 bg-cyan-500/15 px-2 py-0.5 text-[11px] font-semibold text-cyan-800 dark:text-cyan-200">
+                  {toolListCount} in Tool List
+                </span>
+              </div>
               <p className="text-xs text-slate-600 dark:text-slate-300">
                 Search common tools with auto-suggest and add both common and uncommon tools into
                 the Tool List.
@@ -2807,37 +2785,41 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                   Add
                 </button>
               </div>
-            </>
-          ) : null}
-        </div>
+            </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-cyan-500/30 bg-cyan-500/5 px-3 py-2.5">
-          <div className="grid gap-0.5">
-            <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-              AI Enhance
-            </p>
-            <p className="text-xs text-slate-600 dark:text-slate-300">
-              Analyze this draft, improve structure and formatting, then choose your version.
-            </p>
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-cyan-500/30 bg-cyan-500/5 px-3 py-2.5">
+              <div className="grid gap-0.5">
+                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  AI Enhance
+                </p>
+                <p className="text-xs text-slate-600 dark:text-slate-300">
+                  Analyze this draft, improve structure and formatting, then choose your version.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={busy || enhanceBusy}
+                onClick={() => {
+                  void handleEnhanceInstruction();
+                }}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-100"
+              >
+                {enhanceBusy ? (
+                  <Loader2 size={15} className="animate-spin" />
+                ) : (
+                  <Sparkles size={15} />
+                )}
+                {enhanceBusy ? "Enhancing..." : "AI Enhance"}
+              </button>
+            </div>
+
+            {enhanceError ? (
+              <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-200">
+                {enhanceError}
+              </p>
+            ) : null}
           </div>
-          <button
-            type="button"
-            disabled={busy || enhanceBusy}
-            onClick={() => {
-              void handleEnhanceInstruction();
-            }}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-100"
-          >
-            {enhanceBusy ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
-            {enhanceBusy ? "Enhancing..." : "AI Enhance"}
-          </button>
-        </div>
-
-        {enhanceError ? (
-          <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-200">
-            {enhanceError}
-          </p>
-        ) : null}
+        </details>
 
         <RichTextEditor
           label="Work Instructions"

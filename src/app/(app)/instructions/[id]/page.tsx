@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { SlidersHorizontal } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import sanitizeHtml from "sanitize-html";
@@ -1100,72 +1101,80 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
             ) : null}
           </div>
           <div className="grid gap-2 md:justify-items-end">
-            <div className="grid w-full max-w-[14rem] justify-items-stretch gap-2 md:w-[14rem]">
-              <SuggestedToolsDropdown tools={suggestedTools} className="w-full" />
-              <InstructionUpdatesPanel
-                events={instructionUpdateEvents}
-                className="h-fit w-full justify-center self-start"
-              />
-              {!instructionIsArchived ? (
-                <div className="grid grid-cols-2 gap-2">
-                  <LikeInstructionButton
-                    instructionId={instruction.id}
-                    userId={profile.id}
-                    initialLiked={Boolean(likedInstruction)}
-                    initialLikeCount={instructionLikeCount ?? 0}
-                    className="w-full justify-center px-2 py-1.5"
-                  />
-                  <PinInstructionButton
-                    instructionId={instruction.id}
-                    userId={profile.id}
-                    initialPinned={Boolean(pinnedInstruction)}
-                    className="w-full justify-center px-2 py-1.5"
-                  />
-                </div>
-              ) : null}
-              {showCompactEditorInstructionActions ? (
-                <div className="grid grid-cols-2 gap-2">
-                  <Link
-                    href={`/instructions/${instruction.id}/fork`}
-                    className="inline-flex items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-2 py-1.5 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-200"
-                  >
-                    Fork
-                  </Link>
-                  <Link
-                    href={`/instructions/${instruction.id}/edit`}
-                    className="inline-flex items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-2 py-1.5 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-200"
-                  >
-                    Edit
-                  </Link>
-                </div>
-              ) : null}
-              {showCompactEditorInstructionActions && isForkInstruction && instructionForkNumber ? (
-                <InstructionForkMergeControl
-                  forkInstructionId={instruction.id}
-                  forkNumber={instructionForkNumber}
-                  rootInstructionId={forkFamilyRootId}
-                  forkPartId={workItem.part_id}
-                  rootPartId={forkRootWorkItem?.part_id ?? workItem.part_id}
-                  forkItemTitle={workItem.item_title}
-                  rootItemTitle={forkRootWorkItem?.item_title ?? workItem.item_title}
-                  forkDepartmentName={departmentName}
-                  rootDepartmentName={forkRootDepartmentName}
-                  forkBodyMarkdown={instruction.body_markdown}
-                  rootBodyMarkdown={forkRootLookup?.body_markdown ?? ""}
-                  forkRevision={instruction.revision}
-                  rootRevision={forkRootLookup?.revision ?? instruction.revision}
-                  forkMedia={forkInstructionMedia}
-                  rootMedia={forkRootMedia}
-                  className="w-full justify-center px-3 py-1.5 text-xs"
+            <details className="group relative">
+              <summary className="flex list-none justify-end [&::-webkit-details-marker]:hidden">
+                <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-500/35 bg-cyan-500/10 text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-100">
+                  <SlidersHorizontal size={17} />
+                  <span className="sr-only">Open instruction action menu</span>
+                </span>
+              </summary>
+              <div className="absolute right-0 z-30 mt-2 grid w-[min(22rem,calc(100vw-2rem))] gap-2 rounded-2xl border border-white/25 bg-white/95 p-2 shadow-2xl backdrop-blur-xl dark:border-white/15 dark:bg-slate-950/95">
+                <SuggestedToolsDropdown tools={suggestedTools} className="w-full" />
+                <InstructionUpdatesPanel
+                  events={instructionUpdateEvents}
+                  className="h-fit w-full justify-center self-start"
                 />
-              ) : null}
-              {isSystemAdmin(profile.role) && !instructionIsArchived ? (
-                <DeleteInstructionButton
-                  instructionId={instruction.id}
-                  className="w-full justify-center px-3 py-1.5 text-xs"
-                />
-              ) : null}
-            </div>
+                {!instructionIsArchived ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <LikeInstructionButton
+                      instructionId={instruction.id}
+                      userId={profile.id}
+                      initialLiked={Boolean(likedInstruction)}
+                      initialLikeCount={instructionLikeCount ?? 0}
+                      className="w-full justify-center px-2 py-1.5"
+                    />
+                    <PinInstructionButton
+                      instructionId={instruction.id}
+                      userId={profile.id}
+                      initialPinned={Boolean(pinnedInstruction)}
+                      className="w-full justify-center px-2 py-1.5"
+                    />
+                  </div>
+                ) : null}
+                {showCompactEditorInstructionActions ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <Link
+                      href={`/instructions/${instruction.id}/fork`}
+                      className="inline-flex items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-2 py-1.5 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-200"
+                    >
+                      Fork
+                    </Link>
+                    <Link
+                      href={`/instructions/${instruction.id}/edit`}
+                      className="inline-flex items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-2 py-1.5 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-200"
+                    >
+                      Edit
+                    </Link>
+                  </div>
+                ) : null}
+                {showCompactEditorInstructionActions && isForkInstruction && instructionForkNumber ? (
+                  <InstructionForkMergeControl
+                    forkInstructionId={instruction.id}
+                    forkNumber={instructionForkNumber}
+                    rootInstructionId={forkFamilyRootId}
+                    forkPartId={workItem.part_id}
+                    rootPartId={forkRootWorkItem?.part_id ?? workItem.part_id}
+                    forkItemTitle={workItem.item_title}
+                    rootItemTitle={forkRootWorkItem?.item_title ?? workItem.item_title}
+                    forkDepartmentName={departmentName}
+                    rootDepartmentName={forkRootDepartmentName}
+                    forkBodyMarkdown={instruction.body_markdown}
+                    rootBodyMarkdown={forkRootLookup?.body_markdown ?? ""}
+                    forkRevision={instruction.revision}
+                    rootRevision={forkRootLookup?.revision ?? instruction.revision}
+                    forkMedia={forkInstructionMedia}
+                    rootMedia={forkRootMedia}
+                    className="w-full justify-center px-3 py-1.5 text-xs"
+                  />
+                ) : null}
+                {isSystemAdmin(profile.role) && !instructionIsArchived ? (
+                  <DeleteInstructionButton
+                    instructionId={instruction.id}
+                    className="w-full justify-center px-3 py-1.5 text-xs"
+                  />
+                ) : null}
+              </div>
+            </details>
           </div>
         </div>
       </header>
