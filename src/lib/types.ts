@@ -21,6 +21,7 @@ export interface Profile {
   is_active: boolean;
   theme_preference?: ThemePreference;
   icon_color?: string;
+  font_color?: string;
   dashboard_layout?: unknown;
   dashboard_default_layout?: unknown;
   user_settings?: unknown;

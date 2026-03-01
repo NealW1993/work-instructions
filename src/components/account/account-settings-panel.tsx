@@ -25,7 +25,9 @@ import type { ThemePreference } from "@/lib/types";
 
 const ACCOUNT_HISTORY_GUARD_STATE_KEY = "__accountSettingsUnsavedGuard";
 const ICON_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
+const FONT_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 const DEFAULT_ICON_COLOR = "#0EA5E9";
+const DEFAULT_FONT_COLOR = "#FFFFFF";
 const ICON_COLOR_OPTIONS = [
   "#0EA5E9",
   "#2563EB",
@@ -38,8 +40,24 @@ const ICON_COLOR_OPTIONS = [
   "#4B5563",
   "#111827",
 ] as const;
+const FONT_COLOR_OPTIONS = [
+  "#FFFFFF",
+  "#E5E7EB",
+  "#111827",
+  "#0EA5E9",
+  "#2563EB",
+  "#7C3AED",
+  "#DB2777",
+  "#DC2626",
+  "#EA580C",
+  "#16A34A",
+] as const;
 
 function normalizeIconColor(value: string) {
+  return value.trim().toUpperCase();
+}
+
+function normalizeFontColor(value: string) {
   return value.trim().toUpperCase();
 }
 
@@ -79,6 +97,7 @@ interface AccountSettingsPanelProps {
   initialEmployeeId: string;
   initialThemePreference: ThemePreference;
   initialIconColor: string;
+  initialFontColor: string;
   initialTotalSignedInSeconds: number;
   initialActiveSessionStartedAt: string | null;
 }
@@ -98,6 +117,7 @@ export function AccountSettingsPanel({
   initialEmployeeId,
   initialThemePreference,
   initialIconColor,
+  initialFontColor,
   initialTotalSignedInSeconds,
   initialActiveSessionStartedAt,
 }: AccountSettingsPanelProps) {
@@ -113,6 +133,9 @@ export function AccountSettingsPanel({
   const [savedIconColor, setSavedIconColor] = useState(
     normalizeIconColor(initialIconColor || DEFAULT_ICON_COLOR),
   );
+  const [savedFontColor, setSavedFontColor] = useState(
+    normalizeFontColor(initialFontColor || DEFAULT_FONT_COLOR),
+  );
 
   const [fullName, setFullName] = useState(initialFullName);
   const [email, setEmail] = useState(initialEmail);
@@ -120,6 +143,9 @@ export function AccountSettingsPanel({
     useState<ThemePreference>(initialThemePreference);
   const [iconColor, setIconColor] = useState(
     normalizeIconColor(initialIconColor || DEFAULT_ICON_COLOR),
+  );
+  const [fontColor, setFontColor] = useState(
+    normalizeFontColor(initialFontColor || DEFAULT_FONT_COLOR),
   );
   const [wantsPinChange, setWantsPinChange] = useState(false);
   const [pin, setPin] = useState("");
@@ -148,11 +174,13 @@ export function AccountSettingsPanel({
   const normalizedFullName = fullName.trim();
   const normalizedEmail = email.trim().toLowerCase();
   const normalizedIconColor = normalizeIconColor(iconColor);
+  const normalizedFontColor = normalizeFontColor(fontColor);
   const pinMismatch = wantsPinChange && confirmPin.length > 0 && pin !== confirmPin;
   const fullNameChanged = normalizedFullName !== savedFullName;
   const emailChanged = normalizedEmail !== savedEmail;
   const themeChanged = themePreference !== savedThemePreference;
   const iconColorChanged = normalizedIconColor !== savedIconColor;
+  const fontColorChanged = normalizedFontColor !== savedFontColor;
   const pinChanged = wantsPinChange && pin.length > 0;
 
   const hasChanges =
@@ -160,6 +188,7 @@ export function AccountSettingsPanel({
     emailChanged ||
     themeChanged ||
     iconColorChanged ||
+    fontColorChanged ||
     pinChanged;
   const iconInitials = getInitials(normalizedFullName || savedFullName);
   const totalSignedInLabel = useMemo(() => {
@@ -442,6 +471,10 @@ export function AccountSettingsPanel({
         throw new Error("Icon color must be a valid hex value like #0EA5E9.");
       }
 
+      if (!FONT_COLOR_PATTERN.test(normalizedFontColor)) {
+        throw new Error("Font color must be a valid hex value like #FFFFFF.");
+      }
+
       if (wantsPinChange) {
         if (!/^\d{6}$/.test(pin)) {
           throw new Error("PIN must be exactly 6 digits.");
@@ -465,6 +498,7 @@ export function AccountSettingsPanel({
         email?: string;
         themePreference?: ThemePreference;
         iconColor?: string;
+        fontColor?: string;
       } = {};
       let accountUpdated = false;
 
@@ -482,6 +516,10 @@ export function AccountSettingsPanel({
 
       if (iconColorChanged) {
         payload.iconColor = normalizedIconColor;
+      }
+
+      if (fontColorChanged) {
+        payload.fontColor = normalizedFontColor;
       }
 
       if (Object.keys(payload).length > 0) {
@@ -522,6 +560,7 @@ export function AccountSettingsPanel({
       setSavedEmail(normalizedEmail);
       setSavedThemePreference(themePreference);
       setSavedIconColor(normalizedIconColor);
+      setSavedFontColor(normalizedFontColor);
 
       if (accountUpdated && pinChanged) {
         setMessage("Account and PIN updated.");
@@ -531,7 +570,7 @@ export function AccountSettingsPanel({
         setMessage("Account updated.");
       }
 
-      if (fullNameChanged || emailChanged || iconColorChanged) {
+      if (fullNameChanged || emailChanged || iconColorChanged || fontColorChanged) {
         router.refresh();
       }
     } catch (caughtError) {
@@ -666,12 +705,59 @@ export function AccountSettingsPanel({
             </div>
             <div className="inline-flex w-fit items-center gap-2 rounded-xl border border-slate-300/80 bg-white/75 px-3 py-2 dark:border-slate-700 dark:bg-slate-950/60">
               <span
-                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-xs font-extrabold text-white"
-                style={{ backgroundColor: ICON_COLOR_PATTERN.test(normalizedIconColor) ? normalizedIconColor : DEFAULT_ICON_COLOR }}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-xs font-extrabold"
+                style={{
+                  backgroundColor: ICON_COLOR_PATTERN.test(normalizedIconColor)
+                    ? normalizedIconColor
+                    : DEFAULT_ICON_COLOR,
+                  color: FONT_COLOR_PATTERN.test(normalizedFontColor)
+                    ? normalizedFontColor
+                    : DEFAULT_FONT_COLOR,
+                }}
               >
                 {iconInitials}
               </span>
               <span className="text-xs text-slate-600 dark:text-slate-300">Profile icon preview</span>
+            </div>
+          </fieldset>
+
+          <fieldset className="grid gap-2 text-sm">
+            <legend>Font Color</legend>
+            <div className="flex flex-wrap gap-2">
+              {FONT_COLOR_OPTIONS.map((presetColor) => (
+                <button
+                  key={presetColor}
+                  type="button"
+                  onClick={() => setFontColor(presetColor)}
+                  aria-label={`Set font color to ${presetColor}`}
+                  className={`h-8 w-8 rounded-full border transition ${
+                    normalizedFontColor === presetColor
+                      ? "border-slate-900 ring-2 ring-cyan-500/40 dark:border-slate-100"
+                      : "border-slate-300 dark:border-slate-700"
+                  }`}
+                  style={{ backgroundColor: presetColor }}
+                />
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="color"
+                value={FONT_COLOR_PATTERN.test(normalizedFontColor) ? normalizedFontColor : DEFAULT_FONT_COLOR}
+                onChange={(event) => setFontColor(normalizeFontColor(event.target.value))}
+                className="h-10 w-12 cursor-pointer rounded-lg border border-slate-300 bg-transparent p-1 dark:border-slate-700"
+              />
+              <input
+                value={fontColor}
+                maxLength={7}
+                onChange={(event) =>
+                  setFontColor(normalizeFontColor(event.target.value.slice(0, 7)))
+                }
+                className="w-28 rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-sm uppercase text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                placeholder="#FFFFFF"
+              />
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                Initials text color in your account menu icon.
+              </span>
             </div>
           </fieldset>
 

@@ -21,6 +21,7 @@ export default async function AccountSettingsPage() {
         initialEmployeeId={profile.employee_id ?? ""}
         initialThemePreference={profile.theme_preference ?? "dark"}
         initialIconColor={profile.icon_color ?? "#0EA5E9"}
+        initialFontColor={profile.font_color ?? "#FFFFFF"}
         initialTotalSignedInSeconds={profile.total_signed_in_seconds ?? 0}
         initialActiveSessionStartedAt={profile.active_session_started_at ?? null}
       />

@@ -38,6 +38,8 @@ interface UserAccountMenuProps {
 
 const ICON_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 const DEFAULT_ICON_COLOR = "#0EA5E9";
+const FONT_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
+const DEFAULT_FONT_COLOR = "#FFFFFF";
 const ACCOUNT_MENU_ANIMATION_MS = 260;
 const ACCOUNT_MENU_MIN_WIDTH_PX = 270;
 
@@ -48,6 +50,15 @@ function resolveIconColor(value: string | undefined) {
 
   const normalized = value.trim().toUpperCase();
   return ICON_COLOR_PATTERN.test(normalized) ? normalized : DEFAULT_ICON_COLOR;
+}
+
+function resolveFontColor(value: string | undefined) {
+  if (!value) {
+    return DEFAULT_FONT_COLOR;
+  }
+
+  const normalized = value.trim().toUpperCase();
+  return FONT_COLOR_PATTERN.test(normalized) ? normalized : DEFAULT_FONT_COLOR;
 }
 
 function getInitials(value: string) {
@@ -108,6 +119,7 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
 
   const initials = useMemo(() => getInitials(profile.full_name), [profile.full_name]);
   const iconColor = useMemo(() => resolveIconColor(profile.icon_color), [profile.icon_color]);
+  const fontColor = useMemo(() => resolveFontColor(profile.font_color), [profile.font_color]);
   const isDarkTheme = themePreference === "dark";
   const canUsePortal = typeof document !== "undefined";
   const sessionElapsedLabel = useMemo(() => {
@@ -566,8 +578,8 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
         className="inline-flex items-center gap-2 rounded-xl border border-slate-300/70 bg-white/80 px-3 py-1.5 text-sm font-semibold text-slate-800 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-100 dark:hover:bg-slate-900"
       >
         <span
-          className="inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-extrabold text-white"
-          style={{ backgroundColor: iconColor }}
+          className="inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-extrabold"
+          style={{ backgroundColor: iconColor, color: fontColor }}
         >
           {initials}
         </span>

@@ -9,13 +9,24 @@ interface UpdateAccountBody {
   email?: string;
   themePreference?: ThemePreference;
   iconColor?: string;
+  fontColor?: string;
 }
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ICON_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
+const FONT_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 const DEFAULT_ICON_COLOR = "#0EA5E9";
+const DEFAULT_FONT_COLOR = "#FFFFFF";
 
 function normalizeIconColor(value: string | undefined) {
+  if (!value) {
+    return "";
+  }
+
+  return value.trim().toUpperCase();
+}
+
+function normalizeFontColor(value: string | undefined) {
   if (!value) {
     return "";
   }
@@ -41,17 +52,19 @@ export async function PATCH(request: NextRequest) {
   const includeEmail = hasOwn(body, "email");
   const includeThemePreference = hasOwn(body, "themePreference");
   const includeIconColor = hasOwn(body, "iconColor");
+  const includeFontColor = hasOwn(body, "fontColor");
 
   if (
     !includeFullName &&
     !includeEmail &&
     !includeThemePreference &&
-    !includeIconColor
+    !includeIconColor &&
+    !includeFontColor
   ) {
     return NextResponse.json(
       {
         error:
-          "fullName, email, themePreference, or iconColor is required.",
+          "fullName, email, themePreference, iconColor, or fontColor is required.",
       },
       { status: 400 },
     );
@@ -61,6 +74,7 @@ export async function PATCH(request: NextRequest) {
   const normalizedEmail = body.email?.trim().toLowerCase();
   const themePreference = body.themePreference;
   const normalizedIconColor = normalizeIconColor(body.iconColor);
+  const normalizedFontColor = normalizeFontColor(body.fontColor);
 
   if (includeFullName && !fullName) {
     return NextResponse.json(
@@ -114,6 +128,22 @@ export async function PATCH(request: NextRequest) {
     }
   }
 
+  if (includeFontColor) {
+    if (!normalizedFontColor) {
+      return NextResponse.json(
+        { error: "Font color cannot be empty." },
+        { status: 400 },
+      );
+    }
+
+    if (!FONT_COLOR_PATTERN.test(normalizedFontColor)) {
+      return NextResponse.json(
+        { error: "Font color must be a valid hex color like #FFFFFF." },
+        { status: 400 },
+      );
+    }
+  }
+
   const authUpdate: {
     email?: string;
     email_confirm?: boolean;
@@ -121,7 +151,10 @@ export async function PATCH(request: NextRequest) {
   } = {};
   const authMetadata: Record<string, string> = {};
   const profileUpdate: Partial<
-    Pick<Profile, "full_name" | "email" | "theme_preference" | "icon_color">
+    Pick<
+      Profile,
+      "full_name" | "email" | "theme_preference" | "icon_color" | "font_color"
+    >
   > = {};
 
   if (fullName && fullName !== requester.full_name) {
@@ -155,6 +188,14 @@ export async function PATCH(request: NextRequest) {
     profileUpdate.icon_color = normalizedIconColor;
   }
 
+  if (
+    includeFontColor &&
+    normalizedFontColor &&
+    normalizedFontColor !== (requester.font_color ?? DEFAULT_FONT_COLOR)
+  ) {
+    profileUpdate.font_color = normalizedFontColor;
+  }
+
   if (Object.keys(authUpdate).length > 0) {
     const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(
       requester.id,
@@ -180,7 +221,7 @@ export async function PATCH(request: NextRequest) {
   const { data: profile, error: readError } = await supabaseAdmin
     .from("profiles")
     .select(
-      "id, email, employee_id, full_name, role, is_active, theme_preference, icon_color, created_at, updated_at",
+      "id, email, employee_id, full_name, role, is_active, theme_preference, icon_color, font_color, created_at, updated_at",
     )
     .eq("id", requester.id)
     .maybeSingle<Profile>();
