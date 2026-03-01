@@ -4843,27 +4843,6 @@ export function DashboardClient({
           </section>
         ) : null}
 
-        {customizeOpen ? (
-          <section className="rounded-2xl border border-cyan-500/35 bg-cyan-500/10 p-3 backdrop-blur-sm">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs font-semibold text-cyan-900 dark:text-cyan-100">
-                Dashboard Studio is active in the header. Use it for presets, widget library,
-                KPI widgets, save/discard actions, and closing customize mode.
-              </p>
-              <span
-                className={cn(
-                  "rounded-full border px-3 py-1 text-xs font-semibold",
-                  layoutDirty
-                    ? "border-amber-500/45 bg-amber-500/15 text-amber-800 dark:text-amber-200"
-                    : "border-emerald-500/45 bg-emerald-500/15 text-emerald-800 dark:text-emerald-200",
-                )}
-              >
-                {layoutDirty ? "Unsaved changes" : "Layout saved"}
-              </span>
-            </div>
-          </section>
-        ) : null}
-
         <div className="grid grid-cols-12 gap-4">
           {visibleWidgets.map((widget) => {
             const definition = widgetDefinitionsById.get(widget.id);

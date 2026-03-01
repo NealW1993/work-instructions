@@ -17,6 +17,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -32,6 +33,11 @@ import {
   type DashboardLayoutCommandEventDetail,
   type DashboardLayoutStateEventDetail,
 } from "@/lib/dashboard-controls";
+import {
+  DASHBOARD_LAYOUT_PRESETS,
+  type DashboardWidgetLayoutItem,
+  type DashboardWidgetSize,
+} from "@/lib/dashboard-layout";
 import { canEditInstructions, isSystemAdmin } from "@/lib/roles";
 import type { Profile } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -63,6 +69,72 @@ function isActivePath(pathname: string, href: string) {
   return pathname.startsWith(`${href}/`);
 }
 
+function getPresetPreviewSpanValue(size: DashboardWidgetSize) {
+  switch (size) {
+    case "compact":
+      return 2;
+    case "standard":
+      return 3;
+    case "wide":
+      return 4;
+    case "full":
+    default:
+      return 6;
+  }
+}
+
+function buildPresetPreviewRows(
+  presetId: string,
+  layout: DashboardWidgetLayoutItem[],
+) {
+  const rows: Array<Array<{ key: string; span: number }>> = [];
+  let currentRow: Array<{ key: string; span: number }> = [];
+  let consumedColumns = 0;
+
+  layout
+    .filter((entry) => entry.visible)
+    .forEach((entry, index) => {
+      const span = getPresetPreviewSpanValue(entry.size);
+      if (consumedColumns > 0 && consumedColumns + span > 6) {
+        const remaining = 6 - consumedColumns;
+        if (remaining > 0 && currentRow.length > 0) {
+          const lastCell = currentRow[currentRow.length - 1];
+          if (lastCell) {
+            lastCell.span += remaining;
+          }
+        }
+        rows.push(currentRow);
+        currentRow = [];
+        consumedColumns = 0;
+      }
+
+      currentRow.push({
+        key: `${presetId}-${entry.id}-${index}`,
+        span,
+      });
+      consumedColumns += span;
+
+      if (consumedColumns === 6) {
+        rows.push(currentRow);
+        currentRow = [];
+        consumedColumns = 0;
+      }
+    });
+
+  if (currentRow.length > 0) {
+    const remaining = 6 - consumedColumns;
+    if (remaining > 0) {
+      const lastCell = currentRow[currentRow.length - 1];
+      if (lastCell) {
+        lastCell.span += remaining;
+      }
+    }
+    rows.push(currentRow);
+  }
+
+  return rows;
+}
+
 export function AppHeader({ profile }: { profile: Profile }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -75,13 +147,16 @@ export function AppHeader({ profile }: { profile: Profile }) {
   const [studioMenuPathname, setStudioMenuPathname] = useState(pathname);
   const [studioMenuMounted, setStudioMenuMounted] = useState(false);
   const [studioMenuEntered, setStudioMenuEntered] = useState(false);
-  const [studioMenuWidth, setStudioMenuWidth] = useState(380);
+  const [studioMenuWidth, setStudioMenuWidth] = useState(560);
   const [studioLayoutPresetsCollapsed, setStudioLayoutPresetsCollapsed] =
     useState(false);
   const [studioWidgetLibraryCollapsed, setStudioWidgetLibraryCollapsed] =
-    useState(false);
+    useState(true);
   const [studioKpiWidgetsCollapsed, setStudioKpiWidgetsCollapsed] =
-    useState(false);
+    useState(true);
+  const [studioExpandedPresetId, setStudioExpandedPresetId] = useState<string | null>(
+    null,
+  );
   const [instructionMenuOpen, setInstructionMenuOpen] = useState(false);
   const [instructionMenuPathname, setInstructionMenuPathname] = useState(pathname);
   const [instructionMenuMounted, setInstructionMenuMounted] = useState(false);
@@ -147,6 +222,10 @@ export function AppHeader({ profile }: { profile: Profile }) {
   const studioKpiWidgets = activeDashboardLayoutState.studioWidgets.filter(
     (widget) => widget.category === "kpi",
   );
+  const dashboardLayoutPresetsById = useMemo(
+    () => new Map(DASHBOARD_LAYOUT_PRESETS.map((preset) => [preset.id, preset])),
+    [],
+  );
   const customizeLabel =
     canSendDashboardLayoutActions && activeDashboardLayoutState.customizeOpen
       ? "Close Customize Panel"
@@ -195,9 +274,9 @@ export function AppHeader({ profile }: { profile: Profile }) {
     const targetWidth =
       instructionRect && instructionRect.right > studioRect.left
         ? Math.round(instructionRect.right - studioRect.left)
-        : 380;
+        : 560;
 
-    setStudioMenuWidth(Math.max(targetWidth, 360));
+    setStudioMenuWidth(Math.max(targetWidth, 520));
   }, []);
 
   const closeDashboardMenu = useCallback(() => {
@@ -260,13 +339,24 @@ export function AppHeader({ profile }: { profile: Profile }) {
     }
 
     syncStudioMenuWidth();
+    setStudioExpandedPresetId((current) => {
+      if (current) {
+        return current;
+      }
+
+      return (
+        activeDashboardLayoutState.activeLayoutPresetId ??
+        activeDashboardLayoutState.layoutPresets[0]?.id ??
+        null
+      );
+    });
     setStudioMenuPathname(pathname);
     setStudioMenuMounted(true);
     setStudioMenuOpen(true);
     window.requestAnimationFrame(() => {
       setStudioMenuEntered(true);
     });
-  }, [pathname, syncStudioMenuWidth]);
+  }, [activeDashboardLayoutState.activeLayoutPresetId, activeDashboardLayoutState.layoutPresets, pathname, syncStudioMenuWidth]);
 
   const closeInstructionMenu = useCallback(() => {
     if (!instructionMenuMounted && !instructionMenuOpen) {
@@ -720,7 +810,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
             closeInstructionMenu();
             openStudioMenu();
           }}
-          className="relative inline-flex items-center gap-2 rounded-xl border border-cyan-500/50 bg-cyan-500/18 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/28"
+          className="relative inline-flex items-center gap-2 rounded-xl border border-cyan-700 bg-cyan-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-cyan-700 dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
         >
           {studioNeedsAttention ? (
             <span className="absolute -right-1 -top-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-amber-200/40 bg-amber-500 text-amber-950 shadow-lg">
@@ -738,7 +828,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
         {studioMenuMounted ? (
           <div
             className={cn(
-              "absolute top-[calc(100%+0.5rem)] z-[90] grid gap-2 rounded-2xl border border-white/20 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-xl transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
+              "absolute top-[calc(100%+0.5rem)] z-[90] grid max-h-[68vh] gap-2 overflow-y-auto rounded-2xl border border-white/20 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-xl transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
               mobile ? "left-2 right-2" : "left-0",
               studioMenuEntered ? "pointer-events-auto" : "pointer-events-none",
             )}
@@ -772,35 +862,100 @@ export function AppHeader({ profile }: { profile: Profile }) {
                 />
               </button>
               {studioLayoutPresetsCollapsed ? null : (
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {activeDashboardLayoutState.layoutPresets.map((preset) => (
-                    <button
-                      key={preset.id}
-                      type="button"
-                      onClick={() =>
-                        handleDashboardStudioAction(
-                          {
-                            command: "apply-layout-preset",
-                            presetId: preset.id,
-                          },
-                          { closeStudioMenuAfterAction: false },
-                        )
-                      }
-                      className={cn(
-                        "inline-flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition",
-                        activeDashboardLayoutState.activeLayoutPresetId === preset.id
-                          ? "border-cyan-500/50 bg-cyan-500/18 text-cyan-100"
-                          : "border-white/20 bg-white/10 text-slate-100 hover:bg-white/20",
-                      )}
-                    >
-                      <span>{preset.label}</span>
-                      <span className="text-[10px] uppercase tracking-wide">
-                        {activeDashboardLayoutState.activeLayoutPresetId === preset.id
-                          ? "Active"
-                          : "Load"}
-                      </span>
-                    </button>
-                  ))}
+                <div className="grid gap-2">
+                  {activeDashboardLayoutState.layoutPresets.map((preset) => {
+                    const isExpanded = studioExpandedPresetId === preset.id;
+                    const presetDefinition = dashboardLayoutPresetsById.get(preset.id);
+                    const previewRows = presetDefinition
+                      ? buildPresetPreviewRows(preset.id, presetDefinition.layout)
+                      : [];
+
+                    return (
+                      <article
+                        key={preset.id}
+                        className="grid gap-2 rounded-lg border border-white/20 bg-white/10 p-2"
+                      >
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setStudioExpandedPresetId((current) =>
+                              current === preset.id ? null : preset.id,
+                            )
+                          }
+                          className="inline-flex items-center justify-between gap-2 rounded-lg px-1 py-0.5 text-left transition hover:bg-white/10"
+                        >
+                          <span className="text-xs font-semibold text-slate-100">
+                            {preset.label}
+                          </span>
+                          <div className="inline-flex items-center gap-2">
+                            <span
+                              className={cn(
+                                "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                                activeDashboardLayoutState.activeLayoutPresetId === preset.id
+                                  ? "bg-cyan-500/20 text-cyan-100"
+                                  : "bg-slate-500/20 text-slate-200",
+                              )}
+                            >
+                              {activeDashboardLayoutState.activeLayoutPresetId === preset.id
+                                ? "Active"
+                                : "Preset"}
+                            </span>
+                            <ChevronDown
+                              size={13}
+                              className={cn(
+                                "text-slate-300 transition",
+                                isExpanded ? "rotate-180" : "",
+                              )}
+                            />
+                          </div>
+                        </button>
+
+                        {isExpanded ? (
+                          <div className="grid gap-2 border-t border-white/10 pt-2">
+                            {previewRows.length === 0 ? (
+                              <p className="rounded-lg border border-white/15 bg-white/5 px-2 py-2 text-[11px] text-slate-300">
+                                Preview unavailable for this preset.
+                              </p>
+                            ) : (
+                              <div className="grid gap-1 rounded-lg border border-white/20 bg-slate-900/75 p-2">
+                                {previewRows.map((row, rowIndex) => (
+                                  <div
+                                    key={`${preset.id}-row-${rowIndex}`}
+                                    className="grid grid-cols-6 gap-1"
+                                  >
+                                    {row.map((cell) => (
+                                      <span
+                                        key={cell.key}
+                                        className="h-2 rounded-sm bg-cyan-400/80"
+                                        style={{
+                                          gridColumn: `span ${cell.span} / span ${cell.span}`,
+                                        }}
+                                      />
+                                    ))}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleDashboardStudioAction(
+                                  {
+                                    command: "apply-layout-preset",
+                                    presetId: preset.id,
+                                  },
+                                  { closeStudioMenuAfterAction: false },
+                                )
+                              }
+                              className="inline-flex items-center justify-center rounded-lg border border-cyan-500/45 bg-cyan-500/20 px-2.5 py-1.5 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-500/30"
+                            >
+                              Load Layout
+                            </button>
+                          </div>
+                        ) : null}
+                      </article>
+                    );
+                  })}
                 </div>
               )}
             </section>
@@ -825,7 +980,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
                 />
               </button>
               {studioWidgetLibraryCollapsed ? null : (
-                <div className="grid max-h-56 gap-2 overflow-y-auto pr-1">
+                <div className="grid max-h-44 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
                   {studioCoreWidgets.map((widget) => (
                     <article
                       key={widget.id}
@@ -916,7 +1071,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
                 />
               </button>
               {studioKpiWidgetsCollapsed ? null : (
-                <div className="grid max-h-56 gap-2 overflow-y-auto pr-1">
+                <div className="grid max-h-44 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
                   {studioKpiWidgets.map((widget) => (
                     <article
                       key={widget.id}
@@ -1226,16 +1381,16 @@ export function AppHeader({ profile }: { profile: Profile }) {
             />
           </Link>
           <nav className="hidden items-center gap-3 md:flex">
-            {renderDashboardControl(false)}
             {renderDashboardStudioControl(false)}
+            {renderDashboardControl(false)}
             {renderInstructionControl(false)}
           </nav>
           <UserAccountMenu profile={profile} />
         </div>
 
         <nav className="relative mt-2 flex flex-wrap items-center justify-center gap-2 md:hidden">
-          {renderDashboardControl(true)}
           {renderDashboardStudioControl(true)}
+          {renderDashboardControl(true)}
           {renderInstructionControl(true)}
         </nav>
       </div>
