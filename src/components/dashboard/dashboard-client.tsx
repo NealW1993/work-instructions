@@ -208,6 +208,8 @@ const DASHBOARD_RETURN_STATE_MAX_AGE_MS = 1000 * 60 * 30;
 const DASHBOARD_LAYOUT_SNAPSHOT_KEY = "__dashboardSavedLayoutSnapshot";
 const DASHBOARD_LAYOUT_SNAPSHOT_MAX_AGE_MS = 1000 * 60 * 60 * 4;
 const ONE_DAY_MS = 1000 * 60 * 60 * 24;
+const DASHBOARD_WIDGET_DRAG_AUTOSCROLL_EDGE_THRESHOLD_PX = 120;
+const DASHBOARD_WIDGET_DRAG_AUTOSCROLL_MAX_SPEED_PX_PER_FRAME = 26;
 const CELEBRATION_CONFETTI_COLORS = [
   "#22D3EE",
   "#60A5FA",
@@ -864,6 +866,77 @@ function getKpiTicks(maxValue: number, steps = 4) {
   });
 }
 
+interface KpiChartViewport {
+  width: number;
+  height: number;
+  minWidth: number;
+  pointRadius: number;
+  xLabelTargetCount: number;
+  axisTickSteps: number;
+}
+
+function getKpiChartViewport(widgetSize: DashboardWidgetSize): KpiChartViewport {
+  switch (widgetSize) {
+    case "compact":
+      return {
+        width: 420,
+        height: 196,
+        minWidth: 360,
+        pointRadius: 3,
+        xLabelTargetCount: 4,
+        axisTickSteps: 3,
+      };
+    case "full":
+      return {
+        width: 1080,
+        height: 252,
+        minWidth: 920,
+        pointRadius: 4.5,
+        xLabelTargetCount: 12,
+        axisTickSteps: 5,
+      };
+    case "wide":
+      return {
+        width: 860,
+        height: 236,
+        minWidth: 740,
+        pointRadius: 4,
+        xLabelTargetCount: 9,
+        axisTickSteps: 4,
+      };
+    case "standard":
+    default:
+      return {
+        width: 640,
+        height: 220,
+        minWidth: 560,
+        pointRadius: 4,
+        xLabelTargetCount: 6,
+        axisTickSteps: 4,
+      };
+  }
+}
+
+function getKpiXAxisLabelStep(totalPoints: number, targetLabelCount: number) {
+  if (totalPoints <= 1 || targetLabelCount <= 1) {
+    return 1;
+  }
+
+  return Math.max(1, Math.ceil(totalPoints / targetLabelCount));
+}
+
+function shouldRenderKpiXAxisLabel(
+  index: number,
+  totalPoints: number,
+  labelStep: number,
+) {
+  if (totalPoints <= 1) {
+    return true;
+  }
+
+  return index === 0 || index === totalPoints - 1 || index % labelStep === 0;
+}
+
 function KpiTimeRangePicker({
   value,
   onChange,
@@ -895,24 +968,28 @@ function KpiTimeRangePicker({
 function KpiLineChart({
   points,
   yAxisLabel,
+  widgetSize,
   lineColor = "#06B6D4",
   showArea = false,
   onSelectPoint,
 }: {
   points: KpiTimeSeriesPoint[];
   yAxisLabel: string;
+  widgetSize: DashboardWidgetSize;
   lineColor?: string;
   showArea?: boolean;
   onSelectPoint?: (point: KpiTimeSeriesPoint) => void;
 }) {
-  const width = 640;
-  const height = 220;
+  const viewport = getKpiChartViewport(widgetSize);
+  const width = viewport.width;
+  const height = viewport.height;
   const padding = { top: 16, right: 12, bottom: 34, left: 44 };
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
   const maxValue = Math.max(1, ...points.map((point) => point.value));
-  const ticks = getKpiTicks(maxValue);
+  const ticks = getKpiTicks(maxValue, viewport.axisTickSteps);
   const xStep = points.length > 1 ? plotWidth / (points.length - 1) : 0;
+  const labelStep = getKpiXAxisLabelStep(points.length, viewport.xLabelTargetCount);
 
   const toX = (index: number) =>
     points.length > 1 ? padding.left + xStep * index : padding.left + plotWidth / 2;
@@ -934,7 +1011,11 @@ function KpiLineChart({
       <div className="w-full overflow-x-auto">
         <svg
           viewBox={`0 0 ${width} ${height}`}
-          className="h-48 min-w-[560px] w-full text-slate-500 dark:text-slate-300"
+          className="w-full text-slate-500 dark:text-slate-300"
+          style={{
+            minWidth: `${viewport.minWidth}px`,
+            height: `${Math.round(viewport.height)}px`,
+          }}
         >
           <text
             x={12}
@@ -977,19 +1058,21 @@ function KpiLineChart({
               <circle
                 cx={toX(index)}
                 cy={toY(point.value)}
-                r={4}
+                r={viewport.pointRadius}
                 fill={lineColor}
                 className={onSelectPoint ? "cursor-pointer" : ""}
                 onClick={() => onSelectPoint?.(point)}
               />
-              <text
-                x={toX(index)}
-                y={height - 12}
-                textAnchor="middle"
-                className="fill-current text-[10px]"
-              >
-                {point.shortLabel}
-              </text>
+              {shouldRenderKpiXAxisLabel(index, points.length, labelStep) ? (
+                <text
+                  x={toX(index)}
+                  y={height - 12}
+                  textAnchor="middle"
+                  className="fill-current text-[10px]"
+                >
+                  {point.shortLabel}
+                </text>
+              ) : null}
             </g>
           ))}
         </svg>
@@ -1004,29 +1087,40 @@ function KpiLineChart({
 function KpiBarChart({
   bars,
   yAxisLabel,
+  widgetSize,
   onSelectBar,
 }: {
   bars: KpiBarPoint[];
   yAxisLabel: string;
+  widgetSize: DashboardWidgetSize;
   onSelectBar?: (bar: KpiBarPoint) => void;
 }) {
-  const width = 640;
-  const height = 220;
+  const viewport = getKpiChartViewport(widgetSize);
+  const width = viewport.width;
+  const height = viewport.height;
   const padding = { top: 16, right: 12, bottom: 42, left: 44 };
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
   const maxValue = Math.max(1, ...bars.map((bar) => bar.value));
-  const ticks = getKpiTicks(maxValue);
+  const ticks = getKpiTicks(maxValue, viewport.axisTickSteps);
   const barSlotWidth = bars.length > 0 ? plotWidth / bars.length : plotWidth;
-  const barWidth = Math.max(14, Math.min(42, barSlotWidth - 8));
+  const barWidth = Math.max(
+    widgetSize === "compact" ? 10 : 14,
+    Math.min(widgetSize === "full" ? 48 : 42, barSlotWidth - 8),
+  );
   const toY = (value: number) => padding.top + ((maxValue - value) / maxValue) * plotHeight;
+  const labelStep = getKpiXAxisLabelStep(bars.length, viewport.xLabelTargetCount);
 
   return (
     <div className="grid gap-2">
       <div className="w-full overflow-x-auto">
         <svg
           viewBox={`0 0 ${width} ${height}`}
-          className="h-48 min-w-[560px] w-full text-slate-500 dark:text-slate-300"
+          className="w-full text-slate-500 dark:text-slate-300"
+          style={{
+            minWidth: `${viewport.minWidth}px`,
+            height: `${Math.round(viewport.height)}px`,
+          }}
         >
           <text
             x={12}
@@ -1077,14 +1171,16 @@ function KpiBarChart({
                   className={onSelectBar ? "cursor-pointer" : ""}
                   onClick={() => onSelectBar?.(bar)}
                 />
-                <text
-                  x={x + barWidth / 2}
-                  y={height - 18}
-                  textAnchor="middle"
-                  className="fill-current text-[10px]"
-                >
-                  {bar.label}
-                </text>
+                {shouldRenderKpiXAxisLabel(index, bars.length, labelStep) ? (
+                  <text
+                    x={x + barWidth / 2}
+                    y={height - 18}
+                    textAnchor="middle"
+                    className="fill-current text-[10px]"
+                  >
+                    {bar.label}
+                  </text>
+                ) : null}
               </g>
             );
           })}
@@ -1100,14 +1196,17 @@ function KpiBarChart({
 function KpiStackedBarChart({
   points,
   yAxisLabel,
+  widgetSize,
   onSelectPoint,
 }: {
   points: KpiStackedPoint[];
   yAxisLabel: string;
+  widgetSize: DashboardWidgetSize;
   onSelectPoint?: (point: KpiStackedPoint) => void;
 }) {
-  const width = 640;
-  const height = 220;
+  const viewport = getKpiChartViewport(widgetSize);
+  const width = viewport.width;
+  const height = viewport.height;
   const padding = { top: 16, right: 12, bottom: 34, left: 44 };
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
@@ -1115,17 +1214,25 @@ function KpiStackedBarChart({
     1,
     ...points.map((point) => point.healthy + point.attention),
   );
-  const ticks = getKpiTicks(maxValue);
+  const ticks = getKpiTicks(maxValue, viewport.axisTickSteps);
   const barSlotWidth = points.length > 0 ? plotWidth / points.length : plotWidth;
-  const barWidth = Math.max(8, Math.min(24, barSlotWidth - 6));
+  const barWidth = Math.max(
+    widgetSize === "compact" ? 6 : 8,
+    Math.min(widgetSize === "full" ? 28 : 24, barSlotWidth - 6),
+  );
   const toY = (value: number) => padding.top + ((maxValue - value) / maxValue) * plotHeight;
+  const labelStep = getKpiXAxisLabelStep(points.length, viewport.xLabelTargetCount);
 
   return (
     <div className="grid gap-2">
       <div className="w-full overflow-x-auto">
         <svg
           viewBox={`0 0 ${width} ${height}`}
-          className="h-48 min-w-[560px] w-full text-slate-500 dark:text-slate-300"
+          className="w-full text-slate-500 dark:text-slate-300"
+          style={{
+            minWidth: `${viewport.minWidth}px`,
+            height: `${Math.round(viewport.height)}px`,
+          }}
         >
           <text
             x={12}
@@ -1189,14 +1296,16 @@ function KpiStackedBarChart({
                   className={onSelectPoint ? "cursor-pointer" : ""}
                   onClick={() => onSelectPoint?.(point)}
                 />
-                <text
-                  x={x + barWidth / 2}
-                  y={height - 12}
-                  textAnchor="middle"
-                  className="fill-current text-[10px]"
-                >
-                  {point.shortLabel}
-                </text>
+                {shouldRenderKpiXAxisLabel(index, points.length, labelStep) ? (
+                  <text
+                    x={x + barWidth / 2}
+                    y={height - 12}
+                    textAnchor="middle"
+                    className="fill-current text-[10px]"
+                  >
+                    {point.shortLabel}
+                  </text>
+                ) : null}
               </g>
             );
           })}
@@ -1220,22 +1329,25 @@ function KpiScatterChart({
   points,
   xAxisLabel,
   yAxisLabel,
+  widgetSize,
   onSelectPoint,
 }: {
   points: KpiScatterPoint[];
   xAxisLabel: string;
   yAxisLabel: string;
+  widgetSize: DashboardWidgetSize;
   onSelectPoint?: (point: KpiScatterPoint) => void;
 }) {
-  const width = 640;
-  const height = 220;
+  const viewport = getKpiChartViewport(widgetSize);
+  const width = viewport.width;
+  const height = viewport.height;
   const padding = { top: 16, right: 12, bottom: 34, left: 44 };
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
   const maxX = Math.max(1, ...points.map((point) => point.xValue));
   const maxY = Math.max(1, ...points.map((point) => point.yValue));
-  const xTicks = getKpiTicks(maxX);
-  const yTicks = getKpiTicks(maxY);
+  const xTicks = getKpiTicks(maxX, viewport.axisTickSteps);
+  const yTicks = getKpiTicks(maxY, viewport.axisTickSteps);
   const toX = (value: number) => padding.left + (value / maxX) * plotWidth;
   const toY = (value: number) => padding.top + ((maxY - value) / maxY) * plotHeight;
 
@@ -1244,7 +1356,11 @@ function KpiScatterChart({
       <div className="w-full overflow-x-auto">
         <svg
           viewBox={`0 0 ${width} ${height}`}
-          className="h-48 min-w-[560px] w-full text-slate-500 dark:text-slate-300"
+          className="w-full text-slate-500 dark:text-slate-300"
+          style={{
+            minWidth: `${viewport.minWidth}px`,
+            height: `${Math.round(viewport.height)}px`,
+          }}
         >
           <text
             x={12}
@@ -1297,7 +1413,7 @@ function KpiScatterChart({
               key={point.id}
               cx={toX(point.xValue)}
               cy={toY(point.yValue)}
-              r={4}
+              r={viewport.pointRadius}
               fill={point.color}
               fillOpacity={0.85}
               className={onSelectPoint ? "cursor-pointer" : ""}
@@ -1315,21 +1431,44 @@ function KpiScatterChart({
 
 function KpiDonutChart({
   segments,
+  widgetSize,
   onSelectSegment,
 }: {
   segments: KpiDonutSegment[];
+  widgetSize: DashboardWidgetSize;
   onSelectSegment?: (segment: KpiDonutSegment) => void;
 }) {
   const total = segments.reduce((sum, segment) => sum + segment.value, 0);
-  const radius = 52;
+  const radius =
+    widgetSize === "compact"
+      ? 42
+      : widgetSize === "full"
+        ? 64
+        : widgetSize === "wide"
+          ? 58
+          : 52;
   const circumference = 2 * Math.PI * radius;
   let cumulative = 0;
+  const donutSize = radius * 2 + 36;
+  const center = donutSize / 2;
+  const ringWidth = widgetSize === "compact" ? 14 : 18;
+  const isCompact = widgetSize === "compact";
 
   return (
     <div className="grid gap-3">
-      <div className="flex flex-wrap items-center gap-4">
-        <svg viewBox="0 0 140 140" className="h-36 w-36">
-          <circle cx="70" cy="70" r={radius} fill="none" stroke="#CBD5E1" strokeWidth={18} />
+      <div className={cn("flex flex-wrap items-center gap-4", isCompact ? "justify-center" : "")}>
+        <svg
+          viewBox={`0 0 ${donutSize} ${donutSize}`}
+          className={cn(isCompact ? "h-28 w-28" : "h-36 w-36")}
+        >
+          <circle
+            cx={center}
+            cy={center}
+            r={radius}
+            fill="none"
+            stroke="#CBD5E1"
+            strokeWidth={ringWidth}
+          />
           {total > 0
             ? segments.map((segment) => {
                 const segmentLength = (segment.value / total) * circumference;
@@ -1339,15 +1478,15 @@ function KpiDonutChart({
                 return (
                   <circle
                     key={segment.id}
-                    cx="70"
-                    cy="70"
+                    cx={center}
+                    cy={center}
                     r={radius}
                     fill="none"
                     stroke={segment.color}
-                    strokeWidth={18}
+                    strokeWidth={ringWidth}
                     strokeDasharray={`${segmentLength} ${circumference - segmentLength}`}
                     strokeDashoffset={dashOffset}
-                    transform="rotate(-90 70 70)"
+                    transform={`rotate(-90 ${center} ${center})`}
                     className={onSelectSegment ? "cursor-pointer" : ""}
                     onClick={() => onSelectSegment?.(segment)}
                   />
@@ -1355,24 +1494,27 @@ function KpiDonutChart({
               })
             : null}
           <text
-            x="70"
-            y="68"
+            x={center}
+            y={center - (isCompact ? 2 : 4)}
             textAnchor="middle"
             className="fill-slate-700 text-[11px] font-semibold dark:fill-slate-300"
           >
             Total
           </text>
           <text
-            x="70"
-            y="84"
+            x={center}
+            y={center + (isCompact ? 14 : 12)}
             textAnchor="middle"
-            className="fill-slate-900 text-lg font-extrabold dark:fill-slate-100"
+            className={cn(
+              "fill-slate-900 font-extrabold dark:fill-slate-100",
+              isCompact ? "text-base" : "text-lg",
+            )}
           >
             {total}
           </text>
         </svg>
 
-        <div className="grid gap-1.5">
+        <div className={cn("grid gap-1.5", isCompact ? "w-full" : "")}>
           {segments.map((segment) => (
             <button
               key={segment.id}
@@ -1442,6 +1584,12 @@ export function DashboardClient({
     pointerId: number;
     sourceWidgetId: DashboardWidgetId;
   } | null>(null);
+  const dragPointerPositionRef = useRef<{
+    clientX: number;
+    clientY: number;
+  } | null>(null);
+  const dragAutoScrollFrameRef = useRef<number | null>(null);
+  const dragOverWidgetIdRef = useRef<DashboardWidgetId | null>(null);
   const pendingNavigationRef = useRef<DashboardPendingNavigation | null>(null);
   const navigationModalOpenRef = useRef(false);
   const historyGuardActiveRef = useRef(false);
@@ -1509,6 +1657,10 @@ export function DashboardClient({
     [],
   );
   const normalizedReviewWindowDays = normalizeReviewWindowDays(instructionReviewWindowDays);
+
+  useEffect(() => {
+    dragOverWidgetIdRef.current = dragOverWidgetId;
+  }, [dragOverWidgetId]);
 
   const normalizedQuery = query.trim().toLowerCase();
   const isSearching = normalizedQuery.length > 0;
@@ -1802,13 +1954,26 @@ export function DashboardClient({
   useEffect(() => {
     customizeOpenRef.current = customizeOpen;
     if (!customizeOpen) {
-      clearWidgetPointerDragState();
+      if (dragAutoScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(dragAutoScrollFrameRef.current);
+        dragAutoScrollFrameRef.current = null;
+      }
+      dragPointerPositionRef.current = null;
+      pointerDragStateRef.current = null;
+      dragOverWidgetIdRef.current = null;
+      setDraggedWidgetId(null);
+      setDragOverWidgetId(null);
       setActiveKpiDrilldown(null);
     }
   }, [customizeOpen]);
 
   useEffect(() => {
     return () => {
+      if (dragAutoScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(dragAutoScrollFrameRef.current);
+        dragAutoScrollFrameRef.current = null;
+      }
+      dragPointerPositionRef.current = null;
       pointerDragStateRef.current = null;
     };
   }, []);
@@ -3136,10 +3301,6 @@ export function DashboardClient({
     () => new Map(WIDGET_DEFINITIONS.map((widget) => [widget.id, widget])),
     [],
   );
-  const widgetLayoutById = useMemo(
-    () => new Map(widgetLayout.map((widget) => [widget.id, widget])),
-    [widgetLayout],
-  );
 
   const getAuthHeaders = useCallback(async () => {
     const {
@@ -3331,8 +3492,87 @@ export function DashboardClient({
     return candidateId;
   }
 
+  function updateDragOverWidgetFromPointerPosition() {
+    const pointerPosition = dragPointerPositionRef.current;
+    if (!pointerPosition) {
+      return;
+    }
+
+    const targetWidgetId = getWidgetIdAtPointerPosition(
+      pointerPosition.clientX,
+      pointerPosition.clientY,
+    );
+    if (!targetWidgetId || targetWidgetId === dragOverWidgetIdRef.current) {
+      return;
+    }
+
+    setDragOverWidgetId(targetWidgetId);
+  }
+
+  function stopWidgetDragAutoScroll() {
+    if (dragAutoScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(dragAutoScrollFrameRef.current);
+      dragAutoScrollFrameRef.current = null;
+    }
+    dragPointerPositionRef.current = null;
+  }
+
+  function stepWidgetDragAutoScroll() {
+    const pointerDragState = pointerDragStateRef.current;
+    const pointerPosition = dragPointerPositionRef.current;
+    if (!pointerDragState || !pointerPosition) {
+      stopWidgetDragAutoScroll();
+      return;
+    }
+
+    const viewportHeight = window.innerHeight;
+    let deltaY = 0;
+    if (pointerPosition.clientY < DASHBOARD_WIDGET_DRAG_AUTOSCROLL_EDGE_THRESHOLD_PX) {
+      const ratio =
+        (DASHBOARD_WIDGET_DRAG_AUTOSCROLL_EDGE_THRESHOLD_PX - pointerPosition.clientY) /
+        DASHBOARD_WIDGET_DRAG_AUTOSCROLL_EDGE_THRESHOLD_PX;
+      deltaY = -Math.max(
+        1,
+        Math.round(ratio * DASHBOARD_WIDGET_DRAG_AUTOSCROLL_MAX_SPEED_PX_PER_FRAME),
+      );
+    } else if (
+      pointerPosition.clientY >
+      viewportHeight - DASHBOARD_WIDGET_DRAG_AUTOSCROLL_EDGE_THRESHOLD_PX
+    ) {
+      const ratio =
+        (pointerPosition.clientY -
+          (viewportHeight - DASHBOARD_WIDGET_DRAG_AUTOSCROLL_EDGE_THRESHOLD_PX)) /
+        DASHBOARD_WIDGET_DRAG_AUTOSCROLL_EDGE_THRESHOLD_PX;
+      deltaY = Math.max(
+        1,
+        Math.round(ratio * DASHBOARD_WIDGET_DRAG_AUTOSCROLL_MAX_SPEED_PX_PER_FRAME),
+      );
+    }
+
+    if (deltaY !== 0) {
+      window.scrollBy({
+        top: deltaY,
+        left: 0,
+        behavior: "auto",
+      });
+      updateDragOverWidgetFromPointerPosition();
+    }
+
+    dragAutoScrollFrameRef.current = window.requestAnimationFrame(stepWidgetDragAutoScroll);
+  }
+
+  function startWidgetDragAutoScroll() {
+    if (dragAutoScrollFrameRef.current !== null) {
+      return;
+    }
+
+    dragAutoScrollFrameRef.current = window.requestAnimationFrame(stepWidgetDragAutoScroll);
+  }
+
   function clearWidgetPointerDragState() {
+    stopWidgetDragAutoScroll();
     pointerDragStateRef.current = null;
+    dragOverWidgetIdRef.current = null;
     setDraggedWidgetId(null);
     setDragOverWidgetId(null);
   }
@@ -3356,8 +3596,14 @@ export function DashboardClient({
       pointerId: event.pointerId,
       sourceWidgetId: widgetId,
     };
+    dragPointerPositionRef.current = {
+      clientX: event.clientX,
+      clientY: event.clientY,
+    };
     setDraggedWidgetId(widgetId);
     setDragOverWidgetId(widgetId);
+    dragOverWidgetIdRef.current = widgetId;
+    startWidgetDragAutoScroll();
     event.currentTarget.setPointerCapture(event.pointerId);
   }
 
@@ -3367,12 +3613,11 @@ export function DashboardClient({
       return;
     }
 
-    const targetWidgetId = getWidgetIdAtPointerPosition(event.clientX, event.clientY);
-    if (!targetWidgetId || targetWidgetId === dragOverWidgetId) {
-      return;
-    }
-
-    setDragOverWidgetId(targetWidgetId);
+    dragPointerPositionRef.current = {
+      clientX: event.clientX,
+      clientY: event.clientY,
+    };
+    updateDragOverWidgetFromPointerPosition();
   }
 
   function completeWidgetPointerDrag(event: ReactPointerEvent<HTMLButtonElement>) {
@@ -3759,7 +4004,10 @@ export function DashboardClient({
     return null;
   }
 
-  function renderWidgetContent(widgetId: DashboardWidgetId) {
+  function renderWidgetContent(
+    widgetId: DashboardWidgetId,
+    widgetSize: DashboardWidgetSize,
+  ) {
     if (widgetId === "finder") {
       return (
         <div className={cn("grid", departmentInsightExpanded ? "gap-4" : "gap-2")}>
@@ -4506,6 +4754,7 @@ export function DashboardClient({
           <KpiLineChart
             points={throughputMetric.points}
             yAxisLabel="Events"
+            widgetSize={widgetSize}
             lineColor="#06B6D4"
             onSelectPoint={(point) => {
               setActiveKpiDrilldown({
@@ -4548,6 +4797,7 @@ export function DashboardClient({
           <KpiLineChart
             points={creationVelocityMetric.points}
             yAxisLabel="Created"
+            widgetSize={widgetSize}
             lineColor="#3B82F6"
             showArea
             onSelectPoint={(point) => {
@@ -4597,6 +4847,7 @@ export function DashboardClient({
             <KpiBarChart
               bars={departmentWorkloadMetric.bars}
               yAxisLabel="Events"
+              widgetSize={widgetSize}
               onSelectBar={(bar) => {
                 setActiveKpiDrilldown({
                   title: "Department Workload Drill Down",
@@ -4629,6 +4880,7 @@ export function DashboardClient({
           <KpiStackedBarChart
             points={reviewHealthMetric.points}
             yAxisLabel="Instruction Updates"
+            widgetSize={widgetSize}
             onSelectPoint={(point) => {
               setActiveKpiDrilldown({
                 title: "Review Health Drill Down",
@@ -4666,6 +4918,7 @@ export function DashboardClient({
               points={revisionCycleMetric.points}
               xAxisLabel="days since update"
               yAxisLabel="Revision"
+              widgetSize={widgetSize}
               onSelectPoint={(point) => {
                 setActiveKpiDrilldown({
                   title: "Revision Cycle Time Drill Down",
@@ -4702,6 +4955,7 @@ export function DashboardClient({
           ) : (
             <KpiDonutChart
               segments={eventMixMetric.segments}
+              widgetSize={widgetSize}
               onSelectSegment={(segment) => {
                 setActiveKpiDrilldown({
                   title: "Event Mix Drill Down",
@@ -4716,7 +4970,7 @@ export function DashboardClient({
       );
     }
 
-    const isMyImpactCompact = (widgetLayoutById.get("my_impact")?.size ?? "standard") === "compact";
+    const isMyImpactCompact = widgetSize === "compact";
 
     return (
       <div className="grid gap-3">
@@ -4951,7 +5205,7 @@ export function DashboardClient({
                   </div>
                 </div>
 
-                {renderWidgetContent(widget.id)}
+                {renderWidgetContent(widget.id, widget.size)}
               </section>
             );
           })}
