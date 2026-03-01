@@ -39,29 +39,8 @@ export function SuggestedToolsDropdown({ tools, className }: SuggestedToolsDropd
     };
   }, [open]);
 
-  const groupedTools = useMemo(() => {
-    const grouped = new Map<string, Map<string, SuggestedToolOption[]>>();
-    for (const tool of tools) {
-      const categoryName = tool.categoryName.trim() || "General";
-      const subcategoryName = tool.subcategoryName?.trim() || "No Sub-Category";
-      const groupedByCategory = grouped.get(categoryName) ?? new Map<string, SuggestedToolOption[]>();
-      const groupedBySubcategory = groupedByCategory.get(subcategoryName) ?? [];
-      groupedBySubcategory.push(tool);
-      groupedByCategory.set(subcategoryName, groupedBySubcategory);
-      grouped.set(categoryName, groupedByCategory);
-    }
-
-    return Array.from(grouped.entries())
-      .sort(([first], [second]) => first.localeCompare(second))
-      .map(([categoryName, subcategoryMap]) => ({
-        categoryName,
-        subcategories: Array.from(subcategoryMap.entries())
-          .sort(([first], [second]) => first.localeCompare(second))
-          .map(([subcategoryName, entries]) => ({
-            subcategoryName,
-            entries: [...entries].sort((first, second) => first.name.localeCompare(second.name)),
-          })),
-      }));
+  const sortedTools = useMemo(() => {
+    return [...tools].sort((first, second) => first.name.localeCompare(second.name));
   }, [tools]);
 
   const totalCount = tools.length;
@@ -106,7 +85,7 @@ export function SuggestedToolsDropdown({ tools, className }: SuggestedToolsDropd
         <div className="absolute right-0 z-40 mt-2 grid w-[min(24rem,90vw)] gap-3 rounded-xl border border-slate-300/80 bg-white/95 p-3 shadow-2xl backdrop-blur-xl dark:border-slate-700/80 dark:bg-slate-900/95">
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-              Tool List
+              Check List
             </p>
             <button
               type="button"
@@ -117,42 +96,28 @@ export function SuggestedToolsDropdown({ tools, className }: SuggestedToolsDropd
             </button>
           </div>
 
-          {groupedTools.length === 0 ? (
+          {sortedTools.length === 0 ? (
             <p className="rounded-lg border border-slate-300/70 bg-slate-100/80 px-2.5 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300">
               No tools in this list yet.
             </p>
           ) : (
             <div className="grid max-h-72 gap-2 overflow-y-auto pr-1">
-              {groupedTools.map((group) => (
-                <div key={group.categoryName} className="grid gap-1.5">
-                  <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                    {group.categoryName}
-                  </p>
-                  {group.subcategories.map((subcategory) => (
-                    <div key={`${group.categoryName}:${subcategory.subcategoryName}`} className="grid gap-1">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500/90 dark:text-slate-400/90">
-                        {subcategory.subcategoryName}
-                      </p>
-                      {subcategory.entries.map((tool) => (
-                        <label
-                          key={tool.id}
-                          className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300/70 bg-slate-100/70 px-2.5 py-1.5 text-xs text-slate-700 transition hover:bg-slate-200/70 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-800/70"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checkedToolIds.includes(tool.id)}
-                            onChange={() => handleToolToggle(tool.id)}
-                            className="h-4 w-4 rounded border-slate-400 text-cyan-600 focus:ring-cyan-500"
-                          />
-                          <span className="flex-1">{tool.name}</span>
-                          {checkedToolIds.includes(tool.id) ? (
-                            <CheckSquare size={13} className="text-emerald-600 dark:text-emerald-300" />
-                          ) : null}
-                        </label>
-                      ))}
-                    </div>
-                  ))}
-                </div>
+              {sortedTools.map((tool) => (
+                <label
+                  key={tool.id}
+                  className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300/70 bg-slate-100/70 px-2.5 py-1.5 text-xs text-slate-700 transition hover:bg-slate-200/70 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-800/70"
+                >
+                  <input
+                    type="checkbox"
+                    checked={checkedToolIds.includes(tool.id)}
+                    onChange={() => handleToolToggle(tool.id)}
+                    className="h-4 w-4 rounded border-slate-400 text-cyan-600 focus:ring-cyan-500"
+                  />
+                  <span className="flex-1">{tool.name}</span>
+                  {checkedToolIds.includes(tool.id) ? (
+                    <CheckSquare size={13} className="text-emerald-600 dark:text-emerald-300" />
+                  ) : null}
+                </label>
               ))}
             </div>
           )}

@@ -1,7 +1,33 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ARG NPM_REGISTRY=https://registry.npmjs.org/
+ENV HTTP_PROXY=${HTTP_PROXY}
+ENV HTTPS_PROXY=${HTTPS_PROXY}
+ENV NO_PROXY=${NO_PROXY}
+ENV http_proxy=${HTTP_PROXY}
+ENV https_proxy=${HTTPS_PROXY}
+ENV no_proxy=${NO_PROXY}
 COPY package*.json ./
-RUN npm ci
+RUN set -eux; \
+    npm config set registry "${NPM_REGISTRY}"; \
+    npm config set fund false; \
+    npm config set audit false; \
+    npm config set progress false; \
+    npm config set fetch-retries 5; \
+    npm config set fetch-retry-factor 2; \
+    npm config set fetch-retry-mintimeout 20000; \
+    npm config set fetch-retry-maxtimeout 120000; \
+    i=1; \
+    while [ "$i" -le 3 ]; do \
+      npm ci --no-audit --no-fund && break; \
+      if [ "$i" -eq 3 ]; then exit 1; fi; \
+      echo "npm ci failed (attempt $i). Retrying..."; \
+      sleep $((i * 5)); \
+      i=$((i + 1)); \
+    done
 
 FROM node:20-alpine AS builder
 WORKDIR /app

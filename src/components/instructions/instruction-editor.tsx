@@ -1444,6 +1444,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
             )
             .ilike("part_id", `%${safeQuery}%`)
             .eq("work_instructions.is_archived", false)
+            .order("part_id", { ascending: false })
             .order("updated_at", { ascending: false })
             .limit(8);
 
@@ -2867,9 +2868,10 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
               aria-expanded={editorParametersOpen}
               aria-label="Toggle instruction parameters"
               title="Instruction Parameters"
-              className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-500/35 bg-cyan-500/10 text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-100"
+              className="inline-flex h-11 min-w-11 items-center justify-center gap-1 rounded-xl border border-cyan-500/35 bg-cyan-500/10 px-2 text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-100"
             >
               <SlidersHorizontal size={17} />
+              <span className="text-[10px] font-semibold">({toolListCount})</span>
             </button>
           }
           aboveEditorContent={
