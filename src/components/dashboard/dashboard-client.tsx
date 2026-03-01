@@ -858,12 +858,24 @@ function formatKpiNumber(value: number) {
   return `${Math.round(value)}`;
 }
 
-function getKpiTicks(maxValue: number, steps = 4) {
-  const safeMax = Math.max(1, maxValue);
-  return Array.from({ length: steps + 1 }, (_, index) => {
-    const ratio = (steps - index) / steps;
-    return Math.round((safeMax * ratio + Number.EPSILON) * 10) / 10;
-  });
+function getKpiAxisScale(maxValue: number, targetSteps = 4) {
+  const safeMax = Math.max(1, Number.isFinite(maxValue) ? maxValue : 1);
+  const safeTargetSteps = Math.max(1, targetSteps);
+  const roundedMax = Math.ceil(safeMax);
+  const step =
+    roundedMax <= safeTargetSteps + 1
+      ? 1
+      : Math.max(1, Math.ceil(roundedMax / safeTargetSteps));
+  const axisMax = Math.max(step, Math.ceil(roundedMax / step) * step);
+  const ticks = Array.from(
+    { length: Math.floor(axisMax / step) + 1 },
+    (_, index) => axisMax - index * step,
+  );
+
+  return {
+    axisMax,
+    ticks,
+  };
 }
 
 interface KpiChartViewport {
@@ -987,14 +999,14 @@ function KpiLineChart({
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
   const maxValue = Math.max(1, ...points.map((point) => point.value));
-  const ticks = getKpiTicks(maxValue, viewport.axisTickSteps);
+  const { axisMax, ticks } = getKpiAxisScale(maxValue, viewport.axisTickSteps);
   const xStep = points.length > 1 ? plotWidth / (points.length - 1) : 0;
   const labelStep = getKpiXAxisLabelStep(points.length, viewport.xLabelTargetCount);
 
   const toX = (index: number) =>
     points.length > 1 ? padding.left + xStep * index : padding.left + plotWidth / 2;
   const toY = (value: number) =>
-    padding.top + ((maxValue - value) / maxValue) * plotHeight;
+    padding.top + ((axisMax - value) / axisMax) * plotHeight;
 
   const linePath = points
     .map((point, index) => `${index === 0 ? "M" : "L"} ${toX(index)} ${toY(point.value)}`)
@@ -1102,13 +1114,13 @@ function KpiBarChart({
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
   const maxValue = Math.max(1, ...bars.map((bar) => bar.value));
-  const ticks = getKpiTicks(maxValue, viewport.axisTickSteps);
+  const { axisMax, ticks } = getKpiAxisScale(maxValue, viewport.axisTickSteps);
   const barSlotWidth = bars.length > 0 ? plotWidth / bars.length : plotWidth;
   const barWidth = Math.max(
     widgetSize === "compact" ? 10 : 14,
     Math.min(widgetSize === "full" ? 48 : 42, barSlotWidth - 8),
   );
-  const toY = (value: number) => padding.top + ((maxValue - value) / maxValue) * plotHeight;
+  const toY = (value: number) => padding.top + ((axisMax - value) / axisMax) * plotHeight;
   const labelStep = getKpiXAxisLabelStep(bars.length, viewport.xLabelTargetCount);
 
   return (
@@ -1157,20 +1169,23 @@ function KpiBarChart({
           {bars.map((bar, index) => {
             const x = padding.left + index * barSlotWidth + (barSlotWidth - barWidth) / 2;
             const y = toY(bar.value);
-            const barHeight = padding.top + plotHeight - y;
+            const rawBarHeight = padding.top + plotHeight - y;
+            const barHeight = bar.value > 0 ? Math.max(1, rawBarHeight) : 0;
 
             return (
               <g key={bar.id}>
-                <rect
-                  x={x}
-                  y={y}
-                  width={barWidth}
-                  height={Math.max(2, barHeight)}
-                  rx={4}
-                  fill={bar.color}
-                  className={onSelectBar ? "cursor-pointer" : ""}
-                  onClick={() => onSelectBar?.(bar)}
-                />
+                {barHeight > 0 ? (
+                  <rect
+                    x={x}
+                    y={y}
+                    width={barWidth}
+                    height={barHeight}
+                    rx={4}
+                    fill={bar.color}
+                    className={onSelectBar ? "cursor-pointer" : ""}
+                    onClick={() => onSelectBar?.(bar)}
+                  />
+                ) : null}
                 {shouldRenderKpiXAxisLabel(index, bars.length, labelStep) ? (
                   <text
                     x={x + barWidth / 2}
@@ -1214,13 +1229,13 @@ function KpiStackedBarChart({
     1,
     ...points.map((point) => point.healthy + point.attention),
   );
-  const ticks = getKpiTicks(maxValue, viewport.axisTickSteps);
+  const { axisMax, ticks } = getKpiAxisScale(maxValue, viewport.axisTickSteps);
   const barSlotWidth = points.length > 0 ? plotWidth / points.length : plotWidth;
   const barWidth = Math.max(
     widgetSize === "compact" ? 6 : 8,
     Math.min(widgetSize === "full" ? 28 : 24, barSlotWidth - 6),
   );
-  const toY = (value: number) => padding.top + ((maxValue - value) / maxValue) * plotHeight;
+  const toY = (value: number) => padding.top + ((axisMax - value) / axisMax) * plotHeight;
   const labelStep = getKpiXAxisLabelStep(points.length, viewport.xLabelTargetCount);
 
   return (
@@ -1271,31 +1286,39 @@ function KpiStackedBarChart({
             const total = point.healthy + point.attention;
             const totalTopY = toY(total);
             const healthyTopY = toY(point.healthy);
-            const healthyHeight = padding.top + plotHeight - healthyTopY;
-            const attentionHeight = total > 0 ? healthyTopY - totalTopY : 0;
+            const rawHealthyHeight = padding.top + plotHeight - healthyTopY;
+            const healthyHeight = point.healthy > 0 ? Math.max(1, rawHealthyHeight) : 0;
+            const rawAttentionHeight = total > 0 ? healthyTopY - totalTopY : 0;
+            const attentionHeight =
+              point.attention > 0 ? Math.max(1, rawAttentionHeight) : 0;
+            const healthySegmentRadius = attentionHeight > 0 ? 0 : 3;
 
             return (
               <g key={point.id}>
-                <rect
-                  x={x}
-                  y={healthyTopY}
-                  width={barWidth}
-                  height={Math.max(1, healthyHeight)}
-                  rx={3}
-                  fill="#22C55E"
-                  className={onSelectPoint ? "cursor-pointer" : ""}
-                  onClick={() => onSelectPoint?.(point)}
-                />
-                <rect
-                  x={x}
-                  y={totalTopY}
-                  width={barWidth}
-                  height={Math.max(1, attentionHeight)}
-                  rx={3}
-                  fill="#F59E0B"
-                  className={onSelectPoint ? "cursor-pointer" : ""}
-                  onClick={() => onSelectPoint?.(point)}
-                />
+                {healthyHeight > 0 ? (
+                  <rect
+                    x={x}
+                    y={healthyTopY}
+                    width={barWidth}
+                    height={healthyHeight}
+                    rx={healthySegmentRadius}
+                    fill="#22C55E"
+                    className={onSelectPoint ? "cursor-pointer" : ""}
+                    onClick={() => onSelectPoint?.(point)}
+                  />
+                ) : null}
+                {attentionHeight > 0 ? (
+                  <rect
+                    x={x}
+                    y={totalTopY}
+                    width={barWidth}
+                    height={attentionHeight}
+                    rx={3}
+                    fill="#F59E0B"
+                    className={onSelectPoint ? "cursor-pointer" : ""}
+                    onClick={() => onSelectPoint?.(point)}
+                  />
+                ) : null}
                 {shouldRenderKpiXAxisLabel(index, points.length, labelStep) ? (
                   <text
                     x={x + barWidth / 2}
@@ -1346,10 +1369,16 @@ function KpiScatterChart({
   const plotHeight = height - padding.top - padding.bottom;
   const maxX = Math.max(1, ...points.map((point) => point.xValue));
   const maxY = Math.max(1, ...points.map((point) => point.yValue));
-  const xTicks = getKpiTicks(maxX, viewport.axisTickSteps);
-  const yTicks = getKpiTicks(maxY, viewport.axisTickSteps);
-  const toX = (value: number) => padding.left + (value / maxX) * plotWidth;
-  const toY = (value: number) => padding.top + ((maxY - value) / maxY) * plotHeight;
+  const { axisMax: axisMaxX, ticks: xTicks } = getKpiAxisScale(
+    maxX,
+    viewport.axisTickSteps,
+  );
+  const { axisMax: axisMaxY, ticks: yTicks } = getKpiAxisScale(
+    maxY,
+    viewport.axisTickSteps,
+  );
+  const toX = (value: number) => padding.left + (value / axisMaxX) * plotWidth;
+  const toY = (value: number) => padding.top + ((axisMaxY - value) / axisMaxY) * plotHeight;
 
   return (
     <div className="grid gap-2">

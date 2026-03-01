@@ -167,7 +167,6 @@ export function AppHeader({ profile }: { profile: Profile }) {
   const dashboardMenuCloseTimeoutRef = useRef<number | null>(null);
   const studioMenuCloseTimeoutRef = useRef<number | null>(null);
   const instructionMenuCloseTimeoutRef = useRef<number | null>(null);
-  const studioMenuScrollContainerRef = useRef<HTMLDivElement | null>(null);
 
   const canCreateInstructions = canEditInstructions(profile.role);
   const canViewArchivedInstructions = isSystemAdmin(profile.role);
@@ -281,18 +280,27 @@ export function AppHeader({ profile }: { profile: Profile }) {
   }, []);
 
   const scrollStudioMenuToBottom = useCallback(() => {
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        const studioContainer = studioMenuScrollContainerRef.current;
-        if (!studioContainer) {
-          return;
-        }
+    if (typeof document === "undefined") {
+      return;
+    }
 
-        studioContainer.scrollTo({
-          top: studioContainer.scrollHeight,
-          behavior: "smooth",
-        });
+    const scrollVisibleStudioMenu = () => {
+      const visibleStudioMenu = [
+        ...document.querySelectorAll<HTMLElement>('[data-dashboard-studio-menu="true"]'),
+      ].find((element) => element.offsetParent !== null);
+      if (!visibleStudioMenu) {
+        return;
+      }
+
+      visibleStudioMenu.scrollTo({
+        top: visibleStudioMenu.scrollHeight,
+        behavior: "smooth",
       });
+    };
+
+    window.requestAnimationFrame(() => {
+      scrollVisibleStudioMenu();
+      window.setTimeout(scrollVisibleStudioMenu, 90);
     });
   }, []);
 
@@ -837,7 +845,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
 
         {studioMenuMounted ? (
           <div
-            ref={studioMenuScrollContainerRef}
+            data-dashboard-studio-menu="true"
             className={cn(
               "absolute top-[calc(100%+0.5rem)] z-[90] grid max-h-[74vh] gap-2 overflow-y-auto rounded-2xl border border-white/20 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-xl transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
               mobile ? "left-2 right-2" : "left-0",
