@@ -48,6 +48,7 @@ interface InstructionRecord {
   merge_count: number;
   is_archived: boolean;
   body_markdown: string;
+  uncommon_tools: string;
   ai_assisted: boolean;
   ai_assisted_at: string | null;
   last_change_summary: string | null;
@@ -547,7 +548,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, work_item_id, fork_root_instruction_id, fork_number, merged_into_root_at, merge_count, is_archived, body_markdown, ai_assisted, ai_assisted_at, last_change_summary, revision, created_at, updated_at, created_by, updated_by, work_items(id, department_id, part_id, item_title, departments(name)), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
+      "id, work_item_id, fork_root_instruction_id, fork_number, merged_into_root_at, merge_count, is_archived, body_markdown, uncommon_tools, ai_assisted, ai_assisted_at, last_change_summary, revision, created_at, updated_at, created_by, updated_by, work_items(id, department_id, part_id, item_title, departments(name)), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -956,6 +957,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const showCompactEditorInstructionActions =
     canEditInstructions(profile.role) && !instructionIsArchived;
   const canPromoteArchivedRevision = canEditInstructions(profile.role);
+  const uncommonToolsValue = instruction.uncommon_tools.trim();
 
   return (
     <article className="grid gap-5">
@@ -1091,6 +1093,11 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
               {userMap.get(instruction.updated_by) ?? "Unknown"} on{" "}
               <LocalDateTime value={instruction.updated_at} mode="dateTime" />
             </p>
+            {uncommonToolsValue ? (
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Uncommon Tools: <span className="font-semibold">{uncommonToolsValue}</span>
+              </p>
+            ) : null}
           </div>
           <div className="grid gap-2 md:justify-items-end">
             <div className="grid w-full max-w-[14rem] justify-items-stretch gap-2 md:w-[14rem]">

@@ -50,6 +50,61 @@ function normalizeSortOrder(value: unknown) {
   return Math.max(0, Number(value));
 }
 
+async function ensureGeneralCategoryId(
+  supabaseAdmin: ReturnType<typeof getSupabaseAdminClient>,
+  createdBy: string,
+) {
+  const { data: existingCategory, error: existingCategoryError } = await supabaseAdmin
+    .from("suggested_tool_categories")
+    .select("id")
+    .ilike("name", "General")
+    .limit(1)
+    .maybeSingle<{ id: string }>();
+
+  if (existingCategoryError) {
+    throw new Error(existingCategoryError.message);
+  }
+
+  if (existingCategory?.id) {
+    return existingCategory.id;
+  }
+
+  const { data: insertedCategory, error: insertCategoryError } = await supabaseAdmin
+    .from("suggested_tool_categories")
+    .insert({
+      name: "General",
+      sort_order: 0,
+      created_by: createdBy,
+    })
+    .select("id")
+    .maybeSingle<{ id: string }>();
+
+  if (!insertCategoryError && insertedCategory?.id) {
+    return insertedCategory.id;
+  }
+
+  if (insertCategoryError?.code !== "23505") {
+    throw new Error(insertCategoryError?.message ?? "Unable to resolve default category.");
+  }
+
+  const { data: raceResolvedCategory, error: raceResolvedCategoryError } = await supabaseAdmin
+    .from("suggested_tool_categories")
+    .select("id")
+    .ilike("name", "General")
+    .limit(1)
+    .maybeSingle<{ id: string }>();
+
+  if (raceResolvedCategoryError) {
+    throw new Error(raceResolvedCategoryError.message);
+  }
+
+  if (!raceResolvedCategory?.id) {
+    throw new Error("Unable to resolve default category.");
+  }
+
+  return raceResolvedCategory.id;
+}
+
 async function requireAuthenticated(request: NextRequest) {
   const profile = await getRequestProfile(request);
 
@@ -167,7 +222,7 @@ export async function POST(request: NextRequest) {
 
   const body = (await request.json().catch(() => ({}))) as CreateSuggestedToolBody;
   const name = normalizeToolValue(body.name ?? "");
-  const categoryId = typeof body.categoryId === "string" ? body.categoryId.trim() : "";
+  const requestedCategoryId = typeof body.categoryId === "string" ? body.categoryId.trim() : "";
   const subcategoryId =
     typeof body.subcategoryId === "string" ? body.subcategoryId.trim() : null;
   const sortOrder = normalizeSortOrder(body.sortOrder);
@@ -176,11 +231,42 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Tool name is required." }, { status: 400 });
   }
 
-  if (!categoryId) {
-    return NextResponse.json({ error: "Category is required." }, { status: 400 });
+  const supabaseAdmin = getSupabaseAdminClient();
+  let categoryId = requestedCategoryId;
+
+  if (!categoryId && subcategoryId) {
+    const { data: subcategoryFromInput, error: subcategoryFromInputError } = await supabaseAdmin
+      .from("suggested_tool_subcategories")
+      .select("category_id")
+      .eq("id", subcategoryId)
+      .maybeSingle<{ category_id: string }>();
+
+    if (subcategoryFromInputError) {
+      return NextResponse.json({ error: subcategoryFromInputError.message }, { status: 500 });
+    }
+
+    if (!subcategoryFromInput) {
+      return NextResponse.json({ error: "Sub-category not found." }, { status: 404 });
+    }
+
+    categoryId = subcategoryFromInput.category_id;
   }
 
-  const supabaseAdmin = getSupabaseAdminClient();
+  if (!categoryId) {
+    try {
+      categoryId = await ensureGeneralCategoryId(supabaseAdmin, auth.profile.id);
+    } catch (caughtError) {
+      return NextResponse.json(
+        {
+          error:
+            caughtError instanceof Error
+              ? caughtError.message
+              : "Unable to resolve default category.",
+        },
+        { status: 500 },
+      );
+    }
+  }
 
   const { data: category, error: categoryLookupError } = await supabaseAdmin
     .from("suggested_tool_categories")

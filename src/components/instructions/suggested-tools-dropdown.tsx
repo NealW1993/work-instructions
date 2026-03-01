@@ -64,13 +64,7 @@ export function SuggestedToolsDropdown({ tools, className }: SuggestedToolsDropd
       }));
   }, [tools]);
 
-  const checkedCount = useMemo(
-    () => {
-      const validToolIds = new Set(tools.map((tool) => tool.id));
-      return checkedToolIds.filter((toolId) => validToolIds.has(toolId)).length;
-    },
-    [checkedToolIds, tools],
-  );
+  const totalCount = tools.length;
 
   function handleToolToggle(toolId: string) {
     setCheckedToolIds((current) =>
@@ -100,7 +94,7 @@ export function SuggestedToolsDropdown({ tools, className }: SuggestedToolsDropd
         <Wrench size={14} />
         Suggested Tools
         <span className="rounded-full border border-cyan-500/45 bg-cyan-500/15 px-1.5 py-0.5 text-[10px]">
-          {checkedCount}
+          {totalCount}
         </span>
         <ChevronDown
           size={14}

@@ -1816,7 +1816,7 @@ export function UserAdminPanel() {
             className="flex items-center gap-1.5 text-lg font-bold transition hover:opacity-80"
           >
             {suggestedToolsCollapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
-            Suggested Tools
+            Common Tools
           </button>
           <span className="rounded-full border border-cyan-500/35 bg-cyan-500/10 px-2 py-0.5 text-xs font-semibold text-cyan-800 dark:text-cyan-200">
             {suggestedTools.length}
@@ -1825,8 +1825,8 @@ export function UserAdminPanel() {
 
         {!suggestedToolsCollapsed ? (
           <p className="text-sm text-slate-600 dark:text-slate-300">
-            Organize suggested tools by category and sub-category. These are used when selecting
-            suggested tools on instruction create, edit, and fork screens.
+            Manage the reusable common tools list used on instruction create, edit, and fork
+            screens.
           </p>
         ) : null}
 
