@@ -81,6 +81,7 @@ async function resolvePostLoginDestination(userId: string) {
     path: "/dashboard",
     scrollX: 0,
     scrollY: 0,
+    isAutoTimeoutResume: false,
   };
 
   const storedRoute = popAutoLogoutRouteForUser(userId);
@@ -89,18 +90,25 @@ async function resolvePostLoginDestination(userId: string) {
   }
 
   if (!isSafeRestorePath(storedRoute.path)) {
-    return fallback;
+    return {
+      ...fallback,
+      isAutoTimeoutResume: true,
+    };
   }
 
   const routeExists = await doesRouteExistForCurrentSession(storedRoute.path);
   if (!routeExists) {
-    return fallback;
+    return {
+      ...fallback,
+      isAutoTimeoutResume: true,
+    };
   }
 
   return {
     path: storedRoute.path,
     scrollX: storedRoute.scrollX,
     scrollY: storedRoute.scrollY,
+    isAutoTimeoutResume: true,
   };
 }
 
@@ -230,13 +238,25 @@ export function LoginPanel() {
           path: "/dashboard",
           scrollX: 0,
           scrollY: 0,
+          isAutoTimeoutResume: false,
         };
 
     if (destination.scrollX > 0 || destination.scrollY > 0) {
       savePendingPostLoginScrollRestore(destination.path, destination.scrollX, destination.scrollY);
     }
 
-    router.push(destination.path);
+    if (
+      destination.isAutoTimeoutResume &&
+      !destination.path.startsWith("/dashboard")
+    ) {
+      router.replace("/dashboard");
+      window.setTimeout(() => {
+        router.push(destination.path);
+      }, 0);
+      return;
+    }
+
+    router.replace(destination.path);
   }
 
   async function handlePinLogin(event: FormEvent<HTMLFormElement>) {

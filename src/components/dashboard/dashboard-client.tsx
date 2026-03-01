@@ -222,6 +222,10 @@ const SYSTEM_HISTORY_TIME_RANGE_SETTING_PATH = [
   "systemHistory",
   "timeRangeDays",
 ] as const;
+const WIDGET_TITLE_OVERRIDES_SETTING_PATH = [
+  "dashboard",
+  "widgetTitles",
+] as const;
 const FINDER_DEPARTMENT_INSIGHT_VISIBILITY_SETTING_PATH = [
   "dashboard",
   "finder",
@@ -239,6 +243,7 @@ const RECENT_UPDATES_TIME_RANGE_SETTING_PATH = [
   "recentUpdates",
   "timeRangeDays",
 ] as const;
+const MAX_WIDGET_TITLE_LENGTH = 80;
 const DEFAULT_REVIEW_WINDOW_DAYS = 30;
 
 interface DashboardInstructionReturnState {
@@ -443,6 +448,19 @@ function formatElapsedDaysLabel(daysElapsed: number | null) {
 
 function isRecentUpdatesTimeRangeDays(value: number): value is RecentUpdatesTimeRangeDays {
   return RECENT_UPDATES_TIME_RANGE_OPTIONS.some((option) => option.value === value);
+}
+
+function normalizeWidgetTitleOverride(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (!normalized) {
+    return null;
+  }
+
+  return normalized.slice(0, MAX_WIDGET_TITLE_LENGTH);
 }
 
 function classifyKpiEventType(
@@ -1695,6 +1713,8 @@ export function DashboardClient({
   const navigationBypassRef = useRef(false);
   const returnStateAppliedRef = useRef(false);
   const finderPreferencesHydratedRef = useRef(false);
+  const widgetTitleInputRef = useRef<HTMLInputElement | null>(null);
+  const cancelWidgetTitleCommitRef = useRef(false);
   const systemHistoryListRef = useRef<HTMLDivElement | null>(null);
   const recentUpdatesListRef = useRef<HTMLDivElement | null>(null);
   const [query, setQuery] = useState(initialQuery);
@@ -1737,6 +1757,12 @@ export function DashboardClient({
   const [recentUpdatesListMaxHeight, setRecentUpdatesListMaxHeight] = useState<number | null>(
     null,
   );
+  const [widgetTitleOverrides, setWidgetTitleOverrides] = useState<
+    Partial<Record<DashboardWidgetId, string>>
+  >({});
+  const [editingWidgetTitleId, setEditingWidgetTitleId] =
+    useState<DashboardWidgetId | null>(null);
+  const [editingWidgetTitleValue, setEditingWidgetTitleValue] = useState("");
   const [selectedSystemHistoryEventId, setSelectedSystemHistoryEventId] =
     useState<string | null>(null);
   const [activeLikeCelebration, setActiveLikeCelebration] =
@@ -1774,6 +1800,15 @@ export function DashboardClient({
 
   const normalizedQuery = query.trim().toLowerCase();
   const isSearching = normalizedQuery.length > 0;
+  const widgetTitleById = useMemo(() => {
+    return new Map<DashboardWidgetId, string>(
+      WIDGET_DEFINITIONS.map((widgetDefinition) => [
+        widgetDefinition.id,
+        widgetTitleOverrides[widgetDefinition.id] ?? widgetDefinition.title,
+      ]),
+    );
+  }, [widgetTitleOverrides]);
+
   const dispatchLayoutStateToHeader = useCallback(() => {
     if (typeof window === "undefined") {
       return;
@@ -1790,7 +1825,7 @@ export function DashboardClient({
       const definition = widgetDefinitionById.get(widget.id);
       return {
         id: widget.id,
-        title: definition?.title ?? widget.id,
+        title: widgetTitleById.get(widget.id) ?? definition?.title ?? widget.id,
         description: definition?.description ?? "",
         visible: widget.visible,
         size: widget.size,
@@ -1815,7 +1850,7 @@ export function DashboardClient({
         },
       }),
     );
-  }, [customizeOpen, layoutDirty, layoutError, layoutSaving, widgetLayout]);
+  }, [customizeOpen, layoutDirty, layoutError, layoutSaving, widgetLayout, widgetTitleById]);
 
   const persistInstructionReturnState = useCallback(() => {
     if (typeof window === "undefined") {
@@ -1902,6 +1937,27 @@ export function DashboardClient({
             : Number.NaN;
       if (isRecentUpdatesTimeRangeDays(parsedRecentUpdatesTimeRange)) {
         setRecentUpdatesTimeRangeDays(parsedRecentUpdatesTimeRange);
+      }
+
+      const rawWidgetTitleOverrides = getUserSettingAtPath(
+        settings,
+        WIDGET_TITLE_OVERRIDES_SETTING_PATH,
+      );
+      if (
+        rawWidgetTitleOverrides &&
+        typeof rawWidgetTitleOverrides === "object" &&
+        !Array.isArray(rawWidgetTitleOverrides)
+      ) {
+        const parsedWidgetTitleOverrides: Partial<Record<DashboardWidgetId, string>> = {};
+        for (const widgetId of DASHBOARD_WIDGET_IDS) {
+          const normalizedTitle = normalizeWidgetTitleOverride(
+            (rawWidgetTitleOverrides as Record<string, unknown>)[widgetId],
+          );
+          if (normalizedTitle) {
+            parsedWidgetTitleOverrides[widgetId] = normalizedTitle;
+          }
+        }
+        setWidgetTitleOverrides(parsedWidgetTitleOverrides);
       }
     })().finally(() => {
       if (isActive) {
@@ -2096,8 +2152,25 @@ export function DashboardClient({
       setDraggedWidgetId(null);
       setDragOverWidgetId(null);
       setActiveKpiDrilldown(null);
+      setEditingWidgetTitleId(null);
+      setEditingWidgetTitleValue("");
+      cancelWidgetTitleCommitRef.current = false;
     }
   }, [customizeOpen]);
+
+  useEffect(() => {
+    if (!editingWidgetTitleId) {
+      return;
+    }
+
+    const input = widgetTitleInputRef.current;
+    if (!input) {
+      return;
+    }
+
+    input.focus();
+    input.select();
+  }, [editingWidgetTitleId]);
 
   useEffect(() => {
     return () => {
@@ -3571,6 +3644,55 @@ export function DashboardClient({
   const widgetDefinitionsById = useMemo(
     () => new Map(WIDGET_DEFINITIONS.map((widget) => [widget.id, widget])),
     [],
+  );
+
+  const beginWidgetTitleEdit = useCallback(
+    (widgetId: DashboardWidgetId) => {
+      if (!customizeOpen) {
+        return;
+      }
+
+      const currentTitle =
+        widgetTitleById.get(widgetId) ?? widgetDefinitionsById.get(widgetId)?.title ?? widgetId;
+      cancelWidgetTitleCommitRef.current = false;
+      setEditingWidgetTitleId(widgetId);
+      setEditingWidgetTitleValue(currentTitle);
+    },
+    [customizeOpen, widgetDefinitionsById, widgetTitleById],
+  );
+
+  const cancelWidgetTitleEdit = useCallback(() => {
+    cancelWidgetTitleCommitRef.current = false;
+    setEditingWidgetTitleId(null);
+    setEditingWidgetTitleValue("");
+  }, []);
+
+  const commitWidgetTitleEdit = useCallback(
+    (widgetId: DashboardWidgetId) => {
+      const defaultTitle = widgetDefinitionsById.get(widgetId)?.title ?? widgetId;
+      const normalizedTitleOverride = normalizeWidgetTitleOverride(editingWidgetTitleValue);
+      const shouldOverride = normalizedTitleOverride !== null && normalizedTitleOverride !== defaultTitle;
+
+      setWidgetTitleOverrides((currentOverrides) => {
+        const nextOverrides = { ...currentOverrides };
+        if (shouldOverride && normalizedTitleOverride) {
+          nextOverrides[widgetId] = normalizedTitleOverride;
+        } else {
+          delete nextOverrides[widgetId];
+        }
+        return nextOverrides;
+      });
+
+      setEditingWidgetTitleId(null);
+      setEditingWidgetTitleValue("");
+
+      void patchCurrentUserSetting({
+        supabase,
+        path: [...WIDGET_TITLE_OVERRIDES_SETTING_PATH, widgetId].join("."),
+        value: shouldOverride ? normalizedTitleOverride : null,
+      });
+    },
+    [editingWidgetTitleValue, supabase, widgetDefinitionsById],
   );
 
   const getAuthHeaders = useCallback(async () => {
@@ -5419,6 +5541,9 @@ export function DashboardClient({
             if (!definition) {
               return null;
             }
+            const widgetDisplayTitle =
+              widgetTitleById.get(widget.id) ?? definition.title;
+            const isEditingWidgetTitle = editingWidgetTitleId === widget.id;
             const isDragging = draggedWidgetId === widget.id;
             const isDragOverTarget =
               dragOverWidgetId === widget.id && draggedWidgetId !== widget.id;
@@ -5472,7 +5597,7 @@ export function DashboardClient({
                   <button
                     type="button"
                     onClick={() => toggleWidget(widget.id)}
-                    aria-label={`Remove ${definition.title} widget`}
+                    aria-label={`Remove ${widgetDisplayTitle} widget`}
                     className="absolute right-4 top-4 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border border-rose-500/40 bg-rose-500/10 text-rose-700 transition hover:bg-rose-500/20 dark:text-rose-200"
                   >
                     <X size={12} />
@@ -5492,7 +5617,7 @@ export function DashboardClient({
                     {customizeOpen ? (
                       <button
                         type="button"
-                        aria-label={`Drag to reorder ${definition.title}`}
+                        aria-label={`Drag to reorder ${widgetDisplayTitle}`}
                         onDragStart={(event) => event.preventDefault()}
                         onPointerDown={(event) => handleWidgetGripPointerDown(widget.id, event)}
                         onPointerMove={handleWidgetGripPointerMove}
@@ -5504,9 +5629,51 @@ export function DashboardClient({
                       </button>
                     ) : null}
                     <div className="min-w-0">
-                      <h2 className={cn("break-words font-extrabold tracking-tight text-slate-900 dark:text-slate-100", widget.size === "compact" ? "text-base" : "text-xl")}>
-                        {definition.title}
-                      </h2>
+                      {isEditingWidgetTitle ? (
+                        <input
+                          ref={widgetTitleInputRef}
+                          value={editingWidgetTitleValue}
+                          maxLength={MAX_WIDGET_TITLE_LENGTH}
+                          onChange={(event) => setEditingWidgetTitleValue(event.target.value)}
+                          onBlur={() => {
+                            if (cancelWidgetTitleCommitRef.current) {
+                              cancelWidgetTitleEdit();
+                              return;
+                            }
+                            commitWidgetTitleEdit(widget.id);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === "Escape") {
+                              event.preventDefault();
+                              cancelWidgetTitleCommitRef.current = true;
+                              event.currentTarget.blur();
+                              return;
+                            }
+
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              event.currentTarget.blur();
+                            }
+                          }}
+                          className={cn(
+                            "w-full rounded-lg border border-cyan-500/45 bg-cyan-500/10 px-2.5 py-1 font-extrabold tracking-tight text-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/55 dark:text-slate-100",
+                            widget.size === "compact" ? "text-base" : "text-xl",
+                          )}
+                          aria-label={`Rename ${widgetDisplayTitle} widget`}
+                        />
+                      ) : (
+                        <h2
+                          onDoubleClick={() => beginWidgetTitleEdit(widget.id)}
+                          title={customizeOpen ? "Double-click to rename widget" : undefined}
+                          className={cn(
+                            "break-words font-extrabold tracking-tight text-slate-900 dark:text-slate-100",
+                            widget.size === "compact" ? "text-base" : "text-xl",
+                            customizeOpen ? "cursor-text" : "",
+                          )}
+                        >
+                          {widgetDisplayTitle}
+                        </h2>
+                      )}
                     </div>
                   </div>
 
