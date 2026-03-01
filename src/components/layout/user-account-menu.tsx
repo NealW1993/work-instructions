@@ -16,6 +16,7 @@ import { useTheme } from "next-themes";
 import { useRouter } from "next/navigation";
 import { usePostHog } from "posthog-js/react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { canViewKpis, isSystemAdmin } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -108,6 +109,7 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
   const initials = useMemo(() => getInitials(profile.full_name), [profile.full_name]);
   const iconColor = useMemo(() => resolveIconColor(profile.icon_color), [profile.icon_color]);
   const isDarkTheme = themePreference === "dark";
+  const canUsePortal = typeof document !== "undefined";
   const sessionElapsedLabel = useMemo(() => {
     if (sessionStartedAtMs === null) {
       return "00:00:00";
@@ -411,6 +413,7 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
 
       setHelpStatus("Message sent to system admin.");
       setHelpMessage("");
+      setHelpOpen(false);
     } catch (caughtError) {
       setHelpError(
         caughtError instanceof Error ? caughtError.message : "Unable to send help request.",
@@ -419,6 +422,139 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
       setHelpBusy(false);
     }
   }
+
+  const helpModal = helpOpen ? (
+    <div
+      className={cn(
+        "app-modal-shell fixed inset-0 z-[210] grid place-items-center overflow-y-auto p-4 sm:p-6 backdrop-blur-sm",
+        isDarkTheme ? "bg-slate-950/75" : "bg-slate-900/35",
+      )}
+      role="presentation"
+      onClick={() => setHelpOpen(false)}
+    >
+      <article
+        role="dialog"
+        aria-modal="true"
+        aria-label="Help Chat"
+        onClick={(event) => event.stopPropagation()}
+        className={cn(
+          "my-auto grid w-full max-w-lg gap-3 overflow-y-auto rounded-2xl border p-4 shadow-2xl",
+          isDarkTheme
+            ? "border-white/15 bg-slate-950/95 text-slate-100"
+            : "border-slate-300/80 bg-white text-slate-900",
+        )}
+        style={{ maxHeight: "min(92dvh, 760px)" }}
+      >
+        <div className="grid gap-1">
+          <h3 className="text-lg font-bold">Help Chat</h3>
+          <p
+            className={cn(
+              "text-sm",
+              isDarkTheme ? "text-slate-300" : "text-slate-600",
+            )}
+          >
+            Send a direct help request to system admin. Replies will go to your account email.
+          </p>
+        </div>
+
+        {helpStatus ? (
+          <p
+            className={cn(
+              "rounded-xl border p-2 text-sm",
+              isDarkTheme
+                ? "border-emerald-400/45 bg-emerald-500/15 text-emerald-100"
+                : "border-emerald-500/40 bg-emerald-500/10 text-emerald-700",
+            )}
+          >
+            {helpStatus}
+          </p>
+        ) : null}
+        {helpError ? (
+          <p
+            className={cn(
+              "rounded-xl border p-2 text-sm",
+              isDarkTheme
+                ? "border-rose-400/45 bg-rose-500/15 text-rose-100"
+                : "border-rose-500/40 bg-rose-500/10 text-rose-700",
+            )}
+          >
+            {helpError}
+          </p>
+        ) : null}
+
+        <form className="grid min-h-0 gap-3" onSubmit={handleSubmitHelpRequest}>
+          <div className="grid gap-1">
+            <span
+              className={cn(
+                "text-xs font-semibold uppercase tracking-wide",
+                isDarkTheme ? "text-slate-300" : "text-slate-500",
+              )}
+            >
+              Sending as
+            </span>
+            <p className="text-sm font-semibold">{profile.full_name}</p>
+            <p
+              className={cn(
+                "text-xs",
+                isDarkTheme ? "text-slate-400" : "text-slate-600",
+              )}
+            >
+              {profile.email}
+            </p>
+          </div>
+
+          <label
+            className={cn(
+              "grid min-h-0 gap-1 text-sm",
+              isDarkTheme ? "text-slate-200" : "text-slate-700",
+            )}
+          >
+            <span>Message</span>
+            <textarea
+              value={helpMessage}
+              onChange={(event) => setHelpMessage(event.target.value)}
+              rows={6}
+              maxLength={4000}
+              placeholder="How can we help?"
+              className={cn(
+                "min-h-[10rem] rounded-xl border px-3 py-2 outline-none transition",
+                isDarkTheme
+                  ? "border-white/15 bg-black/45 text-slate-100 focus:border-slate-300"
+                  : "border-slate-300 bg-white text-slate-900 focus:border-cyan-500",
+              )}
+            />
+          </label>
+
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setHelpOpen(false)}
+              className={cn(
+                "rounded-xl border px-3 py-2 text-sm font-semibold transition",
+                isDarkTheme
+                  ? "border-white/20 bg-black/45 text-slate-100 hover:bg-white/10"
+                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100",
+              )}
+            >
+              Close
+            </button>
+            <button
+              type="submit"
+              disabled={helpBusy}
+              className={cn(
+                "rounded-xl px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-70",
+                isDarkTheme
+                  ? "bg-cyan-500/35 text-cyan-100 hover:bg-cyan-500/45"
+                  : "bg-cyan-600 text-white hover:bg-cyan-500",
+              )}
+            >
+              {helpBusy ? "Sending..." : "Send Help Request"}
+            </button>
+          </div>
+        </form>
+      </article>
+    </div>
+  ) : null;
 
   return (
     <div ref={rootRef} className="relative">
@@ -556,137 +692,7 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
         </div>
       ) : null}
 
-      {helpOpen ? (
-        <div
-          className={cn(
-            "app-modal-shell fixed inset-0 z-[210] flex items-center justify-center p-4 backdrop-blur-sm",
-            isDarkTheme ? "bg-slate-950/75" : "bg-slate-900/35",
-          )}
-          role="presentation"
-          onClick={() => setHelpOpen(false)}
-        >
-          <article
-            role="dialog"
-            aria-modal="true"
-            aria-label="Help Chat"
-            onClick={(event) => event.stopPropagation()}
-            className={cn(
-              "grid w-full max-w-lg gap-3 rounded-2xl border p-4 shadow-2xl",
-              isDarkTheme
-                ? "border-white/15 bg-slate-950/95 text-slate-100"
-                : "border-slate-300/80 bg-white text-slate-900",
-            )}
-          >
-            <div className="grid gap-1">
-              <h3 className="text-lg font-bold">Help Chat</h3>
-              <p
-                className={cn(
-                  "text-sm",
-                  isDarkTheme ? "text-slate-300" : "text-slate-600",
-                )}
-              >
-                Send a direct help request to system admin. Replies will go to your account email.
-              </p>
-            </div>
-
-            {helpStatus ? (
-              <p
-                className={cn(
-                  "rounded-xl border p-2 text-sm",
-                  isDarkTheme
-                    ? "border-emerald-400/45 bg-emerald-500/15 text-emerald-100"
-                    : "border-emerald-500/40 bg-emerald-500/10 text-emerald-700",
-                )}
-              >
-                {helpStatus}
-              </p>
-            ) : null}
-            {helpError ? (
-              <p
-                className={cn(
-                  "rounded-xl border p-2 text-sm",
-                  isDarkTheme
-                    ? "border-rose-400/45 bg-rose-500/15 text-rose-100"
-                    : "border-rose-500/40 bg-rose-500/10 text-rose-700",
-                )}
-              >
-                {helpError}
-              </p>
-            ) : null}
-
-            <form className="grid gap-3" onSubmit={handleSubmitHelpRequest}>
-              <div className="grid gap-1">
-                <span
-                  className={cn(
-                    "text-xs font-semibold uppercase tracking-wide",
-                    isDarkTheme ? "text-slate-300" : "text-slate-500",
-                  )}
-                >
-                  Sending as
-                </span>
-                <p className="text-sm font-semibold">{profile.full_name}</p>
-                <p
-                  className={cn(
-                    "text-xs",
-                    isDarkTheme ? "text-slate-400" : "text-slate-600",
-                  )}
-                >
-                  {profile.email}
-                </p>
-              </div>
-
-              <label
-                className={cn(
-                  "grid gap-1 text-sm",
-                  isDarkTheme ? "text-slate-200" : "text-slate-700",
-                )}
-              >
-                <span>Message</span>
-                <textarea
-                  value={helpMessage}
-                  onChange={(event) => setHelpMessage(event.target.value)}
-                  rows={6}
-                  maxLength={4000}
-                  placeholder="How can we help?"
-                  className={cn(
-                    "rounded-xl border px-3 py-2 outline-none transition",
-                    isDarkTheme
-                      ? "border-white/15 bg-black/45 text-slate-100 focus:border-slate-300"
-                      : "border-slate-300 bg-white text-slate-900 focus:border-cyan-500",
-                  )}
-                />
-              </label>
-
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setHelpOpen(false)}
-                  className={cn(
-                    "rounded-xl border px-3 py-2 text-sm font-semibold transition",
-                    isDarkTheme
-                      ? "border-white/20 bg-black/45 text-slate-100 hover:bg-white/10"
-                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100",
-                  )}
-                >
-                  Close
-                </button>
-                <button
-                  type="submit"
-                  disabled={helpBusy}
-                  className={cn(
-                    "rounded-xl px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-70",
-                    isDarkTheme
-                      ? "bg-cyan-500/35 text-cyan-100 hover:bg-cyan-500/45"
-                      : "bg-cyan-600 text-white hover:bg-cyan-500",
-                  )}
-                >
-                  {helpBusy ? "Sending..." : "Send Help Request"}
-                </button>
-              </div>
-            </form>
-          </article>
-        </div>
-      ) : null}
+      {helpModal ? (canUsePortal ? createPortal(helpModal, document.body) : helpModal) : null}
     </div>
   );
 }

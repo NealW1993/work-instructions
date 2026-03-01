@@ -82,33 +82,25 @@ function normalizeReviewWindowDays(value: unknown) {
   return parsed >= 1 && parsed <= 365 ? parsed : null;
 }
 
-function addDaysUtc(value: string, days: number) {
+function addDaysLocal(value: string, days: number) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime()) || !Number.isFinite(days)) {
     return null;
   }
 
-  parsed.setUTCDate(parsed.getUTCDate() + Math.trunc(days));
+  parsed.setDate(parsed.getDate() + Math.trunc(days));
   return parsed.toISOString();
 }
 
-function toElapsedCalendarDaysUtc(value: string) {
+function toElapsedCalendarDays(value: string) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
     return null;
   }
 
   const today = new Date();
-  const valueStart = Date.UTC(
-    parsed.getUTCFullYear(),
-    parsed.getUTCMonth(),
-    parsed.getUTCDate(),
-  );
-  const todayStart = Date.UTC(
-    today.getUTCFullYear(),
-    today.getUTCMonth(),
-    today.getUTCDate(),
-  );
+  const valueStart = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate()).getTime();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
   const elapsed = todayStart - valueStart;
   if (!Number.isFinite(elapsed) || elapsed < 0) {
     return null;
@@ -226,7 +218,7 @@ export async function GET(request: NextRequest) {
     .map((instruction) => {
       const reviewStatus = reviewStatusByInstructionId.get(instruction.id) ?? null;
       const calibratedAt = reviewStatus?.last_calibrated_at ?? instruction.updated_at;
-      const daysSinceCalibration = toElapsedCalendarDaysUtc(calibratedAt);
+      const daysSinceCalibration = toElapsedCalendarDays(calibratedAt);
       const isFlagged = reviewStatus?.status === "needs_review";
       const isOutOfRange =
         daysSinceCalibration !== null && daysSinceCalibration >= reviewWindowDays;
@@ -242,7 +234,7 @@ export async function GET(request: NextRequest) {
       const workItem = normalizeRelation(instruction.work_items);
       const department = normalizeRelation(workItem?.departments);
       const flaggedAt = reviewStatus?.flagged_at ?? null;
-      const flaggedDurationDays = flaggedAt ? toElapsedCalendarDaysUtc(flaggedAt) : null;
+      const flaggedDurationDays = flaggedAt ? toElapsedCalendarDays(flaggedAt) : null;
       const outOfRangeDurationDays = overdueDays;
       const needsReviewDurationDays =
         isFlagged && flaggedDurationDays !== null
@@ -254,7 +246,7 @@ export async function GET(request: NextRequest) {
         isFlagged && flaggedAt
           ? flaggedAt
           : isOutOfRange
-            ? addDaysUtc(calibratedAt, reviewWindowDays)
+            ? addDaysLocal(calibratedAt, reviewWindowDays)
             : null;
       const reviewReason =
         isFlagged && isOutOfRange

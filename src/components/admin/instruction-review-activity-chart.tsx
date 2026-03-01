@@ -96,21 +96,44 @@ const PERIOD_BUTTONS: Array<{ value: ReviewPeriod; label: string }> = [
 const MS_IN_DAY = 24 * 60 * 60 * 1000;
 const REVIEW_ACTIVITY_FILTER_STORAGE_KEY = "admin.review.activity.filters";
 
-function getUtcWeekStart(date: Date): Date {
-  const utcDay = date.getUTCDay();
-  const mondayOffset = (utcDay + 6) % 7;
-  return new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() - mondayOffset),
-  );
+function parseDateKey(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
+    return null;
+  }
+
+  const year = Number.parseInt(match[1] ?? "", 10);
+  const month = Number.parseInt(match[2] ?? "", 10);
+  const day = Number.parseInt(match[3] ?? "", 10);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return null;
+  }
+
+  const parsed = new Date(year, month - 1, day);
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return parsed;
 }
 
-function toUtcDateKey(date: Date): string {
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+function getWeekStart(date: Date): Date {
+  const day = date.getDay();
+  const mondayOffset = (day + 6) % 7;
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() - mondayOffset);
 }
 
-function formatUtcMonthDayLabel(date: Date): string {
-  const month = MONTH_SHORT_LABELS[date.getUTCMonth()] ?? "Jan";
-  return `${month} ${date.getUTCDate()}`;
+function toDateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function formatMonthDayLabel(date: Date): string {
+  const month = MONTH_SHORT_LABELS[date.getMonth()] ?? "Jan";
+  return `${month} ${date.getDate()}`;
 }
 
 function formatHourLabel(hour: number): string {
@@ -121,21 +144,30 @@ function formatHourLabel(hour: number): string {
 }
 
 function shiftDay(dateKey: string, deltaDays: number): string {
-  const d = new Date(`${dateKey}T00:00:00.000Z`);
-  d.setUTCDate(d.getUTCDate() + deltaDays);
-  return toUtcDateKey(d);
+  const parsed = parseDateKey(dateKey);
+  if (!parsed) {
+    return dateKey;
+  }
+  parsed.setDate(parsed.getDate() + deltaDays);
+  return toDateKey(parsed);
 }
 
 function shiftWeek(weekStartKey: string, deltaWeeks: number): string {
-  const d = new Date(`${weekStartKey}T00:00:00.000Z`);
-  d.setUTCDate(d.getUTCDate() + deltaWeeks * 7);
-  return toUtcDateKey(d);
+  const parsed = parseDateKey(weekStartKey);
+  if (!parsed) {
+    return weekStartKey;
+  }
+  parsed.setDate(parsed.getDate() + deltaWeeks * 7);
+  return toDateKey(parsed);
 }
 
 function formatWeekLabel(weekStartKey: string): string {
-  const weekStart = new Date(`${weekStartKey}T00:00:00.000Z`);
+  const weekStart = parseDateKey(weekStartKey);
+  if (!weekStart) {
+    return weekStartKey;
+  }
   const weekEnd = new Date(weekStart.getTime() + 6 * MS_IN_DAY);
-  return `${formatUtcMonthDayLabel(weekStart)} – ${formatUtcMonthDayLabel(weekEnd)}, ${weekEnd.getUTCFullYear()}`;
+  return `${formatMonthDayLabel(weekStart)} - ${formatMonthDayLabel(weekEnd)}, ${weekEnd.getFullYear()}`;
 }
 
 function getPartIdLabel(partId: string): string {
@@ -184,7 +216,7 @@ function isValidMonth(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 12;
 }
 
-function isValidUtcDateKey(value: unknown): value is string {
+function isValidDateKey(value: unknown): value is string {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
@@ -250,7 +282,7 @@ function buildYearChartBuckets(events: ReviewActivityEvent[]): ChartBucket[] {
   for (const event of events) {
     const d = new Date(event.occurredAt);
     if (Number.isNaN(d.getTime())) continue;
-    const mi = d.getUTCMonth();
+    const mi = d.getMonth();
     const bucket = buckets[mi];
     if (!bucket) continue;
     bucket.events.push(event);
@@ -277,7 +309,7 @@ function buildMonthChartBuckets(
   month: number,
 ): ChartBucket[] {
   const monthIndex = month - 1;
-  const daysInMonth = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
   const buckets: ChartBucket[] = Array.from({ length: daysInMonth }, (_, i) => ({
     key: `${year}-${String(monthIndex + 1).padStart(2, "0")}-${String(i + 1).padStart(2, "0")}`,
     label: String(i + 1),
@@ -291,8 +323,8 @@ function buildMonthChartBuckets(
   for (const event of events) {
     const d = new Date(event.occurredAt);
     if (Number.isNaN(d.getTime())) continue;
-    if (d.getUTCFullYear() !== year || d.getUTCMonth() !== monthIndex) continue;
-    const dayIdx = d.getUTCDate() - 1;
+    if (d.getFullYear() !== year || d.getMonth() !== monthIndex) continue;
+    const dayIdx = d.getDate() - 1;
     const bucket = buckets[dayIdx];
     if (!bucket) continue;
     bucket.events.push(event);
@@ -316,7 +348,7 @@ function buildMonthChartBuckets(
 function buildWeekChartBuckets(events: ReviewActivityEvent[], weekStart: Date): ChartBucket[] {
   const buckets: ChartBucket[] = DAY_SHORT_LABELS.map((label, i) => {
     const dayDate = new Date(weekStart.getTime() + i * MS_IN_DAY);
-    return { key: toUtcDateKey(dayDate), label, needsReviewCount: 0, upToDateCount: 0, events: [] };
+    return { key: toDateKey(dayDate), label, needsReviewCount: 0, upToDateCount: 0, events: [] };
   });
   const keyToIdx = new Map(buckets.map((b, i) => [b.key, i]));
   const needsReviewIds = buckets.map(() => new Set<string>());
@@ -325,7 +357,7 @@ function buildWeekChartBuckets(events: ReviewActivityEvent[], weekStart: Date): 
   for (const event of events) {
     const d = new Date(event.occurredAt);
     if (Number.isNaN(d.getTime())) continue;
-    const idx = keyToIdx.get(toUtcDateKey(d));
+    const idx = keyToIdx.get(toDateKey(d));
     if (idx === undefined) continue;
     buckets[idx]!.events.push(event);
     if (event.nextStatus === "needs_review") {
@@ -359,8 +391,8 @@ function buildDayChartBuckets(events: ReviewActivityEvent[], dayKey: string): Ch
   for (const event of events) {
     const d = new Date(event.occurredAt);
     if (Number.isNaN(d.getTime())) continue;
-    if (toUtcDateKey(d) !== dayKey) continue;
-    const h = d.getUTCHours();
+    if (toDateKey(d) !== dayKey) continue;
+    const h = d.getHours();
     const bucket = buckets[h];
     if (!bucket) continue;
     bucket.events.push(event);
@@ -386,14 +418,14 @@ function buildWeekSubBuckets(events: ReviewActivityEvent[]): WeekSubBucket[] {
   for (const event of events) {
     const d = new Date(event.occurredAt);
     if (Number.isNaN(d.getTime())) continue;
-    const weekStart = getUtcWeekStart(d);
-    const weekKey = toUtcDateKey(weekStart);
+    const weekStart = getWeekStart(d);
+    const weekKey = toDateKey(weekStart);
     let wb = weekByKey.get(weekKey);
     if (!wb) {
       const weekEnd = new Date(weekStart.getTime() + 6 * MS_IN_DAY);
       wb = {
         key: weekKey,
-        label: `${formatUtcMonthDayLabel(weekStart)} - ${formatUtcMonthDayLabel(weekEnd)}`,
+        label: `${formatMonthDayLabel(weekStart)} - ${formatMonthDayLabel(weekEnd)}`,
         startAt: weekStart.toISOString(),
         events: [],
       };
@@ -447,14 +479,14 @@ export function InstructionReviewActivityChart({
   reloadToken = 0,
 }: InstructionReviewActivityChartProps) {
   const [period, setPeriod] = useState<ReviewPeriod>("year");
-  const [selectedYear, setSelectedYear] = useState(() => new Date().getUTCFullYear());
+  const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear());
   const [selectedPeriodMonth, setSelectedPeriodMonth] = useState(
-    () => new Date().getUTCMonth() + 1,
+    () => new Date().getMonth() + 1,
   );
   const [selectedPeriodWeekStart, setSelectedPeriodWeekStart] = useState(() =>
-    toUtcDateKey(getUtcWeekStart(new Date())),
+    toDateKey(getWeekStart(new Date())),
   );
-  const [selectedPeriodDay, setSelectedPeriodDay] = useState(() => toUtcDateKey(new Date()));
+  const [selectedPeriodDay, setSelectedPeriodDay] = useState(() => toDateKey(new Date()));
   const [statusFilter, setStatusFilter] = useState<ReviewStatusFilter>("all");
   const [events, setEvents] = useState<ReviewActivityEvent[]>([]);
   const [loading, setLoading] = useState(false);
@@ -464,14 +496,14 @@ export function InstructionReviewActivityChart({
 
   // Unified bucket selection
   const [selectedBucketKey, setSelectedBucketKey] = useState<string | null>(() =>
-    String(new Date().getUTCMonth()),
+    String(new Date().getMonth()),
   );
   // Year-view week sub-navigation
   const [selectedWeekKey, setSelectedWeekKey] = useState<string | null>(null);
   const [detailsExpanded, setDetailsExpanded] = useState(false);
 
   const yearOptions = useMemo(() => {
-    const currentYear = new Date().getUTCFullYear();
+    const currentYear = new Date().getFullYear();
     const years: number[] = [];
     for (let y = Math.max(selectedYear, currentYear + 1); y >= Math.min(selectedYear, currentYear - 5); y -= 1) {
       years.push(y);
@@ -516,10 +548,10 @@ export function InstructionReviewActivityChart({
           if (isValidMonth(parsed.selectedPeriodMonth)) {
             setSelectedPeriodMonth(parsed.selectedPeriodMonth);
           }
-          if (isValidUtcDateKey(parsed.selectedPeriodWeekStart)) {
+          if (isValidDateKey(parsed.selectedPeriodWeekStart)) {
             setSelectedPeriodWeekStart(parsed.selectedPeriodWeekStart);
           }
-          if (isValidUtcDateKey(parsed.selectedPeriodDay)) {
+          if (isValidDateKey(parsed.selectedPeriodDay)) {
             setSelectedPeriodDay(parsed.selectedPeriodDay);
           }
           if (isReviewStatusFilter(parsed.statusFilter)) {
@@ -599,11 +631,13 @@ export function InstructionReviewActivityChart({
   // Keep year synced when navigating week/day into a different year
   useEffect(() => {
     if (period === "week") {
-      const y = new Date(`${selectedPeriodWeekStart}T00:00:00.000Z`).getUTCFullYear();
-      if (y !== selectedYear) setSelectedYear(y);
+      const weekStartDate = parseDateKey(selectedPeriodWeekStart);
+      const y = weekStartDate?.getFullYear();
+      if (y && y !== selectedYear) setSelectedYear(y);
     } else if (period === "day") {
-      const y = new Date(`${selectedPeriodDay}T00:00:00.000Z`).getUTCFullYear();
-      if (y !== selectedYear) setSelectedYear(y);
+      const dayDate = parseDateKey(selectedPeriodDay);
+      const y = dayDate?.getFullYear();
+      if (y && y !== selectedYear) setSelectedYear(y);
     }
   }, [period, selectedPeriodWeekStart, selectedPeriodDay, selectedYear]);
 
@@ -622,11 +656,14 @@ export function InstructionReviewActivityChart({
 
   const weekBuckets = useMemo(() => {
     if (period !== "week") return [];
+    const parsedWeekStart =
+      parseDateKey(selectedPeriodWeekStart) ??
+      getWeekStart(new Date(selectedYear, selectedPeriodMonth - 1, 1));
     return buildWeekChartBuckets(
       filteredEvents,
-      new Date(`${selectedPeriodWeekStart}T00:00:00.000Z`),
+      parsedWeekStart,
     );
-  }, [filteredEvents, period, selectedPeriodWeekStart]);
+  }, [filteredEvents, period, selectedPeriodMonth, selectedPeriodWeekStart, selectedYear]);
 
   const dayBuckets = useMemo(() => {
     if (period !== "day") return [];
@@ -682,7 +719,7 @@ export function InstructionReviewActivityChart({
       return;
     }
     if (period === "year") {
-      setSelectedBucketKey(String(new Date().getUTCMonth()));
+      setSelectedBucketKey(String(new Date().getMonth()));
     } else {
       const first = activeBuckets.find((b) => b.events.length > 0) ?? activeBuckets[0];
       setSelectedBucketKey(first?.key ?? null);
@@ -726,7 +763,7 @@ export function InstructionReviewActivityChart({
 
   // Heading label
   const selectedBucketLongLabel = useMemo(() => {
-    if (!selectedBucket) return "—";
+    if (!selectedBucket) return "--";
     if (period === "year") {
       const mi = Number.parseInt(selectedBucket.key, 10);
       return MONTH_LONG_LABELS[mi] ?? selectedBucket.label;
@@ -736,8 +773,11 @@ export function InstructionReviewActivityChart({
       const h = hourStr ? Number.parseInt(hourStr, 10) : 0;
       return `${selectedPeriodDay} at ${formatHourLabel(h)}`;
     }
-    const d = new Date(`${selectedBucket.key}T00:00:00.000Z`);
-    return `${MONTH_LONG_LABELS[d.getUTCMonth()] ?? ""} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+    const selectedDate = parseDateKey(selectedBucket.key);
+    if (!selectedDate) {
+      return selectedBucket.key;
+    }
+    return `${MONTH_LONG_LABELS[selectedDate.getMonth()] ?? ""} ${selectedDate.getDate()}, ${selectedDate.getFullYear()}`;
   }, [selectedBucket, period, selectedPeriodDay]);
 
   const totalNeedsReview = useMemo(
@@ -1163,3 +1203,4 @@ export function InstructionReviewActivityChart({
     </div>
   );
 }
+

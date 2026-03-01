@@ -76,12 +76,51 @@ const PERIOD_BUTTONS: Array<{ value: ForkMergePeriod; label: string }> = [
 
 const KPI_STORAGE_KEY = "admin.kpi.forkMerge.periodParams";
 
+function parseDateKey(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
+    return null;
+  }
+
+  const year = Number.parseInt(match[1] ?? "", 10);
+  const month = Number.parseInt(match[2] ?? "", 10);
+  const day = Number.parseInt(match[3] ?? "", 10);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return null;
+  }
+
+  const parsed = new Date(year, month - 1, day);
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return parsed;
+}
+
 function getBucketRange(
   period: ForkMergePeriod,
   key: string,
 ): { from: string; to: string } {
   if (period === "day") {
-    const startAt = new Date(`${key}:00:00.000Z`);
+    const [datePart, hourPart] = key.split("T");
+    const baseDate = datePart ? parseDateKey(datePart) : null;
+    const parsedHour = Number.parseInt(hourPart ?? "", 10);
+    const hour = Number.isInteger(parsedHour) && parsedHour >= 0 && parsedHour <= 23 ? parsedHour : 0;
+    const startAt = baseDate
+      ? new Date(
+          baseDate.getFullYear(),
+          baseDate.getMonth(),
+          baseDate.getDate(),
+          hour,
+          0,
+          0,
+          0,
+        )
+      : new Date(`${key}:00:00`);
     const endAt = new Date(startAt.getTime() + 60 * 60 * 1000);
     return { from: startAt.toISOString(), to: endAt.toISOString() };
   }
@@ -90,15 +129,15 @@ function getBucketRange(
     const [yearString, monthString] = key.split("-");
     const year = Number.parseInt(yearString ?? "2000", 10);
     const month = Number.parseInt(monthString ?? "1", 10);
-    const startAt = new Date(Date.UTC(year, month - 1, 1));
+    const startAt = new Date(year, month - 1, 1);
     const endAt =
       month === 12
-        ? new Date(Date.UTC(year + 1, 0, 1))
-        : new Date(Date.UTC(year, month, 1));
+        ? new Date(year + 1, 0, 1)
+        : new Date(year, month, 1);
     return { from: startAt.toISOString(), to: endAt.toISOString() };
   }
 
-  const startAt = new Date(`${key}T00:00:00.000Z`);
+  const startAt = parseDateKey(key) ?? new Date(`${key}T00:00:00`);
   const endAt = new Date(startAt.getTime() + 24 * 60 * 60 * 1000);
   return { from: startAt.toISOString(), to: endAt.toISOString() };
 }

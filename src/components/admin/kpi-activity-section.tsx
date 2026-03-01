@@ -235,6 +235,9 @@ export function KpiActivitySection() {
   const trendAxisStep = Math.max(1, Math.ceil(maxTrendCount / 4));
   const trendAxisTicks = Array.from({ length: 5 }, (_, i) => trendAxisStep * (4 - i));
   const trendAxisMax = trendAxisTicks[0] ?? 1;
+  const trendAxisTickOffsets = trendAxisTicks.map((_, index) =>
+    trendAxisTicks.length <= 1 ? 0 : (index / (trendAxisTicks.length - 1)) * 100,
+  );
   const maxContributorUpdates = Math.max(...contributors.map((c) => c.updates), 1);
 
   // Show fewer x-axis labels when many columns to avoid overlap
@@ -388,11 +391,19 @@ export function KpiActivitySection() {
               ) : (
                 <div className="grid grid-cols-[2rem_minmax(0,1fr)] gap-2">
                   {/* Y-axis */}
-                  <div className="grid h-44 grid-rows-5 items-end text-right text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                  <div className="relative h-44">
                     {trendAxisTicks.map((tick, i) => (
                       <span
                         key={`y-${tick}-${i}`}
-                        className={i === trendAxisTicks.length - 1 ? "" : "translate-y-1"}
+                        className={cn(
+                          "absolute right-0 text-right text-[10px] font-semibold leading-none text-slate-500 dark:text-slate-400",
+                          i === 0
+                            ? "translate-y-0"
+                            : i === trendAxisTicks.length - 1
+                              ? "-translate-y-full"
+                              : "-translate-y-1/2",
+                        )}
+                        style={{ top: `${trendAxisTickOffsets[i] ?? 0}%` }}
                       >
                         {tick}
                       </span>
@@ -402,16 +413,17 @@ export function KpiActivitySection() {
                   <div className="min-w-0">
                     <div className="relative h-44">
                       {/* Grid lines */}
-                      <div className="pointer-events-none absolute inset-0 grid grid-rows-5">
-                        {trendAxisTicks.map((_, i) => (
+                      <div className="pointer-events-none absolute inset-0">
+                        {trendAxisTickOffsets.map((offset, i) => (
                           <span
                             key={`grid-${i}`}
-                            className={cn(
-                              "border-t border-slate-300/35 dark:border-slate-700/45",
-                              i === trendAxisTicks.length - 1
-                                ? "border-b border-slate-300/35 dark:border-slate-700/45"
-                                : "",
-                            )}
+                            className="absolute left-0 right-0 border-t border-slate-300/35 dark:border-slate-700/45"
+                            style={{
+                              top:
+                                i === trendAxisTickOffsets.length - 1
+                                  ? "calc(100% - 1px)"
+                                  : `${offset}%`,
+                            }}
                           />
                         ))}
                       </div>

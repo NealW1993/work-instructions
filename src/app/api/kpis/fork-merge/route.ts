@@ -129,17 +129,37 @@ function normalizeMonth(value: string | null, fallback: number) {
   return parsed;
 }
 
+function parseDateKey(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
+    return null;
+  }
+
+  const year = Number.parseInt(match[1] ?? "", 10);
+  const month = Number.parseInt(match[2] ?? "", 10);
+  const day = Number.parseInt(match[3] ?? "", 10);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return null;
+  }
+
+  const parsed = new Date(year, month - 1, day);
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return parsed;
+}
+
 function normalizeDay(value: string | null): Date | null {
   if (!value) {
     return null;
   }
 
-  const parsed = new Date(`${value}T00:00:00.000Z`);
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-
-  return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
+  return parseDateKey(value);
 }
 
 function normalizeWeekStart(value: string | null): Date | null {
@@ -147,8 +167,8 @@ function normalizeWeekStart(value: string | null): Date | null {
     return null;
   }
 
-  const parsed = new Date(`${value}T00:00:00.000Z`);
-  if (Number.isNaN(parsed.getTime())) {
+  const parsed = parseDateKey(value);
+  if (!parsed) {
     return null;
   }
 
@@ -156,25 +176,23 @@ function normalizeWeekStart(value: string | null): Date | null {
 }
 
 function getMondayOf(date: Date) {
-  const utcDay = date.getUTCDay();
-  const mondayOffset = (utcDay + 6) % 7;
-  return new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() - mondayOffset),
-  );
+  const day = date.getDay();
+  const mondayOffset = (day + 6) % 7;
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() - mondayOffset);
 }
 
 function toDateKey(date: Date) {
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(
-    date.getUTCDate(),
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate(),
   ).padStart(2, "0")}`;
 }
 
 function toMonthKey(date: Date) {
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function toHourKey(date: Date) {
-  return `${toDateKey(date)}T${String(date.getUTCHours()).padStart(2, "0")}`;
+  return `${toDateKey(date)}T${String(date.getHours()).padStart(2, "0")}`;
 }
 
 function formatHourLabel(hour: number) {
@@ -203,13 +221,11 @@ function buildRange(
   now: Date,
 ): ActivityRange {
   if (period === "day") {
-    const dayStart =
-      day ??
-      new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const dayStart = day ?? new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
     const prevDay = new Date(dayStart.getTime() - 24 * 60 * 60 * 1000);
     const dayKey = toDateKey(dayStart);
-    const label = `${MONTH_FULL[dayStart.getUTCMonth()]} ${dayStart.getUTCDate()}, ${dayStart.getUTCFullYear()}`;
+    const label = `${MONTH_FULL[dayStart.getMonth()]} ${dayStart.getDate()}, ${dayStart.getFullYear()}`;
 
     return {
       startAt: dayStart,
@@ -238,7 +254,7 @@ function buildRange(
     const weekEndDate = new Date(weekStartDate.getTime() + 7 * 24 * 60 * 60 * 1000);
     const previousWeekStart = new Date(weekStartDate.getTime() - 7 * 24 * 60 * 60 * 1000);
     const weekLastDay = new Date(weekEndDate.getTime() - 24 * 60 * 60 * 1000);
-    const label = `${MONTH_SHORT[weekStartDate.getUTCMonth()]} ${weekStartDate.getUTCDate()} - ${MONTH_SHORT[weekLastDay.getUTCMonth()]} ${weekLastDay.getUTCDate()}, ${weekLastDay.getUTCFullYear()}`;
+    const label = `${MONTH_SHORT[weekStartDate.getMonth()]} ${weekStartDate.getDate()} - ${MONTH_SHORT[weekLastDay.getMonth()]} ${weekLastDay.getDate()}, ${weekLastDay.getFullYear()}`;
 
     return {
       startAt: weekStartDate,
@@ -251,7 +267,7 @@ function buildRange(
           const currentDay = new Date(weekStartDate.getTime() + dayIndex * 24 * 60 * 60 * 1000);
           return {
             key: toDateKey(currentDay),
-            label: `${currentDay.getUTCMonth() + 1}/${currentDay.getUTCDate()}`,
+            label: `${currentDay.getMonth() + 1}/${currentDay.getDate()}`,
             forksCreated: 0,
             merges: 0,
             selectiveMerges: 0,
@@ -267,8 +283,8 @@ function buildRange(
 
   if (period === "month") {
     const monthIndex = month - 1;
-    const monthStart = new Date(Date.UTC(year, monthIndex, 1));
-    const monthEnd = new Date(Date.UTC(year, monthIndex + 1, 1));
+    const monthStart = new Date(year, monthIndex, 1);
+    const monthEnd = new Date(year, monthIndex + 1, 1);
     const daysInMonth = Math.round(
       (monthEnd.getTime() - monthStart.getTime()) / (24 * 60 * 60 * 1000),
     );
@@ -288,7 +304,7 @@ function buildRange(
           const currentDay = new Date(monthStart.getTime() + dayIndex * 24 * 60 * 60 * 1000);
           return {
             key: toDateKey(currentDay),
-            label: `${currentDay.getUTCMonth() + 1}/${currentDay.getUTCDate()}`,
+            label: `${currentDay.getMonth() + 1}/${currentDay.getDate()}`,
             forksCreated: 0,
             merges: 0,
             selectiveMerges: 0,
@@ -302,8 +318,8 @@ function buildRange(
     };
   }
 
-  const yearStart = new Date(Date.UTC(year, 0, 1));
-  const yearEnd = new Date(Date.UTC(year + 1, 0, 1));
+  const yearStart = new Date(year, 0, 1);
+  const yearEnd = new Date(year + 1, 0, 1);
   return {
     startAt: yearStart,
     endAt: yearEnd,
@@ -359,8 +375,8 @@ export async function GET(request: NextRequest) {
   const now = new Date();
   const searchParams = request.nextUrl.searchParams;
   const period = normalizePeriod(searchParams.get("period"));
-  const year = normalizeYear(searchParams.get("year"), now.getUTCFullYear());
-  const month = normalizeMonth(searchParams.get("month"), now.getUTCMonth() + 1);
+  const year = normalizeYear(searchParams.get("year"), now.getFullYear());
+  const month = normalizeMonth(searchParams.get("month"), now.getMonth() + 1);
   const day = normalizeDay(searchParams.get("day"));
   const weekStart = normalizeWeekStart(searchParams.get("weekStart"));
   const range = buildRange(period, year, month, day, weekStart, now);

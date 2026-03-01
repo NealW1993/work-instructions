@@ -114,9 +114,9 @@ export async function GET(request: NextRequest) {
   }
 
   const requestedYear = normalizeRequestedYear(request.nextUrl.searchParams.get("year"));
-  const year = requestedYear ?? new Date().getUTCFullYear();
-  const rangeStartIso = new Date(Date.UTC(year, 0, 1, 0, 0, 0, 0)).toISOString();
-  const rangeEndIso = new Date(Date.UTC(year + 1, 0, 1, 0, 0, 0, 0)).toISOString();
+  const year = requestedYear ?? new Date().getFullYear();
+  const rangeStartIso = new Date(year, 0, 1, 0, 0, 0, 0).toISOString();
+  const rangeEndIso = new Date(year + 1, 0, 1, 0, 0, 0, 0).toISOString();
   const supabaseAdmin = getSupabaseAdminClient();
 
   const { data: rawEvents, error: rawEventsError } = await supabaseAdmin

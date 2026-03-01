@@ -84,45 +84,71 @@ const GRID_COLUMNS_BY_COUNT: Record<number, string> = {
   12: "grid-cols-12",
 };
 
-function toUtcDateKey(date: Date) {
-  const year = date.getUTCFullYear();
-  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(date.getUTCDate()).padStart(2, "0");
+function parseDateKey(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
+    return null;
+  }
+
+  const year = Number.parseInt(match[1] ?? "", 10);
+  const month = Number.parseInt(match[2] ?? "", 10);
+  const day = Number.parseInt(match[3] ?? "", 10);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return null;
+  }
+
+  const parsed = new Date(year, month - 1, day);
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function toDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 
-function getUtcWeekStart(date: Date) {
-  const utcDay = date.getUTCDay();
-  const mondayOffset = (utcDay + 6) % 7;
-  return new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() - mondayOffset),
-  );
+function getWeekStart(date: Date) {
+  const day = date.getDay();
+  const mondayOffset = (day + 6) % 7;
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() - mondayOffset);
 }
 
-function formatUtcMonthDay(date: Date) {
-  const month = MONTH_OPTIONS[date.getUTCMonth()]?.label ?? "Jan";
-  return `${month} ${date.getUTCDate()}`;
+function formatMonthDay(date: Date) {
+  const month = MONTH_OPTIONS[date.getMonth()]?.label ?? "Jan";
+  return `${month} ${date.getDate()}`;
 }
 
 function shiftDay(dateKey: string, deltaDays: number): string {
-  const d = new Date(`${dateKey}T00:00:00.000Z`);
-  d.setUTCDate(d.getUTCDate() + deltaDays);
-  return toUtcDateKey(d);
+  const parsed = parseDateKey(dateKey);
+  if (!parsed) {
+    return dateKey;
+  }
+  parsed.setDate(parsed.getDate() + deltaDays);
+  return toDateKey(parsed);
 }
 
 function buildWeekOptionsForMonth(year: number, month: number) {
   const monthIndex = month - 1;
-  const monthStart = new Date(Date.UTC(year, monthIndex, 1, 0, 0, 0, 0));
-  const monthEnd = new Date(Date.UTC(year, monthIndex + 1, 0, 0, 0, 0, 0));
+  const monthStart = new Date(year, monthIndex, 1, 0, 0, 0, 0);
+  const monthEnd = new Date(year, monthIndex + 1, 0, 0, 0, 0, 0);
   const weekOptions: Array<{ value: string; label: string }> = [];
-  let cursor = getUtcWeekStart(monthStart);
+  let cursor = getWeekStart(monthStart);
 
   while (cursor.getTime() <= monthEnd.getTime()) {
     const weekStart = new Date(cursor.getTime());
     const weekEnd = new Date(cursor.getTime() + 6 * MS_IN_DAY);
     weekOptions.push({
-      value: toUtcDateKey(weekStart),
-      label: `${formatUtcMonthDay(weekStart)} - ${formatUtcMonthDay(weekEnd)}`,
+      value: toDateKey(weekStart),
+      label: `${formatMonthDay(weekStart)} - ${formatMonthDay(weekEnd)}`,
     });
     cursor = new Date(cursor.getTime() + 7 * MS_IN_DAY);
   }
@@ -150,16 +176,16 @@ function isValidYear(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 2000 && value <= 9999;
 }
 
-function isValidUtcDateKey(value: unknown): value is string {
+function isValidDateKey(value: unknown): value is string {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
 export function KpiInsightsPanel() {
   const [period, setPeriod] = useState<InstructionViewPeriod>("year");
-  const [year, setYear] = useState(() => new Date().getUTCFullYear());
-  const [month, setMonth] = useState(() => new Date().getUTCMonth() + 1);
-  const [weekStart, setWeekStart] = useState(() => toUtcDateKey(getUtcWeekStart(new Date())));
-  const [day, setDay] = useState(() => toUtcDateKey(new Date()));
+  const [year, setYear] = useState(() => new Date().getFullYear());
+  const [month, setMonth] = useState(() => new Date().getMonth() + 1);
+  const [weekStart, setWeekStart] = useState(() => toDateKey(getWeekStart(new Date())));
+  const [day, setDay] = useState(() => toDateKey(new Date()));
   const [viewsPayload, setViewsPayload] = useState<InstructionViewsPayload | null>(null);
   const [viewsLoading, setViewsLoading] = useState(false);
   const [viewsError, setViewsError] = useState<string | null>(null);
@@ -172,7 +198,7 @@ export function KpiInsightsPanel() {
   const [detailContributors, setDetailContributors] = useState<InstructionViewContributor[]>([]);
 
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
-  const currentYear = new Date().getUTCFullYear();
+  const currentYear = new Date().getFullYear();
   const yearOptions = useMemo(() => {
     const earliestYear = currentYear - 5;
     const years: number[] = [];
@@ -226,10 +252,10 @@ export function KpiInsightsPanel() {
           if (isValidMonth(parsed.month)) {
             setMonth(parsed.month);
           }
-          if (isValidUtcDateKey(parsed.weekStart)) {
+          if (isValidDateKey(parsed.weekStart)) {
             setWeekStart(parsed.weekStart);
           }
-          if (isValidUtcDateKey(parsed.day)) {
+          if (isValidDateKey(parsed.day)) {
             setDay(parsed.day);
           }
         } catch {

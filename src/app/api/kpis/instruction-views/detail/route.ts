@@ -52,19 +52,42 @@ function normalizeRequestedPeriod(value: string | null): InstructionViewPeriod {
   return "year";
 }
 
-function normalizeDay(value: string | null) {
-  if (!value) return null;
-  const parsed = new Date(`${value}T00:00:00.000Z`);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
+function parseDateKey(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
+    return null;
+  }
+
+  const year = Number.parseInt(match[1] ?? "", 10);
+  const month = Number.parseInt(match[2] ?? "", 10);
+  const day = Number.parseInt(match[3] ?? "", 10);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return null;
+  }
+
+  const parsed = new Date(year, month - 1, day);
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return parsed;
 }
 
-function getUtcWeekStart(date: Date) {
-  const utcDay = date.getUTCDay();
-  const mondayOffset = (utcDay + 6) % 7;
-  return new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() - mondayOffset),
-  );
+function normalizeDay(value: string | null) {
+  if (!value) {
+    return null;
+  }
+  return parseDateKey(value);
+}
+
+function getWeekStart(date: Date) {
+  const day = date.getDay();
+  const mondayOffset = (day + 6) % 7;
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() - mondayOffset);
 }
 
 function normalizeWeekStart(value: string | null) {
@@ -72,18 +95,18 @@ function normalizeWeekStart(value: string | null) {
     return null;
   }
 
-  const parsed = new Date(`${value}T00:00:00.000Z`);
-  if (Number.isNaN(parsed.getTime())) {
+  const parsed = parseDateKey(value);
+  if (!parsed) {
     return null;
   }
 
-  return getUtcWeekStart(parsed);
+  return getWeekStart(parsed);
 }
 
-function toUtcDateKey(date: Date) {
-  const year = date.getUTCFullYear();
-  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(date.getUTCDate()).padStart(2, "0");
+function toDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 
@@ -95,23 +118,29 @@ function buildRange(
   requestedDay: Date | null,
 ) {
   if (period === "day") {
-    const dayUtc = requestedDay ?? new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
+    const dayStart = requestedDay ?? new Date(year, month - 1, 1, 0, 0, 0, 0);
     const rangeStart = new Date(
-      Date.UTC(dayUtc.getUTCFullYear(), dayUtc.getUTCMonth(), dayUtc.getUTCDate(), 0, 0, 0, 0),
+      dayStart.getFullYear(),
+      dayStart.getMonth(),
+      dayStart.getDate(),
+      0,
+      0,
+      0,
+      0,
     );
     const rangeEnd = new Date(rangeStart.getTime() + 24 * 60 * 60 * 1000);
     return {
       startAt: rangeStart,
       endAt: rangeEnd,
-      label: toUtcDateKey(rangeStart),
+      label: toDateKey(rangeStart),
       weekStart: null,
-      day: toUtcDateKey(rangeStart),
+      day: toDateKey(rangeStart),
     };
   }
 
   if (period === "year") {
-    const rangeStart = new Date(Date.UTC(year, 0, 1, 0, 0, 0, 0));
-    const rangeEnd = new Date(Date.UTC(year + 1, 0, 1, 0, 0, 0, 0));
+    const rangeStart = new Date(year, 0, 1, 0, 0, 0, 0);
+    const rangeEnd = new Date(year + 1, 0, 1, 0, 0, 0, 0);
     return {
       startAt: rangeStart,
       endAt: rangeEnd,
@@ -123,8 +152,8 @@ function buildRange(
 
   if (period === "month") {
     const monthIndex = month - 1;
-    const rangeStart = new Date(Date.UTC(year, monthIndex, 1, 0, 0, 0, 0));
-    const rangeEnd = new Date(Date.UTC(year, monthIndex + 1, 1, 0, 0, 0, 0));
+    const rangeStart = new Date(year, monthIndex, 1, 0, 0, 0, 0);
+    const rangeEnd = new Date(year, monthIndex + 1, 1, 0, 0, 0, 0);
     return {
       startAt: rangeStart,
       endAt: rangeEnd,
@@ -134,25 +163,23 @@ function buildRange(
     };
   }
 
-  const fallbackWeekStart = getUtcWeekStart(new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0)));
+  const fallbackWeekStart = getWeekStart(new Date(year, month - 1, 1, 0, 0, 0, 0));
   const weekStart = requestedWeekStart ?? fallbackWeekStart;
   const rangeStart = new Date(
-    Date.UTC(
-      weekStart.getUTCFullYear(),
-      weekStart.getUTCMonth(),
-      weekStart.getUTCDate(),
-      0,
-      0,
-      0,
-      0,
-    ),
+    weekStart.getFullYear(),
+    weekStart.getMonth(),
+    weekStart.getDate(),
+    0,
+    0,
+    0,
+    0,
   );
   const rangeEnd = new Date(rangeStart.getTime() + 7 * 24 * 60 * 60 * 1000);
   return {
     startAt: rangeStart,
     endAt: rangeEnd,
-    label: `${toUtcDateKey(rangeStart)}..${toUtcDateKey(new Date(rangeEnd.getTime() - 1))}`,
-    weekStart: toUtcDateKey(rangeStart),
+    label: `${toDateKey(rangeStart)}..${toDateKey(new Date(rangeEnd.getTime() - 1))}`,
+    weekStart: toDateKey(rangeStart),
     day: null,
   };
 }
@@ -175,9 +202,9 @@ export async function GET(request: NextRequest) {
   const now = new Date();
   const requestedPeriod = normalizeRequestedPeriod(request.nextUrl.searchParams.get("period"));
   const requestedYear =
-    normalizeRequestedYear(request.nextUrl.searchParams.get("year")) ?? now.getUTCFullYear();
+    normalizeRequestedYear(request.nextUrl.searchParams.get("year")) ?? now.getFullYear();
   const requestedMonth =
-    normalizeRequestedMonth(request.nextUrl.searchParams.get("month")) ?? now.getUTCMonth() + 1;
+    normalizeRequestedMonth(request.nextUrl.searchParams.get("month")) ?? now.getMonth() + 1;
   const requestedWeekStart = normalizeWeekStart(request.nextUrl.searchParams.get("weekStart"));
   const requestedDay = normalizeDay(request.nextUrl.searchParams.get("day"));
   const range = buildRange(
