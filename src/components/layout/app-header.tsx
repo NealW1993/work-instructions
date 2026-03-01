@@ -149,7 +149,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
   const [studioMenuEntered, setStudioMenuEntered] = useState(false);
   const [studioMenuWidth, setStudioMenuWidth] = useState(560);
   const [studioLayoutPresetsCollapsed, setStudioLayoutPresetsCollapsed] =
-    useState(false);
+    useState(true);
   const [studioWidgetLibraryCollapsed, setStudioWidgetLibraryCollapsed] =
     useState(true);
   const [studioKpiWidgetsCollapsed, setStudioKpiWidgetsCollapsed] =
@@ -339,24 +339,17 @@ export function AppHeader({ profile }: { profile: Profile }) {
     }
 
     syncStudioMenuWidth();
-    setStudioExpandedPresetId((current) => {
-      if (current) {
-        return current;
-      }
-
-      return (
-        activeDashboardLayoutState.activeLayoutPresetId ??
-        activeDashboardLayoutState.layoutPresets[0]?.id ??
-        null
-      );
-    });
+    setStudioLayoutPresetsCollapsed(true);
+    setStudioWidgetLibraryCollapsed(true);
+    setStudioKpiWidgetsCollapsed(true);
+    setStudioExpandedPresetId(null);
     setStudioMenuPathname(pathname);
     setStudioMenuMounted(true);
     setStudioMenuOpen(true);
     window.requestAnimationFrame(() => {
       setStudioMenuEntered(true);
     });
-  }, [activeDashboardLayoutState.activeLayoutPresetId, activeDashboardLayoutState.layoutPresets, pathname, syncStudioMenuWidth]);
+  }, [pathname, syncStudioMenuWidth]);
 
   const closeInstructionMenu = useCallback(() => {
     if (!instructionMenuMounted && !instructionMenuOpen) {
@@ -842,7 +835,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
               transformOrigin: mobile ? "top center" : "top left",
             }}
           >
-            <section className="grid gap-2 rounded-xl border border-white/15 bg-white/5 p-2">
+            <section className="order-2 grid gap-2 rounded-xl border border-white/15 bg-white/5 p-2">
               <button
                 type="button"
                 onClick={() =>
@@ -960,7 +953,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
               )}
             </section>
 
-            <section className="grid gap-2 rounded-xl border border-white/15 bg-white/5 p-2">
+            <section className="order-3 grid gap-2 rounded-xl border border-white/15 bg-white/5 p-2">
               <button
                 type="button"
                 onClick={() =>
@@ -1051,7 +1044,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
               )}
             </section>
 
-            <section className="grid gap-2 rounded-xl border border-white/15 bg-white/5 p-2">
+            <section className="order-4 grid gap-2 rounded-xl border border-white/15 bg-white/5 p-2">
               <button
                 type="button"
                 onClick={() =>
@@ -1142,29 +1135,27 @@ export function AppHeader({ profile }: { profile: Profile }) {
               )}
             </section>
 
-            <section className="grid gap-2 rounded-xl border border-white/15 bg-white/5 p-2">
-              {showLayoutSaveActions ? (
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <button
-                    type="button"
-                    disabled={!canSaveLayout}
-                    onClick={() => handleDashboardStudioAction({ command: "save-layout" })}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-500/45 bg-emerald-500/15 px-3 py-2 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-45"
-                  >
-                    <Save size={14} />
-                    {activeDashboardLayoutState.layoutSaving ? "Saving..." : "Save Layout"}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!canDiscardLayout}
-                    onClick={() => handleDashboardStudioAction({ command: "discard-changes" })}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-500/45 bg-amber-500/15 px-3 py-2 text-sm font-semibold text-amber-100 transition hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-45"
-                  >
-                    <Undo2 size={14} />
-                    Discard Changes
-                  </button>
-                </div>
-              ) : null}
+            <section className="order-1 grid gap-2 rounded-xl border border-white/15 bg-white/5 p-2">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  disabled={!canSaveLayout}
+                  onClick={() => handleDashboardStudioAction({ command: "save-layout" })}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-500/45 bg-emerald-500/15 px-3 py-2 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <Save size={14} />
+                  {activeDashboardLayoutState.layoutSaving ? "Saving..." : "Save Layout"}
+                </button>
+                <button
+                  type="button"
+                  disabled={!canDiscardLayout}
+                  onClick={() => handleDashboardStudioAction({ command: "discard-changes" })}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-500/45 bg-amber-500/15 px-3 py-2 text-sm font-semibold text-amber-100 transition hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <Undo2 size={14} />
+                  Discard Changes
+                </button>
+              </div>
 
               <button
                 type="button"
