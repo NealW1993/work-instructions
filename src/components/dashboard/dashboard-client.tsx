@@ -4,12 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   CheckCircle2,
-  ChevronRight,
   Eye,
   EyeOff,
   GripVertical,
   Info,
-  Plus,
   Search,
   TriangleAlert,
   ThumbsUp,
@@ -175,6 +173,8 @@ interface ReviewQueueEntry {
 interface DashboardWidgetDefinition {
   id: DashboardWidgetId;
   title: string;
+  description: string;
+  category: "core" | "kpi";
 }
 
 interface DashboardClientProps {
@@ -207,6 +207,7 @@ const DASHBOARD_RETURN_STATE_KEY = "__dashboardInstructionReturnState";
 const DASHBOARD_RETURN_STATE_MAX_AGE_MS = 1000 * 60 * 30;
 const DASHBOARD_LAYOUT_SNAPSHOT_KEY = "__dashboardSavedLayoutSnapshot";
 const DASHBOARD_LAYOUT_SNAPSHOT_MAX_AGE_MS = 1000 * 60 * 60 * 4;
+const ONE_DAY_MS = 1000 * 60 * 60 * 24;
 const CELEBRATION_CONFETTI_COLORS = [
   "#22D3EE",
   "#60A5FA",
@@ -252,34 +253,86 @@ const WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
   {
     id: "finder",
     title: "Find Work Instructions",
+    description: "Search and filter active work instructions across departments.",
+    category: "core",
   },
   {
     id: "pinned",
     title: "Your Pinned Instructions",
+    description: "Quick access to your pinned work instructions.",
+    category: "core",
   },
   {
     id: "newest",
     title: "Newest Work Instructions",
+    description: "Recently created instructions ordered by newest first.",
+    category: "core",
   },
   {
     id: "department_activity",
     title: "Department Activity",
+    description: "Instruction volume and activity split by department.",
+    category: "core",
   },
   {
     id: "review_queue",
     title: "Needs Review Queue",
+    description: "Instructions flagged or out of calibration window.",
+    category: "core",
   },
   {
     id: "recent_updates",
     title: "Recently Updated Work Items",
+    description: "Most recent system updates with direct links to instructions.",
+    category: "core",
   },
   {
     id: "my_impact",
     title: "My Impact Snapshot",
+    description: "Your authored activity and engagement summary.",
+    category: "core",
   },
   {
     id: "system_history",
     title: "System History",
+    description: "Chronological event history with version-check context.",
+    category: "core",
+  },
+  {
+    id: "kpi_throughput",
+    title: "KPI: Throughput Trend",
+    description: "Line graph of daily dashboard event throughput.",
+    category: "kpi",
+  },
+  {
+    id: "kpi_creation_velocity",
+    title: "KPI: Creation Velocity",
+    description: "Area graph of new instruction creation over time.",
+    category: "kpi",
+  },
+  {
+    id: "kpi_department_workload",
+    title: "KPI: Department Workload",
+    description: "Bar graph of event load by department.",
+    category: "kpi",
+  },
+  {
+    id: "kpi_review_health",
+    title: "KPI: Review Health",
+    description: "Stacked graph of healthy versus attention-needed updates.",
+    category: "kpi",
+  },
+  {
+    id: "kpi_revision_cycle_time",
+    title: "KPI: Revision Cycle Time",
+    description: "Scatter graph of days since update versus revision depth.",
+    category: "kpi",
+  },
+  {
+    id: "kpi_event_mix",
+    title: "KPI: Event Mix",
+    description: "Donut graph of created, updated, and review actions.",
+    category: "kpi",
   },
 ];
 
@@ -299,6 +352,12 @@ const RESET_DEFAULT_WIDGET_SIZE_BY_ID: Record<DashboardWidgetId, DashboardWidget
   recent_updates: "wide",
   my_impact: "standard",
   system_history: "full",
+  kpi_throughput: "wide",
+  kpi_creation_velocity: "wide",
+  kpi_department_workload: "standard",
+  kpi_review_health: "wide",
+  kpi_revision_cycle_time: "wide",
+  kpi_event_mix: "standard",
 };
 
 function isDashboardWidgetId(value: string): value is DashboardWidgetId {
@@ -374,6 +433,23 @@ function formatElapsedDaysLabel(daysElapsed: number | null) {
   }
 
   return `Updated ${daysElapsed} days ago`;
+}
+
+function classifyKpiEventType(
+  event: DashboardSystemHistoryEventData,
+): "created" | "updated" | "needs_review" | "up_to_date" {
+  const normalizedDetail = event.detail.trim().toLowerCase();
+  if (normalizedDetail.includes("needs review")) {
+    return "needs_review";
+  }
+  if (normalizedDetail.includes("up to date")) {
+    return "up_to_date";
+  }
+  if (event.event_type === "created") {
+    return "created";
+  }
+
+  return "updated";
 }
 
 function parseSystemHistoryDetailSegments(detail: string) {
@@ -616,72 +692,6 @@ function getWidgetSpanClass(size: DashboardWidgetSize) {
   }
 }
 
-function getPresetPreviewSpanValue(size: DashboardWidgetSize) {
-  switch (size) {
-    case "compact":
-      return 2;
-    case "standard":
-      return 3;
-    case "wide":
-      return 4;
-    case "full":
-    default:
-      return 6;
-  }
-}
-
-function buildPresetPreviewRows(
-  presetId: string,
-  layout: DashboardWidgetLayoutItem[],
-) {
-  const rows: Array<Array<{ key: string; span: number }>> = [];
-  let currentRow: Array<{ key: string; span: number }> = [];
-  let consumedColumns = 0;
-
-  layout
-    .filter((entry) => entry.visible)
-    .forEach((entry, index) => {
-      const span = getPresetPreviewSpanValue(entry.size);
-      if (consumedColumns > 0 && consumedColumns + span > 6) {
-        const remaining = 6 - consumedColumns;
-        if (remaining > 0 && currentRow.length > 0) {
-          const lastCell = currentRow[currentRow.length - 1];
-          if (lastCell) {
-            lastCell.span += remaining;
-          }
-        }
-        rows.push(currentRow);
-        currentRow = [];
-        consumedColumns = 0;
-      }
-
-      currentRow.push({
-        key: `${presetId}-${entry.id}-${index}`,
-        span,
-      });
-      consumedColumns += span;
-
-      if (consumedColumns === 6) {
-        rows.push(currentRow);
-        currentRow = [];
-        consumedColumns = 0;
-      }
-    });
-
-  if (currentRow.length > 0) {
-    const remaining = 6 - consumedColumns;
-    if (remaining > 0) {
-      const lastCell = currentRow[currentRow.length - 1];
-      if (lastCell) {
-        lastCell.span += remaining;
-      }
-    }
-    rows.push(currentRow);
-  }
-
-  return rows;
-}
-
 function getResetDefaultDashboardLayout() {
   return DASHBOARD_WIDGET_IDS.map((id) => ({
     id,
@@ -750,6 +760,645 @@ function ImpactKpiCard({ label, value, onOpen, compact = false }: ImpactKpiCardP
   );
 }
 
+type KpiTimeRangeDays = 7 | 30 | 90;
+
+const KPI_TIME_RANGE_OPTIONS: Array<{ value: KpiTimeRangeDays; label: string }> = [
+  { value: 7, label: "7D" },
+  { value: 30, label: "30D" },
+  { value: 90, label: "90D" },
+];
+
+interface KpiTimeSeriesPoint {
+  id: string;
+  shortLabel: string;
+  fullLabel: string;
+  value: number;
+}
+
+interface KpiBarPoint {
+  id: string;
+  label: string;
+  value: number;
+  color: string;
+}
+
+interface KpiStackedPoint {
+  id: string;
+  shortLabel: string;
+  fullLabel: string;
+  healthy: number;
+  attention: number;
+}
+
+interface KpiScatterPoint {
+  id: string;
+  label: string;
+  xValue: number;
+  yValue: number;
+  color: string;
+}
+
+interface KpiDonutSegment {
+  id: string;
+  label: string;
+  value: number;
+  color: string;
+}
+
+interface KpiDrilldownRow {
+  id: string;
+  label: string;
+  detail: string;
+  value: number;
+  href?: string;
+}
+
+interface KpiDrilldownPanelData {
+  title: string;
+  subtitle: string;
+  yAxisLabel: string;
+  rows: KpiDrilldownRow[];
+}
+
+function toDayStartTimestamp(value: string) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate()).getTime();
+}
+
+function formatKpiShortDate(timestamp: number) {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+  }).format(timestamp);
+}
+
+function formatKpiLongDate(timestamp: number) {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(timestamp);
+}
+
+function formatKpiNumber(value: number) {
+  if (!Number.isFinite(value)) {
+    return "0";
+  }
+
+  if (Math.abs(value) >= 1000) {
+    return `${(value / 1000).toFixed(1)}k`;
+  }
+
+  return `${Math.round(value)}`;
+}
+
+function getKpiTicks(maxValue: number, steps = 4) {
+  const safeMax = Math.max(1, maxValue);
+  return Array.from({ length: steps + 1 }, (_, index) => {
+    const ratio = (steps - index) / steps;
+    return Math.round((safeMax * ratio + Number.EPSILON) * 10) / 10;
+  });
+}
+
+function KpiTimeRangePicker({
+  value,
+  onChange,
+}: {
+  value: KpiTimeRangeDays;
+  onChange: (nextValue: KpiTimeRangeDays) => void;
+}) {
+  return (
+    <div className="inline-flex items-center gap-1 rounded-xl border border-slate-300/70 bg-white/80 p-1 dark:border-slate-700 dark:bg-slate-900/70">
+      {KPI_TIME_RANGE_OPTIONS.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          onClick={() => onChange(option.value)}
+          className={cn(
+            "rounded-lg px-2 py-1 text-[11px] font-semibold transition",
+            value === option.value
+              ? "bg-cyan-500/20 text-cyan-800 dark:text-cyan-100"
+              : "text-slate-600 hover:bg-cyan-500/10 dark:text-slate-300 dark:hover:bg-cyan-500/15",
+          )}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function KpiLineChart({
+  points,
+  yAxisLabel,
+  lineColor = "#06B6D4",
+  showArea = false,
+  onSelectPoint,
+}: {
+  points: KpiTimeSeriesPoint[];
+  yAxisLabel: string;
+  lineColor?: string;
+  showArea?: boolean;
+  onSelectPoint?: (point: KpiTimeSeriesPoint) => void;
+}) {
+  const width = 640;
+  const height = 220;
+  const padding = { top: 16, right: 12, bottom: 34, left: 44 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const maxValue = Math.max(1, ...points.map((point) => point.value));
+  const ticks = getKpiTicks(maxValue);
+  const xStep = points.length > 1 ? plotWidth / (points.length - 1) : 0;
+
+  const toX = (index: number) =>
+    points.length > 1 ? padding.left + xStep * index : padding.left + plotWidth / 2;
+  const toY = (value: number) =>
+    padding.top + ((maxValue - value) / maxValue) * plotHeight;
+
+  const linePath = points
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${toX(index)} ${toY(point.value)}`)
+    .join(" ");
+  const areaPath =
+    points.length > 0
+      ? `${linePath} L ${toX(points.length - 1)} ${padding.top + plotHeight} L ${toX(0)} ${
+          padding.top + plotHeight
+        } Z`
+      : "";
+
+  return (
+    <div className="grid gap-2">
+      <div className="w-full overflow-x-auto">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="h-48 min-w-[560px] w-full text-slate-500 dark:text-slate-300"
+        >
+          <text
+            x={12}
+            y={padding.top + 8}
+            className="fill-current text-[11px] font-semibold"
+            transform={`rotate(-90 ${12} ${padding.top + 8})`}
+          >
+            {yAxisLabel}
+          </text>
+          {ticks.map((tick) => {
+            const y = toY(tick);
+            return (
+              <g key={`tick-${tick}`}>
+                <line
+                  x1={padding.left}
+                  y1={y}
+                  x2={padding.left + plotWidth}
+                  y2={y}
+                  stroke="currentColor"
+                  strokeOpacity={0.18}
+                  strokeWidth={1}
+                />
+                <text
+                  x={padding.left - 8}
+                  y={y + 3}
+                  textAnchor="end"
+                  className="fill-current text-[10px]"
+                >
+                  {formatKpiNumber(tick)}
+                </text>
+              </g>
+            );
+          })}
+          {showArea ? (
+            <path d={areaPath} fill={lineColor} fillOpacity={0.16} stroke="none" />
+          ) : null}
+          <path d={linePath} fill="none" stroke={lineColor} strokeWidth={2.5} />
+          {points.map((point, index) => (
+            <g key={point.id}>
+              <circle
+                cx={toX(index)}
+                cy={toY(point.value)}
+                r={4}
+                fill={lineColor}
+                className={onSelectPoint ? "cursor-pointer" : ""}
+                onClick={() => onSelectPoint?.(point)}
+              />
+              <text
+                x={toX(index)}
+                y={height - 12}
+                textAnchor="middle"
+                className="fill-current text-[10px]"
+              >
+                {point.shortLabel}
+              </text>
+            </g>
+          ))}
+        </svg>
+      </div>
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        Click a point to drill down into the underlying records.
+      </p>
+    </div>
+  );
+}
+
+function KpiBarChart({
+  bars,
+  yAxisLabel,
+  onSelectBar,
+}: {
+  bars: KpiBarPoint[];
+  yAxisLabel: string;
+  onSelectBar?: (bar: KpiBarPoint) => void;
+}) {
+  const width = 640;
+  const height = 220;
+  const padding = { top: 16, right: 12, bottom: 42, left: 44 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const maxValue = Math.max(1, ...bars.map((bar) => bar.value));
+  const ticks = getKpiTicks(maxValue);
+  const barSlotWidth = bars.length > 0 ? plotWidth / bars.length : plotWidth;
+  const barWidth = Math.max(14, Math.min(42, barSlotWidth - 8));
+  const toY = (value: number) => padding.top + ((maxValue - value) / maxValue) * plotHeight;
+
+  return (
+    <div className="grid gap-2">
+      <div className="w-full overflow-x-auto">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="h-48 min-w-[560px] w-full text-slate-500 dark:text-slate-300"
+        >
+          <text
+            x={12}
+            y={padding.top + 8}
+            className="fill-current text-[11px] font-semibold"
+            transform={`rotate(-90 ${12} ${padding.top + 8})`}
+          >
+            {yAxisLabel}
+          </text>
+          {ticks.map((tick) => {
+            const y = toY(tick);
+            return (
+              <g key={`bar-tick-${tick}`}>
+                <line
+                  x1={padding.left}
+                  y1={y}
+                  x2={padding.left + plotWidth}
+                  y2={y}
+                  stroke="currentColor"
+                  strokeOpacity={0.18}
+                  strokeWidth={1}
+                />
+                <text
+                  x={padding.left - 8}
+                  y={y + 3}
+                  textAnchor="end"
+                  className="fill-current text-[10px]"
+                >
+                  {formatKpiNumber(tick)}
+                </text>
+              </g>
+            );
+          })}
+          {bars.map((bar, index) => {
+            const x = padding.left + index * barSlotWidth + (barSlotWidth - barWidth) / 2;
+            const y = toY(bar.value);
+            const barHeight = padding.top + plotHeight - y;
+
+            return (
+              <g key={bar.id}>
+                <rect
+                  x={x}
+                  y={y}
+                  width={barWidth}
+                  height={Math.max(2, barHeight)}
+                  rx={4}
+                  fill={bar.color}
+                  className={onSelectBar ? "cursor-pointer" : ""}
+                  onClick={() => onSelectBar?.(bar)}
+                />
+                <text
+                  x={x + barWidth / 2}
+                  y={height - 18}
+                  textAnchor="middle"
+                  className="fill-current text-[10px]"
+                >
+                  {bar.label}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        Click a bar to open department-level details.
+      </p>
+    </div>
+  );
+}
+
+function KpiStackedBarChart({
+  points,
+  yAxisLabel,
+  onSelectPoint,
+}: {
+  points: KpiStackedPoint[];
+  yAxisLabel: string;
+  onSelectPoint?: (point: KpiStackedPoint) => void;
+}) {
+  const width = 640;
+  const height = 220;
+  const padding = { top: 16, right: 12, bottom: 34, left: 44 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const maxValue = Math.max(
+    1,
+    ...points.map((point) => point.healthy + point.attention),
+  );
+  const ticks = getKpiTicks(maxValue);
+  const barSlotWidth = points.length > 0 ? plotWidth / points.length : plotWidth;
+  const barWidth = Math.max(8, Math.min(24, barSlotWidth - 6));
+  const toY = (value: number) => padding.top + ((maxValue - value) / maxValue) * plotHeight;
+
+  return (
+    <div className="grid gap-2">
+      <div className="w-full overflow-x-auto">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="h-48 min-w-[560px] w-full text-slate-500 dark:text-slate-300"
+        >
+          <text
+            x={12}
+            y={padding.top + 8}
+            className="fill-current text-[11px] font-semibold"
+            transform={`rotate(-90 ${12} ${padding.top + 8})`}
+          >
+            {yAxisLabel}
+          </text>
+          {ticks.map((tick) => {
+            const y = toY(tick);
+            return (
+              <g key={`stacked-tick-${tick}`}>
+                <line
+                  x1={padding.left}
+                  y1={y}
+                  x2={padding.left + plotWidth}
+                  y2={y}
+                  stroke="currentColor"
+                  strokeOpacity={0.18}
+                  strokeWidth={1}
+                />
+                <text
+                  x={padding.left - 8}
+                  y={y + 3}
+                  textAnchor="end"
+                  className="fill-current text-[10px]"
+                >
+                  {formatKpiNumber(tick)}
+                </text>
+              </g>
+            );
+          })}
+          {points.map((point, index) => {
+            const x = padding.left + index * barSlotWidth + (barSlotWidth - barWidth) / 2;
+            const total = point.healthy + point.attention;
+            const totalTopY = toY(total);
+            const healthyTopY = toY(point.healthy);
+            const healthyHeight = padding.top + plotHeight - healthyTopY;
+            const attentionHeight = total > 0 ? healthyTopY - totalTopY : 0;
+
+            return (
+              <g key={point.id}>
+                <rect
+                  x={x}
+                  y={healthyTopY}
+                  width={barWidth}
+                  height={Math.max(1, healthyHeight)}
+                  rx={3}
+                  fill="#22C55E"
+                  className={onSelectPoint ? "cursor-pointer" : ""}
+                  onClick={() => onSelectPoint?.(point)}
+                />
+                <rect
+                  x={x}
+                  y={totalTopY}
+                  width={barWidth}
+                  height={Math.max(1, attentionHeight)}
+                  rx={3}
+                  fill="#F59E0B"
+                  className={onSelectPoint ? "cursor-pointer" : ""}
+                  onClick={() => onSelectPoint?.(point)}
+                />
+                <text
+                  x={x + barWidth / 2}
+                  y={height - 12}
+                  textAnchor="middle"
+                  className="fill-current text-[10px]"
+                >
+                  {point.shortLabel}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      <div className="flex flex-wrap gap-2 text-[11px] font-semibold">
+        <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-300">
+          <span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" />
+          Healthy
+        </span>
+        <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300">
+          <span className="h-2.5 w-2.5 rounded-sm bg-amber-500" />
+          Needs Attention
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function KpiScatterChart({
+  points,
+  xAxisLabel,
+  yAxisLabel,
+  onSelectPoint,
+}: {
+  points: KpiScatterPoint[];
+  xAxisLabel: string;
+  yAxisLabel: string;
+  onSelectPoint?: (point: KpiScatterPoint) => void;
+}) {
+  const width = 640;
+  const height = 220;
+  const padding = { top: 16, right: 12, bottom: 34, left: 44 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const maxX = Math.max(1, ...points.map((point) => point.xValue));
+  const maxY = Math.max(1, ...points.map((point) => point.yValue));
+  const xTicks = getKpiTicks(maxX);
+  const yTicks = getKpiTicks(maxY);
+  const toX = (value: number) => padding.left + (value / maxX) * plotWidth;
+  const toY = (value: number) => padding.top + ((maxY - value) / maxY) * plotHeight;
+
+  return (
+    <div className="grid gap-2">
+      <div className="w-full overflow-x-auto">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="h-48 min-w-[560px] w-full text-slate-500 dark:text-slate-300"
+        >
+          <text
+            x={12}
+            y={padding.top + 8}
+            className="fill-current text-[11px] font-semibold"
+            transform={`rotate(-90 ${12} ${padding.top + 8})`}
+          >
+            {yAxisLabel}
+          </text>
+          {yTicks.map((tick) => {
+            const y = toY(tick);
+            return (
+              <g key={`scatter-y-${tick}`}>
+                <line
+                  x1={padding.left}
+                  y1={y}
+                  x2={padding.left + plotWidth}
+                  y2={y}
+                  stroke="currentColor"
+                  strokeOpacity={0.18}
+                  strokeWidth={1}
+                />
+                <text
+                  x={padding.left - 8}
+                  y={y + 3}
+                  textAnchor="end"
+                  className="fill-current text-[10px]"
+                >
+                  {formatKpiNumber(tick)}
+                </text>
+              </g>
+            );
+          })}
+          {xTicks.map((tick) => {
+            const x = toX(tick);
+            return (
+              <text
+                key={`scatter-x-${tick}`}
+                x={x}
+                y={height - 12}
+                textAnchor="middle"
+                className="fill-current text-[10px]"
+              >
+                {formatKpiNumber(tick)}
+              </text>
+            );
+          })}
+          {points.map((point) => (
+            <circle
+              key={point.id}
+              cx={toX(point.xValue)}
+              cy={toY(point.yValue)}
+              r={4}
+              fill={point.color}
+              fillOpacity={0.85}
+              className={onSelectPoint ? "cursor-pointer" : ""}
+              onClick={() => onSelectPoint?.(point)}
+            />
+          ))}
+        </svg>
+      </div>
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        X-axis {xAxisLabel}. Click any point for instruction-level details.
+      </p>
+    </div>
+  );
+}
+
+function KpiDonutChart({
+  segments,
+  onSelectSegment,
+}: {
+  segments: KpiDonutSegment[];
+  onSelectSegment?: (segment: KpiDonutSegment) => void;
+}) {
+  const total = segments.reduce((sum, segment) => sum + segment.value, 0);
+  const radius = 52;
+  const circumference = 2 * Math.PI * radius;
+  let cumulative = 0;
+
+  return (
+    <div className="grid gap-3">
+      <div className="flex flex-wrap items-center gap-4">
+        <svg viewBox="0 0 140 140" className="h-36 w-36">
+          <circle cx="70" cy="70" r={radius} fill="none" stroke="#CBD5E1" strokeWidth={18} />
+          {total > 0
+            ? segments.map((segment) => {
+                const segmentLength = (segment.value / total) * circumference;
+                const dashOffset = -cumulative;
+                cumulative += segmentLength;
+
+                return (
+                  <circle
+                    key={segment.id}
+                    cx="70"
+                    cy="70"
+                    r={radius}
+                    fill="none"
+                    stroke={segment.color}
+                    strokeWidth={18}
+                    strokeDasharray={`${segmentLength} ${circumference - segmentLength}`}
+                    strokeDashoffset={dashOffset}
+                    transform="rotate(-90 70 70)"
+                    className={onSelectSegment ? "cursor-pointer" : ""}
+                    onClick={() => onSelectSegment?.(segment)}
+                  />
+                );
+              })
+            : null}
+          <text
+            x="70"
+            y="68"
+            textAnchor="middle"
+            className="fill-slate-700 text-[11px] font-semibold dark:fill-slate-300"
+          >
+            Total
+          </text>
+          <text
+            x="70"
+            y="84"
+            textAnchor="middle"
+            className="fill-slate-900 text-lg font-extrabold dark:fill-slate-100"
+          >
+            {total}
+          </text>
+        </svg>
+
+        <div className="grid gap-1.5">
+          {segments.map((segment) => (
+            <button
+              key={segment.id}
+              type="button"
+              onClick={() => onSelectSegment?.(segment)}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-300/70 bg-white/70 px-2.5 py-1 text-left text-xs font-semibold text-slate-700 transition hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-cyan-500/15"
+            >
+              <span
+                className="h-2.5 w-2.5 rounded-sm"
+                style={{ backgroundColor: segment.color }}
+              />
+              <span>{segment.label}</span>
+              <span className="ml-auto text-slate-500 dark:text-slate-400">
+                {segment.value}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        Click a segment or legend row to open the event drill down.
+      </p>
+    </div>
+  );
+}
+
 export function DashboardClient({
   initialQuery,
   searchError,
@@ -779,6 +1428,16 @@ export function DashboardClient({
   const loadDefaultLayoutActionRef = useRef<(() => Promise<void>) | null>(null);
   const resetDefaultsActionRef = useRef<(() => Promise<void>) | null>(null);
   const discardLayoutActionRef = useRef<(() => void) | null>(null);
+  const applyLayoutPresetActionRef = useRef<((presetId: string) => void) | null>(null);
+  const toggleWidgetActionRef = useRef<((widgetId: DashboardWidgetId) => void) | null>(
+    null,
+  );
+  const setWidgetVisibilityActionRef = useRef<
+    ((widgetId: DashboardWidgetId, visible: boolean) => void) | null
+  >(null);
+  const updateWidgetSizeActionRef = useRef<
+    ((widgetId: DashboardWidgetId, size: DashboardWidgetSize) => void) | null
+  >(null);
   const pointerDragStateRef = useRef<{
     pointerId: number;
     sourceWidgetId: DashboardWidgetId;
@@ -815,9 +1474,9 @@ export function DashboardClient({
   const [layoutDirty, setLayoutDirty] = useState(false);
   const [layoutSaving, setLayoutSaving] = useState(false);
   const [layoutError, setLayoutError] = useState<string | null>(null);
-  const [dashboardStudioCollapsed, setDashboardStudioCollapsed] = useState(true);
-  const [layoutPresetsCollapsed, setLayoutPresetsCollapsed] = useState(true);
-  const [widgetLibraryCollapsed, setWidgetLibraryCollapsed] = useState(true);
+  const [kpiTimeRangeDays, setKpiTimeRangeDays] = useState<KpiTimeRangeDays>(30);
+  const [activeKpiDrilldown, setActiveKpiDrilldown] =
+    useState<KpiDrilldownPanelData | null>(null);
   const [portalReady, setPortalReady] = useState(false);
   const [navigationModalOpen, setNavigationModalOpen] = useState(false);
   const [resetDefaultsModalOpen, setResetDefaultsModalOpen] = useState(false);
@@ -858,6 +1517,25 @@ export function DashboardClient({
       return;
     }
 
+    const activeLayoutPresetId = findMatchingDashboardLayoutPreset(widgetLayout)?.id ?? null;
+    const widgetDefinitionById = new Map(
+      WIDGET_DEFINITIONS.map((widgetDefinition) => [
+        widgetDefinition.id,
+        widgetDefinition,
+      ]),
+    );
+    const studioWidgets = widgetLayout.map((widget) => {
+      const definition = widgetDefinitionById.get(widget.id);
+      return {
+        id: widget.id,
+        title: definition?.title ?? widget.id,
+        description: definition?.description ?? "",
+        visible: widget.visible,
+        size: widget.size,
+        category: definition?.category ?? "core",
+      };
+    });
+
     window.dispatchEvent(
       new CustomEvent<DashboardLayoutStateEventDetail>(DASHBOARD_LAYOUT_STATE_EVENT, {
         detail: {
@@ -866,10 +1544,16 @@ export function DashboardClient({
           layoutDirty,
           layoutSaving,
           layoutError,
+          activeLayoutPresetId,
+          layoutPresets: DASHBOARD_LAYOUT_PRESETS.map((preset) => ({
+            id: preset.id,
+            label: preset.label,
+          })),
+          studioWidgets,
         },
       }),
     );
-  }, [customizeOpen, layoutDirty, layoutError, layoutSaving]);
+  }, [customizeOpen, layoutDirty, layoutError, layoutSaving, widgetLayout]);
 
   const persistInstructionReturnState = useCallback(() => {
     if (typeof window === "undefined") {
@@ -1117,15 +1801,9 @@ export function DashboardClient({
 
   useEffect(() => {
     customizeOpenRef.current = customizeOpen;
-    if (customizeOpen) {
-      setDashboardStudioCollapsed(true);
-      setLayoutPresetsCollapsed(true);
-      setWidgetLibraryCollapsed(true);
-      return;
-    }
-
     if (!customizeOpen) {
       clearWidgetPointerDragState();
+      setActiveKpiDrilldown(null);
     }
   }, [customizeOpen]);
 
@@ -1153,6 +1831,9 @@ export function DashboardClient({
             layoutDirty: false,
             layoutSaving: false,
             layoutError: null,
+            activeLayoutPresetId: null,
+            layoutPresets: [],
+            studioWidgets: [],
           },
         }),
       );
@@ -2064,16 +2745,399 @@ export function DashboardClient({
     };
   }, [departmentDrilldownDepartmentId, departmentInsights, flattenedInstructionEntries]);
 
+  const kpiDateBuckets = useMemo(() => {
+    const today = new Date();
+    const todayStart = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate(),
+    ).getTime();
+
+    return Array.from({ length: kpiTimeRangeDays }, (_, index) => {
+      const offset = kpiTimeRangeDays - 1 - index;
+      const start = todayStart - offset * ONE_DAY_MS;
+      return {
+        id: `kpi-day-${start}`,
+        start,
+        end: start + ONE_DAY_MS,
+        shortLabel: formatKpiShortDate(start),
+        fullLabel: formatKpiLongDate(start),
+      };
+    });
+  }, [kpiTimeRangeDays]);
+
+  const kpiRangeStart = kpiDateBuckets[0]?.start ?? 0;
+  const kpiRangeEnd = (kpiDateBuckets[kpiDateBuckets.length - 1]?.end ?? 0) + 1;
+  const kpiBucketIndexByStart = useMemo(
+    () => new Map(kpiDateBuckets.map((bucket, index) => [bucket.start, index])),
+    [kpiDateBuckets],
+  );
+
+  const kpiEventsInRange = useMemo(() => {
+    return filteredSystemHistoryEvents
+      .map((event) => ({
+        event,
+        timestamp: toSortableTimestamp(event.occurred_at),
+      }))
+      .filter(
+        (entry) =>
+          entry.timestamp >= kpiRangeStart &&
+          entry.timestamp < kpiRangeEnd &&
+          entry.timestamp > 0,
+      );
+  }, [filteredSystemHistoryEvents, kpiRangeEnd, kpiRangeStart]);
+
+  const kpiInstructionEntriesScoped = useMemo(() => {
+    const departmentScoped =
+      selectedDepartmentId === "all"
+        ? flattenedInstructionEntries
+        : flattenedInstructionEntries.filter(
+            (entry) => entry.workItem.department_id === selectedDepartmentId,
+          );
+
+    if (!normalizedQuery) {
+      return departmentScoped;
+    }
+
+    return departmentScoped.filter(
+      (entry) =>
+        itemMatchesQuery(entry.workItem, normalizedQuery) ||
+        instructionMatchesQuery(entry.instruction, normalizedQuery),
+    );
+  }, [flattenedInstructionEntries, normalizedQuery, selectedDepartmentId]);
+
+  const throughputMetric = useMemo(() => {
+    const points = kpiDateBuckets.map((bucket) => ({
+      id: bucket.id,
+      shortLabel: bucket.shortLabel,
+      fullLabel: bucket.fullLabel,
+      value: 0,
+    }));
+    const rowsByPointId = new Map<string, KpiDrilldownRow[]>();
+
+    for (const { event, timestamp } of kpiEventsInRange) {
+      const dayStart = toDayStartTimestamp(event.occurred_at);
+      if (dayStart === null) {
+        continue;
+      }
+      const bucketIndex = kpiBucketIndexByStart.get(dayStart);
+      if (bucketIndex === undefined) {
+        continue;
+      }
+
+      const point = points[bucketIndex];
+      if (!point) {
+        continue;
+      }
+
+      point.value += 1;
+      const existing = rowsByPointId.get(point.id) ?? [];
+      existing.push({
+        id: event.id,
+        label: getLabelWithDepartment(event.workItem),
+        detail: `${event.action_label} by ${event.actor_name} at ${new Date(
+          timestamp,
+        ).toLocaleTimeString()}`,
+        value: 1,
+        href: `/instructions/${event.instruction_id}`,
+      });
+      rowsByPointId.set(point.id, existing);
+    }
+
+    return { points, rowsByPointId };
+  }, [kpiBucketIndexByStart, kpiDateBuckets, kpiEventsInRange]);
+
+  const creationVelocityMetric = useMemo(() => {
+    const points = kpiDateBuckets.map((bucket) => ({
+      id: `${bucket.id}-created`,
+      shortLabel: bucket.shortLabel,
+      fullLabel: bucket.fullLabel,
+      value: 0,
+    }));
+    const rowsByPointId = new Map<string, KpiDrilldownRow[]>();
+
+    for (const entry of kpiInstructionEntriesScoped) {
+      const timestamp = toSortableTimestamp(entry.instruction.created_at);
+      if (timestamp < kpiRangeStart || timestamp >= kpiRangeEnd || timestamp <= 0) {
+        continue;
+      }
+
+      const dayStart = toDayStartTimestamp(entry.instruction.created_at);
+      if (dayStart === null) {
+        continue;
+      }
+
+      const bucketIndex = kpiBucketIndexByStart.get(dayStart);
+      if (bucketIndex === undefined) {
+        continue;
+      }
+
+      const point = points[bucketIndex];
+      if (!point) {
+        continue;
+      }
+
+      point.value += 1;
+      const existing = rowsByPointId.get(point.id) ?? [];
+      existing.push({
+        id: entry.instruction.id,
+        label: getLabelWithDepartment(entry.workItem),
+        detail: `Revision ${entry.instruction.revision} created by ${entry.instruction.creator_name}`,
+        value: 1,
+        href: `/instructions/${entry.instruction.id}`,
+      });
+      rowsByPointId.set(point.id, existing);
+    }
+
+    return { points, rowsByPointId };
+  }, [
+    kpiInstructionEntriesScoped,
+    kpiBucketIndexByStart,
+    kpiDateBuckets,
+    kpiRangeEnd,
+    kpiRangeStart,
+  ]);
+
+  const departmentWorkloadMetric = useMemo(() => {
+    const totalsByDepartment = new Map<
+      string,
+      {
+        id: string;
+        label: string;
+        color: string;
+        value: number;
+        rows: KpiDrilldownRow[];
+      }
+    >();
+
+    for (const { event, timestamp } of kpiEventsInRange) {
+      const existing = totalsByDepartment.get(event.workItem.department_id) ?? {
+        id: event.workItem.department_id,
+        label: event.workItem.department_name,
+        color: normalizeDepartmentColor(event.workItem.department_color),
+        value: 0,
+        rows: [],
+      };
+      existing.value += 1;
+      existing.rows.push({
+        id: event.id,
+        label: getLabelWithDepartment(event.workItem),
+        detail: `${event.action_label} by ${event.actor_name} on ${new Date(
+          timestamp,
+        ).toLocaleDateString()}`,
+        value: 1,
+        href: `/instructions/${event.instruction_id}`,
+      });
+      totalsByDepartment.set(event.workItem.department_id, existing);
+    }
+
+    const ranked = [...totalsByDepartment.values()]
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 8);
+    const bars: KpiBarPoint[] = ranked.map((entry) => ({
+      id: entry.id,
+      label:
+        entry.label.length > 12
+          ? `${entry.label.slice(0, 11).trimEnd()}…`
+          : entry.label,
+      value: entry.value,
+      color: entry.color,
+    }));
+    const rowsByBarId = new Map(ranked.map((entry) => [entry.id, entry.rows]));
+
+    return { bars, rowsByBarId };
+  }, [kpiEventsInRange]);
+
+  const reviewHealthMetric = useMemo(() => {
+    const points = kpiDateBuckets.map((bucket) => ({
+      id: `${bucket.id}-review-health`,
+      shortLabel: bucket.shortLabel,
+      fullLabel: bucket.fullLabel,
+      healthy: 0,
+      attention: 0,
+    }));
+    const rowsByPointId = new Map<string, KpiDrilldownRow[]>();
+
+    for (const entry of kpiInstructionEntriesScoped) {
+      const timestamp = toSortableTimestamp(entry.instruction.updated_at);
+      if (timestamp < kpiRangeStart || timestamp >= kpiRangeEnd || timestamp <= 0) {
+        continue;
+      }
+
+      const dayStart = toDayStartTimestamp(entry.instruction.updated_at);
+      if (dayStart === null) {
+        continue;
+      }
+      const bucketIndex = kpiBucketIndexByStart.get(dayStart);
+      if (bucketIndex === undefined) {
+        continue;
+      }
+      const point = points[bucketIndex];
+      if (!point) {
+        continue;
+      }
+
+      const reviewStatus = instructionReviewStatusByInstructionId[entry.instruction.id] ?? null;
+      const daysSinceCalibration = toElapsedCalendarDays(
+        reviewStatus?.last_calibrated_at ?? entry.instruction.updated_at,
+      );
+      const needsAttention =
+        reviewStatus?.status === "needs_review" ||
+        (daysSinceCalibration !== null &&
+          daysSinceCalibration >= normalizedReviewWindowDays);
+
+      if (needsAttention) {
+        point.attention += 1;
+      } else {
+        point.healthy += 1;
+      }
+
+      const existing = rowsByPointId.get(point.id) ?? [];
+      existing.push({
+        id: entry.instruction.id,
+        label: getLabelWithDepartment(entry.workItem),
+        detail: needsAttention
+          ? `Needs attention | Revision ${entry.instruction.revision}`
+          : `Healthy | Revision ${entry.instruction.revision}`,
+        value: 1,
+        href: `/instructions/${entry.instruction.id}`,
+      });
+      rowsByPointId.set(point.id, existing);
+    }
+
+    return { points, rowsByPointId };
+  }, [
+    kpiInstructionEntriesScoped,
+    instructionReviewStatusByInstructionId,
+    kpiBucketIndexByStart,
+    kpiDateBuckets,
+    kpiRangeEnd,
+    kpiRangeStart,
+    normalizedReviewWindowDays,
+  ]);
+
+  const revisionCycleMetric = useMemo(() => {
+    const points: KpiScatterPoint[] = [];
+    const rowsByPointId = new Map<string, KpiDrilldownRow[]>();
+
+    const sortedEntries = [...kpiInstructionEntriesScoped].sort(
+      (left, right) =>
+        toSortableTimestamp(right.instruction.updated_at) -
+        toSortableTimestamp(left.instruction.updated_at),
+    );
+
+    for (const entry of sortedEntries) {
+      const updatedTimestamp = toSortableTimestamp(entry.instruction.updated_at);
+      if (
+        updatedTimestamp < kpiRangeStart ||
+        updatedTimestamp >= kpiRangeEnd ||
+        updatedTimestamp <= 0
+      ) {
+        continue;
+      }
+
+      const daysSinceUpdate = toElapsedCalendarDays(entry.instruction.updated_at);
+      const xValue = Math.max(0, daysSinceUpdate ?? 0);
+      const yValue = Math.max(1, entry.instruction.revision);
+      const pointId = `${entry.instruction.id}-${entry.instruction.revision}`;
+      points.push({
+        id: pointId,
+        label: getLabelWithDepartment(entry.workItem),
+        xValue,
+        yValue,
+        color: normalizeDepartmentColor(entry.workItem.department_color),
+      });
+      rowsByPointId.set(pointId, [
+        {
+          id: entry.instruction.id,
+          label: getLabelWithDepartment(entry.workItem),
+          detail: `Revision ${entry.instruction.revision} updated by ${entry.instruction.updater_name}`,
+          value: yValue,
+          href: `/instructions/${entry.instruction.id}`,
+        },
+      ]);
+
+      if (points.length >= 80) {
+        break;
+      }
+    }
+
+    return { points, rowsByPointId };
+  }, [kpiInstructionEntriesScoped, kpiRangeEnd, kpiRangeStart]);
+
+  const eventMixMetric = useMemo(() => {
+    const segmentsById: Record<
+      "created" | "updated" | "needs_review" | "up_to_date",
+      KpiDonutSegment
+    > = {
+      created: {
+        id: "created",
+        label: "Created",
+        value: 0,
+        color: "#0EA5E9",
+      },
+      updated: {
+        id: "updated",
+        label: "Updated",
+        value: 0,
+        color: "#2563EB",
+      },
+      needs_review: {
+        id: "needs_review",
+        label: "Needs Review",
+        value: 0,
+        color: "#F59E0B",
+      },
+      up_to_date: {
+        id: "up_to_date",
+        label: "Marked Up To Date",
+        value: 0,
+        color: "#22C55E",
+      },
+    };
+    const rowsBySegmentId = new Map<string, KpiDrilldownRow[]>();
+
+    for (const { event, timestamp } of kpiEventsInRange) {
+      const segmentId = classifyKpiEventType(event);
+      const segment = segmentsById[segmentId];
+      if (!segment) {
+        continue;
+      }
+      segment.value += 1;
+      const existingRows = rowsBySegmentId.get(segment.id) ?? [];
+      existingRows.push({
+        id: event.id,
+        label: getLabelWithDepartment(event.workItem),
+        detail: `${event.action_label} by ${event.actor_name} on ${new Date(
+          timestamp,
+        ).toLocaleDateString()}`,
+        value: 1,
+        href: `/instructions/${event.instruction_id}`,
+      });
+      rowsBySegmentId.set(segment.id, existingRows);
+    }
+
+    return {
+      segments: Object.values(segmentsById).filter((segment) => segment.value > 0),
+      rowsBySegmentId,
+    };
+  }, [kpiEventsInRange]);
+
+  const kpiDateRangeLabel = useMemo(() => {
+    const first = kpiDateBuckets[0];
+    const last = kpiDateBuckets[kpiDateBuckets.length - 1];
+    if (!first || !last) {
+      return "";
+    }
+    return `${first.fullLabel} - ${last.fullLabel}`;
+  }, [kpiDateBuckets]);
+
   const widgetDefinitionsById = useMemo(
     () => new Map(WIDGET_DEFINITIONS.map((widget) => [widget.id, widget])),
     [],
   );
   const widgetLayoutById = useMemo(
     () => new Map(widgetLayout.map((widget) => [widget.id, widget])),
-    [widgetLayout],
-  );
-  const activeLayoutPresetId = useMemo(
-    () => findMatchingDashboardLayoutPreset(widgetLayout)?.id ?? null,
     [widgetLayout],
   );
 
@@ -2214,6 +3278,14 @@ export function DashboardClient({
     updateWidgetLayout((current) =>
       current.map((widget) =>
         widget.id === widgetId ? { ...widget, visible: !widget.visible } : widget,
+      ),
+    );
+  }
+
+  function setWidgetVisibility(widgetId: DashboardWidgetId, visible: boolean) {
+    updateWidgetLayout((current) =>
+      current.map((widget) =>
+        widget.id === widgetId ? { ...widget, visible } : widget,
       ),
     );
   }
@@ -2369,11 +3441,54 @@ export function DashboardClient({
   loadDefaultLayoutActionRef.current = loadDefaultDashboardLayout;
   resetDefaultsActionRef.current = resetDashboardLayout;
   discardLayoutActionRef.current = discardDashboardLayoutChanges;
+  applyLayoutPresetActionRef.current = applyLayoutPreset;
+  toggleWidgetActionRef.current = toggleWidget;
+  setWidgetVisibilityActionRef.current = setWidgetVisibility;
+  updateWidgetSizeActionRef.current = updateWidgetSize;
 
   useEffect(() => {
     const handleLayoutCommand = (event: Event) => {
       const detail = (event as CustomEvent<DashboardLayoutCommandEventDetail>).detail;
       if (!detail?.command) {
+        return;
+      }
+
+      if (detail.command === "apply-layout-preset") {
+        if (typeof detail.presetId === "string") {
+          applyLayoutPresetActionRef.current?.(detail.presetId);
+        }
+        return;
+      }
+
+      if (detail.command === "set-widget-visibility") {
+        const widgetId = detail.widgetId;
+        if (!widgetId) {
+          return;
+        }
+
+        if (typeof detail.visible === "boolean") {
+          setWidgetVisibilityActionRef.current?.(widgetId, detail.visible);
+          return;
+        }
+
+        toggleWidgetActionRef.current?.(widgetId);
+        return;
+      }
+
+      if (detail.command === "set-widget-size") {
+        const widgetId = detail.widgetId;
+        const size = detail.size;
+        const isSizeValid =
+          size === "compact" ||
+          size === "standard" ||
+          size === "wide" ||
+          size === "full";
+
+        if (!widgetId || !isSizeValid) {
+          return;
+        }
+
+        updateWidgetSizeActionRef.current?.(widgetId, size);
         return;
       }
 
@@ -2465,6 +3580,7 @@ export function DashboardClient({
   function openNavigationModal(nextNavigation: DashboardPendingNavigation) {
     setImpactDrilldownKey(null);
     setDepartmentDrilldownDepartmentId(null);
+    setActiveKpiDrilldown(null);
     pendingNavigationRef.current = nextNavigation;
     setNavigationModalOpen(true);
   }
@@ -2524,12 +3640,22 @@ export function DashboardClient({
   }
 
   useEffect(() => {
-    if (!navigationModalOpen && !impactDrilldownKey && !departmentDrilldownDepartmentId) {
+    if (
+      !navigationModalOpen &&
+      !impactDrilldownKey &&
+      !departmentDrilldownDepartmentId &&
+      !activeKpiDrilldown
+    ) {
       return;
     }
 
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") {
+        return;
+      }
+
+      if (activeKpiDrilldown) {
+        setActiveKpiDrilldown(null);
         return;
       }
 
@@ -2567,7 +3693,12 @@ export function DashboardClient({
     return () => {
       document.removeEventListener("keydown", handleEscape);
     };
-  }, [departmentDrilldownDepartmentId, impactDrilldownKey, navigationModalOpen]);
+  }, [
+    activeKpiDrilldown,
+    departmentDrilldownDepartmentId,
+    impactDrilldownKey,
+    navigationModalOpen,
+  ]);
 
   function renderWidgetHeaderControls(
     widgetId: DashboardWidgetId,
@@ -3347,6 +4478,244 @@ export function DashboardClient({
       );
     }
 
+    if (widgetId === "kpi_throughput") {
+      const totalEvents = throughputMetric.points.reduce(
+        (sum, point) => sum + point.value,
+        0,
+      );
+
+      return (
+        <div className="grid gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                Time Series Filter
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiDateRangeLabel}</p>
+            </div>
+            <KpiTimeRangePicker
+              value={kpiTimeRangeDays}
+              onChange={setKpiTimeRangeDays}
+            />
+          </div>
+          <div className="rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+            <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+              {totalEvents} event{totalEvents === 1 ? "" : "s"} captured in the selected range.
+            </p>
+          </div>
+          <KpiLineChart
+            points={throughputMetric.points}
+            yAxisLabel="Events"
+            lineColor="#06B6D4"
+            onSelectPoint={(point) => {
+              setActiveKpiDrilldown({
+                title: "Throughput Trend Drill Down",
+                subtitle: `${point.fullLabel} | ${selectedDepartmentName}`,
+                yAxisLabel: "Events",
+                rows: throughputMetric.rowsByPointId.get(point.id) ?? [],
+              });
+            }}
+          />
+        </div>
+      );
+    }
+
+    if (widgetId === "kpi_creation_velocity") {
+      const totalCreated = creationVelocityMetric.points.reduce(
+        (sum, point) => sum + point.value,
+        0,
+      );
+
+      return (
+        <div className="grid gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                Time Series Filter
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiDateRangeLabel}</p>
+            </div>
+            <KpiTimeRangePicker
+              value={kpiTimeRangeDays}
+              onChange={setKpiTimeRangeDays}
+            />
+          </div>
+          <div className="rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+            <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+              {totalCreated} instruction{totalCreated === 1 ? "" : "s"} created in this window.
+            </p>
+          </div>
+          <KpiLineChart
+            points={creationVelocityMetric.points}
+            yAxisLabel="Created"
+            lineColor="#3B82F6"
+            showArea
+            onSelectPoint={(point) => {
+              setActiveKpiDrilldown({
+                title: "Creation Velocity Drill Down",
+                subtitle: `${point.fullLabel} | ${selectedDepartmentName}`,
+                yAxisLabel: "Created",
+                rows: creationVelocityMetric.rowsByPointId.get(point.id) ?? [],
+              });
+            }}
+          />
+        </div>
+      );
+    }
+
+    if (widgetId === "kpi_department_workload") {
+      const totalEvents = departmentWorkloadMetric.bars.reduce(
+        (sum, bar) => sum + bar.value,
+        0,
+      );
+
+      return (
+        <div className="grid gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                Time Series Filter
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiDateRangeLabel}</p>
+            </div>
+            <KpiTimeRangePicker
+              value={kpiTimeRangeDays}
+              onChange={setKpiTimeRangeDays}
+            />
+          </div>
+          <div className="rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+            <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+              Top department load across {totalEvents} event
+              {totalEvents === 1 ? "" : "s"}.
+            </p>
+          </div>
+          {departmentWorkloadMetric.bars.length === 0 ? (
+            <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+              No department event load data is available for this range.
+            </p>
+          ) : (
+            <KpiBarChart
+              bars={departmentWorkloadMetric.bars}
+              yAxisLabel="Events"
+              onSelectBar={(bar) => {
+                setActiveKpiDrilldown({
+                  title: "Department Workload Drill Down",
+                  subtitle: `${bar.label} | ${kpiDateRangeLabel}`,
+                  yAxisLabel: "Events",
+                  rows: departmentWorkloadMetric.rowsByBarId.get(bar.id) ?? [],
+                });
+              }}
+            />
+          )}
+        </div>
+      );
+    }
+
+    if (widgetId === "kpi_review_health") {
+      return (
+        <div className="grid gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                Time Series Filter
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiDateRangeLabel}</p>
+            </div>
+            <KpiTimeRangePicker
+              value={kpiTimeRangeDays}
+              onChange={setKpiTimeRangeDays}
+            />
+          </div>
+          <KpiStackedBarChart
+            points={reviewHealthMetric.points}
+            yAxisLabel="Instruction Updates"
+            onSelectPoint={(point) => {
+              setActiveKpiDrilldown({
+                title: "Review Health Drill Down",
+                subtitle: `${point.fullLabel} | ${selectedDepartmentName}`,
+                yAxisLabel: "Instructions",
+                rows: reviewHealthMetric.rowsByPointId.get(point.id) ?? [],
+              });
+            }}
+          />
+        </div>
+      );
+    }
+
+    if (widgetId === "kpi_revision_cycle_time") {
+      return (
+        <div className="grid gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                Time Series Filter
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiDateRangeLabel}</p>
+            </div>
+            <KpiTimeRangePicker
+              value={kpiTimeRangeDays}
+              onChange={setKpiTimeRangeDays}
+            />
+          </div>
+          {revisionCycleMetric.points.length === 0 ? (
+            <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+              No revision cycle points are available for this time window.
+            </p>
+          ) : (
+            <KpiScatterChart
+              points={revisionCycleMetric.points}
+              xAxisLabel="days since update"
+              yAxisLabel="Revision"
+              onSelectPoint={(point) => {
+                setActiveKpiDrilldown({
+                  title: "Revision Cycle Time Drill Down",
+                  subtitle: point.label,
+                  yAxisLabel: "Revision",
+                  rows: revisionCycleMetric.rowsByPointId.get(point.id) ?? [],
+                });
+              }}
+            />
+          )}
+        </div>
+      );
+    }
+
+    if (widgetId === "kpi_event_mix") {
+      return (
+        <div className="grid gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                Time Series Filter
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiDateRangeLabel}</p>
+            </div>
+            <KpiTimeRangePicker
+              value={kpiTimeRangeDays}
+              onChange={setKpiTimeRangeDays}
+            />
+          </div>
+          {eventMixMetric.segments.length === 0 ? (
+            <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+              No event mix data is available for this time range.
+            </p>
+          ) : (
+            <KpiDonutChart
+              segments={eventMixMetric.segments}
+              onSelectSegment={(segment) => {
+                setActiveKpiDrilldown({
+                  title: "Event Mix Drill Down",
+                  subtitle: `${segment.label} | ${kpiDateRangeLabel}`,
+                  yAxisLabel: "Events",
+                  rows: eventMixMetric.rowsBySegmentId.get(segment.id) ?? [],
+                });
+              }}
+            />
+          )}
+        </div>
+      );
+    }
+
     const isMyImpactCompact = (widgetLayoutById.get("my_impact")?.size ?? "standard") === "compact";
 
     return (
@@ -3457,8 +4826,8 @@ export function DashboardClient({
           <section className="rounded-2xl border border-white/20 bg-white/60 p-3 backdrop-blur-sm dark:border-white/10 dark:bg-slate-900/50">
             {layoutDirty ? (
               <p className="text-xs font-semibold text-amber-700 dark:text-amber-200">
-                Unsaved layout changes. Use the Dashboard menu in the header to save
-                or discard.
+                Unsaved layout changes. Use the Dashboard Studio menu in the header
+                to save or discard.
               </p>
             ) : null}
             {layoutError ? (
@@ -3475,229 +4844,24 @@ export function DashboardClient({
         ) : null}
 
         {customizeOpen ? (
-          <section className="relative overflow-hidden rounded-3xl border border-white/20 bg-gradient-to-r from-white/55 via-white/35 to-white/55 p-4 shadow-lg backdrop-blur-sm dark:border-white/10 dark:from-slate-900/60 dark:via-slate-900/45 dark:to-slate-900/60 md:p-5">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={() => setDashboardStudioCollapsed((current) => !current)}
-                className="inline-flex min-w-0 items-center gap-2 rounded-xl border border-slate-300/70 bg-white/75 px-3 py-2 text-left transition hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/60 dark:hover:border-cyan-500/50 dark:hover:bg-cyan-500/10"
-              >
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-300">
-                    Dashboard Studio
-                  </p>
-                  <h1 className="text-base font-extrabold tracking-tight text-slate-900 dark:text-slate-100 md:text-lg">
-                    Customize Dashboard
-                  </h1>
-                </div>
-                <ChevronRight
-                  size={16}
-                  className={cn(
-                    "shrink-0 text-slate-600 transition-transform dark:text-slate-300",
-                    dashboardStudioCollapsed ? "" : "rotate-90",
-                  )}
-                />
-              </button>
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                {layoutDirty ? (
-                  <span className="rounded-full border border-amber-500/45 bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-800 dark:text-amber-200">
-                    Unsaved changes
-                  </span>
-                ) : (
-                  <span className="rounded-full border border-emerald-500/45 bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-800 dark:text-emerald-200">
-                    Layout saved
-                  </span>
+          <section className="rounded-2xl border border-cyan-500/35 bg-cyan-500/10 p-3 backdrop-blur-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-semibold text-cyan-900 dark:text-cyan-100">
+                Dashboard Studio is active in the header. Use it for presets, widget library,
+                KPI widgets, save/discard actions, and closing customize mode.
+              </p>
+              <span
+                className={cn(
+                  "rounded-full border px-3 py-1 text-xs font-semibold",
+                  layoutDirty
+                    ? "border-amber-500/45 bg-amber-500/15 text-amber-800 dark:text-amber-200"
+                    : "border-emerald-500/45 bg-emerald-500/15 text-emerald-800 dark:text-emerald-200",
                 )}
-              </div>
+              >
+                {layoutDirty ? "Unsaved changes" : "Layout saved"}
+              </span>
             </div>
-
-            {dashboardStudioCollapsed ? null : (
-              <div className="grid gap-2 rounded-2xl border border-slate-300/70 bg-white/65 p-3 dark:border-slate-700 dark:bg-slate-900/50">
-                <p className="text-xs text-slate-600 dark:text-slate-300">
-                  Apply presets and tune widget visibility or size, then save from
-                  the Dashboard menu in the header.
-                </p>
-
-                <section className="grid gap-2 rounded-xl border border-slate-300/70 bg-white/70 p-2 dark:border-slate-700 dark:bg-slate-900/60">
-                  <button
-                    type="button"
-                    onClick={() => setLayoutPresetsCollapsed((current) => !current)}
-                    className="inline-flex items-center justify-between gap-2 rounded-lg px-1 py-0.5 text-left transition hover:bg-cyan-500/10"
-                  >
-                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                      Layout Presets
-                    </span>
-                    <ChevronRight
-                      size={14}
-                      className={cn(
-                        "text-slate-500 transition-transform dark:text-slate-300",
-                        layoutPresetsCollapsed ? "" : "rotate-90",
-                      )}
-                    />
-                  </button>
-                  {layoutPresetsCollapsed ? null : (
-                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                      {DASHBOARD_LAYOUT_PRESETS.map((preset) => {
-                        const previewRows = buildPresetPreviewRows(preset.id, preset.layout);
-
-                        return (
-                          <button
-                            key={preset.id}
-                            type="button"
-                            onClick={() => applyLayoutPreset(preset.id)}
-                            className={cn(
-                              "grid h-full gap-2 rounded-xl border p-2 text-left transition",
-                              activeLayoutPresetId === preset.id
-                                ? "border-cyan-500/50 bg-cyan-500/10"
-                                : "border-slate-300/70 bg-white/80 hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/70",
-                            )}
-                          >
-                            <div className="grid min-h-12 gap-1 rounded-lg border border-slate-300/70 bg-slate-100/80 p-1 dark:border-slate-700 dark:bg-slate-950/60">
-                              {previewRows.map((row, rowIndex) => (
-                                <div
-                                  key={`${preset.id}-row-${rowIndex}`}
-                                  className="grid grid-cols-6 gap-1"
-                                >
-                                  {row.map((cell) => (
-                                    <span
-                                      key={cell.key}
-                                      className="h-2 rounded-sm bg-cyan-500/70 dark:bg-cyan-400/70"
-                                      style={{
-                                        gridColumn: `span ${cell.span} / span ${cell.span}`,
-                                      }}
-                                    />
-                                  ))}
-                                </div>
-                              ))}
-                            </div>
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="text-xs font-semibold text-slate-900 dark:text-slate-100">
-                                {preset.label}
-                              </p>
-                              <span
-                                className={cn(
-                                  "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
-                                  activeLayoutPresetId === preset.id
-                                    ? "bg-cyan-500/20 text-cyan-800 dark:text-cyan-200"
-                                    : "bg-slate-500/20 text-slate-700 dark:text-slate-300",
-                                )}
-                              >
-                                {activeLayoutPresetId === preset.id ? "Active" : "Select"}
-                              </span>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </section>
-
-                <section className="grid gap-2 rounded-xl border border-slate-300/70 bg-white/70 p-2 dark:border-slate-700 dark:bg-slate-900/60">
-                  <button
-                    type="button"
-                    onClick={() => setWidgetLibraryCollapsed((current) => !current)}
-                    className="inline-flex items-center justify-between gap-2 rounded-lg px-1 py-0.5 text-left transition hover:bg-cyan-500/10"
-                  >
-                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                      Widget Library
-                    </span>
-                    <ChevronRight
-                      size={14}
-                      className={cn(
-                        "text-slate-500 transition-transform dark:text-slate-300",
-                        widgetLibraryCollapsed ? "" : "rotate-90",
-                      )}
-                    />
-                  </button>
-                  {widgetLibraryCollapsed ? null : (
-                    <>
-                      <div className="grid gap-2 md:grid-cols-2">
-                        {widgetLayout.map((widget) => {
-                          const definition = widgetDefinitionsById.get(widget.id);
-                          if (!definition) {
-                            return null;
-                          }
-
-                          return (
-                            <article
-                              key={widget.id}
-                              className="grid gap-2 rounded-xl border border-slate-300/70 bg-white/80 p-3 dark:border-slate-700 dark:bg-slate-900/70"
-                            >
-                              <div className="flex items-start justify-between gap-2">
-                                <div>
-                                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                                    {definition.title}
-                                  </p>
-                                </div>
-                                <span
-                                  className={cn(
-                                    "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
-                                    widget.visible
-                                      ? "bg-emerald-500/20 text-emerald-800 dark:text-emerald-200"
-                                      : "bg-slate-500/20 text-slate-700 dark:text-slate-300",
-                                  )}
-                                >
-                                  {widget.visible ? "Visible" : "Hidden"}
-                                </span>
-                              </div>
-
-                              <div className="flex items-center justify-between gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => toggleWidget(widget.id)}
-                                  className={cn(
-                                    "inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-semibold transition",
-                                    widget.visible
-                                      ? "border-rose-500/40 bg-rose-500/10 text-rose-700 hover:bg-rose-500/20 dark:text-rose-200"
-                                      : "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-200",
-                                  )}
-                                >
-                                  {widget.visible ? <X size={12} /> : <Plus size={12} />}
-                                  {widget.visible ? "Remove" : "Add"}
-                                </button>
-
-                                <select
-                                  value={widget.size}
-                                  onChange={(event) =>
-                                    updateWidgetSize(
-                                      widget.id,
-                                      event.target.value as DashboardWidgetSize,
-                                    )
-                                  }
-                                  className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                                >
-                                  {WIDGET_SIZE_OPTIONS.map((option) => (
-                                    <option key={option.value} value={option.value}>
-                                      {option.label}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                            </article>
-                          );
-                        })}
-                      </div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">
-                        Tip: use the grip handle to drag and reorder widgets while customize mode
-                        is on.
-                      </p>
-                    </>
-                  )}
-                </section>
-              </div>
-            )}
           </section>
-        ) : null}
-
-        {customizeOpen ? (
-          <button
-            type="button"
-            onClick={() => setCustomizeOpen(false)}
-            className="fixed bottom-4 right-4 z-40 inline-flex items-center gap-2 rounded-full border border-slate-400/45 bg-slate-950/85 px-4 py-2 text-xs font-semibold text-slate-100 shadow-xl backdrop-blur-sm transition hover:bg-slate-900 md:bottom-6 md:right-6"
-          >
-            <X size={14} />
-            Close Customize Panel
-          </button>
         ) : null}
 
         <div className="grid grid-cols-12 gap-4">
@@ -3967,6 +5131,71 @@ export function DashboardClient({
                     Leave Without Saving
                   </button>
                 </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+
+      {activeKpiDrilldown && portalReady
+        ? createPortal(
+            <div className="app-modal-shell fixed inset-0 z-[112] flex items-center justify-center overflow-y-auto bg-slate-950/80 p-4 backdrop-blur-sm sm:p-6">
+              <div className="grid w-full max-w-3xl gap-4 rounded-2xl border border-cyan-500/35 bg-slate-950/95 p-5 shadow-2xl">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-100">
+                      {activeKpiDrilldown.title}
+                    </h3>
+                    <p className="text-sm text-slate-300">{activeKpiDrilldown.subtitle}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveKpiDrilldown(null)}
+                    className="rounded-xl border border-slate-600 bg-slate-900/70 px-3 py-1.5 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
+                  >
+                    Close
+                  </button>
+                </div>
+
+                {activeKpiDrilldown.rows.length === 0 ? (
+                  <p className="rounded-xl border border-slate-700 bg-slate-900/60 p-4 text-sm text-slate-300">
+                    No records were found for this drill down point.
+                  </p>
+                ) : (
+                  <div className="grid max-h-[55vh] gap-2 overflow-y-auto pr-1">
+                    {activeKpiDrilldown.rows.map((row) =>
+                      row.href ? (
+                        <Link
+                          key={row.id}
+                          href={row.href}
+                          onClick={() => setActiveKpiDrilldown(null)}
+                          className="rounded-xl border border-cyan-500/35 bg-cyan-500/10 p-3 transition hover:bg-cyan-500/20"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="font-semibold text-slate-100">{row.label}</p>
+                            <span className="text-xs font-semibold text-cyan-200">
+                              {activeKpiDrilldown.yAxisLabel}: {formatKpiNumber(row.value)}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-300">{row.detail}</p>
+                        </Link>
+                      ) : (
+                        <article
+                          key={row.id}
+                          className="rounded-xl border border-cyan-500/35 bg-cyan-500/10 p-3"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="font-semibold text-slate-100">{row.label}</p>
+                            <span className="text-xs font-semibold text-cyan-200">
+                              {activeKpiDrilldown.yAxisLabel}: {formatKpiNumber(row.value)}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-300">{row.detail}</p>
+                        </article>
+                      ),
+                    )}
+                  </div>
+                )}
               </div>
             </div>,
             document.body,

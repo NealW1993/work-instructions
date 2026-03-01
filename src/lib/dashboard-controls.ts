@@ -1,3 +1,8 @@
+import type {
+  DashboardWidgetId,
+  DashboardWidgetSize,
+} from "@/lib/dashboard-layout";
+
 export const DASHBOARD_LAYOUT_COMMAND_EVENT = "dashboard:layout-command";
 export const DASHBOARD_LAYOUT_STATE_EVENT = "dashboard:layout-state";
 export const DASHBOARD_LAYOUT_MENU_INTENT_KEY = "dashboard:layout-menu-intent";
@@ -9,10 +14,31 @@ export type DashboardLayoutCommand =
   | "save-layout-default"
   | "discard-changes"
   | "load-default"
-  | "reset-defaults";
+  | "reset-defaults"
+  | "apply-layout-preset"
+  | "set-widget-visibility"
+  | "set-widget-size";
 
 export interface DashboardLayoutCommandEventDetail {
   command: DashboardLayoutCommand;
+  presetId?: string;
+  widgetId?: DashboardWidgetId;
+  visible?: boolean;
+  size?: DashboardWidgetSize;
+}
+
+export interface DashboardLayoutStudioWidgetState {
+  id: DashboardWidgetId;
+  title: string;
+  description: string;
+  visible: boolean;
+  size: DashboardWidgetSize;
+  category: "core" | "kpi";
+}
+
+export interface DashboardLayoutPresetState {
+  id: string;
+  label: string;
 }
 
 export interface DashboardLayoutStateEventDetail {
@@ -21,6 +47,9 @@ export interface DashboardLayoutStateEventDetail {
   layoutDirty: boolean;
   layoutSaving: boolean;
   layoutError: string | null;
+  activeLayoutPresetId: string | null;
+  layoutPresets: DashboardLayoutPresetState[];
+  studioWidgets: DashboardLayoutStudioWidgetState[];
 }
 
 export const DASHBOARD_LAYOUT_DEFAULT_STATE: DashboardLayoutStateEventDetail = {
@@ -29,4 +58,7 @@ export const DASHBOARD_LAYOUT_DEFAULT_STATE: DashboardLayoutStateEventDetail = {
   layoutDirty: false,
   layoutSaving: false,
   layoutError: null,
+  activeLayoutPresetId: null,
+  layoutPresets: [],
+  studioWidgets: [],
 };

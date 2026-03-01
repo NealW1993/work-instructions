@@ -39,6 +39,12 @@ import { cn } from "@/lib/utils";
 const DASHBOARD_RETURN_STATE_KEY = "__dashboardInstructionReturnState";
 const MENU_ANIMATION_MS = 260;
 const HEADER_BACKGROUND_PLAYBACK_RATE = 0.45;
+const WIDGET_SIZE_OPTIONS = [
+  { value: "compact", label: "Compact" },
+  { value: "standard", label: "Standard" },
+  { value: "wide", label: "Wide" },
+  { value: "full", label: "Full Width" },
+] as const;
 
 function applyHeaderVideoPlaybackRate(video: HTMLVideoElement) {
   video.defaultPlaybackRate = HEADER_BACKGROUND_PLAYBACK_RATE;
@@ -65,6 +71,17 @@ export function AppHeader({ profile }: { profile: Profile }) {
   const [dashboardMenuMounted, setDashboardMenuMounted] = useState(false);
   const [dashboardMenuEntered, setDashboardMenuEntered] = useState(false);
   const [dashboardMenuWidth, setDashboardMenuWidth] = useState(300);
+  const [studioMenuOpen, setStudioMenuOpen] = useState(false);
+  const [studioMenuPathname, setStudioMenuPathname] = useState(pathname);
+  const [studioMenuMounted, setStudioMenuMounted] = useState(false);
+  const [studioMenuEntered, setStudioMenuEntered] = useState(false);
+  const [studioMenuWidth, setStudioMenuWidth] = useState(380);
+  const [studioLayoutPresetsCollapsed, setStudioLayoutPresetsCollapsed] =
+    useState(false);
+  const [studioWidgetLibraryCollapsed, setStudioWidgetLibraryCollapsed] =
+    useState(false);
+  const [studioKpiWidgetsCollapsed, setStudioKpiWidgetsCollapsed] =
+    useState(false);
   const [instructionMenuOpen, setInstructionMenuOpen] = useState(false);
   const [instructionMenuPathname, setInstructionMenuPathname] = useState(pathname);
   const [instructionMenuMounted, setInstructionMenuMounted] = useState(false);
@@ -73,6 +90,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
     DASHBOARD_LAYOUT_DEFAULT_STATE,
   );
   const dashboardMenuCloseTimeoutRef = useRef<number | null>(null);
+  const studioMenuCloseTimeoutRef = useRef<number | null>(null);
   const instructionMenuCloseTimeoutRef = useRef<number | null>(null);
 
   const canCreateInstructions = canEditInstructions(profile.role);
@@ -86,6 +104,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
     : DASHBOARD_LAYOUT_DEFAULT_STATE;
   const dashboardMenuVisible =
     dashboardMenuOpen && dashboardMenuPathname === pathname;
+  const studioMenuVisible = studioMenuOpen && studioMenuPathname === pathname;
   const instructionMenuVisible =
     canViewArchivedInstructions &&
     instructionMenuOpen &&
@@ -115,6 +134,19 @@ export function AppHeader({ profile }: { profile: Profile }) {
     (activeDashboardLayoutState.layoutDirty ||
       activeDashboardLayoutState.layoutSaving ||
       Boolean(activeDashboardLayoutState.layoutError));
+  const showDashboardStudioButton =
+    canSendDashboardLayoutActions && activeDashboardLayoutState.customizeOpen;
+  const studioNeedsAttention =
+    showDashboardStudioButton &&
+    (activeDashboardLayoutState.layoutDirty ||
+      activeDashboardLayoutState.layoutSaving ||
+      Boolean(activeDashboardLayoutState.layoutError));
+  const studioCoreWidgets = activeDashboardLayoutState.studioWidgets.filter(
+    (widget) => widget.category === "core",
+  );
+  const studioKpiWidgets = activeDashboardLayoutState.studioWidgets.filter(
+    (widget) => widget.category === "kpi",
+  );
   const customizeLabel =
     canSendDashboardLayoutActions && activeDashboardLayoutState.customizeOpen
       ? "Close Customize Panel"
@@ -141,6 +173,31 @@ export function AppHeader({ profile }: { profile: Profile }) {
         : 300;
 
     setDashboardMenuWidth(Math.max(targetWidth, 300));
+  }, []);
+
+  const syncStudioMenuWidth = useCallback(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const visibleStudioRoot = [
+      ...document.querySelectorAll<HTMLElement>('[data-dashboard-studio-root="true"]'),
+    ].find((element) => element.offsetParent !== null);
+    if (!visibleStudioRoot) {
+      return;
+    }
+
+    const visibleInstructionRoot = [
+      ...document.querySelectorAll<HTMLElement>('[data-instruction-menu-root="true"]'),
+    ].find((element) => element.offsetParent !== null);
+    const studioRect = visibleStudioRoot.getBoundingClientRect();
+    const instructionRect = visibleInstructionRoot?.getBoundingClientRect() ?? null;
+    const targetWidth =
+      instructionRect && instructionRect.right > studioRect.left
+        ? Math.round(instructionRect.right - studioRect.left)
+        : 380;
+
+    setStudioMenuWidth(Math.max(targetWidth, 360));
   }, []);
 
   const closeDashboardMenu = useCallback(() => {
@@ -176,6 +233,40 @@ export function AppHeader({ profile }: { profile: Profile }) {
       setDashboardMenuEntered(true);
     });
   }, [pathname, syncDashboardMenuWidth]);
+
+  const closeStudioMenu = useCallback(() => {
+    if (!studioMenuMounted && !studioMenuOpen) {
+      return;
+    }
+
+    if (studioMenuCloseTimeoutRef.current !== null) {
+      window.clearTimeout(studioMenuCloseTimeoutRef.current);
+      studioMenuCloseTimeoutRef.current = null;
+    }
+
+    setStudioMenuEntered(false);
+    setStudioMenuOpen(false);
+
+    studioMenuCloseTimeoutRef.current = window.setTimeout(() => {
+      setStudioMenuMounted(false);
+      studioMenuCloseTimeoutRef.current = null;
+    }, MENU_ANIMATION_MS);
+  }, [studioMenuMounted, studioMenuOpen]);
+
+  const openStudioMenu = useCallback(() => {
+    if (studioMenuCloseTimeoutRef.current !== null) {
+      window.clearTimeout(studioMenuCloseTimeoutRef.current);
+      studioMenuCloseTimeoutRef.current = null;
+    }
+
+    syncStudioMenuWidth();
+    setStudioMenuPathname(pathname);
+    setStudioMenuMounted(true);
+    setStudioMenuOpen(true);
+    window.requestAnimationFrame(() => {
+      setStudioMenuEntered(true);
+    });
+  }, [pathname, syncStudioMenuWidth]);
 
   const closeInstructionMenu = useCallback(() => {
     if (!instructionMenuMounted && !instructionMenuOpen) {
@@ -239,6 +330,20 @@ export function AppHeader({ profile }: { profile: Profile }) {
   }, [closeInstructionMenu, instructionMenuOpen, instructionMenuPathname, pathname]);
 
   useEffect(() => {
+    if (!studioMenuOpen || studioMenuPathname === pathname) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      closeStudioMenu();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [closeStudioMenu, pathname, studioMenuOpen, studioMenuPathname]);
+
+  useEffect(() => {
     if (!dashboardMenuMounted) {
       return;
     }
@@ -255,10 +360,30 @@ export function AppHeader({ profile }: { profile: Profile }) {
     };
   }, [dashboardMenuMounted, syncDashboardMenuWidth]);
 
+  useEffect(() => {
+    if (!studioMenuMounted) {
+      return;
+    }
+
+    const onWindowResize = () => {
+      syncStudioMenuWidth();
+    };
+    const frameId = window.requestAnimationFrame(syncStudioMenuWidth);
+    window.addEventListener("resize", onWindowResize);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", onWindowResize);
+    };
+  }, [studioMenuMounted, syncStudioMenuWidth]);
+
   useEffect(
     () => () => {
       if (dashboardMenuCloseTimeoutRef.current !== null) {
         window.clearTimeout(dashboardMenuCloseTimeoutRef.current);
+      }
+      if (studioMenuCloseTimeoutRef.current !== null) {
+        window.clearTimeout(studioMenuCloseTimeoutRef.current);
       }
       if (instructionMenuCloseTimeoutRef.current !== null) {
         window.clearTimeout(instructionMenuCloseTimeoutRef.current);
@@ -280,6 +405,16 @@ export function AppHeader({ profile }: { profile: Profile }) {
         layoutDirty: Boolean(detail.layoutDirty),
         layoutSaving: Boolean(detail.layoutSaving),
         layoutError: detail.layoutError ?? null,
+        activeLayoutPresetId:
+          typeof detail.activeLayoutPresetId === "string"
+            ? detail.activeLayoutPresetId
+            : null,
+        layoutPresets: Array.isArray(detail.layoutPresets)
+          ? detail.layoutPresets
+          : [],
+        studioWidgets: Array.isArray(detail.studioWidgets)
+          ? detail.studioWidgets
+          : [],
       });
     };
 
@@ -296,7 +431,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
   }, []);
 
   useEffect(() => {
-    if (!dashboardMenuVisible && !instructionMenuVisible) {
+    if (!dashboardMenuVisible && !instructionMenuVisible && !studioMenuVisible) {
       return;
     }
 
@@ -304,18 +439,21 @@ export function AppHeader({ profile }: { profile: Profile }) {
       const target = event.target as HTMLElement | null;
       if (
         target?.closest('[data-dashboard-menu-root="true"]') ||
+        target?.closest('[data-dashboard-studio-root="true"]') ||
         target?.closest('[data-instruction-menu-root="true"]')
       ) {
         return;
       }
 
       closeDashboardMenu();
+      closeStudioMenu();
       closeInstructionMenu();
     };
 
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         closeDashboardMenu();
+        closeStudioMenu();
         closeInstructionMenu();
       }
     };
@@ -327,7 +465,14 @@ export function AppHeader({ profile }: { profile: Profile }) {
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("keydown", handleEscape);
     };
-  }, [closeDashboardMenu, closeInstructionMenu, dashboardMenuVisible, instructionMenuVisible]);
+  }, [
+    closeDashboardMenu,
+    closeInstructionMenu,
+    closeStudioMenu,
+    dashboardMenuVisible,
+    instructionMenuVisible,
+    studioMenuVisible,
+  ]);
 
   const clearDashboardInstructionReturnState = useCallback(() => {
     try {
@@ -349,6 +494,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
 
       clearDashboardInstructionReturnState();
       closeDashboardMenu();
+      closeStudioMenu();
       closeInstructionMenu();
 
       if (!isDashboardActive) {
@@ -362,11 +508,18 @@ export function AppHeader({ profile }: { profile: Profile }) {
         behavior: "auto",
       });
     },
-    [clearDashboardInstructionReturnState, closeDashboardMenu, closeInstructionMenu, isDashboardActive],
+    [
+      clearDashboardInstructionReturnState,
+      closeDashboardMenu,
+      closeInstructionMenu,
+      closeStudioMenu,
+      isDashboardActive,
+    ],
   );
 
   const triggerDashboardAction = useCallback(
-    (command: DashboardLayoutCommand) => {
+    (detail: DashboardLayoutCommandEventDetail) => {
+      const command = detail.command;
       if (isDashboardActive) {
         if (command === "toggle-customize" && !dashboardLayoutState.available) {
           try {
@@ -383,7 +536,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
           new CustomEvent<DashboardLayoutCommandEventDetail>(
             DASHBOARD_LAYOUT_COMMAND_EVENT,
             {
-              detail: { command },
+              detail,
             },
           ),
         );
@@ -409,11 +562,32 @@ export function AppHeader({ profile }: { profile: Profile }) {
 
   const handleDashboardAction = useCallback(
     (command: DashboardLayoutCommand) => {
-      triggerDashboardAction(command);
+      triggerDashboardAction({ command });
       closeDashboardMenu();
+      closeStudioMenu();
       closeInstructionMenu();
     },
-    [closeDashboardMenu, closeInstructionMenu, triggerDashboardAction],
+    [closeDashboardMenu, closeInstructionMenu, closeStudioMenu, triggerDashboardAction],
+  );
+
+  const handleDashboardStudioAction = useCallback(
+    (
+      detail: DashboardLayoutCommandEventDetail,
+      options?: { closeStudioMenuAfterAction?: boolean },
+    ) => {
+      triggerDashboardAction(detail);
+      closeDashboardMenu();
+      closeInstructionMenu();
+      if (options?.closeStudioMenuAfterAction ?? true) {
+        closeStudioMenu();
+      }
+    },
+    [
+      closeDashboardMenu,
+      closeInstructionMenu,
+      closeStudioMenu,
+      triggerDashboardAction,
+    ],
   );
 
   const renderDashboardControl = (mobile: boolean) => (
@@ -449,6 +623,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
             return;
           }
 
+          closeStudioMenu();
           closeInstructionMenu();
           openDashboardMenu();
         }}
@@ -494,74 +669,16 @@ export function AppHeader({ profile }: { profile: Profile }) {
             {customizeLabel}
           </button>
 
-          <button
-            type="button"
-            disabled={!canLoadDefault}
-            onClick={() => handleDashboardAction("load-default")}
-            className="inline-flex items-center gap-2 rounded-xl border border-sky-500/45 bg-sky-500/15 px-3 py-2 text-sm font-semibold text-sky-100 transition hover:bg-sky-500/25 disabled:cursor-not-allowed disabled:opacity-45"
-          >
-            <Download size={14} />
-            Load Default Dashboard
-          </button>
-
-          {showLayoutSaveActions ? (
-            <>
-              <button
-                type="button"
-                disabled={!canSaveLayout}
-                onClick={() => handleDashboardAction("save-layout")}
-                className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/45 bg-emerald-500/15 px-3 py-2 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-45"
-              >
-                <Save size={14} />
-                {activeDashboardLayoutState.layoutSaving ? "Saving..." : "Save Layout"}
-              </button>
-
-              <button
-                type="button"
-                disabled={!canDiscardLayout}
-                onClick={() => handleDashboardAction("discard-changes")}
-                className="inline-flex items-center gap-2 rounded-xl border border-amber-500/45 bg-amber-500/15 px-3 py-2 text-sm font-semibold text-amber-100 transition hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-45"
-              >
-                <Undo2 size={14} />
-                Discard Changes
-              </button>
-            </>
-          ) : null}
-
-          {showSaveLayoutAsDefaultAction ? (
-            <button
-              type="button"
-              disabled={!canSaveLayoutAsDefault}
-              onClick={() => handleDashboardAction("save-layout-default")}
-              className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-45"
-            >
-              <BookmarkPlus size={14} />
-              Save Layout as Default
-            </button>
-          ) : null}
-
-          <button
-            type="button"
-            disabled={!canResetLayout}
-            onClick={() => handleDashboardAction("reset-defaults")}
-            className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-45"
-          >
-            <RefreshCw size={14} />
-            Reset Dashboard
-          </button>
-
           <div className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-[11px] text-slate-300">
             {!isDashboardActive
               ? "Choose Customize Dashboard to jump into dashboard studio."
               : !activeDashboardLayoutState.available
                 ? "Dashboard studio is loading."
-              : activeDashboardLayoutState.layoutDirty
-                ? "You have unsaved layout changes."
               : !activeDashboardLayoutState.customizeOpen
-                ? "Open Customize Dashboard to edit layout and manage defaults."
+                ? "Open Customize Dashboard to enter Dashboard Studio."
               : activeDashboardLayoutState.layoutSaving
                   ? "Saving your layout..."
-                  : "Layout and default are saved. Load Default Dashboard applies your saved default, and Reset Dashboard only resets the current layout."}
+                  : "Dashboard Studio is active in the header. Open that menu for presets, widget options, KPI widgets, and save/discard actions."}
           </div>
 
           {activeDashboardLayoutState.layoutError ? (
@@ -574,6 +691,383 @@ export function AppHeader({ profile }: { profile: Profile }) {
     </div>
   );
 
+  const renderDashboardStudioControl = (mobile: boolean) => {
+    if (!showDashboardStudioButton) {
+      return null;
+    }
+
+    return (
+      <div
+        data-dashboard-studio-root="true"
+        className={cn(mobile ? "inline-flex max-w-full" : "relative inline-flex")}
+      >
+        <button
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={studioMenuVisible}
+          aria-label={
+            studioNeedsAttention
+              ? "Open dashboard studio options. Action required."
+              : "Open dashboard studio options"
+          }
+          onClick={() => {
+            if (studioMenuVisible) {
+              closeStudioMenu();
+              return;
+            }
+
+            closeDashboardMenu();
+            closeInstructionMenu();
+            openStudioMenu();
+          }}
+          className="relative inline-flex items-center gap-2 rounded-xl border border-cyan-500/50 bg-cyan-500/18 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/28"
+        >
+          {studioNeedsAttention ? (
+            <span className="absolute -right-1 -top-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-amber-200/40 bg-amber-500 text-amber-950 shadow-lg">
+              <CircleAlert size={11} />
+            </span>
+          ) : null}
+          <LayoutGrid size={14} />
+          <span>Dashboard Studio</span>
+          <ChevronDown
+            size={14}
+            className={cn("transition", studioMenuVisible ? "rotate-180" : "")}
+          />
+        </button>
+
+        {studioMenuMounted ? (
+          <div
+            className={cn(
+              "absolute top-[calc(100%+0.5rem)] z-[90] grid gap-2 rounded-2xl border border-white/20 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-xl transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
+              mobile ? "left-2 right-2" : "left-0",
+              studioMenuEntered ? "pointer-events-auto" : "pointer-events-none",
+            )}
+            style={{
+              ...(mobile ? {} : { width: `${studioMenuWidth}px` }),
+              opacity: studioMenuEntered ? 1 : 0,
+              filter: studioMenuEntered ? "blur(0px)" : "blur(6px)",
+              transform: studioMenuEntered
+                ? "translateY(0px) scale(1)"
+                : "translateY(-8px) scale(0.98)",
+              transformOrigin: mobile ? "top center" : "top left",
+            }}
+          >
+            <section className="grid gap-2 rounded-xl border border-white/15 bg-white/5 p-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setStudioLayoutPresetsCollapsed((currentState) => !currentState)
+                }
+                className="inline-flex items-center justify-between gap-2 rounded-lg px-1 py-0.5 text-left transition hover:bg-cyan-500/10"
+              >
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-200">
+                  Layout Presets
+                </span>
+                <ChevronDown
+                  size={13}
+                  className={cn(
+                    "text-slate-300 transition",
+                    studioLayoutPresetsCollapsed ? "" : "rotate-180",
+                  )}
+                />
+              </button>
+              {studioLayoutPresetsCollapsed ? null : (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {activeDashboardLayoutState.layoutPresets.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() =>
+                        handleDashboardStudioAction(
+                          {
+                            command: "apply-layout-preset",
+                            presetId: preset.id,
+                          },
+                          { closeStudioMenuAfterAction: false },
+                        )
+                      }
+                      className={cn(
+                        "inline-flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition",
+                        activeDashboardLayoutState.activeLayoutPresetId === preset.id
+                          ? "border-cyan-500/50 bg-cyan-500/18 text-cyan-100"
+                          : "border-white/20 bg-white/10 text-slate-100 hover:bg-white/20",
+                      )}
+                    >
+                      <span>{preset.label}</span>
+                      <span className="text-[10px] uppercase tracking-wide">
+                        {activeDashboardLayoutState.activeLayoutPresetId === preset.id
+                          ? "Active"
+                          : "Load"}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="grid gap-2 rounded-xl border border-white/15 bg-white/5 p-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setStudioWidgetLibraryCollapsed((currentState) => !currentState)
+                }
+                className="inline-flex items-center justify-between gap-2 rounded-lg px-1 py-0.5 text-left transition hover:bg-cyan-500/10"
+              >
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-200">
+                  Widget Library
+                </span>
+                <ChevronDown
+                  size={13}
+                  className={cn(
+                    "text-slate-300 transition",
+                    studioWidgetLibraryCollapsed ? "" : "rotate-180",
+                  )}
+                />
+              </button>
+              {studioWidgetLibraryCollapsed ? null : (
+                <div className="grid max-h-56 gap-2 overflow-y-auto pr-1">
+                  {studioCoreWidgets.map((widget) => (
+                    <article
+                      key={widget.id}
+                      className="grid gap-2 rounded-lg border border-white/20 bg-white/10 p-2"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-xs font-semibold text-slate-100">{widget.title}</p>
+                          <p className="text-[11px] text-slate-300">{widget.description}</p>
+                        </div>
+                        <span
+                          className={cn(
+                            "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                            widget.visible
+                              ? "bg-emerald-500/20 text-emerald-200"
+                              : "bg-slate-500/20 text-slate-300",
+                          )}
+                        >
+                          {widget.visible ? "Visible" : "Hidden"}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleDashboardStudioAction(
+                              {
+                                command: "set-widget-visibility",
+                                widgetId: widget.id,
+                                visible: !widget.visible,
+                              },
+                              { closeStudioMenuAfterAction: false },
+                            )
+                          }
+                          className={cn(
+                            "rounded-lg border px-2 py-1 text-xs font-semibold transition",
+                            widget.visible
+                              ? "border-rose-500/40 bg-rose-500/15 text-rose-100 hover:bg-rose-500/25"
+                              : "border-emerald-500/40 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/25",
+                          )}
+                        >
+                          {widget.visible ? "Remove" : "Add"}
+                        </button>
+                        <select
+                          value={widget.size}
+                          onChange={(event) =>
+                            handleDashboardStudioAction(
+                              {
+                                command: "set-widget-size",
+                                widgetId: widget.id,
+                                size: event.target.value as DashboardLayoutCommandEventDetail["size"],
+                              },
+                              { closeStudioMenuAfterAction: false },
+                            )
+                          }
+                          className="rounded-lg border border-slate-600 bg-slate-900/70 px-2 py-1 text-xs text-slate-100 outline-none transition focus:border-cyan-400"
+                        >
+                          {WIDGET_SIZE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="grid gap-2 rounded-xl border border-white/15 bg-white/5 p-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setStudioKpiWidgetsCollapsed((currentState) => !currentState)
+                }
+                className="inline-flex items-center justify-between gap-2 rounded-lg px-1 py-0.5 text-left transition hover:bg-cyan-500/10"
+              >
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-200">
+                  KPI Widgets
+                </span>
+                <ChevronDown
+                  size={13}
+                  className={cn(
+                    "text-slate-300 transition",
+                    studioKpiWidgetsCollapsed ? "" : "rotate-180",
+                  )}
+                />
+              </button>
+              {studioKpiWidgetsCollapsed ? null : (
+                <div className="grid max-h-56 gap-2 overflow-y-auto pr-1">
+                  {studioKpiWidgets.map((widget) => (
+                    <article
+                      key={widget.id}
+                      className="grid gap-2 rounded-lg border border-white/20 bg-white/10 p-2"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-xs font-semibold text-slate-100">{widget.title}</p>
+                          <p className="text-[11px] text-slate-300">{widget.description}</p>
+                        </div>
+                        <span
+                          className={cn(
+                            "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                            widget.visible
+                              ? "bg-emerald-500/20 text-emerald-200"
+                              : "bg-slate-500/20 text-slate-300",
+                          )}
+                        >
+                          {widget.visible ? "Visible" : "Hidden"}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleDashboardStudioAction(
+                              {
+                                command: "set-widget-visibility",
+                                widgetId: widget.id,
+                                visible: !widget.visible,
+                              },
+                              { closeStudioMenuAfterAction: false },
+                            )
+                          }
+                          className={cn(
+                            "rounded-lg border px-2 py-1 text-xs font-semibold transition",
+                            widget.visible
+                              ? "border-rose-500/40 bg-rose-500/15 text-rose-100 hover:bg-rose-500/25"
+                              : "border-emerald-500/40 bg-emerald-500/15 text-emerald-100 hover:bg-emerald-500/25",
+                          )}
+                        >
+                          {widget.visible ? "Remove" : "Add"}
+                        </button>
+                        <select
+                          value={widget.size}
+                          onChange={(event) =>
+                            handleDashboardStudioAction(
+                              {
+                                command: "set-widget-size",
+                                widgetId: widget.id,
+                                size: event.target.value as DashboardLayoutCommandEventDetail["size"],
+                              },
+                              { closeStudioMenuAfterAction: false },
+                            )
+                          }
+                          className="rounded-lg border border-slate-600 bg-slate-900/70 px-2 py-1 text-xs text-slate-100 outline-none transition focus:border-cyan-400"
+                        >
+                          {WIDGET_SIZE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="grid gap-2 rounded-xl border border-white/15 bg-white/5 p-2">
+              {showLayoutSaveActions ? (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    disabled={!canSaveLayout}
+                    onClick={() => handleDashboardStudioAction({ command: "save-layout" })}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-500/45 bg-emerald-500/15 px-3 py-2 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-45"
+                  >
+                    <Save size={14} />
+                    {activeDashboardLayoutState.layoutSaving ? "Saving..." : "Save Layout"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!canDiscardLayout}
+                    onClick={() => handleDashboardStudioAction({ command: "discard-changes" })}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-500/45 bg-amber-500/15 px-3 py-2 text-sm font-semibold text-amber-100 transition hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-45"
+                  >
+                    <Undo2 size={14} />
+                    Discard Changes
+                  </button>
+                </div>
+              ) : null}
+
+              <button
+                type="button"
+                disabled={!canSaveLayoutAsDefault}
+                onClick={() =>
+                  handleDashboardStudioAction({ command: "save-layout-default" })
+                }
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <BookmarkPlus size={14} />
+                Save Layout as Default
+              </button>
+
+              <div className="grid gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  disabled={!canLoadDefault}
+                  onClick={() => handleDashboardStudioAction({ command: "load-default" })}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-sky-500/45 bg-sky-500/15 px-3 py-2 text-sm font-semibold text-sky-100 transition hover:bg-sky-500/25 disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <Download size={14} />
+                  Load Default
+                </button>
+                <button
+                  type="button"
+                  disabled={!canResetLayout}
+                  onClick={() => handleDashboardStudioAction({ command: "reset-defaults" })}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <RefreshCw size={14} />
+                  Reset Dashboard
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleDashboardStudioAction({ command: "toggle-customize" })}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/25"
+              >
+                <LayoutGrid size={14} />
+                Close Customize Panel
+              </button>
+
+              <div className="rounded-lg border border-white/15 bg-white/5 px-2.5 py-2 text-[11px] text-slate-300">
+                Manage dashboard layout and KPI widgets here while customize mode is active.
+              </div>
+              {activeDashboardLayoutState.layoutError ? (
+                <p className="rounded-lg border border-rose-500/40 bg-rose-500/15 px-2.5 py-2 text-[11px] text-rose-100">
+                  {activeDashboardLayoutState.layoutError}
+                </p>
+              ) : null}
+            </section>
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
   const renderInstructionControl = (mobile: boolean) => {
     if (!canCreateInstructions) {
       return null;
@@ -585,6 +1079,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
           href="/instructions/new"
           onClick={() => {
             closeDashboardMenu();
+            closeStudioMenu();
             closeInstructionMenu();
           }}
           className={cn(
@@ -608,6 +1103,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
           href="/instructions/new"
           onClick={() => {
             closeDashboardMenu();
+            closeStudioMenu();
             closeInstructionMenu();
           }}
           className={cn(
@@ -632,6 +1128,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
             }
 
             closeDashboardMenu();
+            closeStudioMenu();
             openInstructionMenu();
           }}
           className={cn(
@@ -663,7 +1160,11 @@ export function AppHeader({ profile }: { profile: Profile }) {
           >
             <Link
               href="/instructions/archived"
-              onClick={() => closeInstructionMenu()}
+              onClick={() => {
+                closeDashboardMenu();
+                closeStudioMenu();
+                closeInstructionMenu();
+              }}
               className={cn(
                 "inline-flex items-center rounded-xl border px-3 py-2 text-sm font-semibold transition",
                 isArchivedInstructionActive
@@ -726,6 +1227,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
           </Link>
           <nav className="hidden items-center gap-3 md:flex">
             {renderDashboardControl(false)}
+            {renderDashboardStudioControl(false)}
             {renderInstructionControl(false)}
           </nav>
           <UserAccountMenu profile={profile} />
@@ -733,6 +1235,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
 
         <nav className="relative mt-2 flex flex-wrap items-center justify-center gap-2 md:hidden">
           {renderDashboardControl(true)}
+          {renderDashboardStudioControl(true)}
           {renderInstructionControl(true)}
         </nav>
       </div>

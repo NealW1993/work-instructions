@@ -6,7 +6,13 @@ export type DashboardWidgetId =
   | "review_queue"
   | "recent_updates"
   | "my_impact"
-  | "system_history";
+  | "system_history"
+  | "kpi_throughput"
+  | "kpi_creation_velocity"
+  | "kpi_department_workload"
+  | "kpi_review_health"
+  | "kpi_revision_cycle_time"
+  | "kpi_event_mix";
 
 export type DashboardWidgetSize = "compact" | "standard" | "wide" | "full";
 
@@ -31,6 +37,12 @@ export const DASHBOARD_WIDGET_IDS: DashboardWidgetId[] = [
   "recent_updates",
   "my_impact",
   "system_history",
+  "kpi_throughput",
+  "kpi_creation_velocity",
+  "kpi_department_workload",
+  "kpi_review_health",
+  "kpi_revision_cycle_time",
+  "kpi_event_mix",
 ];
 
 export const DASHBOARD_WIDGET_SIZES: DashboardWidgetSize[] = [
@@ -55,6 +67,12 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
       { id: "review_queue", visible: true, size: "standard" },
       { id: "recent_updates", visible: true, size: "wide" },
       { id: "system_history", visible: true, size: "full" },
+      { id: "kpi_throughput", visible: false, size: "wide" },
+      { id: "kpi_creation_velocity", visible: false, size: "wide" },
+      { id: "kpi_department_workload", visible: false, size: "standard" },
+      { id: "kpi_review_health", visible: false, size: "wide" },
+      { id: "kpi_revision_cycle_time", visible: false, size: "wide" },
+      { id: "kpi_event_mix", visible: false, size: "standard" },
     ],
   },
   {
@@ -69,6 +87,12 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
       { id: "review_queue", visible: true, size: "compact" },
       { id: "pinned", visible: true, size: "compact" },
       { id: "my_impact", visible: true, size: "compact" },
+      { id: "kpi_throughput", visible: false, size: "wide" },
+      { id: "kpi_creation_velocity", visible: false, size: "wide" },
+      { id: "kpi_department_workload", visible: false, size: "standard" },
+      { id: "kpi_review_health", visible: false, size: "wide" },
+      { id: "kpi_revision_cycle_time", visible: false, size: "wide" },
+      { id: "kpi_event_mix", visible: false, size: "standard" },
     ],
   },
   {
@@ -83,6 +107,12 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
       { id: "newest", visible: true, size: "standard" },
       { id: "pinned", visible: true, size: "standard" },
       { id: "my_impact", visible: true, size: "compact" },
+      { id: "kpi_throughput", visible: false, size: "wide" },
+      { id: "kpi_creation_velocity", visible: false, size: "wide" },
+      { id: "kpi_department_workload", visible: false, size: "standard" },
+      { id: "kpi_review_health", visible: false, size: "wide" },
+      { id: "kpi_revision_cycle_time", visible: false, size: "wide" },
+      { id: "kpi_event_mix", visible: false, size: "standard" },
     ],
   },
   {
@@ -97,6 +127,12 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
       { id: "review_queue", visible: true, size: "compact" },
       { id: "system_history", visible: true, size: "wide" },
       { id: "department_activity", visible: true, size: "compact" },
+      { id: "kpi_throughput", visible: false, size: "wide" },
+      { id: "kpi_creation_velocity", visible: false, size: "wide" },
+      { id: "kpi_department_workload", visible: false, size: "standard" },
+      { id: "kpi_review_health", visible: false, size: "wide" },
+      { id: "kpi_revision_cycle_time", visible: false, size: "wide" },
+      { id: "kpi_event_mix", visible: false, size: "standard" },
     ],
   },
   {
@@ -111,6 +147,12 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
       { id: "recent_updates", visible: true, size: "wide" },
       { id: "review_queue", visible: true, size: "compact" },
       { id: "system_history", visible: true, size: "full" },
+      { id: "kpi_throughput", visible: false, size: "wide" },
+      { id: "kpi_creation_velocity", visible: false, size: "wide" },
+      { id: "kpi_department_workload", visible: false, size: "standard" },
+      { id: "kpi_review_health", visible: false, size: "wide" },
+      { id: "kpi_revision_cycle_time", visible: false, size: "wide" },
+      { id: "kpi_event_mix", visible: false, size: "standard" },
     ],
   },
   {
@@ -125,6 +167,12 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
       { id: "finder", visible: true, size: "wide" },
       { id: "pinned", visible: true, size: "standard" },
       { id: "my_impact", visible: true, size: "compact" },
+      { id: "kpi_throughput", visible: false, size: "wide" },
+      { id: "kpi_creation_velocity", visible: false, size: "wide" },
+      { id: "kpi_department_workload", visible: false, size: "standard" },
+      { id: "kpi_review_health", visible: false, size: "wide" },
+      { id: "kpi_revision_cycle_time", visible: false, size: "wide" },
+      { id: "kpi_event_mix", visible: false, size: "standard" },
     ],
   },
 ];
