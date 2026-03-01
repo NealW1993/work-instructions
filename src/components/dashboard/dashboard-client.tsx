@@ -217,12 +217,10 @@ const CELEBRATION_CONFETTI_COLORS = [
   "#F59E0B",
   "#FB7185",
 ];
-const DEFAULT_SYSTEM_HISTORY_ROW_LIMIT = 15;
-const SYSTEM_HISTORY_ROW_LIMIT_OPTIONS = [5, 15, 30, 45, 60] as const;
-const SYSTEM_HISTORY_ROW_LIMIT_SETTING_PATH = [
+const SYSTEM_HISTORY_TIME_RANGE_SETTING_PATH = [
   "dashboard",
   "systemHistory",
-  "rowLimit",
+  "timeRangeDays",
 ] as const;
 const FINDER_DEPARTMENT_INSIGHT_VISIBILITY_SETTING_PATH = [
   "dashboard",
@@ -235,6 +233,12 @@ const FINDER_SELECTED_DEPARTMENT_SETTING_PATH = [
   "selectedDepartmentId",
 ] as const;
 const RECENT_UPDATES_EVENT_LIMIT = 20;
+const RECENT_UPDATES_SCROLL_CARD_LIMIT = 5;
+const RECENT_UPDATES_TIME_RANGE_SETTING_PATH = [
+  "dashboard",
+  "recentUpdates",
+  "timeRangeDays",
+] as const;
 const DEFAULT_REVIEW_WINDOW_DAYS = 30;
 
 interface DashboardInstructionReturnState {
@@ -435,6 +439,10 @@ function formatElapsedDaysLabel(daysElapsed: number | null) {
   }
 
   return `Updated ${daysElapsed} days ago`;
+}
+
+function isRecentUpdatesTimeRangeDays(value: number): value is RecentUpdatesTimeRangeDays {
+  return RECENT_UPDATES_TIME_RANGE_OPTIONS.some((option) => option.value === value);
 }
 
 function classifyKpiEventType(
@@ -774,6 +782,20 @@ const KPI_TIME_RANGE_OPTIONS: Array<{ value: KpiTimeRangeDays; label: string }> 
   { value: 7, label: "7D" },
   { value: 30, label: "30D" },
   { value: 90, label: "90D" },
+];
+
+type RecentUpdatesTimeRangeDays = 7 | 14 | 30 | 90;
+
+const DEFAULT_RECENT_UPDATES_TIME_RANGE_DAYS: RecentUpdatesTimeRangeDays = 30;
+
+const RECENT_UPDATES_TIME_RANGE_OPTIONS: Array<{
+  value: RecentUpdatesTimeRangeDays;
+  label: string;
+}> = [
+  { value: 7, label: "7 days" },
+  { value: 14, label: "14 days" },
+  { value: 30, label: "30 days" },
+  { value: 90, label: "90 days" },
 ];
 
 interface KpiTimeSeriesPoint {
@@ -1673,6 +1695,8 @@ export function DashboardClient({
   const navigationBypassRef = useRef(false);
   const returnStateAppliedRef = useRef(false);
   const finderPreferencesHydratedRef = useRef(false);
+  const systemHistoryListRef = useRef<HTMLDivElement | null>(null);
+  const recentUpdatesListRef = useRef<HTMLDivElement | null>(null);
   const [query, setQuery] = useState(initialQuery);
   const [selectedDepartmentId, setSelectedDepartmentId] = useState("all");
   const [departmentInsightExpanded, setDepartmentInsightExpanded] = useState(false);
@@ -1703,8 +1727,15 @@ export function DashboardClient({
   const [impactDrilldownKey, setImpactDrilldownKey] = useState<ImpactDrilldownKey | null>(null);
   const [departmentDrilldownDepartmentId, setDepartmentDrilldownDepartmentId] =
     useState<string | null>(null);
-  const [systemHistoryRowLimit, setSystemHistoryRowLimit] = useState<number>(
-    DEFAULT_SYSTEM_HISTORY_ROW_LIMIT,
+  const [systemHistoryTimeRangeDays, setSystemHistoryTimeRangeDays] =
+    useState<RecentUpdatesTimeRangeDays>(DEFAULT_RECENT_UPDATES_TIME_RANGE_DAYS);
+  const [systemHistoryListMaxHeight, setSystemHistoryListMaxHeight] = useState<number | null>(
+    null,
+  );
+  const [recentUpdatesTimeRangeDays, setRecentUpdatesTimeRangeDays] =
+    useState<RecentUpdatesTimeRangeDays>(DEFAULT_RECENT_UPDATES_TIME_RANGE_DAYS);
+  const [recentUpdatesListMaxHeight, setRecentUpdatesListMaxHeight] = useState<number | null>(
+    null,
   );
   const [selectedSystemHistoryEventId, setSelectedSystemHistoryEventId] =
     useState<string | null>(null);
@@ -1845,22 +1876,32 @@ export function DashboardClient({
         setSelectedDepartmentId(storedDepartmentId.trim());
       }
 
-      const rawSystemHistoryRowLimit = getUserSettingAtPath(
+      const rawSystemHistoryTimeRange = getUserSettingAtPath(
         settings,
-        SYSTEM_HISTORY_ROW_LIMIT_SETTING_PATH,
+        SYSTEM_HISTORY_TIME_RANGE_SETTING_PATH,
       );
-      const parsedSystemHistoryRowLimit =
-        typeof rawSystemHistoryRowLimit === "number"
-          ? rawSystemHistoryRowLimit
-          : typeof rawSystemHistoryRowLimit === "string"
-            ? Number.parseInt(rawSystemHistoryRowLimit, 10)
+      const parsedSystemHistoryTimeRange =
+        typeof rawSystemHistoryTimeRange === "number"
+          ? rawSystemHistoryTimeRange
+          : typeof rawSystemHistoryTimeRange === "string"
+            ? Number.parseInt(rawSystemHistoryTimeRange, 10)
             : Number.NaN;
-      if (
-        SYSTEM_HISTORY_ROW_LIMIT_OPTIONS.includes(
-          parsedSystemHistoryRowLimit as (typeof SYSTEM_HISTORY_ROW_LIMIT_OPTIONS)[number],
-        )
-      ) {
-        setSystemHistoryRowLimit(parsedSystemHistoryRowLimit);
+      if (isRecentUpdatesTimeRangeDays(parsedSystemHistoryTimeRange)) {
+        setSystemHistoryTimeRangeDays(parsedSystemHistoryTimeRange);
+      }
+
+      const rawRecentUpdatesTimeRange = getUserSettingAtPath(
+        settings,
+        RECENT_UPDATES_TIME_RANGE_SETTING_PATH,
+      );
+      const parsedRecentUpdatesTimeRange =
+        typeof rawRecentUpdatesTimeRange === "number"
+          ? rawRecentUpdatesTimeRange
+          : typeof rawRecentUpdatesTimeRange === "string"
+            ? Number.parseInt(rawRecentUpdatesTimeRange, 10)
+            : Number.NaN;
+      if (isRecentUpdatesTimeRangeDays(parsedRecentUpdatesTimeRange)) {
+        setRecentUpdatesTimeRangeDays(parsedRecentUpdatesTimeRange);
       }
     })().finally(() => {
       if (isActive) {
@@ -1976,10 +2017,22 @@ export function DashboardClient({
 
     void patchCurrentUserSetting({
       supabase,
-      path: SYSTEM_HISTORY_ROW_LIMIT_SETTING_PATH.join("."),
-      value: systemHistoryRowLimit,
+      path: SYSTEM_HISTORY_TIME_RANGE_SETTING_PATH.join("."),
+      value: systemHistoryTimeRangeDays,
     });
-  }, [supabase, systemHistoryRowLimit]);
+  }, [supabase, systemHistoryTimeRangeDays]);
+
+  useEffect(() => {
+    if (!finderPreferencesHydratedRef.current) {
+      return;
+    }
+
+    void patchCurrentUserSetting({
+      supabase,
+      path: RECENT_UPDATES_TIME_RANGE_SETTING_PATH.join("."),
+      value: recentUpdatesTimeRangeDays,
+    });
+  }, [recentUpdatesTimeRangeDays, supabase]);
 
   useEffect(() => {
     if (!finderPreferencesHydratedRef.current) {
@@ -2550,9 +2603,17 @@ export function DashboardClient({
     );
   }, [departmentFilteredSystemHistoryEvents, normalizedQuery]);
 
+  const systemHistoryCutoffTimestamp = useMemo(
+    () => Date.now() - systemHistoryTimeRangeDays * ONE_DAY_MS,
+    [systemHistoryTimeRangeDays],
+  );
+
   const visibleSystemHistoryEvents = useMemo(
-    () => filteredSystemHistoryEvents.slice(0, systemHistoryRowLimit),
-    [filteredSystemHistoryEvents, systemHistoryRowLimit],
+    () =>
+      filteredSystemHistoryEvents.filter(
+        (event) => toSortableTimestamp(event.occurred_at) >= systemHistoryCutoffTimestamp,
+      ),
+    [filteredSystemHistoryEvents, systemHistoryCutoffTimestamp],
   );
 
   const systemHistoryTimelineByInstruction = useMemo(() => {
@@ -2648,6 +2709,61 @@ export function DashboardClient({
     });
   }, [visibleSystemHistoryEvents]);
 
+  const shouldScrollSystemHistory =
+    visibleSystemHistoryEvents.length > RECENT_UPDATES_SCROLL_CARD_LIMIT;
+
+  const recalculateSystemHistoryListMaxHeight = useCallback(() => {
+    const listElement = systemHistoryListRef.current;
+    if (!listElement || !shouldScrollSystemHistory) {
+      setSystemHistoryListMaxHeight(null);
+      return;
+    }
+
+    const cards = Array.from(
+      listElement.querySelectorAll<HTMLElement>("[data-system-history-card='true']"),
+    );
+    const visibleCardCount = Math.min(cards.length, RECENT_UPDATES_SCROLL_CARD_LIMIT);
+    if (visibleCardCount === 0) {
+      setSystemHistoryListMaxHeight(null);
+      return;
+    }
+
+    let totalHeight = 0;
+    for (let index = 0; index < visibleCardCount; index += 1) {
+      totalHeight += cards[index].offsetHeight;
+    }
+
+    const styles = window.getComputedStyle(listElement);
+    const parsedGap = Number.parseFloat(styles.rowGap || styles.gap || "0");
+    if (Number.isFinite(parsedGap) && parsedGap > 0 && visibleCardCount > 1) {
+      totalHeight += parsedGap * (visibleCardCount - 1);
+    }
+
+    const nextMaxHeight = Math.ceil(totalHeight);
+    setSystemHistoryListMaxHeight((currentHeight) =>
+      currentHeight === nextMaxHeight ? currentHeight : nextMaxHeight,
+    );
+  }, [shouldScrollSystemHistory]);
+
+  useEffect(() => {
+    recalculateSystemHistoryListMaxHeight();
+  }, [recalculateSystemHistoryListMaxHeight, visibleSystemHistoryEvents]);
+
+  useEffect(() => {
+    const listElement = systemHistoryListRef.current;
+    if (!listElement || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      recalculateSystemHistoryListMaxHeight();
+    });
+    observer.observe(listElement);
+    return () => {
+      observer.disconnect();
+    };
+  }, [recalculateSystemHistoryListMaxHeight, visibleSystemHistoryEvents.length]);
+
   const visibleWidgets = useMemo(
     () => widgetLayout.filter((widget) => widget.visible),
     [widgetLayout],
@@ -2657,11 +2773,76 @@ export function DashboardClient({
     return [...departmentInsights].sort((a, b) => b.instructionCount - a.instructionCount);
   }, [departmentInsights]);
 
+  const recentUpdatesCutoffTimestamp = useMemo(
+    () => Date.now() - recentUpdatesTimeRangeDays * ONE_DAY_MS,
+    [recentUpdatesTimeRangeDays],
+  );
+
   const recentUpdateEvents = useMemo(() => {
     return filteredSystemHistoryEvents
-      .filter((event) => event.event_type === "updated")
+      .filter((event) => {
+        if (event.event_type !== "updated") {
+          return false;
+        }
+
+        return toSortableTimestamp(event.occurred_at) >= recentUpdatesCutoffTimestamp;
+      })
       .slice(0, RECENT_UPDATES_EVENT_LIMIT);
-  }, [filteredSystemHistoryEvents]);
+  }, [filteredSystemHistoryEvents, recentUpdatesCutoffTimestamp]);
+
+  const shouldScrollRecentUpdates = recentUpdateEvents.length > RECENT_UPDATES_SCROLL_CARD_LIMIT;
+
+  const recalculateRecentUpdatesListMaxHeight = useCallback(() => {
+    const listElement = recentUpdatesListRef.current;
+    if (!listElement || !shouldScrollRecentUpdates) {
+      setRecentUpdatesListMaxHeight(null);
+      return;
+    }
+
+    const cards = Array.from(
+      listElement.querySelectorAll<HTMLElement>("[data-recent-update-card='true']"),
+    );
+    const visibleCardCount = Math.min(cards.length, RECENT_UPDATES_SCROLL_CARD_LIMIT);
+    if (visibleCardCount === 0) {
+      setRecentUpdatesListMaxHeight(null);
+      return;
+    }
+
+    let totalHeight = 0;
+    for (let index = 0; index < visibleCardCount; index += 1) {
+      totalHeight += cards[index].offsetHeight;
+    }
+
+    const styles = window.getComputedStyle(listElement);
+    const parsedGap = Number.parseFloat(styles.rowGap || styles.gap || "0");
+    if (Number.isFinite(parsedGap) && parsedGap > 0 && visibleCardCount > 1) {
+      totalHeight += parsedGap * (visibleCardCount - 1);
+    }
+
+    const nextMaxHeight = Math.ceil(totalHeight);
+    setRecentUpdatesListMaxHeight((currentHeight) =>
+      currentHeight === nextMaxHeight ? currentHeight : nextMaxHeight,
+    );
+  }, [shouldScrollRecentUpdates]);
+
+  useEffect(() => {
+    recalculateRecentUpdatesListMaxHeight();
+  }, [recalculateRecentUpdatesListMaxHeight, recentUpdateEvents]);
+
+  useEffect(() => {
+    const listElement = recentUpdatesListRef.current;
+    if (!listElement || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      recalculateRecentUpdatesListMaxHeight();
+    });
+    observer.observe(listElement);
+    return () => {
+      observer.disconnect();
+    };
+  }, [recalculateRecentUpdatesListMaxHeight, recentUpdateEvents.length]);
 
   const flattenedInstructionEntries = useMemo(
     () =>
@@ -4067,23 +4248,47 @@ export function DashboardClient({
       );
     }
 
-    if (widgetId === "system_history") {
+    if (widgetId === "recent_updates") {
       return (
         <label className="inline-flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300">
-          <span>Display</span>
+          <span>Window</span>
           <select
-            value={systemHistoryRowLimit}
+            value={recentUpdatesTimeRangeDays}
             onChange={(event) => {
-              const nextLimit = Number.parseInt(event.target.value, 10);
-              if (Number.isFinite(nextLimit) && nextLimit > 0) {
-                setSystemHistoryRowLimit(nextLimit);
+              const nextRange = Number.parseInt(event.target.value, 10);
+              if (isRecentUpdatesTimeRangeDays(nextRange)) {
+                setRecentUpdatesTimeRangeDays(nextRange);
               }
             }}
             className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
           >
-            {SYSTEM_HISTORY_ROW_LIMIT_OPTIONS.map((option) => (
-              <option key={option} value={option}>
-                {option} rows
+            {RECENT_UPDATES_TIME_RANGE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                Last {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      );
+    }
+
+    if (widgetId === "system_history") {
+      return (
+        <label className="inline-flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300">
+          <span>Window</span>
+          <select
+            value={systemHistoryTimeRangeDays}
+            onChange={(event) => {
+              const nextRange = Number.parseInt(event.target.value, 10);
+              if (isRecentUpdatesTimeRangeDays(nextRange)) {
+                setSystemHistoryTimeRangeDays(nextRange);
+              }
+            }}
+            className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+          >
+            {RECENT_UPDATES_TIME_RANGE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                Last {option.label}
               </option>
             ))}
           </select>
@@ -4559,13 +4764,23 @@ export function DashboardClient({
     if (widgetId === "recent_updates") {
       return recentUpdateEvents.length === 0 ? (
         <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-          No recent instruction updates for {selectedDepartmentName}.
+          No instruction updates in the last {recentUpdatesTimeRangeDays} days for{" "}
+          {selectedDepartmentName}.
         </p>
       ) : (
-        <div className="grid gap-2">
+        <div
+          ref={recentUpdatesListRef}
+          className={cn("grid gap-2", shouldScrollRecentUpdates ? "overflow-y-auto pr-1" : "")}
+          style={
+            shouldScrollRecentUpdates && recentUpdatesListMaxHeight !== null
+              ? { maxHeight: `${recentUpdatesListMaxHeight}px` }
+              : undefined
+          }
+        >
           {recentUpdateEvents.map((event) => (
             <article
               key={event.id}
+              data-recent-update-card="true"
               style={{
                 borderColor: colorWithAlpha(event.workItem.department_color, 0.45),
                 backgroundColor: colorWithAlpha(event.workItem.department_color, 0.12),
@@ -4618,8 +4833,9 @@ export function DashboardClient({
         <div className="grid gap-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-slate-600 dark:text-slate-300">
-              Showing {visibleSystemHistoryEvents.length} of {filteredSystemHistoryEvents.length}{" "}
-              events
+              {visibleSystemHistoryEvents.length} event
+              {visibleSystemHistoryEvents.length === 1 ? "" : "s"} in the last{" "}
+              {systemHistoryTimeRangeDays} days
             </p>
             <button
               type="button"
@@ -4633,10 +4849,19 @@ export function DashboardClient({
 
           {visibleSystemHistoryEvents.length === 0 ? (
             <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-              No recent system activity for {selectedDepartmentName}.
+              No system activity in the last {systemHistoryTimeRangeDays} days for{" "}
+              {selectedDepartmentName}.
             </p>
           ) : (
-            <div className="grid w-full gap-2">
+            <div
+              ref={systemHistoryListRef}
+              className={cn("grid w-full gap-2", shouldScrollSystemHistory ? "overflow-y-auto pr-1" : "")}
+              style={
+                shouldScrollSystemHistory && systemHistoryListMaxHeight !== null
+                  ? { maxHeight: `${systemHistoryListMaxHeight}px` }
+                  : undefined
+              }
+            >
               {visibleSystemHistoryEvents.map((event) => {
                 const isSelected = selectedSystemHistoryEventId === event.id;
                 const openInstructionHref = `/instructions/${event.instruction_id}`;
@@ -4649,6 +4874,7 @@ export function DashboardClient({
                 return (
                   <article
                     key={event.id}
+                    data-system-history-card="true"
                     role="button"
                     tabIndex={0}
                     aria-pressed={isSelected}
