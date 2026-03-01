@@ -167,6 +167,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
   const dashboardMenuCloseTimeoutRef = useRef<number | null>(null);
   const studioMenuCloseTimeoutRef = useRef<number | null>(null);
   const instructionMenuCloseTimeoutRef = useRef<number | null>(null);
+  const studioMenuScrollContainerRef = useRef<HTMLDivElement | null>(null);
 
   const canCreateInstructions = canEditInstructions(profile.role);
   const canViewArchivedInstructions = isSystemAdmin(profile.role);
@@ -277,6 +278,22 @@ export function AppHeader({ profile }: { profile: Profile }) {
         : 560;
 
     setStudioMenuWidth(Math.max(targetWidth, 520));
+  }, []);
+
+  const scrollStudioMenuToBottom = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const studioContainer = studioMenuScrollContainerRef.current;
+        if (!studioContainer) {
+          return;
+        }
+
+        studioContainer.scrollTo({
+          top: studioContainer.scrollHeight,
+          behavior: "smooth",
+        });
+      });
+    });
   }, []);
 
   const closeDashboardMenu = useCallback(() => {
@@ -820,8 +837,9 @@ export function AppHeader({ profile }: { profile: Profile }) {
 
         {studioMenuMounted ? (
           <div
+            ref={studioMenuScrollContainerRef}
             className={cn(
-              "absolute top-[calc(100%+0.5rem)] z-[90] grid max-h-[68vh] gap-2 overflow-y-auto rounded-2xl border border-white/20 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-xl transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
+              "absolute top-[calc(100%+0.5rem)] z-[90] grid max-h-[74vh] gap-2 overflow-y-auto rounded-2xl border border-white/20 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-xl transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
               mobile ? "left-2 right-2" : "left-0",
               studioMenuEntered ? "pointer-events-auto" : "pointer-events-none",
             )}
@@ -838,9 +856,13 @@ export function AppHeader({ profile }: { profile: Profile }) {
             <section className="order-2 grid gap-2 rounded-xl border border-white/15 bg-white/5 p-2">
               <button
                 type="button"
-                onClick={() =>
-                  setStudioLayoutPresetsCollapsed((currentState) => !currentState)
-                }
+                onClick={() => {
+                  const nextCollapsed = !studioLayoutPresetsCollapsed;
+                  setStudioLayoutPresetsCollapsed(nextCollapsed);
+                  if (!nextCollapsed) {
+                    scrollStudioMenuToBottom();
+                  }
+                }}
                 className="inline-flex items-center justify-between gap-2 rounded-lg px-1 py-0.5 text-left transition hover:bg-cyan-500/10"
               >
                 <span className="text-xs font-semibold uppercase tracking-wide text-slate-200">
@@ -870,11 +892,14 @@ export function AppHeader({ profile }: { profile: Profile }) {
                       >
                         <button
                           type="button"
-                          onClick={() =>
-                            setStudioExpandedPresetId((current) =>
-                              current === preset.id ? null : preset.id,
-                            )
-                          }
+                          onClick={() => {
+                            const nextExpandedPresetId =
+                              studioExpandedPresetId === preset.id ? null : preset.id;
+                            setStudioExpandedPresetId(nextExpandedPresetId);
+                            if (nextExpandedPresetId) {
+                              scrollStudioMenuToBottom();
+                            }
+                          }}
                           className="inline-flex items-center justify-between gap-2 rounded-lg px-1 py-0.5 text-left transition hover:bg-white/10"
                         >
                           <span className="text-xs font-semibold text-slate-100">
@@ -956,9 +981,13 @@ export function AppHeader({ profile }: { profile: Profile }) {
             <section className="order-3 grid gap-2 rounded-xl border border-white/15 bg-white/5 p-2">
               <button
                 type="button"
-                onClick={() =>
-                  setStudioWidgetLibraryCollapsed((currentState) => !currentState)
-                }
+                onClick={() => {
+                  const nextCollapsed = !studioWidgetLibraryCollapsed;
+                  setStudioWidgetLibraryCollapsed(nextCollapsed);
+                  if (!nextCollapsed) {
+                    scrollStudioMenuToBottom();
+                  }
+                }}
                 className="inline-flex items-center justify-between gap-2 rounded-lg px-1 py-0.5 text-left transition hover:bg-cyan-500/10"
               >
                 <span className="text-xs font-semibold uppercase tracking-wide text-slate-200">
@@ -973,7 +1002,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
                 />
               </button>
               {studioWidgetLibraryCollapsed ? null : (
-                <div className="grid max-h-44 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                <div className="grid max-h-52 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
                   {studioCoreWidgets.map((widget) => (
                     <article
                       key={widget.id}
@@ -1047,9 +1076,13 @@ export function AppHeader({ profile }: { profile: Profile }) {
             <section className="order-4 grid gap-2 rounded-xl border border-white/15 bg-white/5 p-2">
               <button
                 type="button"
-                onClick={() =>
-                  setStudioKpiWidgetsCollapsed((currentState) => !currentState)
-                }
+                onClick={() => {
+                  const nextCollapsed = !studioKpiWidgetsCollapsed;
+                  setStudioKpiWidgetsCollapsed(nextCollapsed);
+                  if (!nextCollapsed) {
+                    scrollStudioMenuToBottom();
+                  }
+                }}
                 className="inline-flex items-center justify-between gap-2 rounded-lg px-1 py-0.5 text-left transition hover:bg-cyan-500/10"
               >
                 <span className="text-xs font-semibold uppercase tracking-wide text-slate-200">
@@ -1064,7 +1097,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
                 />
               </button>
               {studioKpiWidgetsCollapsed ? null : (
-                <div className="grid max-h-44 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                <div className="grid max-h-52 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
                   {studioKpiWidgets.map((widget) => (
                     <article
                       key={widget.id}
