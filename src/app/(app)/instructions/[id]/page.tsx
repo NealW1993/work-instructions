@@ -999,6 +999,23 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const showCompactEditorInstructionActions =
     canEditInstructions(profile.role) && !instructionIsArchived;
   const canPromoteArchivedRevision = canEditInstructions(profile.role);
+  const printToolNamesByKey = new Map<string, string>();
+
+  for (const tool of suggestedTools) {
+    const normalizedToolName = tool.name.trim();
+    if (!normalizedToolName) {
+      continue;
+    }
+
+    const normalizedToolKey = normalizedToolName.toLowerCase();
+    if (!printToolNamesByKey.has(normalizedToolKey)) {
+      printToolNamesByKey.set(normalizedToolKey, normalizedToolName);
+    }
+  }
+
+  const printToolNames = Array.from(printToolNamesByKey.values()).sort((first, second) =>
+    first.localeCompare(second),
+  );
 
   return (
     <article className="grid gap-5">
@@ -1008,11 +1025,39 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
       />
       <InstructionViewTracker instructionId={instruction.id} />
 
-      <InstructionBackButton
-        fallbackHref={instructionIsArchived ? "/instructions/archived" : "/dashboard"}
-      />
+      <section className="hidden print:block print:bg-white print:text-slate-900">
+        <h1 className="text-3xl font-extrabold text-slate-900">{workItem.item_title}</h1>
+        <p className="mt-1 text-sm text-slate-700">
+          Revision <span className="font-semibold">{instruction.revision}</span>
+        </p>
 
-      <header className="relative z-20 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+        <section className="mt-6 grid gap-2">
+          <h2 className="text-xl font-bold text-slate-900">Tool List</h2>
+          {printToolNames.length === 0 ? (
+            <p className="text-sm text-slate-700">No tools listed.</p>
+          ) : (
+            <ul className="list-disc pl-5 text-sm text-slate-800">
+              {printToolNames.map((toolName) => (
+                <li key={toolName}>{toolName}</li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="mt-6 grid gap-2">
+          <h2 className="text-xl font-bold text-slate-900">Work Instructions</h2>
+          <div className="rounded-xl border border-slate-300 bg-white p-4">
+            {renderInstructionContent(instruction.body_markdown)}
+          </div>
+        </section>
+      </section>
+
+      <div className="grid gap-5 print:hidden">
+        <InstructionBackButton
+          fallbackHref={instructionIsArchived ? "/instructions/archived" : "/dashboard"}
+        />
+
+        <header className="relative z-20 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
         {!instructionIsArchived && showReviewIndicator ? (
           <div
             className={`mb-4 rounded-2xl border px-4 py-3 ${
@@ -1209,89 +1254,90 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
             </div>
           </div>
         </div>
-      </header>
+        </header>
 
-      <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
-        <h2 className="text-xl font-bold">Work Instructions</h2>
-        <InstructionBodyLightbox>
-          {renderInstructionContent(instruction.body_markdown)}
-        </InstructionBodyLightbox>
-      </section>
-
-      {instruction.instruction_media.length > 0 ? (
         <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
-          <h2 className="text-xl font-bold">Media</h2>
-          <InstructionMediaSection media={instruction.instruction_media} />
+          <h2 className="text-xl font-bold">Work Instructions</h2>
+          <InstructionBodyLightbox>
+            {renderInstructionContent(instruction.body_markdown)}
+          </InstructionBodyLightbox>
         </section>
-      ) : null}
 
-      {isForkInstruction || forkCount > 0 ? (
-        <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
-          <div className="grid gap-1">
-            <h2 className="text-xl font-bold">Fork Branches</h2>
-            <p className="text-sm text-slate-600 dark:text-slate-300">
-              Branches are numbered per original instruction and always merge back to the original.
-            </p>
-          </div>
+        {instruction.instruction_media.length > 0 ? (
+          <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+            <h2 className="text-xl font-bold">Media</h2>
+            <InstructionMediaSection media={instruction.instruction_media} />
+          </section>
+        ) : null}
 
-          <div className="grid gap-2">
-            {isForkInstruction ? (
-              <Link
-                href={`/instructions/${forkFamilyRootId}`}
-                className="grid gap-1 rounded-xl border border-violet-500/40 bg-violet-500/10 px-3 py-2 transition hover:bg-violet-500/15"
-              >
-                <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                  Original Instruction
-                </p>
-                <p className="text-xs text-slate-600 dark:text-slate-300">
-                  {forkRootWorkItem?.part_id ?? workItem.part_id} |{" "}
-                  {forkRootWorkItem?.item_title ?? workItem.item_title} | {forkRootDepartmentName}
-                </p>
-              </Link>
-            ) : null}
+        {isForkInstruction || forkCount > 0 ? (
+          <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+            <div className="grid gap-1">
+              <h2 className="text-xl font-bold">Fork Branches</h2>
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                Branches are numbered per original instruction and always merge back to the original.
+              </p>
+            </div>
 
-            {forkFamilyRows.length > 0 ? (
-              forkFamilyRows.map((forkRow) => (
+            <div className="grid gap-2">
+              {isForkInstruction ? (
                 <Link
-                  key={forkRow.id}
-                  href={`/instructions/${forkRow.id}`}
-                  className="grid gap-1 rounded-xl border border-cyan-500/35 bg-cyan-500/10 px-3 py-2 transition hover:bg-cyan-500/15"
+                  href={`/instructions/${forkFamilyRootId}`}
+                  className="grid gap-1 rounded-xl border border-violet-500/40 bg-violet-500/10 px-3 py-2 transition hover:bg-violet-500/15"
                 >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                      Fork {forkRow.fork_number ?? "?"}
-                    </p>
-                    <span
-                      className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                        forkRow.merged_into_root_at
-                          ? "border-emerald-500/45 bg-emerald-500/15 text-emerald-800 dark:text-emerald-200"
-                          : "border-amber-500/45 bg-amber-500/15 text-amber-800 dark:text-amber-200"
-                      }`}
-                    >
-                      {forkRow.merged_into_root_at ? "Merged" : "Open"}
-                    </span>
-                  </div>
+                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    Original Instruction
+                  </p>
                   <p className="text-xs text-slate-600 dark:text-slate-300">
-                    Created <LocalDateTime value={forkRow.created_at} mode="dateTime" />
-                    {forkRow.merged_into_root_at ? (
-                      <>
-                        {" "}
-                        | Last merged{" "}
-                        <LocalDateTime value={forkRow.merged_into_root_at} mode="dateTime" />
-                      </>
-                    ) : null}
-                    {forkRow.is_archived ? " | Archived" : ""}
+                    {forkRootWorkItem?.part_id ?? workItem.part_id} |{" "}
+                    {forkRootWorkItem?.item_title ?? workItem.item_title} | {forkRootDepartmentName}
                   </p>
                 </Link>
-              ))
-            ) : (
-              <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-                No fork branches have been created yet.
-              </p>
-            )}
-          </div>
-        </section>
-      ) : null}
+              ) : null}
+
+              {forkFamilyRows.length > 0 ? (
+                forkFamilyRows.map((forkRow) => (
+                  <Link
+                    key={forkRow.id}
+                    href={`/instructions/${forkRow.id}`}
+                    className="grid gap-1 rounded-xl border border-cyan-500/35 bg-cyan-500/10 px-3 py-2 transition hover:bg-cyan-500/15"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                        Fork {forkRow.fork_number ?? "?"}
+                      </p>
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                          forkRow.merged_into_root_at
+                            ? "border-emerald-500/45 bg-emerald-500/15 text-emerald-800 dark:text-emerald-200"
+                            : "border-amber-500/45 bg-amber-500/15 text-amber-800 dark:text-amber-200"
+                        }`}
+                      >
+                        {forkRow.merged_into_root_at ? "Merged" : "Open"}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600 dark:text-slate-300">
+                      Created <LocalDateTime value={forkRow.created_at} mode="dateTime" />
+                      {forkRow.merged_into_root_at ? (
+                        <>
+                          {" "}
+                          | Last merged{" "}
+                          <LocalDateTime value={forkRow.merged_into_root_at} mode="dateTime" />
+                        </>
+                      ) : null}
+                      {forkRow.is_archived ? " | Archived" : ""}
+                    </p>
+                  </Link>
+                ))
+              ) : (
+                <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+                  No fork branches have been created yet.
+                </p>
+              )}
+            </div>
+          </section>
+        ) : null}
+      </div>
     </article>
   );
 }

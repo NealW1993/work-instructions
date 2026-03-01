@@ -1356,7 +1356,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
   };
 
   return (
-    <header className="sticky top-0 z-[80] border-b border-white/20 dark:border-white/10">
+    <header className="sticky top-0 z-[80] border-b border-white/20 print:hidden dark:border-white/10">
       <div aria-hidden="true" className="absolute inset-0">
         <video
           autoPlay
