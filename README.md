@@ -19,6 +19,11 @@ Internal work-instructions software built with React (Next.js), TypeScript, Supa
   - Dashboard department filter + department instruction counts
   - Markdown steps + markdown notes
   - Inline image/video inserts upload to Supabase Storage bucket `instruction-media` (tablet camera compatible)
+- Dashboard Studio + KPI layer:
+  - Header-driven Dashboard Studio controls (layout presets, widget library, KPI widget library, save/discard/default actions)
+  - KPI widgets support responsive compact/standard/wide/full layouts
+  - KPI drill-down modals include total events summaries and card titles
+  - Layout customization supports drag/reorder and auto-scroll behavior
 - Security:
   - Full Postgres schema + RLS + role policies
   - Storage policies for media bucket
@@ -28,6 +33,13 @@ Internal work-instructions software built with React (Next.js), TypeScript, Supa
   - Modern visual style
 - Analytics:
   - PostHog client integration (optional, env-driven)
+- Data portability:
+  - Admin/System Admin `Export Data` page with format + dataset selection
+  - Export formats: `CSV`, `TSV`, `JSON`
+  - `Export All` supported from one action
+- Printing:
+  - Instruction page Parameters menu includes a `Print` action for all users
+  - Print view is clean and focused: title, revision, tool list, and work instructions
 - Deployment:
   - Local dev and Docker compose
   - Mailpit SMTP for local email testing
@@ -47,7 +59,10 @@ Internal work-instructions software built with React (Next.js), TypeScript, Supa
 
 - `src/app/(auth)/...`: login and password reset pages
 - `src/app/(app)/...`: authenticated app pages (dashboard, instructions, admin)
+- `src/app/(app)/admin/export/page.tsx`: admin export UI
+- `src/app/(app)/instructions/[id]/print/page.tsx`: print-friendly instruction view
 - `src/app/api/...`: server API routes for PIN auth and user admin
+- `src/app/api/admin/export-data/route.ts`: role-protected export generation route
 - `src/components/...`: UI components
 - `src/lib/...`: Supabase clients, auth helpers, env, mailer
 - `supabase/migrations/202602210001_init.sql`: full database schema + RLS + policies

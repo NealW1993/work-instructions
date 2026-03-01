@@ -361,6 +361,24 @@ function normalizeLookupValue(value: string) {
   return value.trim().toLowerCase();
 }
 
+function parseToolNames(value: string | null | undefined) {
+  const dedupedByName = new Map<string, string>();
+
+  for (const rawEntry of (value ?? "").split(/[\r\n,;]+/)) {
+    const normalizedEntry = rawEntry.trim();
+    if (!normalizedEntry) {
+      continue;
+    }
+
+    const key = normalizedEntry.toLowerCase();
+    if (!dedupedByName.has(key)) {
+      dedupedByName.set(key, normalizedEntry);
+    }
+  }
+
+  return Array.from(dedupedByName.values());
+}
+
 function normalizeRevisionHistoryLookupWorkItem(
   relation: InstructionRevisionHistoryLookupRow["work_items"],
 ) {
@@ -866,6 +884,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const linkedToolIds = ((suggestedToolLinkData ?? []) as InstructionSuggestedToolLinkRow[])
     .map((link) => link.suggested_tool_id)
     .filter((value) => value.trim().length > 0);
+  const uncommonToolNames = parseToolNames(instruction.uncommon_tools);
 
   if (linkedToolIds.length > 0) {
     const { data: suggestedToolsData, error: suggestedToolsError } = await supabase
@@ -915,6 +934,27 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
       .filter((tool) => tool.name.length > 0);
   }
 
+  if (uncommonToolNames.length > 0) {
+    const existingToolNames = new Set(
+      suggestedTools.map((tool) => tool.name.trim().toLowerCase()),
+    );
+
+    for (const [index, toolName] of uncommonToolNames.entries()) {
+      const normalizedToolName = toolName.toLowerCase();
+      if (existingToolNames.has(normalizedToolName)) {
+        continue;
+      }
+
+      suggestedTools.push({
+        id: `manual-tool-${instruction.id}-${index}`,
+        name: toolName,
+        categoryName: "General",
+        subcategoryName: null,
+      });
+      existingToolNames.add(normalizedToolName);
+    }
+  }
+
   const reviewWindowDays =
     !reviewSettingsError
       ? normalizeReviewWindowDays(reviewSettingsData?.review_window_days) ??
@@ -959,7 +999,6 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const showCompactEditorInstructionActions =
     canEditInstructions(profile.role) && !instructionIsArchived;
   const canPromoteArchivedRevision = canEditInstructions(profile.role);
-  const uncommonToolsValue = instruction.uncommon_tools.trim();
 
   return (
     <article className="grid gap-5">
@@ -1083,11 +1122,6 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
               {userMap.get(instruction.updated_by) ?? "Unknown"} on{" "}
               <LocalDateTime value={instruction.updated_at} mode="dateTime" />
             </p>
-            {uncommonToolsValue ? (
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                Uncommon Tools: <span className="font-semibold">{uncommonToolsValue}</span>
-              </p>
-            ) : null}
           </div>
           <div className="grid gap-2 md:justify-items-end">
             <div className="flex flex-wrap items-center justify-end gap-2">

@@ -104,6 +104,46 @@ const MIN_REVIEW_WINDOW_DAYS = 1;
 const MAX_REVIEW_WINDOW_DAYS = 365;
 const REVIEW_STATUS_BATCH_SIZE = 300;
 const DEFAULT_DEPARTMENT_COLOR = "#0EA5E9";
+const DASHBOARD_QUERY_TIMEOUT_MS = 12000;
+
+interface DashboardQueryError {
+  message: string;
+}
+
+interface DashboardQueryResult<TData> {
+  data: TData | null;
+  error: DashboardQueryError | null;
+}
+
+async function runDashboardQuery<TData>(
+  queryPromise: PromiseLike<DashboardQueryResult<TData>>,
+  timeoutMessage: string,
+): Promise<DashboardQueryResult<TData>> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+
+  try {
+    return await Promise.race([
+      queryPromise,
+      new Promise<DashboardQueryResult<TData>>((resolve) => {
+        timeoutHandle = setTimeout(() => {
+          resolve({
+            data: null,
+            error: { message: timeoutMessage },
+          });
+        }, DASHBOARD_QUERY_TIMEOUT_MS);
+      }),
+    ]);
+  } catch {
+    return {
+      data: null,
+      error: { message: timeoutMessage },
+    };
+  } finally {
+    if (timeoutHandle !== null) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+}
 
 function normalizeReviewWindowDays(value: unknown) {
   if (!Number.isInteger(value)) {
@@ -354,14 +394,38 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     { data: departmentsData },
     { data: reviewSettingsData, error: reviewSettingsError },
   ] = await Promise.all([
-    searchRequest,
-    newestRequest,
-    pinnedRequest,
-    authoredLikesRequest,
-    historyInstructionsRequest,
-    historyEventsRequest,
-    departmentsRequest,
-    reviewSettingsRequest,
+    runDashboardQuery(
+      searchRequest,
+      "Dashboard search query timed out.",
+    ),
+    runDashboardQuery(
+      newestRequest,
+      "Newest instructions query timed out.",
+    ),
+    runDashboardQuery(
+      pinnedRequest,
+      "Pinned instructions query timed out.",
+    ),
+    runDashboardQuery(
+      authoredLikesRequest,
+      "Likes query timed out.",
+    ),
+    runDashboardQuery(
+      historyInstructionsRequest,
+      "Instruction history query timed out.",
+    ),
+    runDashboardQuery(
+      historyEventsRequest,
+      "History events query timed out.",
+    ),
+    runDashboardQuery(
+      departmentsRequest,
+      "Departments query timed out.",
+    ),
+    runDashboardQuery(
+      reviewSettingsRequest,
+      "Review settings query timed out.",
+    ),
   ]);
 
   const rawItems = (searchData ?? []) as DashboardWorkItemRow[];
@@ -400,10 +464,13 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       batchStartIndex + REVIEW_STATUS_BATCH_SIZE,
     );
 
-    const { data: reviewStatusRows, error: reviewStatusError } = await supabase
-      .from("instruction_review_status")
-      .select("instruction_id, status, last_calibrated_at, flagged_at, updated_at")
-      .in("instruction_id", batchIds);
+    const { data: reviewStatusRows, error: reviewStatusError } = await runDashboardQuery(
+      supabase
+        .from("instruction_review_status")
+        .select("instruction_id, status, last_calibrated_at, flagged_at, updated_at")
+        .in("instruction_id", batchIds),
+      "Instruction review status query timed out.",
+    );
 
     if (reviewStatusError) {
       break;

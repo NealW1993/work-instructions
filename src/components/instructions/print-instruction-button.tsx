@@ -15,11 +15,7 @@ export function PrintInstructionButton({
 }: PrintInstructionButtonProps) {
   function handlePrint() {
     const printHref = `/instructions/${instructionId}/print?autoprint=1`;
-    const openedWindow = window.open(printHref, "_blank", "noopener,noreferrer");
-
-    if (!openedWindow) {
-      window.location.href = printHref;
-    }
+    window.location.assign(printHref);
   }
 
   return (

@@ -20,6 +20,7 @@ interface InstructionPrintRecord {
   id: string;
   revision: number;
   body_markdown: string;
+  uncommon_tools: string;
   work_items:
     | {
         part_id: string;
@@ -71,6 +72,24 @@ function getWorkItem(relation: InstructionPrintRecord["work_items"]) {
 
 function looksLikeHtml(value: string): boolean {
   return /<\/?[a-z][\s\S]*>/i.test(value);
+}
+
+function parseToolNames(value: string | null | undefined) {
+  const dedupedByName = new Map<string, string>();
+
+  for (const rawEntry of (value ?? "").split(/[\r\n,;]+/)) {
+    const normalizedEntry = rawEntry.trim();
+    if (!normalizedEntry) {
+      continue;
+    }
+
+    const key = normalizedEntry.toLowerCase();
+    if (!dedupedByName.has(key)) {
+      dedupedByName.set(key, normalizedEntry);
+    }
+  }
+
+  return Array.from(dedupedByName.values());
 }
 
 function sanitizeRichHtml(value: string): string {
@@ -159,7 +178,9 @@ export default async function InstructionPrintPage({
 
   const { data, error } = await supabase
     .from("work_instructions")
-    .select("id, revision, body_markdown, work_items(part_id, item_title, departments(name))")
+    .select(
+      "id, revision, body_markdown, uncommon_tools, work_items(part_id, item_title, departments(name))",
+    )
     .eq("id", id)
     .maybeSingle();
 
@@ -203,9 +224,21 @@ export default async function InstructionPrintPage({
     throw new Error(toolRowsError.message);
   }
 
-  const toolNames = ((toolRows ?? []) as SuggestedToolRow[])
+  const linkedToolNames = ((toolRows ?? []) as SuggestedToolRow[])
     .map((entry) => entry.name.trim())
     .filter((entry) => entry.length > 0);
+  const toolNamesByKey = new Map<string, string>();
+
+  for (const toolName of [...linkedToolNames, ...parseToolNames(instruction.uncommon_tools)]) {
+    const key = toolName.toLowerCase();
+    if (!toolNamesByKey.has(key)) {
+      toolNamesByKey.set(key, toolName);
+    }
+  }
+
+  const toolNames = Array.from(toolNamesByKey.values()).sort((first, second) =>
+    first.localeCompare(second),
+  );
 
   return (
     <>
@@ -231,14 +264,14 @@ export default async function InstructionPrintPage({
       <article className="print-sheet mx-auto max-w-4xl rounded-2xl border border-slate-300/70 bg-white p-6 shadow-lg dark:border-slate-700 dark:bg-slate-950">
         <PrintPageControls instructionHref={`/instructions/${instruction.id}`} />
 
-        <header className="border-b border-slate-300 pb-4 dark:border-slate-700">
+        <section className="border-b border-slate-300 pb-4 dark:border-slate-700">
           <h1 className="text-3xl font-extrabold text-slate-900 dark:text-slate-100">
             {workItem.item_title}
           </h1>
           <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
             Revision <span className="font-semibold">{instruction.revision}</span>
           </p>
-        </header>
+        </section>
 
         <section className="mt-5 grid gap-2">
           <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">Tool List</h2>

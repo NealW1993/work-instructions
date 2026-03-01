@@ -306,7 +306,7 @@ export async function POST(request: NextRequest) {
         }, {}),
       };
 
-      return new NextResponse(JSON.stringify(payload, null, 2), {
+      return new NextResponse(JSON.stringify(payload), {
         headers: {
           "Content-Type": formatDetails.contentType,
           "Content-Disposition": `attachment; filename="${fileName}"`,

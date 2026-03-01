@@ -1,11 +1,16 @@
 "use client";
 
+import Image, { type ImageLoaderProps } from "next/image";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 interface InstructionBodyLightboxProps {
   children: React.ReactNode;
+}
+
+function passthroughImageLoader({ src }: ImageLoaderProps) {
+  return src;
 }
 
 export function InstructionBodyLightbox({ children }: InstructionBodyLightboxProps) {
@@ -55,9 +60,13 @@ export function InstructionBodyLightbox({ children }: InstructionBodyLightboxPro
         <X size={18} />
       </button>
 
-      <img
+      <Image
+        loader={passthroughImageLoader}
+        unoptimized
         src={lightboxSrc}
         alt="Enlarged view"
+        width={1600}
+        height={1200}
         className="max-h-[85dvh] max-w-[90dvw] rounded-xl object-contain shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       />
