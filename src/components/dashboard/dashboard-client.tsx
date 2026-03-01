@@ -43,6 +43,11 @@ import {
   type DashboardLayoutCommandEventDetail,
   type DashboardLayoutStateEventDetail,
 } from "@/lib/dashboard-controls";
+import { getUserSettingAtPath } from "@/lib/user-settings";
+import {
+  fetchCurrentUserSettings,
+  patchCurrentUserSetting,
+} from "@/lib/user-settings-client";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { cn } from "@/lib/utils";
 
@@ -210,10 +215,21 @@ const CELEBRATION_CONFETTI_COLORS = [
 ];
 const DEFAULT_SYSTEM_HISTORY_ROW_LIMIT = 15;
 const SYSTEM_HISTORY_ROW_LIMIT_OPTIONS = [5, 15, 30, 45, 60] as const;
-const SYSTEM_HISTORY_ROW_LIMIT_STORAGE_KEY = "dashboard.systemHistoryRowLimit";
-const FINDER_DEPARTMENT_INSIGHT_VISIBILITY_STORAGE_KEY =
-  "dashboard.finder.departmentInsightVisible";
-const FINDER_SELECTED_DEPARTMENT_STORAGE_KEY = "dashboard.finder.selectedDepartmentId";
+const SYSTEM_HISTORY_ROW_LIMIT_SETTING_PATH = [
+  "dashboard",
+  "systemHistory",
+  "rowLimit",
+] as const;
+const FINDER_DEPARTMENT_INSIGHT_VISIBILITY_SETTING_PATH = [
+  "dashboard",
+  "finder",
+  "departmentInsightVisible",
+] as const;
+const FINDER_SELECTED_DEPARTMENT_SETTING_PATH = [
+  "dashboard",
+  "finder",
+  "selectedDepartmentId",
+] as const;
 const RECENT_UPDATES_EVENT_LIMIT = 20;
 const DEFAULT_REVIEW_WINDOW_DAYS = 30;
 
@@ -893,28 +909,57 @@ export function DashboardClient({
   }, []);
 
   useEffect(() => {
-    try {
-      const storedDepartmentInsightVisibility = window.localStorage.getItem(
-        FINDER_DEPARTMENT_INSIGHT_VISIBILITY_STORAGE_KEY,
-      );
-      if (storedDepartmentInsightVisibility === "1") {
-        setDepartmentInsightExpanded(true);
-      } else if (storedDepartmentInsightVisibility === "0") {
-        setDepartmentInsightExpanded(false);
+    let isActive = true;
+
+    void (async () => {
+      const settings = await fetchCurrentUserSettings(supabase);
+      if (!settings || !isActive) {
+        return;
       }
 
-      const storedDepartmentId = window.localStorage.getItem(
-        FINDER_SELECTED_DEPARTMENT_STORAGE_KEY,
+      const storedDepartmentInsightVisibility = getUserSettingAtPath(
+        settings,
+        FINDER_DEPARTMENT_INSIGHT_VISIBILITY_SETTING_PATH,
       );
-      if (storedDepartmentId && storedDepartmentId.trim().length > 0) {
-        setSelectedDepartmentId(storedDepartmentId);
+      if (typeof storedDepartmentInsightVisibility === "boolean") {
+        setDepartmentInsightExpanded(storedDepartmentInsightVisibility);
       }
-    } catch {
-      // Persisted dashboard preferences are best-effort.
-    } finally {
-      finderPreferencesHydratedRef.current = true;
-    }
-  }, []);
+
+      const storedDepartmentId = getUserSettingAtPath(
+        settings,
+        FINDER_SELECTED_DEPARTMENT_SETTING_PATH,
+      );
+      if (typeof storedDepartmentId === "string" && storedDepartmentId.trim().length > 0) {
+        setSelectedDepartmentId(storedDepartmentId.trim());
+      }
+
+      const rawSystemHistoryRowLimit = getUserSettingAtPath(
+        settings,
+        SYSTEM_HISTORY_ROW_LIMIT_SETTING_PATH,
+      );
+      const parsedSystemHistoryRowLimit =
+        typeof rawSystemHistoryRowLimit === "number"
+          ? rawSystemHistoryRowLimit
+          : typeof rawSystemHistoryRowLimit === "string"
+            ? Number.parseInt(rawSystemHistoryRowLimit, 10)
+            : Number.NaN;
+      if (
+        SYSTEM_HISTORY_ROW_LIMIT_OPTIONS.includes(
+          parsedSystemHistoryRowLimit as (typeof SYSTEM_HISTORY_ROW_LIMIT_OPTIONS)[number],
+        )
+      ) {
+        setSystemHistoryRowLimit(parsedSystemHistoryRowLimit);
+      }
+    })().finally(() => {
+      if (isActive) {
+        finderPreferencesHydratedRef.current = true;
+      }
+    });
+
+    return () => {
+      isActive = false;
+    };
+  }, [supabase]);
 
   useEffect(() => {
     if (!layoutNotice) {
@@ -1013,62 +1058,40 @@ export function DashboardClient({
   }, [activeLikeCelebration?.latestNewLikeAt, activeLikeCelebration?.newLikesCount]);
 
   useEffect(() => {
-    try {
-      const rawValue = window.localStorage.getItem(SYSTEM_HISTORY_ROW_LIMIT_STORAGE_KEY);
-      if (!rawValue) {
-        return;
-      }
-
-      const parsedValue = Number.parseInt(rawValue, 10);
-      if (
-        SYSTEM_HISTORY_ROW_LIMIT_OPTIONS.includes(
-          parsedValue as (typeof SYSTEM_HISTORY_ROW_LIMIT_OPTIONS)[number],
-        )
-      ) {
-        setSystemHistoryRowLimit(parsedValue);
-      }
-    } catch {
-      // Persisted dashboard preferences are best-effort.
+    if (!finderPreferencesHydratedRef.current) {
+      return;
     }
-  }, []);
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        SYSTEM_HISTORY_ROW_LIMIT_STORAGE_KEY,
-        String(systemHistoryRowLimit),
-      );
-    } catch {
-      // Persisted dashboard preferences are best-effort.
-    }
-  }, [systemHistoryRowLimit]);
+    void patchCurrentUserSetting({
+      supabase,
+      path: SYSTEM_HISTORY_ROW_LIMIT_SETTING_PATH.join("."),
+      value: systemHistoryRowLimit,
+    });
+  }, [supabase, systemHistoryRowLimit]);
 
   useEffect(() => {
     if (!finderPreferencesHydratedRef.current) {
       return;
     }
 
-    try {
-      window.localStorage.setItem(
-        FINDER_DEPARTMENT_INSIGHT_VISIBILITY_STORAGE_KEY,
-        departmentInsightExpanded ? "1" : "0",
-      );
-    } catch {
-      // Persisted dashboard preferences are best-effort.
-    }
-  }, [departmentInsightExpanded]);
+    void patchCurrentUserSetting({
+      supabase,
+      path: FINDER_DEPARTMENT_INSIGHT_VISIBILITY_SETTING_PATH.join("."),
+      value: departmentInsightExpanded,
+    });
+  }, [departmentInsightExpanded, supabase]);
 
   useEffect(() => {
     if (!finderPreferencesHydratedRef.current) {
       return;
     }
 
-    try {
-      window.localStorage.setItem(FINDER_SELECTED_DEPARTMENT_STORAGE_KEY, selectedDepartmentId);
-    } catch {
-      // Persisted dashboard preferences are best-effort.
-    }
-  }, [selectedDepartmentId]);
+    void patchCurrentUserSetting({
+      supabase,
+      path: FINDER_SELECTED_DEPARTMENT_SETTING_PATH.join("."),
+      value: selectedDepartmentId,
+    });
+  }, [selectedDepartmentId, supabase]);
 
   useEffect(() => {
     try {

@@ -7,6 +7,11 @@ import { createPortal } from "react-dom";
 
 import { LocalDateTime } from "@/components/ui/local-date-time";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { getUserSettingAtPath } from "@/lib/user-settings";
+import {
+  fetchCurrentUserSettings,
+  patchCurrentUserSetting,
+} from "@/lib/user-settings-client";
 import { cn } from "@/lib/utils";
 
 type ForkMergePeriod = "day" | "week" | "month" | "year";
@@ -74,7 +79,12 @@ const PERIOD_BUTTONS: Array<{ value: ForkMergePeriod; label: string }> = [
   { value: "year", label: "Year" },
 ];
 
-const KPI_STORAGE_KEY = "admin.kpi.forkMerge.periodParams";
+const FORK_MERGE_PERIOD_SETTING_PATH = [
+  "admin",
+  "kpi",
+  "forkMerge",
+  "periodParams",
+] as const;
 
 function parseDateKey(value: string): Date | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
@@ -155,6 +165,7 @@ function isValidPeriodParams(value: unknown): value is string {
 export function ForkMergeKpiPanel() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [periodParams, setPeriodParams] = useState("period=week");
+  const [preferencesHydrated, setPreferencesHydrated] = useState(false);
   const [data, setData] = useState<ForkMergeKpiResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -259,27 +270,53 @@ export function ForkMergeKpiPanel() {
   );
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    let isActive = true;
+
+    void (async () => {
+      try {
+        const settings = await fetchCurrentUserSettings(supabase);
+        if (!isActive || !settings) {
+          return;
+        }
+
+        const storedParams = getUserSettingAtPath(
+          settings,
+          FORK_MERGE_PERIOD_SETTING_PATH,
+        );
+        if (isValidPeriodParams(storedParams)) {
+          setPeriodParams(storedParams);
+        }
+      } finally {
+        if (isActive) {
+          setPreferencesHydrated(true);
+        }
+      }
+    })();
+
+    return () => {
+      isActive = false;
+    };
+  }, [supabase]);
+
+  useEffect(() => {
+    if (!preferencesHydrated) {
       return;
     }
 
-    const storedParams = window.localStorage.getItem(KPI_STORAGE_KEY);
-    if (isValidPeriodParams(storedParams)) {
-      setPeriodParams(storedParams);
-    }
-  }, []);
+    void patchCurrentUserSetting({
+      supabase,
+      path: FORK_MERGE_PERIOD_SETTING_PATH.join("."),
+      value: periodParams,
+    });
+  }, [periodParams, preferencesHydrated, supabase]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (!preferencesHydrated) {
       return;
     }
 
-    window.localStorage.setItem(KPI_STORAGE_KEY, periodParams);
-  }, [periodParams]);
-
-  useEffect(() => {
     void fetchKpiData(periodParams);
-  }, [fetchKpiData, periodParams]);
+  }, [fetchKpiData, periodParams, preferencesHydrated]);
 
   const trendPoints = data?.trendPoints ?? [];
   const contributors = data?.contributors ?? [];

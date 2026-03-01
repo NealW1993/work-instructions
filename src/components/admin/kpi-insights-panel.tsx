@@ -5,6 +5,11 @@ import { X } from "lucide-react";
 import { createPortal } from "react-dom";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { getUserSettingAtPath } from "@/lib/user-settings";
+import {
+  fetchCurrentUserSettings,
+  patchCurrentUserSetting,
+} from "@/lib/user-settings-client";
 import { cn } from "@/lib/utils";
 
 type InstructionViewPeriod = "year" | "month" | "week" | "day";
@@ -67,7 +72,12 @@ const MONTH_OPTIONS = [
   { value: 12, label: "Dec" },
 ] as const;
 
-const KPI_INSIGHTS_FILTERS_STORAGE_KEY = "admin.kpi.insights.filters";
+const KPI_INSIGHTS_FILTERS_SETTING_PATH = [
+  "admin",
+  "kpi",
+  "insights",
+  "filters",
+] as const;
 const MS_IN_DAY = 24 * 60 * 60 * 1000;
 const GRID_COLUMNS_BY_COUNT: Record<number, string> = {
   1: "grid-cols-1",
@@ -190,7 +200,6 @@ export function KpiInsightsPanel() {
   const [viewsLoading, setViewsLoading] = useState(false);
   const [viewsError, setViewsError] = useState<string | null>(null);
   const [filtersHydrated, setFiltersHydrated] = useState(false);
-  const [filtersStorageKey, setFiltersStorageKey] = useState<string | null>(null);
   const [selectedPoint, setSelectedPoint] = useState<InstructionViewPoint | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -217,32 +226,18 @@ export function KpiInsightsPanel() {
     let isActive = true;
 
     void (async () => {
-      if (typeof window === "undefined") {
-        return;
-      }
-
-      let storageKey = KPI_INSIGHTS_FILTERS_STORAGE_KEY;
       try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        if (session?.user?.id) {
-          storageKey = `${KPI_INSIGHTS_FILTERS_STORAGE_KEY}.${session.user.id}`;
+        const settings = await fetchCurrentUserSettings(supabase);
+        if (!isActive || !settings) {
+          return;
         }
-      } catch {
-        // Local filter persistence should still work if session lookup fails.
-      }
 
-      if (!isActive) {
-        return;
-      }
-
-      setFiltersStorageKey(storageKey);
-
-      const storedValue = window.localStorage.getItem(storageKey);
-      if (storedValue) {
-        try {
-          const parsed = JSON.parse(storedValue) as Partial<KpiInsightsStoredFilters>;
+        const storedValue = getUserSettingAtPath(
+          settings,
+          KPI_INSIGHTS_FILTERS_SETTING_PATH,
+        );
+        if (storedValue && typeof storedValue === "object" && !Array.isArray(storedValue)) {
+          const parsed = storedValue as Partial<KpiInsightsStoredFilters>;
           if (isInstructionViewPeriod(parsed.period)) {
             setPeriod(parsed.period);
           }
@@ -258,12 +253,12 @@ export function KpiInsightsPanel() {
           if (isValidDateKey(parsed.day)) {
             setDay(parsed.day);
           }
-        } catch {
-          // Ignore invalid persisted state and keep defaults.
+        }
+      } finally {
+        if (isActive) {
+          setFiltersHydrated(true);
         }
       }
-
-      setFiltersHydrated(true);
     })();
 
     return () => {
@@ -272,7 +267,7 @@ export function KpiInsightsPanel() {
   }, [supabase]);
 
   useEffect(() => {
-    if (!filtersHydrated || !filtersStorageKey || typeof window === "undefined") {
+    if (!filtersHydrated) {
       return;
     }
 
@@ -283,8 +278,12 @@ export function KpiInsightsPanel() {
       weekStart,
       day,
     };
-    window.localStorage.setItem(filtersStorageKey, JSON.stringify(payload));
-  }, [day, filtersHydrated, filtersStorageKey, month, period, weekStart, year]);
+    void patchCurrentUserSetting({
+      supabase,
+      path: KPI_INSIGHTS_FILTERS_SETTING_PATH.join("."),
+      value: payload,
+    });
+  }, [day, filtersHydrated, month, period, supabase, weekStart, year]);
 
   const getAuthHeaders = useCallback(async () => {
     const {

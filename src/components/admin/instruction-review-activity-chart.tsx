@@ -5,6 +5,12 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { LocalDateTime } from "@/components/ui/local-date-time";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { getUserSettingAtPath } from "@/lib/user-settings";
+import {
+  fetchCurrentUserSettings,
+  patchCurrentUserSetting,
+} from "@/lib/user-settings-client";
 import { cn } from "@/lib/utils";
 
 type ReviewStatus = "up_to_date" | "needs_review";
@@ -94,7 +100,12 @@ const PERIOD_BUTTONS: Array<{ value: ReviewPeriod; label: string }> = [
 ];
 
 const MS_IN_DAY = 24 * 60 * 60 * 1000;
-const REVIEW_ACTIVITY_FILTER_STORAGE_KEY = "admin.review.activity.filters";
+const REVIEW_ACTIVITY_FILTER_SETTING_PATH = [
+  "admin",
+  "review",
+  "activity",
+  "filters",
+] as const;
 
 function parseDateKey(value: string): Date | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
@@ -218,36 +229,6 @@ function isValidMonth(value: unknown): value is number {
 
 function isValidDateKey(value: unknown): value is string {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
-}
-
-function decodeBase64Url(value: string): string {
-  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
-  const paddingLength = (4 - (normalized.length % 4)) % 4;
-  const padded = normalized + "=".repeat(paddingLength);
-  return atob(padded);
-}
-
-function getUserIdFromAuthHeaders(headers: Record<string, string>): string | null {
-  const authorizationHeader = headers.Authorization ?? headers.authorization;
-  if (!authorizationHeader || !authorizationHeader.startsWith("Bearer ")) {
-    return null;
-  }
-
-  const token = authorizationHeader.slice(7).trim();
-  const tokenParts = token.split(".");
-  if (tokenParts.length < 2) {
-    return null;
-  }
-
-  try {
-    const decodedPayload = decodeBase64Url(tokenParts[1] ?? "");
-    const parsedPayload = JSON.parse(decodedPayload) as { sub?: unknown };
-    const subject =
-      typeof parsedPayload.sub === "string" ? parsedPayload.sub.trim() : "";
-    return subject || null;
-  } catch {
-    return null;
-  }
 }
 
 function isInteractiveClickTarget(target: EventTarget | null) {
@@ -478,6 +459,7 @@ export function InstructionReviewActivityChart({
   getAuthHeaders,
   reloadToken = 0,
 }: InstructionReviewActivityChartProps) {
+  const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [period, setPeriod] = useState<ReviewPeriod>("year");
   const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear());
   const [selectedPeriodMonth, setSelectedPeriodMonth] = useState(
@@ -492,7 +474,6 @@ export function InstructionReviewActivityChart({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filtersHydrated, setFiltersHydrated] = useState(false);
-  const [filtersStorageKey, setFiltersStorageKey] = useState<string | null>(null);
 
   // Unified bucket selection
   const [selectedBucketKey, setSelectedBucketKey] = useState<string | null>(() =>
@@ -515,30 +496,18 @@ export function InstructionReviewActivityChart({
     let isActive = true;
 
     void (async () => {
-      if (typeof window === "undefined") {
-        return;
-      }
-
-      let storageKey = REVIEW_ACTIVITY_FILTER_STORAGE_KEY;
       try {
-        const headers = await getAuthHeaders();
-        const userId = getUserIdFromAuthHeaders(headers);
-        if (userId) {
-          storageKey = `${REVIEW_ACTIVITY_FILTER_STORAGE_KEY}.${userId}`;
+        const settings = await fetchCurrentUserSettings(supabase);
+        if (!isActive || !settings) {
+          return;
         }
-      } catch {
-        // Continue with generic local filter key if auth headers are unavailable.
-      }
 
-      if (!isActive) {
-        return;
-      }
-
-      setFiltersStorageKey(storageKey);
-      const storedValue = window.localStorage.getItem(storageKey);
-      if (storedValue) {
-        try {
-          const parsed = JSON.parse(storedValue) as Partial<StoredReviewActivityFilters>;
+        const storedValue = getUserSettingAtPath(
+          settings,
+          REVIEW_ACTIVITY_FILTER_SETTING_PATH,
+        );
+        if (storedValue && typeof storedValue === "object" && !Array.isArray(storedValue)) {
+          const parsed = storedValue as Partial<StoredReviewActivityFilters>;
           if (isReviewPeriod(parsed.period)) {
             setPeriod(parsed.period);
           }
@@ -557,21 +526,21 @@ export function InstructionReviewActivityChart({
           if (isReviewStatusFilter(parsed.statusFilter)) {
             setStatusFilter(parsed.statusFilter);
           }
-        } catch {
-          // Ignore invalid persisted state and keep defaults.
+        }
+      } finally {
+        if (isActive) {
+          setFiltersHydrated(true);
         }
       }
-
-      setFiltersHydrated(true);
     })();
 
     return () => {
       isActive = false;
     };
-  }, [getAuthHeaders]);
+  }, [supabase]);
 
   useEffect(() => {
-    if (!filtersHydrated || !filtersStorageKey || typeof window === "undefined") {
+    if (!filtersHydrated) {
       return;
     }
 
@@ -583,16 +552,20 @@ export function InstructionReviewActivityChart({
       selectedPeriodDay,
       statusFilter,
     };
-    window.localStorage.setItem(filtersStorageKey, JSON.stringify(payload));
+    void patchCurrentUserSetting({
+      supabase,
+      path: REVIEW_ACTIVITY_FILTER_SETTING_PATH.join("."),
+      value: payload,
+    });
   }, [
     filtersHydrated,
-    filtersStorageKey,
     period,
     selectedPeriodDay,
     selectedPeriodMonth,
     selectedPeriodWeekStart,
     selectedYear,
     statusFilter,
+    supabase,
   ]);
 
   const fetchActivityEvents = useCallback(async () => {

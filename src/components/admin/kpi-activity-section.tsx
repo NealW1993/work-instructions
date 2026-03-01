@@ -6,6 +6,11 @@ import { createPortal } from "react-dom";
 
 import { LocalDateTime } from "@/components/ui/local-date-time";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { getUserSettingAtPath } from "@/lib/user-settings";
+import {
+  fetchCurrentUserSettings,
+  patchCurrentUserSetting,
+} from "@/lib/user-settings-client";
 import { cn } from "@/lib/utils";
 
 type ActivityPeriod = "day" | "week" | "month" | "year";
@@ -113,7 +118,12 @@ const PERIOD_BUTTONS: { value: ActivityPeriod; label: string }[] = [
   { value: "year", label: "Year" },
 ];
 
-const KPI_ACTIVITY_FILTER_STORAGE_KEY = "admin.kpi.activity.periodParams";
+const KPI_ACTIVITY_FILTER_SETTING_PATH = [
+  "admin",
+  "kpi",
+  "activity",
+  "periodParams",
+] as const;
 
 function isValidActivityPeriodParams(value: unknown): value is string {
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -129,7 +139,6 @@ export function KpiActivitySection() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [periodParams, setPeriodParams] = useState("period=week");
   const [filtersHydrated, setFiltersHydrated] = useState(false);
-  const [filtersStorageKey, setFiltersStorageKey] = useState<string | null>(null);
   const [data, setData] = useState<ActivityApiResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -173,33 +182,24 @@ export function KpiActivitySection() {
     let isActive = true;
 
     void (async () => {
-      if (typeof window === "undefined") {
-        return;
-      }
-
-      let storageKey = KPI_ACTIVITY_FILTER_STORAGE_KEY;
       try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        if (session?.user?.id) {
-          storageKey = `${KPI_ACTIVITY_FILTER_STORAGE_KEY}.${session.user.id}`;
+        const settings = await fetchCurrentUserSettings(supabase);
+        if (!isActive || !settings) {
+          return;
         }
-      } catch {
-        // Continue with a generic key if session lookup fails.
-      }
 
-      if (!isActive) {
-        return;
+        const storedPeriodParams = getUserSettingAtPath(
+          settings,
+          KPI_ACTIVITY_FILTER_SETTING_PATH,
+        );
+        if (isValidActivityPeriodParams(storedPeriodParams)) {
+          setPeriodParams(storedPeriodParams);
+        }
+      } finally {
+        if (isActive) {
+          setFiltersHydrated(true);
+        }
       }
-
-      setFiltersStorageKey(storageKey);
-      const storedPeriodParams = window.localStorage.getItem(storageKey);
-      if (isValidActivityPeriodParams(storedPeriodParams)) {
-        setPeriodParams(storedPeriodParams);
-      }
-
-      setFiltersHydrated(true);
     })();
 
     return () => {
@@ -208,12 +208,16 @@ export function KpiActivitySection() {
   }, [supabase]);
 
   useEffect(() => {
-    if (!filtersHydrated || !filtersStorageKey || typeof window === "undefined") {
+    if (!filtersHydrated) {
       return;
     }
 
-    window.localStorage.setItem(filtersStorageKey, periodParams);
-  }, [filtersHydrated, filtersStorageKey, periodParams]);
+    void patchCurrentUserSetting({
+      supabase,
+      path: KPI_ACTIVITY_FILTER_SETTING_PATH.join("."),
+      value: periodParams,
+    });
+  }, [filtersHydrated, periodParams, supabase]);
 
   useEffect(() => {
     if (!filtersHydrated) {
