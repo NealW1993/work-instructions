@@ -23,6 +23,7 @@ import {
 import { InstructionViewTracker } from "@/components/instructions/instruction-view-tracker";
 import { LikeInstructionButton } from "@/components/instructions/like-instruction-button";
 import { PinInstructionButton } from "@/components/instructions/pin-instruction-button";
+import { PrintInstructionButton } from "@/components/instructions/print-instruction-button";
 import { RestoreArchivedInstructionButton } from "@/components/instructions/restore-archived-instruction-button";
 import {
   type InstructionUpdateEvent,
@@ -1107,6 +1108,10 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
                 <InstructionUpdatesPanel
                   events={instructionUpdateEvents}
                   className="h-fit w-full justify-center self-start"
+                />
+                <PrintInstructionButton
+                  instructionId={instruction.id}
+                  className="w-full justify-center px-3 py-1.5 text-xs"
                 />
                 {!instructionIsArchived ? (
                   <div className="grid grid-cols-2 gap-2">
