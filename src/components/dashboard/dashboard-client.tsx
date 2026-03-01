@@ -557,6 +557,11 @@ function getLabelWithDepartment(workItem: DashboardWorkItemSummary) {
   return `${getPartIdLabel(workItem)} | ${workItem.department_name}`;
 }
 
+function getWorkItemTitle(workItem: DashboardWorkItemSummary) {
+  const title = workItem.item_title?.trim();
+  return title && title.length > 0 ? title : "Untitled Work Item";
+}
+
 function getForkLabel(
   forkNumber: number | null | undefined,
   forkRootInstructionId: string | null | undefined,
@@ -721,6 +726,7 @@ interface ImpactDrilldownEntry {
   id: string;
   href: string;
   label: string;
+  title: string;
   detail: string;
   color: string;
 }
@@ -810,6 +816,7 @@ interface KpiDonutSegment {
 interface KpiDrilldownRow {
   id: string;
   label: string;
+  title: string;
   detail: string;
   value: number;
   href?: string;
@@ -2824,6 +2831,7 @@ export function DashboardClient({
         id: entry.instruction.id,
         href: `/instructions/${entry.instruction.id}`,
         label: getLabelWithDepartment(entry.workItem),
+        title: getWorkItemTitle(entry.workItem),
         detail: `Revision ${entry.instruction.revision} | Created ${new Date(
           entry.instruction.created_at,
         ).toLocaleDateString()}`,
@@ -2856,6 +2864,7 @@ export function DashboardClient({
         id: entry.instruction.id,
         href: `/instructions/${entry.instruction.id}`,
         label: getLabelWithDepartment(entry.workItem),
+        title: getWorkItemTitle(entry.workItem),
         detail: `Latest authored item for ${entry.workItem.department_name} | Revision ${entry.instruction.revision}`,
         color: entry.workItem.department_color,
       }));
@@ -2873,6 +2882,7 @@ export function DashboardClient({
         id: instruction.id,
         href: `/instructions/${instruction.id}`,
         label: getLabelWithDepartment(instruction.workItem),
+        title: getWorkItemTitle(instruction.workItem),
         detail: `${instruction.likes_count} like${instruction.likes_count === 1 ? "" : "s"} | Latest ${new Date(
           instruction.latest_liked_at,
         ).toLocaleDateString()}`,
@@ -2890,6 +2900,7 @@ export function DashboardClient({
         id: myLatestEntry.instruction.id,
         href: `/instructions/${myLatestEntry.instruction.id}`,
         label: getLabelWithDepartment(myLatestEntry.workItem),
+        title: getWorkItemTitle(myLatestEntry.workItem),
         detail: `Revision ${myLatestEntry.instruction.revision} | Created ${new Date(
           myLatestEntry.instruction.created_at,
         ).toLocaleDateString()}`,
@@ -2968,6 +2979,7 @@ export function DashboardClient({
         id: entry.instruction.id,
         href: `/instructions/${entry.instruction.id}`,
         label: getLabelWithDepartment(entry.workItem),
+        title: getWorkItemTitle(entry.workItem),
         detail: `Revision ${entry.instruction.revision} | Updated by ${entry.instruction.updater_name} on ${new Date(
           entry.instruction.updated_at,
         ).toLocaleDateString()}`,
@@ -3072,6 +3084,7 @@ export function DashboardClient({
       existing.push({
         id: event.id,
         label: getLabelWithDepartment(event.workItem),
+        title: getWorkItemTitle(event.workItem),
         detail: `${event.action_label} by ${event.actor_name} at ${new Date(
           timestamp,
         ).toLocaleTimeString()}`,
@@ -3119,6 +3132,7 @@ export function DashboardClient({
       existing.push({
         id: entry.instruction.id,
         label: getLabelWithDepartment(entry.workItem),
+        title: getWorkItemTitle(entry.workItem),
         detail: `Revision ${entry.instruction.revision} created by ${entry.instruction.creator_name}`,
         value: 1,
         href: `/instructions/${entry.instruction.id}`,
@@ -3159,6 +3173,7 @@ export function DashboardClient({
       existing.rows.push({
         id: event.id,
         label: getLabelWithDepartment(event.workItem),
+        title: getWorkItemTitle(event.workItem),
         detail: `${event.action_label} by ${event.actor_name} on ${new Date(
           timestamp,
         ).toLocaleDateString()}`,
@@ -3233,6 +3248,7 @@ export function DashboardClient({
       existing.push({
         id: entry.instruction.id,
         label: getLabelWithDepartment(entry.workItem),
+        title: getWorkItemTitle(entry.workItem),
         detail: needsAttention
           ? `Needs attention | Revision ${entry.instruction.revision}`
           : `Healthy | Revision ${entry.instruction.revision}`,
@@ -3288,6 +3304,7 @@ export function DashboardClient({
         {
           id: entry.instruction.id,
           label: getLabelWithDepartment(entry.workItem),
+          title: getWorkItemTitle(entry.workItem),
           detail: `Revision ${entry.instruction.revision} updated by ${entry.instruction.updater_name}`,
           value: yValue,
           href: `/instructions/${entry.instruction.id}`,
@@ -3345,6 +3362,7 @@ export function DashboardClient({
       existingRows.push({
         id: event.id,
         label: getLabelWithDepartment(event.workItem),
+        title: getWorkItemTitle(event.workItem),
         detail: `${event.action_label} by ${event.actor_name} on ${new Date(
           timestamp,
         ).toLocaleDateString()}`,
@@ -5486,6 +5504,7 @@ export function DashboardClient({
                             <div className="flex flex-wrap items-center gap-2">
                               <p className="font-semibold text-slate-100">{row.label}</p>
                             </div>
+                            <p className="text-sm font-semibold text-slate-100">{row.title}</p>
                             <p className="text-xs text-slate-300">{row.detail}</p>
                           </Link>
                         ) : (
@@ -5496,6 +5515,7 @@ export function DashboardClient({
                             <div className="flex flex-wrap items-center gap-2">
                               <p className="font-semibold text-slate-100">{row.label}</p>
                             </div>
+                            <p className="text-sm font-semibold text-slate-100">{row.title}</p>
                             <p className="text-xs text-slate-300">{row.detail}</p>
                           </article>
                         ),
@@ -5547,6 +5567,7 @@ export function DashboardClient({
                         className="rounded-xl border p-3 transition hover:brightness-110"
                       >
                         <p className="font-semibold text-slate-100">{entry.label}</p>
+                        <p className="text-sm font-semibold text-slate-100">{entry.title}</p>
                         <p className="text-xs text-slate-300">{entry.detail}</p>
                       </Link>
                     ))}
@@ -5598,6 +5619,7 @@ export function DashboardClient({
                         className="rounded-xl border p-3 transition hover:brightness-110"
                       >
                         <p className="font-semibold text-slate-100">{entry.label}</p>
+                        <p className="text-sm font-semibold text-slate-100">{entry.title}</p>
                         <p className="text-xs text-slate-300">{entry.detail}</p>
                       </Link>
                     ))}
