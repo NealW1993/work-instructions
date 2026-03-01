@@ -38,6 +38,12 @@ import { cn } from "@/lib/utils";
 
 const DASHBOARD_RETURN_STATE_KEY = "__dashboardInstructionReturnState";
 const MENU_ANIMATION_MS = 260;
+const HEADER_BACKGROUND_PLAYBACK_RATE = 0.45;
+
+function applyHeaderVideoPlaybackRate(video: HTMLVideoElement) {
+  video.defaultPlaybackRate = HEADER_BACKGROUND_PLAYBACK_RATE;
+  video.playbackRate = HEADER_BACKGROUND_PLAYBACK_RATE;
+}
 
 function isActivePath(pathname: string, href: string) {
   if (href === "/admin/users" && pathname.startsWith("/admin/")) {
@@ -421,7 +427,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
         className={cn(
           "inline-flex items-center rounded-l-xl border border-r-0 px-4 py-2 text-sm font-semibold transition",
           isDashboardActive
-            ? "border-cyan-500/55 bg-cyan-500/15 text-cyan-900 shadow-sm dark:text-cyan-100"
+            ? "border-cyan-700 bg-cyan-600 text-white shadow-sm dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900"
             : "border-slate-300/70 bg-white/70 text-slate-700 hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/65 dark:text-slate-100 dark:hover:border-cyan-500/50 dark:hover:bg-cyan-500/10",
         )}
       >
@@ -449,7 +455,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
         className={cn(
           "relative inline-flex items-center rounded-r-xl border px-2.5 py-2 transition",
           isDashboardActive
-            ? "border-cyan-500/55 bg-cyan-500/15 text-cyan-900 hover:bg-cyan-500/25 dark:text-cyan-100 dark:hover:bg-cyan-500/25"
+            ? "border-cyan-700 bg-cyan-600 text-white hover:bg-cyan-700 dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
             : "border-slate-300/70 bg-white/70 text-slate-700 hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/65 dark:text-slate-100 dark:hover:border-cyan-500/50 dark:hover:bg-cyan-500/10",
         )}
       >
@@ -584,7 +590,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
           className={cn(
             "inline-flex items-center rounded-xl border px-4 py-2 text-sm font-semibold transition",
             isNewInstructionActive
-              ? "border-cyan-500/55 bg-cyan-500/15 text-cyan-900 shadow-sm dark:text-cyan-100"
+              ? "border-cyan-700 bg-cyan-600 text-white shadow-sm dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900"
               : "border-slate-300/70 bg-white/70 text-slate-700 hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/65 dark:text-slate-100 dark:hover:border-cyan-500/50 dark:hover:bg-cyan-500/10",
           )}
         >
@@ -607,7 +613,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
           className={cn(
             "inline-flex items-center rounded-l-xl border border-r-0 px-4 py-2 text-sm font-semibold transition",
             instructionControlActive
-              ? "border-cyan-500/55 bg-cyan-500/15 text-cyan-900 shadow-sm dark:text-cyan-100"
+              ? "border-cyan-700 bg-cyan-600 text-white shadow-sm dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900"
               : "border-slate-300/70 bg-white/70 text-slate-700 hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/65 dark:text-slate-100 dark:hover:border-cyan-500/50 dark:hover:bg-cyan-500/10",
           )}
         >
@@ -631,7 +637,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
           className={cn(
             "inline-flex items-center rounded-r-xl border px-2.5 py-2 transition",
             instructionControlActive
-              ? "border-cyan-500/55 bg-cyan-500/15 text-cyan-900 hover:bg-cyan-500/25 dark:text-cyan-100 dark:hover:bg-cyan-500/25"
+              ? "border-cyan-700 bg-cyan-600 text-white hover:bg-cyan-700 dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
               : "border-slate-300/70 bg-white/70 text-slate-700 hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/65 dark:text-slate-100 dark:hover:border-cyan-500/50 dark:hover:bg-cyan-500/10",
           )}
         >
@@ -674,22 +680,48 @@ export function AppHeader({ profile }: { profile: Profile }) {
   };
 
   return (
-    <header className="sticky top-0 z-[80] border-b border-white/20 bg-white/75 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/70">
-      <div className="mx-auto w-full max-w-7xl px-4 py-3 md:px-8">
+    <header className="sticky top-0 z-[80] border-b border-white/20 dark:border-white/10">
+      <div aria-hidden="true" className="absolute inset-0">
+        <video
+          autoPlay
+          loop
+          muted
+          playsInline
+          preload="auto"
+          onLoadedMetadata={(event) => applyHeaderVideoPlaybackRate(event.currentTarget)}
+          className="h-full w-full object-cover dark:hidden"
+        >
+          <source src="/header-light.mp4" type="video/mp4" />
+        </video>
+        <video
+          autoPlay
+          loop
+          muted
+          playsInline
+          preload="auto"
+          onLoadedMetadata={(event) => applyHeaderVideoPlaybackRate(event.currentTarget)}
+          className="hidden h-full w-full object-cover dark:block"
+        >
+          <source src="/header-dark.mp4" type="video/mp4" />
+        </video>
+        <div className="absolute inset-0 bg-white/35 dark:bg-slate-950/35" />
+      </div>
+
+      <div className="relative z-10 mx-auto w-full max-w-7xl px-4 py-3 md:px-8">
         <div className="flex items-center justify-end gap-3">
           <Link
             href="/dashboard"
             onClick={handleDashboardLinkClick}
-            aria-label="OMNI Technologies Dashboard"
-            className="mr-auto hidden items-center rounded-lg px-1 py-1 transition hover:opacity-90 md:inline-flex"
+            aria-label="Delta Dashboard"
+            className="mr-auto inline-flex items-center rounded-lg px-1 py-1 transition hover:opacity-90"
           >
             <Image
-              src="/omni-technologies-logo.svg"
-              alt="OMNI Technologies"
-              width={280}
-              height={68}
+              src="/delta-logo.svg"
+              alt="Delta"
+              width={36}
+              height={36}
               priority
-              className="h-7 w-auto md:h-8"
+              className="h-9 w-9"
             />
           </Link>
           <nav className="hidden items-center gap-3 md:flex">

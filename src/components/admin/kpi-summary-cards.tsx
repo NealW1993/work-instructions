@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import type { LucideIcon } from "lucide-react";
-import { Activity, Archive, BarChart3, FileText, Users, X } from "lucide-react";
+import { Activity, BarChart3, FileText, ThumbsUp, Users, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -13,7 +13,7 @@ export interface KpiSummaryCardConfig {
   id:
     | "active-users"
     | "active-instructions"
-    | "archived-instructions"
+    | "total-likes"
     | "updates-last-7-days"
     | "total-active-user-time";
   label: string;
@@ -44,7 +44,7 @@ const MODAL_TONE_CLASSES: Record<KpiSummaryTone, string> = {
 const ICON_BY_CARD_ID: Record<KpiSummaryCardConfig["id"], LucideIcon> = {
   "active-users": Users,
   "active-instructions": FileText,
-  "archived-instructions": Archive,
+  "total-likes": ThumbsUp,
   "updates-last-7-days": Activity,
   "total-active-user-time": BarChart3,
 };
@@ -56,6 +56,7 @@ export function KpiSummaryCards({ cards }: { cards: KpiSummaryCardConfig[] }) {
     [cards, selectedCardId],
   );
   const SelectedCardIcon = selectedCard ? ICON_BY_CARD_ID[selectedCard.id] : null;
+  const shouldScrollDetails = (selectedCard?.details.length ?? 0) > 5;
   const canUsePortal = typeof document !== "undefined";
 
   useEffect(() => {
@@ -140,15 +141,22 @@ export function KpiSummaryCards({ cards }: { cards: KpiSummaryCardConfig[] }) {
                   </button>
                 </header>
 
-                <div className="grid gap-2 p-5">
-                  {selectedCard.details.map((detail, index) => (
-                    <p
-                      key={`${selectedCard.id}-detail-${index}`}
-                      className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200"
-                    >
-                      {detail}
-                    </p>
-                  ))}
+                <div className="p-5">
+                  <div
+                    className={cn(
+                      "grid gap-2",
+                      shouldScrollDetails ? "max-h-[18rem] overflow-y-auto pr-1" : "",
+                    )}
+                  >
+                    {selectedCard.details.map((detail, index) => (
+                      <p
+                        key={`${selectedCard.id}-detail-${index}`}
+                        className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200"
+                      >
+                        {detail}
+                      </p>
+                    ))}
+                  </div>
                 </div>
               </article>
             </div>,

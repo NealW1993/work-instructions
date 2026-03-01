@@ -46,6 +46,18 @@ interface KpiInstructionChangeEventRow {
   actor_user_id: string;
 }
 
+interface KpiLikeInstructionRelation {
+  created_by: string;
+}
+
+interface KpiInstructionLikeRow {
+  instruction_id: string;
+  work_instructions:
+    | KpiLikeInstructionRelation
+    | KpiLikeInstructionRelation[]
+    | null;
+}
+
 interface UsageByUser {
   id: string;
   label: string;
@@ -63,6 +75,7 @@ interface DepartmentInstructionBreakdown {
 }
 
 const DEFAULT_DEPARTMENT_COLOR = "#0EA5E9";
+const INSTRUCTION_LIKES_BATCH_SIZE = 1000;
 
 function normalizeDepartmentColor(value: string | null | undefined) {
   const normalized = (value ?? "").trim().toUpperCase();
@@ -105,6 +118,52 @@ function formatSystemDate(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function normalizeLikeInstructionRelation(
+  relation:
+    | KpiLikeInstructionRelation
+    | KpiLikeInstructionRelation[]
+    | null
+    | undefined,
+) {
+  if (!relation) {
+    return null;
+  }
+
+  if (Array.isArray(relation)) {
+    return relation[0] ?? null;
+  }
+
+  return relation;
+}
+
+async function fetchAllInstructionLikes(supabaseAdmin: ReturnType<typeof getSupabaseAdminClient>) {
+  const rows: KpiInstructionLikeRow[] = [];
+  let offset = 0;
+
+  while (true) {
+    const { data, error } = await supabaseAdmin
+      .from("instruction_likes")
+      .select("instruction_id, work_instructions!inner(created_by)")
+      .order("created_at", { ascending: true })
+      .range(offset, offset + INSTRUCTION_LIKES_BATCH_SIZE - 1);
+
+    if (error) {
+      return { rows: [] as KpiInstructionLikeRow[], error: error.message };
+    }
+
+    const batch = (data ?? []) as KpiInstructionLikeRow[];
+    rows.push(...batch);
+
+    if (batch.length < INSTRUCTION_LIKES_BATCH_SIZE) {
+      break;
+    }
+
+    offset += INSTRUCTION_LIKES_BATCH_SIZE;
+  }
+
+  return { rows, error: null as string | null };
 }
 
 
@@ -212,6 +271,10 @@ export default async function SystemKpisPage() {
       .order("occurred_at", { ascending: false })
       .range(0, 9999),
   ]);
+  const {
+    rows: instructionLikes,
+    error: likesError,
+  } = await fetchAllInstructionLikes(supabaseAdmin);
 
   const profiles = (profilesData ?? []) as KpiProfileRow[];
   const departments = (departmentsData ?? []) as KpiDepartmentRow[];
@@ -225,6 +288,7 @@ export default async function SystemKpisPage() {
     workItemsError?.message ?? null,
     instructionsError?.message ?? null,
     changeEventsError?.message ?? null,
+    likesError ?? null,
   ].filter((message): message is string => Boolean(message));
 
   const usageByActiveUsers: UsageByUser[] = profiles
@@ -315,6 +379,34 @@ export default async function SystemKpisPage() {
   const profileLabelById = new Map(
     profiles.map((entry) => [entry.id, entry.full_name.trim() || entry.email]),
   );
+  const likesReceivedByAuthorId = new Map<string, number>();
+  for (const like of instructionLikes) {
+    const instruction = normalizeLikeInstructionRelation(like.work_instructions);
+    const creatorUserId = instruction?.created_by?.trim() ?? "";
+    if (!creatorUserId) {
+      continue;
+    }
+
+    likesReceivedByAuthorId.set(
+      creatorUserId,
+      (likesReceivedByAuthorId.get(creatorUserId) ?? 0) + 1,
+    );
+  }
+  const usersWithReceivedLikes = [...likesReceivedByAuthorId.entries()]
+    .filter(([, count]) => count > 0)
+    .map(([userId, receivedLikes]) => ({
+      userId,
+      label: profileLabelById.get(userId) ?? "Unknown User",
+      receivedLikes,
+    }))
+    .sort((first, second) => {
+      if (second.receivedLikes !== first.receivedLikes) {
+        return second.receivedLikes - first.receivedLikes;
+      }
+
+      return first.label.localeCompare(second.label);
+    });
+  const totalLikeCount = instructionLikes.length;
   const todaySystem = startOfSystemDay(now);
   const tomorrowSystem = addSystemDays(todaySystem, 1);
   const sevenDaysAgoSystem = addSystemDays(todaySystem, -6);
@@ -372,15 +464,19 @@ export default async function SystemKpisPage() {
       ],
     },
     {
-      id: "archived-instructions",
-      label: "Archived Instructions",
-      value: String(archivedInstructionCount),
+      id: "total-likes",
+      label: "Total Likes",
+      value: String(totalLikeCount),
       tone: "amber",
-      details: [
-        `${archivedInstructionCount} archived instruction${archivedInstructionCount === 1 ? "" : "s"} retained for history.`,
-        `${activeInstructionCount} active instruction${activeInstructionCount === 1 ? "" : "s"} still available for daily use.`,
-        `${totalInstructionCount} total instruction${totalInstructionCount === 1 ? "" : "s"} in all statuses.`,
-      ],
+      details:
+        usersWithReceivedLikes.length > 0
+          ? usersWithReceivedLikes.map(
+              (entry) =>
+                `${entry.label}: ${entry.receivedLikes} like${
+                  entry.receivedLikes === 1 ? "" : "s"
+                } received`,
+            )
+          : ["No users have received likes yet."],
     },
     {
       id: "updates-last-7-days",
