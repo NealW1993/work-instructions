@@ -87,6 +87,8 @@ interface RichTextEditorProps {
   minHeightClassName?: string;
   hasError?: boolean;
   focusRequestKey?: number;
+  toolbarEndContent?: ReactNode;
+  aboveEditorContent?: ReactNode;
 }
 
 interface ToolbarButtonProps {
@@ -712,6 +714,8 @@ export function RichTextEditor({
   minHeightClassName = "min-h-52",
   hasError = false,
   focusRequestKey = 0,
+  toolbarEndContent,
+  aboveEditorContent,
 }: RichTextEditorProps) {
   const [, setToolbarRefreshCounter] = useState(0);
   const [toolbarMessage, setToolbarMessage] = useState<string | null>(null);
@@ -1199,6 +1203,10 @@ export function RichTextEditor({
         >
           <Redo2 size={14} />
         </ToolbarButton>
+
+        {toolbarEndContent ? (
+          <div className="ml-auto inline-flex items-center justify-end">{toolbarEndContent}</div>
+        ) : null}
       </div>
 
       <input
@@ -1236,6 +1244,8 @@ export function RichTextEditor({
           {toolbarMessage}
         </p>
       ) : null}
+
+      {aboveEditorContent ? <div className="grid gap-3">{aboveEditorContent}</div> : null}
 
       <EditorContent editor={editor} />
     </div>

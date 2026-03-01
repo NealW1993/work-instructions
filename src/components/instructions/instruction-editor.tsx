@@ -834,6 +834,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   const [enhancementComparison, setEnhancementComparison] =
     useState<EnhancementComparisonState | null>(null);
   const [enhancementModalOpen, setEnhancementModalOpen] = useState(false);
+  const [editorParametersOpen, setEditorParametersOpen] = useState(false);
   const [pendingAiEnhancementId, setPendingAiEnhancementId] = useState<string | null>(null);
 
   const formRef = useRef<HTMLFormElement | null>(null);
@@ -2554,273 +2555,6 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           </label>
         </div>
 
-        <details className="group relative order-first">
-          <summary className="flex list-none justify-end [&::-webkit-details-marker]:hidden">
-            <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-500/35 bg-cyan-500/10 text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-100">
-              <SlidersHorizontal size={17} />
-              <span className="sr-only">Open instruction tools and AI controls</span>
-            </span>
-          </summary>
-          <div className="mt-2 grid gap-3">
-            <div className="grid gap-2 rounded-2xl border border-cyan-500/30 bg-cyan-500/5 px-3 py-3.5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                  Tool List
-                </p>
-                <span className="rounded-full border border-cyan-500/40 bg-cyan-500/15 px-2 py-0.5 text-[11px] font-semibold text-cyan-800 dark:text-cyan-200">
-                  {toolListCount} in Tool List
-                </span>
-              </div>
-              <p className="text-xs text-slate-600 dark:text-slate-300">
-                Search common tools with auto-suggest and add both common and uncommon tools into
-                the Tool List.
-              </p>
-
-              <div className="inline-flex w-fit items-center rounded-lg border border-slate-300/80 bg-white/90 p-0.5 text-xs dark:border-slate-700 dark:bg-slate-950/70">
-                <button
-                  type="button"
-                  onClick={() => setCommonToolInputMode("type")}
-                  className={cn(
-                    "rounded-md px-2.5 py-1 font-semibold transition",
-                    commonToolInputMode === "type"
-                      ? "bg-cyan-500/20 text-cyan-800 dark:text-cyan-100"
-                      : "text-slate-700 hover:bg-slate-200/80 dark:text-slate-300 dark:hover:bg-slate-800",
-                  )}
-                >
-                  Type
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCommonToolInputMode("select")}
-                  className={cn(
-                    "rounded-md px-2.5 py-1 font-semibold transition",
-                    commonToolInputMode === "select"
-                      ? "bg-cyan-500/20 text-cyan-800 dark:text-cyan-100"
-                      : "text-slate-700 hover:bg-slate-200/80 dark:text-slate-300 dark:hover:bg-slate-800",
-                  )}
-                >
-                  Select
-                </button>
-              </div>
-
-              {toolCatalogError ? (
-                <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-200">
-                  {toolCatalogError}
-                </p>
-              ) : null}
-
-              <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-                <label className="grid gap-1 text-xs font-semibold text-slate-700 dark:text-slate-200">
-                  <span>
-                    {commonToolInputMode === "type"
-                      ? "Search Common Tools"
-                      : "Select Common Tool"}
-                  </span>
-                  {commonToolInputMode === "type" ? (
-                    <>
-                      <input
-                        list="instruction-common-tool-options"
-                        value={commonToolSearchInput}
-                        onChange={(event) => {
-                          const nextValue = event.target.value;
-                          setCommonToolSearchInput(nextValue);
-                          const normalizedQuery = nextValue.trim().toLowerCase();
-                          const matchedToolId =
-                            commonToolIdByName.get(normalizedQuery) ??
-                            commonToolOptions.find((tool) =>
-                              tool.name.trim().toLowerCase().includes(normalizedQuery),
-                            )?.id ??
-                            "";
-                          setToolPickerToolId(matchedToolId);
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            addCommonToolToToolList();
-                          }
-                        }}
-                        placeholder="Start typing to auto-suggest common tools..."
-                        className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                        disabled={toolCatalogBusy || commonToolOptions.length === 0}
-                      />
-                      <datalist id="instruction-common-tool-options">
-                        {filteredCommonToolOptions.map((tool) => (
-                          <option key={tool.id} value={tool.name} />
-                        ))}
-                      </datalist>
-                    </>
-                  ) : (
-                    <select
-                      value={toolPickerToolId}
-                      onChange={(event) => {
-                        const nextToolId = event.target.value;
-                        setToolPickerToolId(nextToolId);
-                        const selectedTool = commonToolOptions.find((tool) => tool.id === nextToolId);
-                        setCommonToolSearchInput(selectedTool?.name ?? "");
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          addCommonToolToToolList();
-                        }
-                      }}
-                      className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                      disabled={toolCatalogBusy || commonToolOptions.length === 0}
-                    >
-                      <option value="">Select a common tool...</option>
-                      {commonToolOptions.map((tool) => (
-                        <option key={tool.id} value={tool.id}>
-                          {tool.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </label>
-
-                <button
-                  type="button"
-                  disabled={!resolveCommonToolSelectionId()}
-                  onClick={addCommonToolToToolList}
-                  className="rounded-lg border border-cyan-500/40 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-100"
-                >
-                  Add
-                </button>
-              </div>
-
-              <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-                <label className="grid gap-1 text-xs font-semibold text-slate-700 dark:text-slate-200">
-                  <span>Add New Common Tool</span>
-                  <input
-                    value={newSuggestedToolName}
-                    onChange={(event) => setNewSuggestedToolName(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        if (!toolSetupBusy && newSuggestedToolName.trim()) {
-                          void createSuggestedToolFromEditor();
-                        }
-                      }
-                    }}
-                    placeholder="Torque wrench, impact driver..."
-                    className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                  />
-                </label>
-                <button
-                  type="button"
-                  disabled={toolSetupBusy || !newSuggestedToolName.trim()}
-                  onClick={() => {
-                    void createSuggestedToolFromEditor();
-                  }}
-                  className="rounded-lg border border-cyan-500/35 px-3 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-200"
-                >
-                  {toolSetupBusy ? "Working..." : "Add Common Tool"}
-                </button>
-              </div>
-
-              <div className="grid gap-1">
-                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Tool List ({toolListCount})
-                </p>
-                {toolListCount === 0 ? (
-                  <p className="rounded-lg border border-slate-300/70 bg-white/80 px-2.5 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300">
-                    No tools in the list yet.
-                  </p>
-                ) : (
-                  <div className="flex flex-wrap gap-1.5">
-                    {selectedTools.map((tool) => (
-                      <button
-                        key={tool.id}
-                        type="button"
-                        onClick={() => toggleSelectedTool(tool.id)}
-                        className="inline-flex items-center gap-1 rounded-full border border-cyan-500/45 bg-cyan-500/15 px-2.5 py-1 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
-                        title="Click to remove"
-                        >
-                        <span>{tool.name}</span>
-                        {!tool.isActive ? (
-                          <span className="rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-200">
-                            Hidden
-                          </span>
-                        ) : null}
-                        <span className="opacity-70">x</span>
-                      </button>
-                    ))}
-                    {uncommonToolList.map((toolName) => (
-                      <button
-                        key={`uncommon:${toolName.toLowerCase()}`}
-                        type="button"
-                        onClick={() => removeUncommonToolFromList(toolName)}
-                        className="inline-flex items-center gap-1 rounded-full border border-amber-500/45 bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-800 transition hover:bg-amber-500/25 dark:text-amber-100"
-                        title="Click to remove"
-                      >
-                        <span>{toolName}</span>
-                        <span className="opacity-70">x</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-                <label className="grid gap-1.5 text-sm">
-                  <span className="font-semibold">Uncommon Tools</span>
-                  <input
-                    value={uncommonToolsInput}
-                    onChange={(event) => setUncommonToolsInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        addUncommonToolsToToolList();
-                      }
-                    }}
-                    placeholder="Type uncommon tools here (comma separated if multiple)"
-                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                  />
-                </label>
-                <button
-                  type="button"
-                  disabled={toolSetupBusy || uncommonToolCandidates.length === 0}
-                  onClick={addUncommonToolsToToolList}
-                  className="rounded-lg border border-cyan-500/35 px-3 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-200"
-                >
-                  Add
-                </button>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-cyan-500/30 bg-cyan-500/5 px-3 py-2.5">
-              <div className="grid gap-0.5">
-                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                  AI Enhance
-                </p>
-                <p className="text-xs text-slate-600 dark:text-slate-300">
-                  Analyze this draft, improve structure and formatting, then choose your version.
-                </p>
-              </div>
-              <button
-                type="button"
-                disabled={busy || enhanceBusy}
-                onClick={() => {
-                  void handleEnhanceInstruction();
-                }}
-                className="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-100"
-              >
-                {enhanceBusy ? (
-                  <Loader2 size={15} className="animate-spin" />
-                ) : (
-                  <Sparkles size={15} />
-                )}
-                {enhanceBusy ? "Enhancing..." : "AI Enhance"}
-              </button>
-            </div>
-
-            {enhanceError ? (
-              <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-200">
-                {enhanceError}
-              </p>
-            ) : null}
-          </div>
-        </details>
-
         <RichTextEditor
           label="Work Instructions"
           value={bodyMarkdown}
@@ -2837,6 +2571,283 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           minHeightClassName="min-h-72"
           hasError={fieldErrors.body}
           focusRequestKey={bodyFocusRequestKey}
+          toolbarEndContent={
+            <button
+              type="button"
+              onClick={() => setEditorParametersOpen((current) => !current)}
+              aria-expanded={editorParametersOpen}
+              aria-label="Toggle instruction parameters"
+              title="Instruction Parameters"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-500/35 bg-cyan-500/10 text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-100"
+            >
+              <SlidersHorizontal size={17} />
+            </button>
+          }
+          aboveEditorContent={
+            editorParametersOpen ? (
+              <>
+                <div className="grid gap-2 rounded-2xl border border-cyan-500/30 bg-cyan-500/5 px-3 py-3.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                      Tool List
+                    </p>
+                    <span className="rounded-full border border-cyan-500/40 bg-cyan-500/15 px-2 py-0.5 text-[11px] font-semibold text-cyan-800 dark:text-cyan-200">
+                      {toolListCount} in Tool List
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 dark:text-slate-300">
+                    Search common tools with auto-suggest and add both common and uncommon tools
+                    into the Tool List.
+                  </p>
+
+                  <div className="inline-flex w-fit items-center rounded-lg border border-slate-300/80 bg-white/90 p-0.5 text-xs dark:border-slate-700 dark:bg-slate-950/70">
+                    <button
+                      type="button"
+                      onClick={() => setCommonToolInputMode("type")}
+                      className={cn(
+                        "rounded-md px-2.5 py-1 font-semibold transition",
+                        commonToolInputMode === "type"
+                          ? "bg-cyan-500/20 text-cyan-800 dark:text-cyan-100"
+                          : "text-slate-700 hover:bg-slate-200/80 dark:text-slate-300 dark:hover:bg-slate-800",
+                      )}
+                    >
+                      Type
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCommonToolInputMode("select")}
+                      className={cn(
+                        "rounded-md px-2.5 py-1 font-semibold transition",
+                        commonToolInputMode === "select"
+                          ? "bg-cyan-500/20 text-cyan-800 dark:text-cyan-100"
+                          : "text-slate-700 hover:bg-slate-200/80 dark:text-slate-300 dark:hover:bg-slate-800",
+                      )}
+                    >
+                      Select
+                    </button>
+                  </div>
+
+                  {toolCatalogError ? (
+                    <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-200">
+                      {toolCatalogError}
+                    </p>
+                  ) : null}
+
+                  <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                    <label className="grid gap-1 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                      <span>
+                        {commonToolInputMode === "type"
+                          ? "Search Common Tools"
+                          : "Select Common Tool"}
+                      </span>
+                      {commonToolInputMode === "type" ? (
+                        <>
+                          <input
+                            list="instruction-common-tool-options"
+                            value={commonToolSearchInput}
+                            onChange={(event) => {
+                              const nextValue = event.target.value;
+                              setCommonToolSearchInput(nextValue);
+                              const normalizedQuery = nextValue.trim().toLowerCase();
+                              const matchedToolId =
+                                commonToolIdByName.get(normalizedQuery) ??
+                                commonToolOptions.find((tool) =>
+                                  tool.name.trim().toLowerCase().includes(normalizedQuery),
+                                )?.id ??
+                                "";
+                              setToolPickerToolId(matchedToolId);
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                addCommonToolToToolList();
+                              }
+                            }}
+                            placeholder="Start typing to auto-suggest common tools..."
+                            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                            disabled={toolCatalogBusy || commonToolOptions.length === 0}
+                          />
+                          <datalist id="instruction-common-tool-options">
+                            {filteredCommonToolOptions.map((tool) => (
+                              <option key={tool.id} value={tool.name} />
+                            ))}
+                          </datalist>
+                        </>
+                      ) : (
+                        <select
+                          value={toolPickerToolId}
+                          onChange={(event) => {
+                            const nextToolId = event.target.value;
+                            setToolPickerToolId(nextToolId);
+                            const selectedTool = commonToolOptions.find(
+                              (tool) => tool.id === nextToolId,
+                            );
+                            setCommonToolSearchInput(selectedTool?.name ?? "");
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              addCommonToolToToolList();
+                            }
+                          }}
+                          className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                          disabled={toolCatalogBusy || commonToolOptions.length === 0}
+                        >
+                          <option value="">Select a common tool...</option>
+                          {commonToolOptions.map((tool) => (
+                            <option key={tool.id} value={tool.id}>
+                              {tool.name}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </label>
+
+                    <button
+                      type="button"
+                      disabled={!resolveCommonToolSelectionId()}
+                      onClick={addCommonToolToToolList}
+                      className="rounded-lg border border-cyan-500/40 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-100"
+                    >
+                      Add
+                    </button>
+                  </div>
+
+                  <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                    <label className="grid gap-1 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                      <span>Add New Common Tool</span>
+                      <input
+                        value={newSuggestedToolName}
+                        onChange={(event) => setNewSuggestedToolName(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            if (!toolSetupBusy && newSuggestedToolName.trim()) {
+                              void createSuggestedToolFromEditor();
+                            }
+                          }
+                        }}
+                        placeholder="Torque wrench, impact driver..."
+                        className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      disabled={toolSetupBusy || !newSuggestedToolName.trim()}
+                      onClick={() => {
+                        void createSuggestedToolFromEditor();
+                      }}
+                      className="rounded-lg border border-cyan-500/35 px-3 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-200"
+                    >
+                      {toolSetupBusy ? "Working..." : "Add Common Tool"}
+                    </button>
+                  </div>
+
+                  <div className="grid gap-1">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                      Tool List ({toolListCount})
+                    </p>
+                    {toolListCount === 0 ? (
+                      <p className="rounded-lg border border-slate-300/70 bg-white/80 px-2.5 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300">
+                        No tools in the list yet.
+                      </p>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedTools.map((tool) => (
+                          <button
+                            key={tool.id}
+                            type="button"
+                            onClick={() => toggleSelectedTool(tool.id)}
+                            className="inline-flex items-center gap-1 rounded-full border border-cyan-500/45 bg-cyan-500/15 px-2.5 py-1 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
+                            title="Click to remove"
+                          >
+                            <span>{tool.name}</span>
+                            {!tool.isActive ? (
+                              <span className="rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-200">
+                                Hidden
+                              </span>
+                            ) : null}
+                            <span className="opacity-70">x</span>
+                          </button>
+                        ))}
+                        {uncommonToolList.map((toolName) => (
+                          <button
+                            key={`uncommon:${toolName.toLowerCase()}`}
+                            type="button"
+                            onClick={() => removeUncommonToolFromList(toolName)}
+                            className="inline-flex items-center gap-1 rounded-full border border-amber-500/45 bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-800 transition hover:bg-amber-500/25 dark:text-amber-100"
+                            title="Click to remove"
+                          >
+                            <span>{toolName}</span>
+                            <span className="opacity-70">x</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                    <label className="grid gap-1.5 text-sm">
+                      <span className="font-semibold">Uncommon Tools</span>
+                      <input
+                        value={uncommonToolsInput}
+                        onChange={(event) => setUncommonToolsInput(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            addUncommonToolsToToolList();
+                          }
+                        }}
+                        placeholder="Type uncommon tools here (comma separated if multiple)"
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      disabled={toolSetupBusy || uncommonToolCandidates.length === 0}
+                      onClick={addUncommonToolsToToolList}
+                      className="rounded-lg border border-cyan-500/35 px-3 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-200"
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-cyan-500/30 bg-cyan-500/5 px-3 py-2.5">
+                  <div className="grid gap-0.5">
+                    <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                      AI Enhance
+                    </p>
+                    <p className="text-xs text-slate-600 dark:text-slate-300">
+                      Analyze this draft, improve structure and formatting, then choose your
+                      version.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy || enhanceBusy}
+                    onClick={() => {
+                      void handleEnhanceInstruction();
+                    }}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-100"
+                  >
+                    {enhanceBusy ? (
+                      <Loader2 size={15} className="animate-spin" />
+                    ) : (
+                      <Sparkles size={15} />
+                    )}
+                    {enhanceBusy ? "Enhancing..." : "AI Enhance"}
+                  </button>
+                </div>
+
+                {enhanceError ? (
+                  <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-200">
+                    {enhanceError}
+                  </p>
+                ) : null}
+              </>
+            ) : null
+          }
         />
 
         <button
