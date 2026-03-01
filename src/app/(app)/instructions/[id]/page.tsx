@@ -1144,7 +1144,6 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
                   className="h-fit w-full justify-center self-start"
                 />
                 <PrintInstructionButton
-                  instructionId={instruction.id}
                   className="w-full justify-center px-3 py-1.5 text-xs"
                 />
                 {!instructionIsArchived ? (

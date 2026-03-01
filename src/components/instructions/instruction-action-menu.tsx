@@ -44,7 +44,7 @@ export function InstructionActionMenu({ children, className }: InstructionAction
   }, [open]);
 
   return (
-    <div ref={menuRef} className={cn("relative", className)}>
+    <div ref={menuRef} className={cn("relative print:hidden", className)}>
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}

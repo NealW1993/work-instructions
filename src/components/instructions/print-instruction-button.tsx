@@ -5,17 +5,14 @@ import { Printer } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface PrintInstructionButtonProps {
-  instructionId: string;
   className?: string;
 }
 
 export function PrintInstructionButton({
-  instructionId,
   className,
 }: PrintInstructionButtonProps) {
   function handlePrint() {
-    const printHref = `/instructions/${instructionId}/print?autoprint=1`;
-    window.location.assign(printHref);
+    window.print();
   }
 
   return (
