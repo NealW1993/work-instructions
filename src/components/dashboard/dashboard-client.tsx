@@ -1379,6 +1379,8 @@ function KpiScatterChart({
   );
   const toX = (value: number) => padding.left + (value / axisMaxX) * plotWidth;
   const toY = (value: number) => padding.top + ((axisMaxY - value) / axisMaxY) * plotHeight;
+  const yAxisTitleX = padding.left - 20;
+  const yAxisTitleY = padding.top + plotHeight / 2;
 
   return (
     <div className="grid gap-2">
@@ -1392,10 +1394,12 @@ function KpiScatterChart({
           }}
         >
           <text
-            x={12}
-            y={padding.top + 8}
+            x={yAxisTitleX}
+            y={yAxisTitleY}
+            textAnchor="middle"
+            dominantBaseline="middle"
             className="fill-current text-[11px] font-semibold"
-            transform={`rotate(-90 ${12} ${padding.top + 8})`}
+            transform={`rotate(-90 ${yAxisTitleX} ${yAxisTitleY})`}
           >
             {yAxisLabel}
           </text>
@@ -1468,27 +1472,36 @@ function KpiDonutChart({
   onSelectSegment?: (segment: KpiDonutSegment) => void;
 }) {
   const total = segments.reduce((sum, segment) => sum + segment.value, 0);
+  const isCompact = widgetSize === "compact";
+  const isWide = widgetSize === "wide";
+  const isFull = widgetSize === "full";
   const radius =
-    widgetSize === "compact"
-      ? 42
-      : widgetSize === "full"
-        ? 64
-        : widgetSize === "wide"
-          ? 58
-          : 52;
+    isCompact ? 42 : isFull ? 98 : isWide ? 72 : 58;
   const circumference = 2 * Math.PI * radius;
   let cumulative = 0;
   const donutSize = radius * 2 + 36;
   const center = donutSize / 2;
-  const ringWidth = widgetSize === "compact" ? 14 : 18;
-  const isCompact = widgetSize === "compact";
+  const ringWidth = isCompact ? 14 : isFull ? 24 : isWide ? 20 : 18;
+  const donutPixelSize = isCompact ? 112 : isFull ? 304 : isWide ? 236 : 188;
+  const totalLabelY = center - (isCompact ? 2 : isFull ? 18 : 6);
+  const totalValueY = center + (isCompact ? 14 : isFull ? 22 : 14);
 
   return (
     <div className="grid gap-3">
-      <div className={cn("flex flex-wrap items-center gap-4", isCompact ? "justify-center" : "")}>
+      <div
+        className={cn(
+          "grid items-center gap-4",
+          isCompact
+            ? "justify-items-center"
+            : isFull
+              ? "md:grid-cols-[minmax(280px,340px)_1fr]"
+              : "sm:grid-cols-[minmax(200px,240px)_1fr]",
+        )}
+      >
         <svg
           viewBox={`0 0 ${donutSize} ${donutSize}`}
-          className={cn(isCompact ? "h-28 w-28" : "h-36 w-36")}
+          className="shrink-0"
+          style={{ width: `${donutPixelSize}px`, height: `${donutPixelSize}px` }}
         >
           <circle
             cx={center}
@@ -1524,39 +1537,61 @@ function KpiDonutChart({
             : null}
           <text
             x={center}
-            y={center - (isCompact ? 2 : 4)}
+            y={totalLabelY}
             textAnchor="middle"
-            className="fill-slate-700 text-[11px] font-semibold dark:fill-slate-300"
+            dominantBaseline="middle"
+            className={cn(
+              "fill-slate-700 font-semibold dark:fill-slate-300",
+              isFull ? "text-[13px]" : "text-[11px]",
+            )}
           >
             Total
           </text>
           <text
             x={center}
-            y={center + (isCompact ? 14 : 12)}
+            y={totalValueY}
             textAnchor="middle"
+            dominantBaseline="middle"
             className={cn(
               "fill-slate-900 font-extrabold dark:fill-slate-100",
-              isCompact ? "text-base" : "text-lg",
+              isCompact ? "text-base" : isFull ? "text-2xl" : "text-xl",
             )}
           >
             {total}
           </text>
         </svg>
 
-        <div className={cn("grid gap-1.5", isCompact ? "w-full" : "")}>
+        <div
+          className={cn(
+            "grid w-full gap-1.5",
+            !isCompact && isFull ? "sm:grid-cols-2" : "",
+          )}
+        >
           {segments.map((segment) => (
             <button
               key={segment.id}
               type="button"
               onClick={() => onSelectSegment?.(segment)}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-300/70 bg-white/70 px-2.5 py-1 text-left text-xs font-semibold text-slate-700 transition hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-cyan-500/15"
+              className={cn(
+                "inline-flex w-full items-center gap-2 rounded-lg border border-slate-300/70 bg-white/70 text-left font-semibold text-slate-700 transition hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-cyan-500/15",
+                isCompact
+                  ? "px-2.5 py-1 text-xs"
+                  : isFull
+                    ? "min-h-14 rounded-xl px-4 py-3 text-base"
+                    : "px-3 py-1.5 text-sm",
+              )}
             >
               <span
-                className="h-2.5 w-2.5 rounded-sm"
+                className={cn("rounded-sm", isFull ? "h-3.5 w-3.5" : "h-2.5 w-2.5")}
                 style={{ backgroundColor: segment.color }}
               />
-              <span>{segment.label}</span>
-              <span className="ml-auto text-slate-500 dark:text-slate-400">
+              <span className={cn(isFull ? "text-base" : "")}>{segment.label}</span>
+              <span
+                className={cn(
+                  "ml-auto text-slate-500 dark:text-slate-400",
+                  isFull ? "text-base font-bold" : "",
+                )}
+              >
                 {segment.value}
               </span>
             </button>
