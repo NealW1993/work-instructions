@@ -414,15 +414,7 @@ export default async function SystemKpisPage() {
 
   return (
     <section className="grid gap-4">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="grid gap-1">
-          <h1 className="text-3xl font-extrabold text-slate-900 dark:text-slate-100">
-            System KPI&apos;s
-          </h1>
-          <p className="text-sm text-slate-600 dark:text-slate-300">
-            Operations and usage metrics for your work instructions system.
-          </p>
-        </div>
+      <header className="flex flex-wrap items-start gap-3">
         {isSystemAdmin(profile.role) ? (
           <Link
             href="/admin/users"
@@ -432,6 +424,14 @@ export default async function SystemKpisPage() {
             Back to System Admin
           </Link>
         ) : null}
+        <div className="grid min-w-0 gap-1">
+          <h1 className="text-3xl font-extrabold text-slate-900 dark:text-slate-100">
+            System KPI&apos;s
+          </h1>
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            Operations and usage metrics for your work instructions system.
+          </p>
+        </div>
       </header>
 
       {dataErrors.length > 0 ? (

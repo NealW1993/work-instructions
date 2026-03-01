@@ -368,16 +368,15 @@ export function ArchivedInstructionsPanel({
 
   return (
     <div className="grid gap-5">
-      <InstructionBackButton fallbackHref="/dashboard" />
-
       <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
-        <div className="grid gap-2">
-          <div>
+        <header className="flex flex-wrap items-start gap-3">
+          <InstructionBackButton fallbackHref="/dashboard" />
+          <div className="grid min-w-0 gap-1">
             <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
               Archived Work Instructions
             </h1>
           </div>
-        </div>
+        </header>
 
         <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_260px]">
           <label className="grid gap-1 text-sm">
