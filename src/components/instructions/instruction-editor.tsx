@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  ChevronDown,
   Loader2,
   SlidersHorizontal,
   Sparkles,
@@ -145,6 +146,12 @@ interface EnhancementComparisonState {
   originalContent: string;
   enhancedContent: string;
   enhancementNotes: string;
+}
+
+type PendingCommonToolChange = "save" | "remove";
+interface PendingCommonToolChangeEntry {
+  name: string;
+  change: PendingCommonToolChange;
 }
 
 const DEFAULT_FIELD_ERRORS: FieldErrors = {
@@ -374,6 +381,23 @@ function mergeToolNameLists(current: string[], additions: string[]) {
 
 function serializeToolNameList(value: string[]) {
   return value.map((entry) => entry.trim()).filter(Boolean).join(", ");
+}
+
+function normalizeToolName(value: string) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function compareToolNames(firstName: string, secondName: string) {
+  const firstStartsWithNumber = /^\d/.test(firstName.trim());
+  const secondStartsWithNumber = /^\d/.test(secondName.trim());
+  if (firstStartsWithNumber !== secondStartsWithNumber) {
+    return firstStartsWithNumber ? -1 : 1;
+  }
+
+  return firstName.localeCompare(secondName, undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
 }
 
 function buildSnapshot(data: {
@@ -816,7 +840,11 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   const [commonToolInputMode, setCommonToolInputMode] = useState<"type" | "select">("type");
   const [toolPickerToolId, setToolPickerToolId] = useState("");
   const [commonToolSearchInput, setCommonToolSearchInput] = useState("");
-  const [newSuggestedToolName, setNewSuggestedToolName] = useState("");
+  const [commonToolSelectOpen, setCommonToolSelectOpen] = useState(false);
+  const [duplicateToolNotice, setDuplicateToolNotice] = useState<string | null>(null);
+  const [pendingCommonToolChanges, setPendingCommonToolChanges] = useState<
+    Record<string, PendingCommonToolChangeEntry>
+  >({});
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>(DEFAULT_FIELD_ERRORS);
   const [bodyFocusRequestKey, setBodyFocusRequestKey] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -840,6 +868,8 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   const formRef = useRef<HTMLFormElement | null>(null);
   const partInputRef = useRef<HTMLInputElement | null>(null);
   const itemTitleInputRef = useRef<HTMLInputElement | null>(null);
+  const commonToolSelectRef = useRef<HTMLDivElement | null>(null);
+  const duplicateToolNoticeTimeoutRef = useRef<number | null>(null);
   const hasUnsavedChangesRef = useRef(false);
   const navigationModalOpenRef = useRef(false);
   const historyGuardActiveRef = useRef(false);
@@ -876,6 +906,10 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       }),
     [bodyMarkdown, departmentId, itemTitle, partId, revision, selectedToolIds, uncommonToolList],
   );
+  const hasPendingCommonToolChanges = useMemo(
+    () => Object.keys(pendingCommonToolChanges).length > 0,
+    [pendingCommonToolChanges],
+  );
 
   const createModeHasMeaningfulChanges = useMemo(() => {
     const hasContentChanges =
@@ -885,6 +919,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       currentSnapshot.selectedToolIds.length > 0 ||
       currentSnapshot.uncommonTools.length > 0 ||
       uncommonToolsInput.trim().length > 0 ||
+      hasPendingCommonToolChanges ||
       richTextToPlain(currentSnapshot.bodyMarkdown).length > 0;
 
     const hasDepartmentChange = departmentTouched
@@ -897,16 +932,21 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     departmentTouched,
     initialSnapshot.departmentId,
     initialSnapshot.revision,
+    hasPendingCommonToolChanges,
     uncommonToolsInput,
   ]);
 
   const hasUnsavedChanges = useMemo(() => {
+    if (hasPendingCommonToolChanges) {
+      return true;
+    }
+
     if (mode === "create") {
       return createModeHasMeaningfulChanges;
     }
 
     return !snapshotsAreEqual(currentSnapshot, initialSnapshot);
-  }, [createModeHasMeaningfulChanges, currentSnapshot, initialSnapshot, mode]);
+  }, [createModeHasMeaningfulChanges, currentSnapshot, hasPendingCommonToolChanges, initialSnapshot, mode]);
 
   const selectedDepartmentName = useMemo(
     () => departments.find((department) => department.id === departmentId)?.name ?? "Unknown",
@@ -918,10 +958,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     () =>
       suggestedTools
         .filter((tool) => tool.isActive)
-        .sort(
-        (first, second) =>
-          first.sortOrder - second.sortOrder || first.name.localeCompare(second.name),
-      ),
+        .sort((first, second) => compareToolNames(first.name, second.name)),
     [suggestedTools],
   );
   const commonToolIdByName = useMemo(
@@ -946,8 +983,33 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     () =>
       suggestedTools
         .filter((tool) => selectedToolSet.has(tool.id))
-        .sort((first, second) => first.name.localeCompare(second.name)),
+        .sort((first, second) => compareToolNames(first.name, second.name)),
     [selectedToolSet, suggestedTools],
+  );
+  const selectedToolNameSet = useMemo(
+    () =>
+      new Set(
+        selectedTools.map((tool) => normalizeToolName(tool.name).toLowerCase()),
+      ),
+    [selectedTools],
+  );
+  const uncommonToolNameSet = useMemo(
+    () =>
+      new Set(
+        uncommonToolList.map((toolName) => normalizeToolName(toolName).toLowerCase()),
+      ),
+    [uncommonToolList],
+  );
+  const selectedPickerTool = useMemo(
+    () => commonToolOptions.find((tool) => tool.id === toolPickerToolId) ?? null,
+    [commonToolOptions, toolPickerToolId],
+  );
+  const commonToolNameSet = useMemo(
+    () =>
+      new Set(
+        commonToolOptions.map((tool) => normalizeToolName(tool.name).toLowerCase()),
+      ),
+    [commonToolOptions],
   );
   const toolListCount = selectedTools.length + uncommonToolList.length;
   const uncommonToolCandidates = useMemo(() => {
@@ -957,6 +1019,15 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   useEffect(() => {
     setPortalReady(true);
   }, []);
+
+  useEffect(
+    () => () => {
+      if (duplicateToolNoticeTimeoutRef.current !== null) {
+        window.clearTimeout(duplicateToolNoticeTimeoutRef.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (mode === "create") {
@@ -1318,6 +1389,41 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   }, [commonToolOptions, toolPickerToolId]);
 
   useEffect(() => {
+    if (!commonToolSelectOpen || commonToolInputMode !== "select") {
+      return;
+    }
+
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!commonToolSelectRef.current || !target || commonToolSelectRef.current.contains(target)) {
+        return;
+      }
+
+      setCommonToolSelectOpen(false);
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setCommonToolSelectOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [commonToolInputMode, commonToolSelectOpen]);
+
+  useEffect(() => {
+    if (commonToolInputMode !== "select" && commonToolSelectOpen) {
+      setCommonToolSelectOpen(false);
+    }
+  }, [commonToolInputMode, commonToolSelectOpen]);
+
+  useEffect(() => {
     const query = partId.trim();
     if (query.length < 2) {
       setPartSuggestions([]);
@@ -1401,6 +1507,17 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     );
   }
 
+  function showDuplicateToolNotice() {
+    setDuplicateToolNotice("Can't add duplicates");
+    if (duplicateToolNoticeTimeoutRef.current !== null) {
+      window.clearTimeout(duplicateToolNoticeTimeoutRef.current);
+    }
+    duplicateToolNoticeTimeoutRef.current = window.setTimeout(() => {
+      setDuplicateToolNotice(null);
+      duplicateToolNoticeTimeoutRef.current = null;
+    }, 2000);
+  }
+
   function resolveCommonToolSelectionId() {
     if (commonToolInputMode === "select") {
       return commonToolOptions.some((tool) => tool.id === toolPickerToolId) ? toolPickerToolId : "";
@@ -1430,10 +1547,20 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     }
 
     const selectedTool = commonToolOptions.find((tool) => tool.id === resolvedToolId);
+    if (selectedToolIds.includes(resolvedToolId)) {
+      showDuplicateToolNotice();
+      return;
+    }
+    if (selectedTool && uncommonToolNameSet.has(normalizeToolName(selectedTool.name).toLowerCase())) {
+      showDuplicateToolNotice();
+      return;
+    }
+
     if (selectedTool) {
       setCommonToolSearchInput(selectedTool.name);
     }
     setToolPickerToolId(resolvedToolId);
+    setCommonToolSelectOpen(false);
     setSelectedToolIds((current) =>
       current.includes(resolvedToolId) ? current : [...current, resolvedToolId],
     );
@@ -1441,13 +1568,43 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
   function addUncommonToolsToToolList() {
     setToolCatalogError(null);
-    const toAdd = uncommonToolCandidates;
-    if (toAdd.length === 0) {
+    const parsedCandidates = uncommonToolCandidates.map((candidate) => normalizeToolName(candidate));
+    if (parsedCandidates.length === 0) {
       return;
     }
 
-    setUncommonToolList((current) => mergeToolNameLists(current, toAdd));
-    setUncommonToolsInput("");
+    const filteredToAdd: string[] = [];
+    const seenInBatch = new Set<string>();
+    let blockedDuplicate = false;
+
+    for (const candidate of parsedCandidates) {
+      const normalizedKey = candidate.toLowerCase();
+      if (
+        !normalizedKey ||
+        seenInBatch.has(normalizedKey) ||
+        uncommonToolNameSet.has(normalizedKey) ||
+        selectedToolNameSet.has(normalizedKey)
+      ) {
+        blockedDuplicate = true;
+        continue;
+      }
+
+      seenInBatch.add(normalizedKey);
+      filteredToAdd.push(candidate);
+    }
+
+    if (filteredToAdd.length > 0) {
+      setUncommonToolList((current) => mergeToolNameLists(current, filteredToAdd));
+      setUncommonToolsInput("");
+    }
+
+    if (blockedDuplicate) {
+      showDuplicateToolNotice();
+    }
+
+    if (filteredToAdd.length === 0) {
+      return;
+    }
   }
 
   function removeUncommonToolFromList(toolName: string) {
@@ -1461,16 +1618,61 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     );
   }
 
-  async function createSuggestedToolFromEditor() {
+  function isToolSavedToCommonList(toolName: string) {
+    const normalizedKey = normalizeToolName(toolName).toLowerCase();
+    if (!normalizedKey) {
+      return false;
+    }
+
+    const pendingChange = pendingCommonToolChanges[normalizedKey]?.change;
+    if (pendingChange === "save") {
+      return true;
+    }
+    if (pendingChange === "remove") {
+      return false;
+    }
+
+    return commonToolNameSet.has(normalizedKey);
+  }
+
+  function toggleCommonToolSavedState(rawToolName: string) {
+    setToolCatalogError(null);
+    const normalizedName = normalizeToolName(rawToolName);
+    if (!normalizedName) {
+      return;
+    }
+
+    const normalizedKey = normalizedName.toLowerCase();
+    const persistedSavedState = commonToolNameSet.has(normalizedKey);
+    const pendingChange = pendingCommonToolChanges[normalizedKey]?.change;
+    const effectiveSavedState =
+      pendingChange === "save" ? true : pendingChange === "remove" ? false : persistedSavedState;
+    const nextSavedState = !effectiveSavedState;
+
+    setPendingCommonToolChanges((current) => {
+      const next = { ...current };
+      if (nextSavedState === persistedSavedState) {
+        delete next[normalizedKey];
+      } else {
+        next[normalizedKey] = {
+          name: normalizedName,
+          change: nextSavedState ? "save" : "remove",
+        };
+      }
+      return next;
+    });
+  }
+
+  async function syncPendingCommonToolChanges() {
+    const pendingEntries = Object.entries(pendingCommonToolChanges);
+    if (pendingEntries.length === 0) {
+      return;
+    }
+
     setToolCatalogError(null);
     setToolSetupBusy(true);
 
     try {
-      const normalizedName = newSuggestedToolName.trim();
-      if (!normalizedName) {
-        throw new Error("Enter a common tool name first.");
-      }
-
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -1478,41 +1680,110 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         throw new Error("Missing session token. Please sign in again.");
       }
 
-      const response = await fetch("/api/suggested-tools", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          name: normalizedName,
-          sortOrder: suggestedTools.length,
-        }),
-      });
-
-      const payload = (await response.json().catch(() => ({}))) as {
-        error?: string;
-        tool?: { id: string };
-      };
-
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Unable to create common tool.");
-      }
-
-      const insertedToolId = payload.tool?.id ?? null;
-      const nextTools = await loadSuggestedTools(selectedToolIds);
-
-      setNewSuggestedToolName("");
-      if (insertedToolId && nextTools.some((tool) => tool.id === insertedToolId)) {
-        setToolPickerToolId(insertedToolId);
-        setSelectedToolIds((current) =>
-          current.includes(insertedToolId) ? current : [...current, insertedToolId],
-        );
-      }
-    } catch (caughtError) {
-      setToolCatalogError(
-        caughtError instanceof Error ? caughtError.message : "Unable to create common tool.",
+      const latestTools = await loadSuggestedTools(selectedToolIds);
+      const toolByNormalizedName = new Map(
+        latestTools.map((tool) => [normalizeToolName(tool.name).toLowerCase(), tool] as const),
       );
+      const activeCommonToolNames = new Set(
+        latestTools
+          .filter((tool) => tool.isActive)
+          .map((tool) => normalizeToolName(tool.name).toLowerCase()),
+      );
+      let nextSortOrder =
+        latestTools.reduce((max, tool) => Math.max(max, tool.sortOrder), -1) + 1;
+      for (const [, pendingEntry] of pendingEntries) {
+        const normalizedName = normalizeToolName(pendingEntry.name);
+        const normalizedNameKey = normalizedName.toLowerCase();
+        if (!normalizedNameKey) {
+          continue;
+        }
+
+        const matchingTool = toolByNormalizedName.get(normalizedNameKey) ?? null;
+
+        if (pendingEntry.change === "save") {
+          if (activeCommonToolNames.has(normalizedNameKey)) {
+            continue;
+          }
+
+          if (matchingTool && !matchingTool.isActive) {
+            const reactivateResponse = await fetch(`/api/suggested-tools/${matchingTool.id}`, {
+              method: "PATCH",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${session.access_token}`,
+              },
+              body: JSON.stringify({
+                isActive: true,
+              }),
+            });
+
+            const reactivatePayload = (await reactivateResponse.json().catch(() => ({}))) as {
+              error?: string;
+            };
+            if (!reactivateResponse.ok) {
+              throw new Error(reactivatePayload.error ?? "Unable to reactivate common tool.");
+            }
+
+            activeCommonToolNames.add(normalizedNameKey);
+            continue;
+          }
+
+          const createResponse = await fetch("/api/suggested-tools", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({
+              name: normalizedName,
+              sortOrder: nextSortOrder,
+            }),
+          });
+
+          const createPayload = (await createResponse.json().catch(() => ({}))) as {
+            error?: string;
+          };
+          if (!createResponse.ok && createResponse.status !== 409) {
+            throw new Error(createPayload.error ?? "Unable to save tool to common list.");
+          }
+          activeCommonToolNames.add(normalizedNameKey);
+          nextSortOrder += 1;
+          continue;
+        }
+
+        if (!activeCommonToolNames.has(normalizedNameKey) || !matchingTool?.isActive) {
+          continue;
+        }
+
+        const disableResponse = await fetch(`/api/suggested-tools/${matchingTool.id}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            isActive: false,
+          }),
+        });
+
+        const disablePayload = (await disableResponse.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        if (!disableResponse.ok) {
+          throw new Error(disablePayload.error ?? "Unable to remove tool from common list.");
+        }
+
+        activeCommonToolNames.delete(normalizedNameKey);
+      }
+
+      const nextTools = await loadSuggestedTools(selectedToolIds);
+      const resolvedToolId = resolveCommonToolSelectionId();
+      if (resolvedToolId && nextTools.some((tool) => tool.id === resolvedToolId)) {
+        setToolPickerToolId(resolvedToolId);
+      } else if (!nextTools.some((tool) => tool.id === toolPickerToolId)) {
+        setToolPickerToolId("");
+      }
+      setPendingCommonToolChanges({});
     } finally {
       setToolSetupBusy(false);
     }
@@ -2361,6 +2632,8 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         setPendingAiEnhancementId(null);
       }
 
+      await syncPendingCommonToolChanges();
+
       setMessage(
         isEditRevisionBump
           ? "New revision created successfully."
@@ -2690,32 +2963,71 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                           </datalist>
                         </>
                       ) : (
-                        <select
-                          value={toolPickerToolId}
-                          onChange={(event) => {
-                            const nextToolId = event.target.value;
-                            setToolPickerToolId(nextToolId);
-                            const selectedTool = commonToolOptions.find(
-                              (tool) => tool.id === nextToolId,
-                            );
-                            setCommonToolSearchInput(selectedTool?.name ?? "");
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                              event.preventDefault();
-                              addCommonToolToToolList();
-                            }
-                          }}
-                          className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                          disabled={toolCatalogBusy || commonToolOptions.length === 0}
-                        >
-                          <option value="">Select a common tool...</option>
-                          {commonToolOptions.map((tool) => (
-                            <option key={tool.id} value={tool.id}>
-                              {tool.name}
-                            </option>
-                          ))}
-                        </select>
+                        <div ref={commonToolSelectRef} className="relative">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (toolCatalogBusy || commonToolOptions.length === 0) {
+                                return;
+                              }
+                              setCommonToolSelectOpen((current) => !current);
+                            }}
+                            className="flex w-full items-center justify-between gap-2 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-left outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                            disabled={toolCatalogBusy || commonToolOptions.length === 0}
+                            aria-expanded={commonToolSelectOpen}
+                            aria-haspopup="listbox"
+                          >
+                            <span className="truncate">
+                              {selectedPickerTool?.name ?? "Select a common tool..."}
+                            </span>
+                            <ChevronDown
+                              size={14}
+                              className={cn("shrink-0 transition", commonToolSelectOpen ? "rotate-180" : "")}
+                            />
+                          </button>
+
+                          {commonToolSelectOpen ? (
+                            <div className="absolute left-0 right-0 top-[calc(100%+0.35rem)] z-30 rounded-lg border border-slate-300 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-950">
+                              <div className="max-h-[18rem] overflow-y-auto">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setToolPickerToolId("");
+                                    setCommonToolSearchInput("");
+                                    setCommonToolSelectOpen(false);
+                                  }}
+                                  className={cn(
+                                    "w-full px-2.5 py-1.5 text-left text-sm transition",
+                                    toolPickerToolId
+                                      ? "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900"
+                                      : "bg-cyan-500/10 text-cyan-900 dark:text-cyan-100",
+                                  )}
+                                >
+                                  Select a common tool...
+                                </button>
+                                {commonToolOptions.map((tool) => (
+                                  <button
+                                    key={tool.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setToolPickerToolId(tool.id);
+                                      setCommonToolSearchInput(tool.name);
+                                      setCommonToolSelectOpen(false);
+                                    }}
+                                    className={cn(
+                                      "w-full px-2.5 py-1.5 text-left text-sm transition hover:bg-slate-100 dark:hover:bg-slate-900",
+                                      toolPickerToolId === tool.id
+                                        ? "bg-cyan-500/10 text-cyan-900 dark:text-cyan-100"
+                                        : "text-slate-700 dark:text-slate-200",
+                                    )}
+                                  >
+                                    {tool.name}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
                       )}
                     </label>
 
@@ -2729,75 +3041,139 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                     </button>
                   </div>
 
-                  <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-                    <label className="grid gap-1 text-xs font-semibold text-slate-700 dark:text-slate-200">
-                      <span>Add New Common Tool</span>
-                      <input
-                        value={newSuggestedToolName}
-                        onChange={(event) => setNewSuggestedToolName(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            if (!toolSetupBusy && newSuggestedToolName.trim()) {
-                              void createSuggestedToolFromEditor();
-                            }
-                          }
-                        }}
-                        placeholder="Torque wrench, impact driver..."
-                        className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      disabled={toolSetupBusy || !newSuggestedToolName.trim()}
-                      onClick={() => {
-                        void createSuggestedToolFromEditor();
-                      }}
-                      className="rounded-lg border border-cyan-500/35 px-3 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-200"
-                    >
-                      {toolSetupBusy ? "Working..." : "Add Common Tool"}
-                    </button>
-                  </div>
-
                   <div className="grid gap-1">
-                    <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                      Tool List ({toolListCount})
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        Tool List ({toolListCount})
+                      </p>
+                      <button
+                        type="button"
+                        className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-400/70 text-[10px] font-bold text-slate-600 dark:border-slate-600 dark:text-slate-300"
+                        title="Bubble controls are staged until you save the instruction. Click a lit bubble to stage removal from Common Tools, or click an unlit bubble to stage adding it. Changes apply only after this instruction is saved."
+                        aria-label="How common tool bubbles work"
+                      >
+                        ?
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-600 dark:text-slate-300">
+                      Click a bubble to stage common-tool changes. Lit = will be in Common Tools
+                      after instruction save. Unlit = will be removed/not added after instruction
+                      save.
                     </p>
+                    {duplicateToolNotice ? (
+                      <p className="w-fit rounded-md border border-amber-500/45 bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:text-amber-100">
+                        {duplicateToolNotice}
+                      </p>
+                    ) : null}
                     {toolListCount === 0 ? (
                       <p className="rounded-lg border border-slate-300/70 bg-white/80 px-2.5 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300">
                         No tools in the list yet.
                       </p>
                     ) : (
                       <div className="flex flex-wrap gap-1.5">
-                        {selectedTools.map((tool) => (
-                          <button
-                            key={tool.id}
-                            type="button"
-                            onClick={() => toggleSelectedTool(tool.id)}
-                            className="inline-flex items-center gap-1 rounded-full border border-cyan-500/45 bg-cyan-500/15 px-2.5 py-1 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
-                            title="Click to remove"
-                          >
-                            <span>{tool.name}</span>
-                            {!tool.isActive ? (
-                              <span className="rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-200">
-                                Hidden
-                              </span>
-                            ) : null}
-                            <span className="opacity-70">x</span>
-                          </button>
-                        ))}
-                        {uncommonToolList.map((toolName) => (
-                          <button
-                            key={`uncommon:${toolName.toLowerCase()}`}
-                            type="button"
-                            onClick={() => removeUncommonToolFromList(toolName)}
-                            className="inline-flex items-center gap-1 rounded-full border border-amber-500/45 bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-800 transition hover:bg-amber-500/25 dark:text-amber-100"
-                            title="Click to remove"
-                          >
-                            <span>{toolName}</span>
-                            <span className="opacity-70">x</span>
-                          </button>
-                        ))}
+                        {selectedTools.map((tool) => {
+                          const savedToCommonList = isToolSavedToCommonList(tool.name);
+                          return (
+                            <div
+                              key={tool.id}
+                              className="inline-flex items-center gap-1 rounded-full border border-cyan-500/45 bg-cyan-500/15 px-2.5 py-1 text-xs font-semibold text-cyan-800 dark:text-cyan-100"
+                            >
+                              <span>{tool.name}</span>
+                              {!tool.isActive ? (
+                                <span className="rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-200">
+                                  Hidden
+                                </span>
+                              ) : null}
+                              <button
+                                type="button"
+                                onClick={() => toggleSelectedTool(tool.id)}
+                                className="opacity-70 transition hover:opacity-100"
+                                title="Remove from Tool List"
+                                aria-label={`Remove ${tool.name} from Tool List`}
+                              >
+                                x
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => toggleCommonToolSavedState(tool.name)}
+                                disabled={toolSetupBusy}
+                                className={cn(
+                                  "inline-flex h-4 w-4 items-center justify-center rounded-full border transition disabled:cursor-not-allowed disabled:opacity-60",
+                                  savedToCommonList
+                                    ? "border-emerald-500/70 bg-emerald-500/70"
+                                    : "border-cyan-500/45 bg-white/40 hover:bg-cyan-500/20 dark:bg-slate-900/40",
+                                )}
+                                title={
+                                  savedToCommonList
+                                    ? "Saved in Common Tools"
+                                    : "Save to Common Tools"
+                                }
+                                aria-label={
+                                  savedToCommonList
+                                    ? `${tool.name} is saved in Common Tools`
+                                    : `Save ${tool.name} to Common Tools`
+                                }
+                                aria-pressed={savedToCommonList}
+                              >
+                                <span
+                                  className={cn(
+                                    "h-2 w-2 rounded-full transition",
+                                    savedToCommonList ? "bg-white" : "bg-transparent",
+                                  )}
+                                />
+                              </button>
+                            </div>
+                          );
+                        })}
+                        {uncommonToolList.map((toolName) => {
+                          const savedToCommonList = isToolSavedToCommonList(toolName);
+                          return (
+                            <div
+                              key={`uncommon:${toolName.toLowerCase()}`}
+                              className="inline-flex items-center gap-1 rounded-full border border-amber-500/45 bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:text-amber-100"
+                            >
+                              <span>{toolName}</span>
+                              <button
+                                type="button"
+                                onClick={() => removeUncommonToolFromList(toolName)}
+                                className="opacity-70 transition hover:opacity-100"
+                                title="Remove from Tool List"
+                                aria-label={`Remove ${toolName} from Tool List`}
+                              >
+                                x
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => toggleCommonToolSavedState(toolName)}
+                                disabled={toolSetupBusy}
+                                className={cn(
+                                  "inline-flex h-4 w-4 items-center justify-center rounded-full border transition disabled:cursor-not-allowed disabled:opacity-60",
+                                  savedToCommonList
+                                    ? "border-emerald-500/70 bg-emerald-500/70"
+                                    : "border-amber-500/45 bg-white/40 hover:bg-amber-500/20 dark:bg-slate-900/40",
+                                )}
+                                title={
+                                  savedToCommonList
+                                    ? "Saved in Common Tools"
+                                    : "Save to Common Tools"
+                                }
+                                aria-label={
+                                  savedToCommonList
+                                    ? `${toolName} is saved in Common Tools`
+                                    : `Save ${toolName} to Common Tools`
+                                }
+                                aria-pressed={savedToCommonList}
+                              >
+                                <span
+                                  className={cn(
+                                    "h-2 w-2 rounded-full transition",
+                                    savedToCommonList ? "bg-white" : "bg-transparent",
+                                  )}
+                                />
+                              </button>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>

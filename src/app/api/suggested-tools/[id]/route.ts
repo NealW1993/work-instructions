@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
+import { canEditInstructions } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 interface UpdateSuggestedToolBody {
@@ -35,16 +36,33 @@ async function requireSystemAdmin(request: NextRequest) {
   return { error: null, profile };
 }
 
+async function requireEditor(request: NextRequest) {
+  const profile = await getRequestProfile(request);
+
+  if (!profile) {
+    return {
+      error: NextResponse.json({ error: "Unauthorized." }, { status: 401 }),
+      profile: null,
+    };
+  }
+
+  if (!canEditInstructions(profile.role)) {
+    return {
+      error: NextResponse.json(
+        { error: "Editor privileges required." },
+        { status: 403 },
+      ),
+      profile,
+    };
+  }
+
+  return { error: null, profile };
+}
+
 export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireSystemAdmin(request);
-  if (auth.error || !auth.profile) {
-    return auth.error;
-  }
-
-  const { id } = await context.params;
   const body = (await request.json().catch(() => ({}))) as UpdateSuggestedToolBody;
   const hasName = typeof body.name === "string";
   const hasIsActive = typeof body.isActive === "boolean";
@@ -56,6 +74,15 @@ export async function PATCH(
     );
   }
 
+  const auth =
+    hasName
+      ? await requireSystemAdmin(request)
+      : await requireEditor(request);
+  if (auth.error || !auth.profile) {
+    return auth.error;
+  }
+
+  const { id } = await context.params;
   const updates: Record<string, unknown> = {};
   if (hasName) {
     const normalizedName = normalizeToolName(body.name ?? "");
