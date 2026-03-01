@@ -710,7 +710,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
           "inline-flex items-center rounded-l-xl border border-r-0 px-4 py-2 text-sm font-semibold transition",
           isDashboardActive
             ? "border-cyan-700 bg-cyan-600 text-white shadow-sm dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900"
-            : "border-slate-300/70 bg-white/70 text-slate-700 hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/65 dark:text-slate-100 dark:hover:border-cyan-500/50 dark:hover:bg-cyan-500/10",
+            : "border-slate-300/70 bg-white/80 text-slate-700 hover:border-slate-400 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-800",
         )}
       >
         Dashboard
@@ -739,7 +739,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
           "relative inline-flex items-center rounded-r-xl border px-2.5 py-2 transition",
           isDashboardActive
             ? "border-cyan-700 bg-cyan-600 text-white hover:bg-cyan-700 dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
-            : "border-slate-300/70 bg-white/70 text-slate-700 hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/65 dark:text-slate-100 dark:hover:border-cyan-500/50 dark:hover:bg-cyan-500/10",
+            : "border-slate-300/70 bg-white/80 text-slate-700 hover:border-slate-400 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-800",
         )}
       >
         {dashboardNeedsAttention ? (
@@ -776,18 +776,6 @@ export function AppHeader({ profile }: { profile: Profile }) {
             <LayoutGrid size={14} />
             {customizeLabel}
           </button>
-
-          <div className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-[11px] text-slate-300">
-            {!isDashboardActive
-              ? "Choose Customize Dashboard to jump into dashboard studio."
-              : !activeDashboardLayoutState.available
-                ? "Dashboard studio is loading."
-              : !activeDashboardLayoutState.customizeOpen
-                ? "Open Customize Dashboard to enter Dashboard Studio."
-              : activeDashboardLayoutState.layoutSaving
-                  ? "Saving your layout..."
-                  : "Dashboard Studio is active in the header. Open that menu for presets, widget options, KPI widgets, and save/discard actions."}
-          </div>
 
           {activeDashboardLayoutState.layoutError ? (
             <p className="rounded-xl border border-rose-500/40 bg-rose-500/15 px-3 py-2 text-[11px] text-rose-100">
@@ -1177,6 +1165,15 @@ export function AppHeader({ profile }: { profile: Profile }) {
             </section>
 
             <section className="order-1 grid gap-2 rounded-xl border border-white/15 bg-white/5 p-2">
+              <button
+                type="button"
+                onClick={() => handleDashboardStudioAction({ command: "toggle-customize" })}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/25"
+              >
+                <LayoutGrid size={14} />
+                Close Customize Panel
+              </button>
+
               <div className="grid gap-2 sm:grid-cols-2">
                 <button
                   type="button"
@@ -1231,15 +1228,6 @@ export function AppHeader({ profile }: { profile: Profile }) {
                 </button>
               </div>
 
-              <button
-                type="button"
-                onClick={() => handleDashboardStudioAction({ command: "toggle-customize" })}
-                className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/25"
-              >
-                <LayoutGrid size={14} />
-                Close Customize Panel
-              </button>
-
               <div className="rounded-lg border border-white/15 bg-white/5 px-2.5 py-2 text-[11px] text-slate-300">
                 Manage dashboard layout and KPI widgets here while customize mode is active.
               </div>
@@ -1273,7 +1261,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
             "inline-flex items-center rounded-xl border px-4 py-2 text-sm font-semibold transition",
             isNewInstructionActive
               ? "border-cyan-700 bg-cyan-600 text-white shadow-sm dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900"
-              : "border-slate-300/70 bg-white/70 text-slate-700 hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/65 dark:text-slate-100 dark:hover:border-cyan-500/50 dark:hover:bg-cyan-500/10",
+              : "border-slate-300/70 bg-white/80 text-slate-700 hover:border-slate-400 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-800",
           )}
         >
           New Instruction
@@ -1297,7 +1285,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
             "inline-flex items-center rounded-l-xl border border-r-0 px-4 py-2 text-sm font-semibold transition",
             instructionControlActive
               ? "border-cyan-700 bg-cyan-600 text-white shadow-sm dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900"
-              : "border-slate-300/70 bg-white/70 text-slate-700 hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/65 dark:text-slate-100 dark:hover:border-cyan-500/50 dark:hover:bg-cyan-500/10",
+              : "border-slate-300/70 bg-white/80 text-slate-700 hover:border-slate-400 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-800",
           )}
         >
           New Instruction
@@ -1322,7 +1310,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
             "inline-flex items-center rounded-r-xl border px-2.5 py-2 transition",
             instructionControlActive
               ? "border-cyan-700 bg-cyan-600 text-white hover:bg-cyan-700 dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
-              : "border-slate-300/70 bg-white/70 text-slate-700 hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/65 dark:text-slate-100 dark:hover:border-cyan-500/50 dark:hover:bg-cyan-500/10",
+              : "border-slate-300/70 bg-white/80 text-slate-700 hover:border-slate-400 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-800",
           )}
         >
           <ChevronDown

@@ -1721,6 +1721,14 @@ export function DashboardClient({
     [],
   );
   const normalizedReviewWindowDays = normalizeReviewWindowDays(instructionReviewWindowDays);
+  const activeKpiDrilldownTotalEvents = useMemo(
+    () =>
+      activeKpiDrilldown?.rows.reduce(
+        (sum, row) => sum + (Number.isFinite(row.value) ? row.value : 0),
+        0,
+      ) ?? 0,
+    [activeKpiDrilldown],
+  );
 
   useEffect(() => {
     dragOverWidgetIdRef.current = dragOverWidgetId;
@@ -5459,38 +5467,40 @@ export function DashboardClient({
                     No records were found for this drill down point.
                   </p>
                 ) : (
-                  <div className="grid max-h-[55vh] gap-2 overflow-y-auto pr-1">
-                    {activeKpiDrilldown.rows.map((row) =>
-                      row.href ? (
-                        <Link
-                          key={row.id}
-                          href={row.href}
-                          onClick={() => setActiveKpiDrilldown(null)}
-                          className="rounded-xl border border-cyan-500/35 bg-cyan-500/10 p-3 transition hover:bg-cyan-500/20"
-                        >
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <p className="font-semibold text-slate-100">{row.label}</p>
-                            <span className="text-xs font-semibold text-cyan-200">
-                              {activeKpiDrilldown.yAxisLabel}: {formatKpiNumber(row.value)}
-                            </span>
-                          </div>
-                          <p className="text-xs text-slate-300">{row.detail}</p>
-                        </Link>
-                      ) : (
-                        <article
-                          key={row.id}
-                          className="rounded-xl border border-cyan-500/35 bg-cyan-500/10 p-3"
-                        >
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <p className="font-semibold text-slate-100">{row.label}</p>
-                            <span className="text-xs font-semibold text-cyan-200">
-                              {activeKpiDrilldown.yAxisLabel}: {formatKpiNumber(row.value)}
-                            </span>
-                          </div>
-                          <p className="text-xs text-slate-300">{row.detail}</p>
-                        </article>
-                      ),
-                    )}
+                  <div className="grid gap-2">
+                    <div className="rounded-xl border border-cyan-500/35 bg-cyan-500/10 px-3 py-2">
+                      <p className="text-sm font-semibold text-cyan-100">
+                        Total Events: {formatKpiNumber(activeKpiDrilldownTotalEvents)}
+                      </p>
+                    </div>
+
+                    <div className="grid max-h-[55vh] gap-2 overflow-y-auto pr-1">
+                      {activeKpiDrilldown.rows.map((row) =>
+                        row.href ? (
+                          <Link
+                            key={row.id}
+                            href={row.href}
+                            onClick={() => setActiveKpiDrilldown(null)}
+                            className="rounded-xl border border-cyan-500/35 bg-cyan-500/10 p-3 transition hover:bg-cyan-500/20"
+                          >
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="font-semibold text-slate-100">{row.label}</p>
+                            </div>
+                            <p className="text-xs text-slate-300">{row.detail}</p>
+                          </Link>
+                        ) : (
+                          <article
+                            key={row.id}
+                            className="rounded-xl border border-cyan-500/35 bg-cyan-500/10 p-3"
+                          >
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="font-semibold text-slate-100">{row.label}</p>
+                            </div>
+                            <p className="text-xs text-slate-300">{row.detail}</p>
+                          </article>
+                        ),
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
