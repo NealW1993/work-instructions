@@ -676,12 +676,12 @@ export function AppHeader({ profile }: { profile: Profile }) {
   return (
     <header className="sticky top-0 z-[80] border-b border-white/20 bg-white/75 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/70">
       <div className="mx-auto w-full max-w-7xl px-4 py-3 md:px-8">
-        <div className="relative flex items-center justify-center md:justify-end">
+        <div className="flex items-center justify-end gap-3">
           <Link
             href="/dashboard"
             onClick={handleDashboardLinkClick}
             aria-label="OMNI Technologies Dashboard"
-            className="absolute left-0 hidden items-center rounded-lg px-1 py-1 transition hover:opacity-90 md:inline-flex"
+            className="mr-auto hidden items-center rounded-lg px-1 py-1 transition hover:opacity-90 md:inline-flex"
           >
             <Image
               src="/omni-technologies-logo.svg"
@@ -692,7 +692,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
               className="h-7 w-auto md:h-8"
             />
           </Link>
-          <nav className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-3 md:flex">
+          <nav className="hidden items-center gap-3 md:flex">
             {renderDashboardControl(false)}
             {renderInstructionControl(false)}
           </nav>

@@ -563,7 +563,7 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
         type="button"
         onClick={() => (open ? closeMenu() : openMenu())}
         aria-expanded={open}
-        className="inline-flex items-center gap-2 rounded-full border border-slate-300/70 bg-white/80 px-3 py-1.5 text-sm font-semibold text-slate-800 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-100 dark:hover:bg-slate-900"
+        className="inline-flex items-center gap-2 rounded-xl border border-slate-300/70 bg-white/80 px-3 py-1.5 text-sm font-semibold text-slate-800 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-100 dark:hover:bg-slate-900"
       >
         <span
           className="inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-extrabold text-white"
@@ -578,7 +578,7 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
       {menuMounted ? (
         <div
           className={cn(
-            "absolute right-0 z-[90] mt-2 grid gap-3 rounded-2xl border border-white/20 bg-slate-950/95 p-3 shadow-2xl backdrop-blur-xl transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
+            "absolute right-0 z-[90] mt-2 grid gap-3 rounded-xl border border-white/20 bg-slate-950/95 p-3 shadow-2xl backdrop-blur-xl transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
             menuEntered ? "pointer-events-auto" : "pointer-events-none",
           )}
           style={{
@@ -626,7 +626,7 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
               </span>
               <span
                 className={cn(
-                  "relative inline-flex h-5 w-9 shrink-0 overflow-hidden rounded-full border transition-colors duration-300 ease-out",
+                  "relative inline-flex h-5 w-10 shrink-0 overflow-hidden rounded-md border transition-[background-color,border-color] duration-140 ease-[cubic-bezier(0.2,0.8,0.2,1)]",
                   isDarkTheme
                     ? "border-cyan-300/50 bg-cyan-400/45"
                     : "border-slate-400/45 bg-slate-700/80",
@@ -634,8 +634,8 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
               >
                 <span
                   className={cn(
-                    "absolute left-[2px] top-[2px] h-3.5 w-3.5 rounded-full bg-white shadow-md transition-transform duration-300 ease-out",
-                    isDarkTheme ? "translate-x-[14px]" : "translate-x-0",
+                    "absolute left-[2px] top-[2px] h-3.5 w-3.5 rounded-[3px] bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.2)] transition-transform duration-140 ease-[cubic-bezier(0.2,0.8,0.2,1)]",
+                    isDarkTheme ? "translate-x-[22px]" : "translate-x-0",
                   )}
                 />
               </span>

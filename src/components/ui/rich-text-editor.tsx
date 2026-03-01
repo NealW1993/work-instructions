@@ -87,6 +87,7 @@ interface RichTextEditorProps {
   minHeightClassName?: string;
   hasError?: boolean;
   focusRequestKey?: number;
+  toolbarAfterRedoContent?: ReactNode;
   toolbarEndContent?: ReactNode;
   aboveEditorContent?: ReactNode;
 }
@@ -714,6 +715,7 @@ export function RichTextEditor({
   minHeightClassName = "min-h-52",
   hasError = false,
   focusRequestKey = 0,
+  toolbarAfterRedoContent,
   toolbarEndContent,
   aboveEditorContent,
 }: RichTextEditorProps) {
@@ -1203,6 +1205,10 @@ export function RichTextEditor({
         >
           <Redo2 size={14} />
         </ToolbarButton>
+
+        {toolbarAfterRedoContent ? (
+          <div className="inline-flex items-center">{toolbarAfterRedoContent}</div>
+        ) : null}
 
         {toolbarEndContent ? (
           <div className="ml-auto inline-flex items-center justify-end">{toolbarEndContent}</div>

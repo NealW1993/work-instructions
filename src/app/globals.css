@@ -8,12 +8,18 @@
   --foreground: #3d4150;
   --muted: #73798a;
   --ring: #3f6ed8;
+  --ui-radius-sm: 0.3rem;
+  --ui-radius-md: 0.4rem;
+  --ui-radius-lg: 0.5rem;
+  --ui-radius-xl: 0.62rem;
+  --ui-radius-2xl: 0.76rem;
+  --ui-radius-3xl: 0.92rem;
 }
 
 .dark {
-  --background: #0a0a0a;
-  --surface: #171717cf;
-  --surface-strong: #111111;
+  --background: #000000;
+  --surface: #0b0b0bd9;
+  --surface-strong: #050505;
   --foreground: #f5f5f5;
   --muted: #a3a3a3;
   --ring: #d4d4d4;
@@ -120,9 +126,9 @@ body {
 
 .dark body {
   background:
-    radial-gradient(circle at 10% 15%, rgba(255, 255, 255, 0.13) 0%, transparent 45%),
-    radial-gradient(circle at 85% 10%, rgba(161, 161, 170, 0.16) 0%, transparent 35%),
-    radial-gradient(circle at 20% 85%, rgba(82, 82, 91, 0.2) 0%, transparent 40%),
+    radial-gradient(circle at 10% 15%, rgba(255, 255, 255, 0.045) 0%, transparent 42%),
+    radial-gradient(circle at 84% 10%, rgba(255, 255, 255, 0.03) 0%, transparent 34%),
+    radial-gradient(circle at 18% 86%, rgba(255, 255, 255, 0.02) 0%, transparent 35%),
     var(--background);
 }
 
@@ -642,4 +648,55 @@ html:not(.dark) .review-note-modal-shell textarea:focus {
   animation-name: dashboard-like-confetti-fall;
   animation-timing-function: linear;
   animation-iteration-count: infinite;
+}
+
+/* Global UI precision pass: less rounded and tighter container spacing. */
+.rounded-sm {
+  border-radius: var(--ui-radius-sm) !important;
+}
+
+.rounded,
+.rounded-md {
+  border-radius: var(--ui-radius-md) !important;
+}
+
+.rounded-lg {
+  border-radius: var(--ui-radius-lg) !important;
+}
+
+.rounded-xl {
+  border-radius: var(--ui-radius-xl) !important;
+}
+
+.rounded-2xl {
+  border-radius: var(--ui-radius-2xl) !important;
+}
+
+.rounded-3xl {
+  border-radius: var(--ui-radius-3xl) !important;
+}
+
+button.rounded-full,
+a.rounded-full,
+[role="button"].rounded-full,
+summary > .rounded-full {
+  border-radius: var(--ui-radius-2xl) !important;
+}
+
+:is(section, article, form, div)[class*="rounded-3xl"][class*="border"][class*="p-5"] {
+  padding: 1rem !important;
+}
+
+:is(section, article, form, div)[class*="rounded-3xl"][class*="border"][class*="p-6"] {
+  padding: 1.1rem !important;
+}
+
+@media (min-width: 48rem) {
+  :is(section, article, form, div)[class*="rounded-3xl"][class*="border"][class*="md:p-7"] {
+    padding: 1.25rem !important;
+  }
+
+  :is(section, article, form, div)[class*="rounded-3xl"][class*="border"][class*="md:p-8"] {
+    padding: 1.4rem !important;
+  }
 }

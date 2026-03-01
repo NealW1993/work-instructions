@@ -2571,6 +2571,24 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           minHeightClassName="min-h-72"
           hasError={fieldErrors.body}
           focusRequestKey={bodyFocusRequestKey}
+          toolbarAfterRedoContent={
+            <button
+              type="button"
+              onClick={() => {
+                void handleEnhanceInstruction();
+              }}
+              disabled={busy || enhanceBusy}
+              aria-label={enhanceBusy ? "Enhancing instructions" : "Enhance instructions with AI"}
+              title={enhanceBusy ? "Enhancing..." : "AI Enhance"}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-fuchsia-500/45 bg-fuchsia-500/20 text-fuchsia-100 transition hover:bg-fuchsia-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {enhanceBusy ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Sparkles size={14} />
+              )}
+            </button>
+          }
           toolbarEndContent={
             <button
               type="button"
@@ -2812,43 +2830,16 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                     </button>
                   </div>
                 </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-cyan-500/30 bg-cyan-500/5 px-3 py-2.5">
-                  <div className="grid gap-0.5">
-                    <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                      AI Enhance
-                    </p>
-                    <p className="text-xs text-slate-600 dark:text-slate-300">
-                      Analyze this draft, improve structure and formatting, then choose your
-                      version.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={busy || enhanceBusy}
-                    onClick={() => {
-                      void handleEnhanceInstruction();
-                    }}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-100"
-                  >
-                    {enhanceBusy ? (
-                      <Loader2 size={15} className="animate-spin" />
-                    ) : (
-                      <Sparkles size={15} />
-                    )}
-                    {enhanceBusy ? "Enhancing..." : "AI Enhance"}
-                  </button>
-                </div>
-
-                {enhanceError ? (
-                  <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-200">
-                    {enhanceError}
-                  </p>
-                ) : null}
               </>
             ) : null
           }
         />
+
+        {enhanceError ? (
+          <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-200">
+            {enhanceError}
+          </p>
+        ) : null}
 
         <button
           type="submit"
