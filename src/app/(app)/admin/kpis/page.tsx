@@ -1,6 +1,4 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
 
 import { AiEnhancementKpiPanel } from "@/components/admin/ai-enhancement-kpi-panel";
 import { ForkMergeKpiPanel } from "@/components/admin/fork-merge-kpi-panel";
@@ -8,6 +6,7 @@ import { KpiActivitySection } from "@/components/admin/kpi-activity-section";
 import { KpiInsightsPanel } from "@/components/admin/kpi-insights-panel";
 import { KpiSummaryCards, type KpiSummaryCardConfig } from "@/components/admin/kpi-summary-cards";
 import { ReviewCoverageKpiPanel } from "@/components/admin/review-coverage-kpi-panel";
+import { InstructionBackButton } from "@/components/instructions/instruction-back-button";
 import { requireAuthenticatedUser } from "@/lib/auth";
 import { canViewKpis, isSystemAdmin } from "@/lib/roles";
 import { formatElapsedHhMmSs } from "@/lib/session-timer";
@@ -415,15 +414,9 @@ export default async function SystemKpisPage() {
   return (
     <section className="grid gap-4">
       <header className="flex flex-wrap items-start gap-3">
-        {isSystemAdmin(profile.role) ? (
-          <Link
-            href="/admin/users"
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-300/70 bg-white/70 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-900"
-          >
-            <ArrowLeft size={16} />
-            Back to System Admin
-          </Link>
-        ) : null}
+        <InstructionBackButton
+          fallbackHref={isSystemAdmin(profile.role) ? "/admin/users" : "/dashboard"}
+        />
         <div className="grid min-w-0 gap-1">
           <h1 className="text-3xl font-extrabold text-slate-900 dark:text-slate-100">
             System KPI&apos;s

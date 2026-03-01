@@ -2578,7 +2578,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
               disabled={busy || enhanceBusy}
               aria-label={enhanceBusy ? "Enhancing instructions" : "Enhance instructions with AI"}
               title={enhanceBusy ? "Enhancing..." : "AI Enhance"}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-fuchsia-500/45 bg-fuchsia-500/20 text-fuchsia-100 transition hover:bg-fuchsia-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-fuchsia-500/45 bg-fuchsia-500/20 text-fuchsia-800 transition hover:bg-fuchsia-500/30 dark:text-fuchsia-100 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {enhanceBusy ? (
                 <Loader2 size={14} className="animate-spin" />
