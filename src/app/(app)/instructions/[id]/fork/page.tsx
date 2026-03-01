@@ -28,6 +28,10 @@ interface ForkInstructionRecord {
   work_items: WorkItemRelation | WorkItemRelation[];
 }
 
+interface InstructionSuggestedToolLinkRow {
+  suggested_tool_id: string;
+}
+
 function normalizeWorkItem(
   relation: ForkInstructionRecord["work_items"],
 ): WorkItemRelation | null {
@@ -68,6 +72,19 @@ export default async function ForkInstructionPage({ params }: ForkInstructionPag
   const forkRootInstructionId =
     instruction.fork_root_instruction_id ?? instruction.id;
 
+  const { data: suggestedToolLinkData, error: suggestedToolLinkError } = await supabase
+    .from("instruction_suggested_tools")
+    .select("suggested_tool_id")
+    .eq("instruction_id", instruction.id);
+
+  if (suggestedToolLinkError) {
+    throw new Error(suggestedToolLinkError.message);
+  }
+
+  const suggestedToolIds = ((suggestedToolLinkData ?? []) as InstructionSuggestedToolLinkRow[])
+    .map((link) => link.suggested_tool_id)
+    .filter((value) => value.trim().length > 0);
+
   if (!workItem) {
     notFound();
   }
@@ -96,6 +113,7 @@ export default async function ForkInstructionPage({ params }: ForkInstructionPag
           itemTitle: workItem.item_title,
           bodyMarkdown: instruction.body_markdown,
           revision: instruction.revision,
+          suggestedToolIds,
         }}
       />
     </div>

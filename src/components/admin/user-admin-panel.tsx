@@ -34,14 +34,36 @@ interface AdminDepartment {
 interface AdminSuggestedTool {
   id: string;
   name: string;
-  toolType: string;
+  categoryId: string;
+  subcategoryId: string | null;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface AdminSuggestedToolCategory {
+  id: string;
+  name: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface AdminSuggestedToolSubcategory {
+  id: string;
+  categoryId: string;
+  name: string;
+  sortOrder: number;
   createdAt: string;
   updatedAt: string;
 }
 
 interface SuggestedToolsResponse {
-  suggestedTools: AdminSuggestedTool[];
-  toolTypes: string[];
+  canCreateTaxonomy: boolean;
+  canManageTaxonomy: boolean;
+  categories: AdminSuggestedToolCategory[];
+  subcategories: AdminSuggestedToolSubcategory[];
+  tools: AdminSuggestedTool[];
 }
 
 interface InstructionReviewSettingsResponse {
@@ -83,6 +105,20 @@ type ConfirmDialogState =
   | {
       kind: "delete-suggested-tool";
       toolId: string;
+      title: string;
+      description: string;
+      confirmLabel: string;
+    }
+  | {
+      kind: "delete-suggested-tool-category";
+      categoryId: string;
+      title: string;
+      description: string;
+      confirmLabel: string;
+    }
+  | {
+      kind: "delete-suggested-tool-subcategory";
+      subcategoryId: string;
       title: string;
       description: string;
       confirmLabel: string;
@@ -224,13 +260,28 @@ export function UserAdminPanel() {
   const [reviewSettingsBusy, setReviewSettingsBusy] = useState(false);
   const [reviewWindowInputHasError, setReviewWindowInputHasError] = useState(false);
   const [reviewActivityReloadToken, setReviewActivityReloadToken] = useState(0);
+  const [canCreateSuggestedToolTaxonomy, setCanCreateSuggestedToolTaxonomy] = useState(false);
+  const [canManageSuggestedToolTaxonomy, setCanManageSuggestedToolTaxonomy] = useState(false);
+  const [suggestedToolCategories, setSuggestedToolCategories] = useState<
+    AdminSuggestedToolCategory[]
+  >([]);
+  const [suggestedToolSubcategories, setSuggestedToolSubcategories] = useState<
+    AdminSuggestedToolSubcategory[]
+  >([]);
   const [suggestedTools, setSuggestedTools] = useState<AdminSuggestedTool[]>([]);
-  const [suggestedToolTypes, setSuggestedToolTypes] = useState<string[]>([]);
   const [suggestedToolsCollapsed, setSuggestedToolsCollapsed] = useState(true);
   const [newSuggestedToolName, setNewSuggestedToolName] = useState("");
-  const [newSuggestedToolType, setNewSuggestedToolType] = useState("");
+  const [newSuggestedToolCategoryName, setNewSuggestedToolCategoryName] = useState("");
+  const [newSuggestedToolSubcategoryName, setNewSuggestedToolSubcategoryName] = useState("");
+  const [newSuggestedToolCategoryId, setNewSuggestedToolCategoryId] = useState("");
+  const [newSuggestedToolSubcategoryId, setNewSuggestedToolSubcategoryId] = useState("");
   const [newSuggestedToolNameHasError, setNewSuggestedToolNameHasError] = useState(false);
-  const [newSuggestedToolTypeHasError, setNewSuggestedToolTypeHasError] = useState(false);
+  const [newSuggestedToolCategoryNameHasError, setNewSuggestedToolCategoryNameHasError] =
+    useState(false);
+  const [newSuggestedToolSubcategoryNameHasError, setNewSuggestedToolSubcategoryNameHasError] =
+    useState(false);
+  const [newSuggestedToolCategoryIdHasError, setNewSuggestedToolCategoryIdHasError] =
+    useState(false);
 
   const [newDepartmentName, setNewDepartmentName] = useState("");
   const [newDepartmentNameHasError, setNewDepartmentNameHasError] = useState(false);
@@ -435,8 +486,31 @@ export function UserAdminPanel() {
         throw new Error(payload.error ?? "Unable to load suggested tools.");
       }
 
-      setSuggestedTools(payload.suggestedTools ?? []);
-      setSuggestedToolTypes(payload.toolTypes ?? []);
+      const nextCategories = payload.categories ?? [];
+      const nextSubcategories = payload.subcategories ?? [];
+      const nextTools = payload.tools ?? [];
+      setCanCreateSuggestedToolTaxonomy(payload.canCreateTaxonomy === true);
+      setCanManageSuggestedToolTaxonomy(payload.canManageTaxonomy === true);
+      setSuggestedToolCategories(nextCategories);
+      setSuggestedToolSubcategories(nextSubcategories);
+      setSuggestedTools(nextTools);
+      setNewSuggestedToolCategoryId((current) => {
+        if (current && nextCategories.some((category) => category.id === current)) {
+          return current;
+        }
+
+        return nextCategories[0]?.id ?? "";
+      });
+      setNewSuggestedToolSubcategoryId((current) => {
+        if (
+          current &&
+          nextSubcategories.some((subcategory) => subcategory.id === current)
+        ) {
+          return current;
+        }
+
+        return "";
+      });
     } catch (caughtError) {
       const normalizedMessage =
         caughtError instanceof Error
@@ -568,6 +642,16 @@ export function UserAdminPanel() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "suggested_tools" },
+        () => scheduleSuggestedToolsRefresh(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "suggested_tool_categories" },
+        () => scheduleSuggestedToolsRefresh(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "suggested_tool_subcategories" },
         () => scheduleSuggestedToolsRefresh(),
       )
       .subscribe();
@@ -735,26 +819,131 @@ export function UserAdminPanel() {
     }
   }
 
+  async function handleCreateSuggestedToolCategory(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    setNewSuggestedToolCategoryNameHasError(false);
+
+    try {
+      const normalizedName = normalizeSuggestedToolInput(newSuggestedToolCategoryName);
+
+      if (!normalizedName) {
+        setNewSuggestedToolCategoryNameHasError(true);
+        throw new Error("Category name is required.");
+      }
+
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/suggested-tools/categories", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          name: normalizedName,
+          sortOrder: suggestedToolCategories.length,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to create suggested tool category.");
+      }
+
+      setMessage("Suggested tool category added.");
+      setNewSuggestedToolCategoryName("");
+      await fetchSuggestedTools();
+    } catch (caughtError) {
+      const normalizedMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Unable to create suggested tool category.";
+      setError(normalizedMessage);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCreateSuggestedToolSubcategory(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    setNewSuggestedToolSubcategoryNameHasError(false);
+    setNewSuggestedToolCategoryIdHasError(false);
+
+    try {
+      const normalizedCategoryId = newSuggestedToolCategoryId.trim();
+      const normalizedName = normalizeSuggestedToolInput(newSuggestedToolSubcategoryName);
+
+      if (!normalizedCategoryId) {
+        setNewSuggestedToolCategoryIdHasError(true);
+        throw new Error("Category is required for a sub-category.");
+      }
+
+      if (!normalizedName) {
+        setNewSuggestedToolSubcategoryNameHasError(true);
+        throw new Error("Sub-category name is required.");
+      }
+
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/suggested-tools/subcategories", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          categoryId: normalizedCategoryId,
+          name: normalizedName,
+          sortOrder: suggestedToolSubcategories.filter(
+            (subcategory) => subcategory.categoryId === normalizedCategoryId,
+          ).length,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to create suggested tool sub-category.");
+      }
+
+      setMessage("Suggested tool sub-category added.");
+      setNewSuggestedToolSubcategoryName("");
+      await fetchSuggestedTools();
+    } catch (caughtError) {
+      const normalizedMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Unable to create suggested tool sub-category.";
+      setError(normalizedMessage);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleCreateSuggestedTool(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
     setError(null);
     setMessage(null);
     setNewSuggestedToolNameHasError(false);
-    setNewSuggestedToolTypeHasError(false);
+    setNewSuggestedToolCategoryIdHasError(false);
 
     try {
       const normalizedName = normalizeSuggestedToolInput(newSuggestedToolName);
-      const normalizedType = normalizeSuggestedToolInput(newSuggestedToolType);
+      const normalizedCategoryId = newSuggestedToolCategoryId.trim();
+      const normalizedSubcategoryId = newSuggestedToolSubcategoryId.trim();
+
+      if (!normalizedCategoryId) {
+        setNewSuggestedToolCategoryIdHasError(true);
+        throw new Error("Category is required for a tool.");
+      }
 
       if (!normalizedName) {
         setNewSuggestedToolNameHasError(true);
-        throw new Error("Suggested tool name is required.");
-      }
-
-      if (!normalizedType) {
-        setNewSuggestedToolTypeHasError(true);
-        throw new Error("Tool type is required.");
+        throw new Error("Tool name is required.");
       }
 
       const headers = await getAuthHeaders();
@@ -763,7 +952,9 @@ export function UserAdminPanel() {
         headers,
         body: JSON.stringify({
           name: normalizedName,
-          toolType: normalizedType,
+          categoryId: normalizedCategoryId,
+          subcategoryId: normalizedSubcategoryId || null,
+          sortOrder: suggestedTools.length,
         }),
       });
 
@@ -777,7 +968,6 @@ export function UserAdminPanel() {
 
       setMessage("Suggested tool added.");
       setNewSuggestedToolName("");
-      setNewSuggestedToolType("");
       await fetchSuggestedTools();
     } catch (caughtError) {
       const normalizedMessage =
@@ -818,6 +1008,74 @@ export function UserAdminPanel() {
         caughtError instanceof Error
           ? caughtError.message
           : "Unable to delete suggested tool.";
+      setError(normalizedMessage);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function performDeleteSuggestedToolCategory(categoryId: string) {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/suggested-tools/categories/${categoryId}`, {
+        method: "DELETE",
+        headers,
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to delete suggested tool category.");
+      }
+
+      setMessage("Suggested tool category deleted.");
+      setConfirmDialog(null);
+      await fetchSuggestedTools();
+    } catch (caughtError) {
+      const normalizedMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Unable to delete suggested tool category.";
+      setError(normalizedMessage);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function performDeleteSuggestedToolSubcategory(subcategoryId: string) {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/suggested-tools/subcategories/${subcategoryId}`, {
+        method: "DELETE",
+        headers,
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to delete suggested tool sub-category.");
+      }
+
+      setMessage("Suggested tool sub-category deleted.");
+      setConfirmDialog(null);
+      await fetchSuggestedTools();
+    } catch (caughtError) {
+      const normalizedMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Unable to delete suggested tool sub-category.";
       setError(normalizedMessage);
     } finally {
       setBusy(false);
@@ -1389,6 +1647,16 @@ export function UserAdminPanel() {
       return;
     }
 
+    if (confirmDialog.kind === "delete-suggested-tool-category") {
+      await performDeleteSuggestedToolCategory(confirmDialog.categoryId);
+      return;
+    }
+
+    if (confirmDialog.kind === "delete-suggested-tool-subcategory") {
+      await performDeleteSuggestedToolSubcategory(confirmDialog.subcategoryId);
+      return;
+    }
+
     await performDeleteDepartment(confirmDialog.departmentId);
   }
 
@@ -1400,23 +1668,56 @@ export function UserAdminPanel() {
     const currentColor = normalizeColorHex(colorUpdate) ?? DEFAULT_DEPARTMENT_COLORS[0];
     return nameDirty || currentColor !== savedColor;
   });
-  const suggestedToolTypeOptions = useMemo(() => {
-    const values = new Set<string>();
-    for (const toolType of suggestedToolTypes) {
-      const normalized = normalizeSuggestedToolInput(toolType);
-      if (normalized) {
-        values.add(normalized);
-      }
-    }
-    for (const tool of suggestedTools) {
-      const normalized = normalizeSuggestedToolInput(tool.toolType);
-      if (normalized) {
-        values.add(normalized);
-      }
+  const sortedSuggestedToolCategories = useMemo(
+    () =>
+      [...suggestedToolCategories].sort(
+        (first, second) =>
+          first.sortOrder - second.sortOrder || first.name.localeCompare(second.name),
+      ),
+    [suggestedToolCategories],
+  );
+  const newToolSubcategoryOptions = useMemo(() => {
+    if (!newSuggestedToolCategoryId) {
+      return [] as AdminSuggestedToolSubcategory[];
     }
 
-    return Array.from(values).sort((first, second) => first.localeCompare(second));
-  }, [suggestedToolTypes, suggestedTools]);
+    return suggestedToolSubcategories
+      .filter((subcategory) => subcategory.categoryId === newSuggestedToolCategoryId)
+      .sort(
+        (first, second) =>
+          first.sortOrder - second.sortOrder || first.name.localeCompare(second.name),
+      );
+  }, [newSuggestedToolCategoryId, suggestedToolSubcategories]);
+  const suggestedToolsGroupedByCategory = useMemo(
+    () =>
+      sortedSuggestedToolCategories.map((category) => {
+        const toolsInCategory = suggestedTools
+          .filter((tool) => tool.categoryId === category.id)
+          .sort(
+            (first, second) =>
+              first.sortOrder - second.sortOrder || first.name.localeCompare(second.name),
+          );
+        const subcategories = suggestedToolSubcategories
+          .filter((subcategory) => subcategory.categoryId === category.id)
+          .sort(
+            (first, second) =>
+              first.sortOrder - second.sortOrder || first.name.localeCompare(second.name),
+          )
+          .map((subcategory) => ({
+            subcategory,
+            tools: toolsInCategory.filter((tool) => tool.subcategoryId === subcategory.id),
+          }));
+        const uncategorizedTools = toolsInCategory.filter((tool) => !tool.subcategoryId);
+
+        return {
+          category,
+          subcategories,
+          uncategorizedTools,
+          totalTools: toolsInCategory.length,
+        };
+      }),
+    [sortedSuggestedToolCategories, suggestedToolSubcategories, suggestedTools],
+  );
 
   return (
     <div className="grid gap-5">
@@ -1524,103 +1825,334 @@ export function UserAdminPanel() {
 
         {!suggestedToolsCollapsed ? (
           <p className="text-sm text-slate-600 dark:text-slate-300">
-            Add suggested tools and categories used for instruction sanity checks. Tool type
-            auto-suggests from values already saved in the database.
+            Organize suggested tools by category and sub-category. These are used when selecting
+            suggested tools on instruction create, edit, and fork screens.
           </p>
         ) : null}
 
         {!suggestedToolsCollapsed ? (
-          <form
-            noValidate
-            onSubmit={handleCreateSuggestedTool}
-            className="grid gap-2 md:max-w-3xl md:grid-cols-[minmax(0,1fr)_220px_auto] md:items-end"
-          >
-            <label className="grid gap-1 text-sm">
-              <span>Tool Name</span>
-              <input
-                value={newSuggestedToolName}
-                onChange={(event) => {
-                  setNewSuggestedToolName(event.target.value);
-                  if (newSuggestedToolNameHasError && event.target.value.trim()) {
-                    setNewSuggestedToolNameHasError(false);
-                  }
-                }}
-                placeholder="Torque wrench, caliper, bore scope..."
-                className={getInputClass(newSuggestedToolNameHasError)}
-              />
-            </label>
-            <label className="grid gap-1 text-sm">
-              <span>Tool Type</span>
-              <input
-                list="suggested-tool-type-options"
-                value={newSuggestedToolType}
-                onChange={(event) => {
-                  setNewSuggestedToolType(event.target.value);
-                  if (newSuggestedToolTypeHasError && event.target.value.trim()) {
-                    setNewSuggestedToolTypeHasError(false);
-                  }
-                }}
-                placeholder="Measurement, setup, safety..."
-                className={getInputClass(newSuggestedToolTypeHasError)}
-              />
-              <datalist id="suggested-tool-type-options">
-                {suggestedToolTypeOptions.map((toolType) => (
-                  <option key={toolType} value={toolType} />
-                ))}
-              </datalist>
-            </label>
-            <button
-              type="submit"
-              disabled={busy}
-              className="rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {busy ? "Working..." : "Add Tool"}
-            </button>
-          </form>
+          canCreateSuggestedToolTaxonomy ? (
+            <div className="grid gap-3">
+              <form
+                noValidate
+                onSubmit={handleCreateSuggestedToolCategory}
+                className="grid gap-2 md:max-w-2xl md:grid-cols-[minmax(0,1fr)_auto] md:items-end"
+              >
+                <label className="grid gap-1 text-sm">
+                  <span>New Category</span>
+                  <input
+                    value={newSuggestedToolCategoryName}
+                    onChange={(event) => {
+                      setNewSuggestedToolCategoryName(event.target.value);
+                      if (newSuggestedToolCategoryNameHasError && event.target.value.trim()) {
+                        setNewSuggestedToolCategoryNameHasError(false);
+                      }
+                    }}
+                    placeholder="Bolts, Pneumatic Tools, Fixtures..."
+                    className={getInputClass(newSuggestedToolCategoryNameHasError)}
+                  />
+                </label>
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="rounded-xl border border-cyan-500/35 px-4 py-2.5 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-200"
+                >
+                  {busy ? "Working..." : "Add Category"}
+                </button>
+              </form>
+
+              <form
+                noValidate
+                onSubmit={handleCreateSuggestedToolSubcategory}
+                className="grid gap-2 md:max-w-3xl md:grid-cols-[220px_minmax(0,1fr)_auto] md:items-end"
+              >
+                <label className="grid gap-1 text-sm">
+                  <span>Category</span>
+                  <select
+                    value={newSuggestedToolCategoryId}
+                    onChange={(event) => {
+                      setNewSuggestedToolCategoryId(event.target.value);
+                      setNewSuggestedToolSubcategoryId("");
+                      if (newSuggestedToolCategoryIdHasError && event.target.value.trim()) {
+                        setNewSuggestedToolCategoryIdHasError(false);
+                      }
+                    }}
+                    className={getInputClass(newSuggestedToolCategoryIdHasError)}
+                    disabled={busy || sortedSuggestedToolCategories.length === 0}
+                  >
+                    {sortedSuggestedToolCategories.length === 0 ? (
+                      <option value="">No categories available</option>
+                    ) : null}
+                    {sortedSuggestedToolCategories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-1 text-sm">
+                  <span>New Sub-Category</span>
+                  <input
+                    value={newSuggestedToolSubcategoryName}
+                    onChange={(event) => {
+                      setNewSuggestedToolSubcategoryName(event.target.value);
+                      if (newSuggestedToolSubcategoryNameHasError && event.target.value.trim()) {
+                        setNewSuggestedToolSubcategoryNameHasError(false);
+                      }
+                    }}
+                    placeholder="SHCS, FHCS, BHCS..."
+                    className={getInputClass(newSuggestedToolSubcategoryNameHasError)}
+                  />
+                </label>
+                <button
+                  type="submit"
+                  disabled={busy || sortedSuggestedToolCategories.length === 0}
+                  className="rounded-xl border border-cyan-500/35 px-4 py-2.5 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-200"
+                >
+                  {busy ? "Working..." : "Add Sub-Category"}
+                </button>
+              </form>
+
+              <form
+                noValidate
+                onSubmit={handleCreateSuggestedTool}
+                className="grid gap-2 md:max-w-5xl md:grid-cols-[minmax(0,1fr)_220px_220px_auto] md:items-end"
+              >
+                <label className="grid gap-1 text-sm">
+                  <span>Tool Name</span>
+                  <input
+                    value={newSuggestedToolName}
+                    onChange={(event) => {
+                      setNewSuggestedToolName(event.target.value);
+                      if (newSuggestedToolNameHasError && event.target.value.trim()) {
+                        setNewSuggestedToolNameHasError(false);
+                      }
+                    }}
+                    placeholder="Torque wrench, caliper, bore scope..."
+                    className={getInputClass(newSuggestedToolNameHasError)}
+                  />
+                </label>
+                <label className="grid gap-1 text-sm">
+                  <span>Category</span>
+                  <select
+                    value={newSuggestedToolCategoryId}
+                    onChange={(event) => {
+                      setNewSuggestedToolCategoryId(event.target.value);
+                      setNewSuggestedToolSubcategoryId("");
+                      if (newSuggestedToolCategoryIdHasError && event.target.value.trim()) {
+                        setNewSuggestedToolCategoryIdHasError(false);
+                      }
+                    }}
+                    className={getInputClass(newSuggestedToolCategoryIdHasError)}
+                    disabled={busy || sortedSuggestedToolCategories.length === 0}
+                  >
+                    {sortedSuggestedToolCategories.length === 0 ? (
+                      <option value="">No categories available</option>
+                    ) : null}
+                    {sortedSuggestedToolCategories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-1 text-sm">
+                  <span>Sub-Category (Optional)</span>
+                  <select
+                    value={newSuggestedToolSubcategoryId}
+                    onChange={(event) => setNewSuggestedToolSubcategoryId(event.target.value)}
+                    className={getInputClass(false)}
+                    disabled={busy || !newSuggestedToolCategoryId}
+                  >
+                    <option value="">No sub-category</option>
+                    {newToolSubcategoryOptions.map((subcategory) => (
+                      <option key={subcategory.id} value={subcategory.id}>
+                        {subcategory.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="submit"
+                  disabled={busy || sortedSuggestedToolCategories.length === 0}
+                  className="rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {busy ? "Working..." : "Add Tool"}
+                </button>
+              </form>
+            </div>
+          ) : (
+            <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+              You can view suggested tool taxonomy, but only editors can create new categories,
+              sub-categories, and tools.
+            </p>
+          )
         ) : null}
 
         {!suggestedToolsCollapsed ? (
-          suggestedTools.length === 0 ? (
+          sortedSuggestedToolCategories.length === 0 ? (
             <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-              No suggested tools have been configured yet.
+              No suggested tool categories have been configured yet.
             </p>
           ) : (
-            <div className="grid gap-2">
-              {suggestedTools.map((tool) => (
+            <div className="grid gap-3">
+              {suggestedToolsGroupedByCategory.map((group) => (
                 <div
-                  key={tool.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-300/70 bg-white/70 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/50"
+                  key={group.category.id}
+                  className="grid gap-3 rounded-2xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50"
                 >
-                  <div className="grid gap-0.5">
-                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                      {tool.name}
-                    </p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Type: {tool.toolType}
-                    </p>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                        {group.category.name}
+                      </p>
+                      <span className="rounded-full border border-cyan-500/35 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-semibold text-cyan-800 dark:text-cyan-200">
+                        {group.totalTools} tool{group.totalTools === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    {canManageSuggestedToolTaxonomy ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          setConfirmDialog({
+                            kind: "delete-suggested-tool-category",
+                            categoryId: group.category.id,
+                            title: `Delete category "${group.category.name}"?`,
+                            description:
+                              "Delete all tools/sub-categories under this category first, then retry.",
+                            confirmLabel: "Delete Category",
+                          })
+                        }
+                        className="rounded-lg border border-rose-500/40 px-2 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-40 dark:text-rose-300"
+                      >
+                        Delete Category
+                      </button>
+                    ) : null}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Updated <LocalDateTime value={tool.updatedAt} mode="dateTime" />
+
+                  {group.uncategorizedTools.length > 0 ? (
+                    <div className="grid gap-1.5">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        No Sub-Category
+                      </p>
+                      {group.uncategorizedTools.map((tool) => (
+                        <div
+                          key={tool.id}
+                          className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-300/70 bg-white/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/70"
+                        >
+                          <div className="grid gap-0.5">
+                            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                              {tool.name}
+                            </p>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                              Updated <LocalDateTime value={tool.updatedAt} mode="dateTime" />
+                            </p>
+                          </div>
+                          {canManageSuggestedToolTaxonomy ? (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() =>
+                                setConfirmDialog({
+                                  kind: "delete-suggested-tool",
+                                  toolId: tool.id,
+                                  title: `Delete suggested tool "${tool.name}"?`,
+                                  description:
+                                    "This removes it from future instruction sanity-check dropdowns.",
+                                  confirmLabel: "Delete Tool",
+                                })
+                              }
+                              className="rounded-lg border border-rose-500/40 px-2 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-40 dark:text-rose-300"
+                            >
+                              Delete
+                            </button>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {group.subcategories.map(({ subcategory, tools }) => (
+                    <div key={subcategory.id} className="grid gap-1.5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                          {subcategory.name}
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                            {tools.length} tool{tools.length === 1 ? "" : "s"}
+                          </span>
+                          {canManageSuggestedToolTaxonomy ? (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() =>
+                                setConfirmDialog({
+                                  kind: "delete-suggested-tool-subcategory",
+                                  subcategoryId: subcategory.id,
+                                  title: `Delete sub-category "${subcategory.name}"?`,
+                                  description:
+                                    "Delete or move tools in this sub-category first, then retry.",
+                                  confirmLabel: "Delete Sub-Category",
+                                })
+                              }
+                              className="rounded-lg border border-rose-500/40 px-2 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-40 dark:text-rose-300"
+                            >
+                              Delete Sub-Category
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      {tools.length === 0 ? (
+                        <p className="rounded-xl border border-dashed border-slate-300/80 bg-white/70 px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-400">
+                          No tools in this sub-category.
+                        </p>
+                      ) : (
+                        tools.map((tool) => (
+                          <div
+                            key={tool.id}
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-300/70 bg-white/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/70"
+                          >
+                            <div className="grid gap-0.5">
+                              <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                                {tool.name}
+                              </p>
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                Updated <LocalDateTime value={tool.updatedAt} mode="dateTime" />
+                              </p>
+                            </div>
+                            {canManageSuggestedToolTaxonomy ? (
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() =>
+                                  setConfirmDialog({
+                                    kind: "delete-suggested-tool",
+                                    toolId: tool.id,
+                                    title: `Delete suggested tool "${tool.name}"?`,
+                                    description:
+                                      "This removes it from future instruction sanity-check dropdowns.",
+                                    confirmLabel: "Delete Tool",
+                                  })
+                                }
+                                className="rounded-lg border border-rose-500/40 px-2 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-40 dark:text-rose-300"
+                              >
+                                Delete
+                              </button>
+                            ) : null}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  ))}
+
+                  {group.totalTools === 0 && group.subcategories.length === 0 ? (
+                    <p className="rounded-xl border border-dashed border-slate-300/80 bg-white/70 px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-400">
+                      Category is empty.
                     </p>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        setConfirmDialog({
-                          kind: "delete-suggested-tool",
-                          toolId: tool.id,
-                          title: `Delete suggested tool "${tool.name}"?`,
-                          description:
-                            "This removes it from future instruction sanity-check dropdowns.",
-                          confirmLabel: "Delete Tool",
-                        })
-                      }
-                      className="rounded-lg border border-rose-500/40 px-2 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-40 dark:text-rose-300"
-                    >
-                      Delete
-                    </button>
-                  </div>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -2427,7 +2959,7 @@ export function UserAdminPanel() {
                               {nameChanged ? (
                                 <>
                                   <span className="opacity-50 line-through">{dept.name}</span>
-                                  {" â†’ "}
+                                  {" -> "}
                                   <span className="font-semibold text-slate-100">{newName}</span>
                                 </>
                               ) : (

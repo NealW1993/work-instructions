@@ -25,6 +25,7 @@ interface InstructionEditorProps {
     itemTitle: string;
     bodyMarkdown: string;
     revision: number;
+    suggestedToolIds?: string[];
   };
 }
 
@@ -54,6 +55,28 @@ interface EditorSnapshot {
   itemTitle: string;
   bodyMarkdown: string;
   revision: number;
+  selectedToolIds: string[];
+}
+
+interface SuggestedToolCategoryOption {
+  id: string;
+  name: string;
+  sortOrder: number;
+}
+
+interface SuggestedToolSubcategoryOption {
+  id: string;
+  categoryId: string;
+  name: string;
+  sortOrder: number;
+}
+
+interface SuggestedToolOption {
+  id: string;
+  name: string;
+  categoryId: string;
+  subcategoryId: string | null;
+  sortOrder: number;
 }
 
 interface InstructionChangeSourceMedia {
@@ -326,13 +349,19 @@ function buildSnapshot(data: {
   itemTitle: string;
   bodyMarkdown: string;
   revision: number;
+  selectedToolIds: string[];
 }): EditorSnapshot {
+  const normalizedToolIds = Array.from(
+    new Set(data.selectedToolIds.map((value) => value.trim()).filter(Boolean)),
+  ).sort((first, second) => first.localeCompare(second));
+
   return {
     departmentId: normalizeSnapshotValue(data.departmentId),
     partId: normalizeSnapshotValue(data.partId),
     itemTitle: normalizeSnapshotValue(data.itemTitle),
     bodyMarkdown: normalizeEditorContent(data.bodyMarkdown),
     revision: data.revision,
+    selectedToolIds: normalizedToolIds,
   };
 }
 
@@ -665,7 +694,9 @@ function snapshotsAreEqual(a: EditorSnapshot, b: EditorSnapshot) {
     a.partId === b.partId &&
     a.itemTitle === b.itemTitle &&
     a.bodyMarkdown === b.bodyMarkdown &&
-    a.revision === b.revision
+    a.revision === b.revision &&
+    a.selectedToolIds.length === b.selectedToolIds.length &&
+    a.selectedToolIds.every((value, index) => value === b.selectedToolIds[index])
   );
 }
 
@@ -735,6 +766,27 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     normalizeEditorContent(initialData?.bodyMarkdown ?? ""),
   );
   const [revision, setRevision] = useState(initialData?.revision ?? 1);
+  const [suggestedToolCategories, setSuggestedToolCategories] = useState<
+    SuggestedToolCategoryOption[]
+  >([]);
+  const [suggestedToolSubcategories, setSuggestedToolSubcategories] = useState<
+    SuggestedToolSubcategoryOption[]
+  >([]);
+  const [suggestedTools, setSuggestedTools] = useState<SuggestedToolOption[]>([]);
+  const [selectedToolIds, setSelectedToolIds] = useState<string[]>(
+    initialData?.suggestedToolIds ?? [],
+  );
+  const [toolCatalogBusy, setToolCatalogBusy] = useState(false);
+  const [toolCatalogError, setToolCatalogError] = useState<string | null>(null);
+  const [toolSetupBusy, setToolSetupBusy] = useState(false);
+  const [toolPickerCategoryId, setToolPickerCategoryId] = useState("");
+  const [toolPickerSubcategoryId, setToolPickerSubcategoryId] = useState("");
+  const [toolPickerToolId, setToolPickerToolId] = useState("");
+  const [newSuggestedToolCategoryName, setNewSuggestedToolCategoryName] = useState("");
+  const [newSuggestedToolSubcategoryName, setNewSuggestedToolSubcategoryName] = useState("");
+  const [newSuggestedToolName, setNewSuggestedToolName] = useState("");
+  const [newSuggestedToolCategoryId, setNewSuggestedToolCategoryId] = useState("");
+  const [newSuggestedToolSubcategoryId, setNewSuggestedToolSubcategoryId] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>(DEFAULT_FIELD_ERRORS);
   const [bodyFocusRequestKey, setBodyFocusRequestKey] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -774,6 +826,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         itemTitle: initialData?.itemTitle ?? "",
         bodyMarkdown: initialData?.bodyMarkdown ?? "",
         revision: initialData?.revision ?? 1,
+        selectedToolIds: initialData?.suggestedToolIds ?? [],
       }),
     [initialData],
   );
@@ -786,8 +839,9 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         itemTitle,
         bodyMarkdown,
         revision,
+        selectedToolIds,
       }),
-    [bodyMarkdown, departmentId, itemTitle, partId, revision],
+    [bodyMarkdown, departmentId, itemTitle, partId, revision, selectedToolIds],
   );
 
   const createModeHasMeaningfulChanges = useMemo(() => {
@@ -795,6 +849,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       currentSnapshot.partId.length > 0 ||
       currentSnapshot.itemTitle.length > 0 ||
       currentSnapshot.revision !== initialSnapshot.revision ||
+      currentSnapshot.selectedToolIds.length > 0 ||
       richTextToPlain(currentSnapshot.bodyMarkdown).length > 0;
 
     const hasDepartmentChange = departmentTouched
@@ -816,6 +871,83 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     () => departments.find((department) => department.id === departmentId)?.name ?? "Unknown",
     [departmentId, departments],
   );
+
+  const selectedToolSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
+  const toolCategoryById = useMemo(
+    () =>
+      new Map(
+        suggestedToolCategories.map((category) => [category.id, category] as const),
+      ),
+    [suggestedToolCategories],
+  );
+  const toolSubcategoryById = useMemo(
+    () =>
+      new Map(
+        suggestedToolSubcategories.map((subcategory) => [subcategory.id, subcategory] as const),
+      ),
+    [suggestedToolSubcategories],
+  );
+
+  const pickerSubcategoryOptions = useMemo(() => {
+    if (!toolPickerCategoryId) {
+      return [] as SuggestedToolSubcategoryOption[];
+    }
+
+    return suggestedToolSubcategories
+      .filter((subcategory) => subcategory.categoryId === toolPickerCategoryId)
+      .sort(
+        (first, second) =>
+          first.sortOrder - second.sortOrder || first.name.localeCompare(second.name),
+      );
+  }, [suggestedToolSubcategories, toolPickerCategoryId]);
+
+  const pickerToolOptions = useMemo(() => {
+    if (!toolPickerCategoryId) {
+      return [] as SuggestedToolOption[];
+    }
+
+    return suggestedTools
+      .filter((tool) => {
+        if (tool.categoryId !== toolPickerCategoryId) {
+          return false;
+        }
+
+        if (toolPickerSubcategoryId === "__none__") {
+          return tool.subcategoryId === null;
+        }
+
+        if (toolPickerSubcategoryId) {
+          return tool.subcategoryId === toolPickerSubcategoryId;
+        }
+
+        return true;
+      })
+      .sort(
+        (first, second) =>
+          first.sortOrder - second.sortOrder || first.name.localeCompare(second.name),
+      );
+  }, [suggestedTools, toolPickerCategoryId, toolPickerSubcategoryId]);
+
+  const selectedTools = useMemo(
+    () =>
+      suggestedTools
+        .filter((tool) => selectedToolSet.has(tool.id))
+        .sort((first, second) => first.name.localeCompare(second.name)),
+    [selectedToolSet, suggestedTools],
+  );
+
+  const newToolSubcategoryOptions = useMemo(() => {
+    if (!newSuggestedToolCategoryId) {
+      return [] as SuggestedToolSubcategoryOption[];
+    }
+
+    return suggestedToolSubcategories
+      .filter((subcategory) => subcategory.categoryId === newSuggestedToolCategoryId)
+      .sort(
+        (first, second) =>
+          first.sortOrder - second.sortOrder || first.name.localeCompare(second.name),
+      );
+  }, [newSuggestedToolCategoryId, suggestedToolSubcategories]);
 
   useEffect(() => {
     setPortalReady(true);
@@ -1060,6 +1192,190 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   }, [departmentId, departments]);
 
   useEffect(() => {
+    let isActive = true;
+    setToolCatalogBusy(true);
+    setToolCatalogError(null);
+
+    void (async () => {
+      try {
+        const [
+          { data: categoryData, error: categoryError },
+          { data: subcategoryData, error: subcategoryError },
+          { data: toolData, error: toolError },
+        ] = await Promise.all([
+          supabase
+            .from("suggested_tool_categories")
+            .select("id, name, sort_order")
+            .order("sort_order", { ascending: true })
+            .order("name", { ascending: true }),
+          supabase
+            .from("suggested_tool_subcategories")
+            .select("id, category_id, name, sort_order")
+            .order("sort_order", { ascending: true })
+            .order("name", { ascending: true }),
+          supabase
+            .from("suggested_tools")
+            .select("id, name, category_id, subcategory_id, sort_order")
+            .order("sort_order", { ascending: true })
+            .order("name", { ascending: true }),
+        ]);
+
+        if (!isActive) {
+          return;
+        }
+
+        if (categoryError) {
+          throw categoryError;
+        }
+
+        if (subcategoryError) {
+          throw subcategoryError;
+        }
+
+        if (toolError) {
+          throw toolError;
+        }
+
+        const nextCategories = ((categoryData ?? []) as Array<{
+          id: string;
+          name: string;
+          sort_order: number;
+        }>).map((category) => ({
+          id: category.id,
+          name: category.name,
+          sortOrder: category.sort_order ?? 0,
+        }));
+        const nextSubcategories = ((subcategoryData ?? []) as Array<{
+          id: string;
+          category_id: string;
+          name: string;
+          sort_order: number;
+        }>).map((subcategory) => ({
+          id: subcategory.id,
+          categoryId: subcategory.category_id,
+          name: subcategory.name,
+          sortOrder: subcategory.sort_order ?? 0,
+        }));
+        const nextTools = ((toolData ?? []) as Array<{
+          id: string;
+          name: string;
+          category_id: string;
+          subcategory_id: string | null;
+          sort_order: number;
+        }>).map((tool) => ({
+          id: tool.id,
+          name: tool.name,
+          categoryId: tool.category_id,
+          subcategoryId: tool.subcategory_id,
+          sortOrder: tool.sort_order ?? 0,
+        }));
+
+        setSuggestedToolCategories(nextCategories);
+        setSuggestedToolSubcategories(nextSubcategories);
+        setSuggestedTools(nextTools);
+
+        setSelectedToolIds((current) =>
+          current.filter((toolId) => nextTools.some((tool) => tool.id === toolId)),
+        );
+
+        const firstCategoryId = nextCategories[0]?.id ?? "";
+        setToolPickerCategoryId((current) =>
+          current && nextCategories.some((category) => category.id === current)
+            ? current
+            : firstCategoryId,
+        );
+        setNewSuggestedToolCategoryId((current) =>
+          current && nextCategories.some((category) => category.id === current)
+            ? current
+            : firstCategoryId,
+        );
+      } catch {
+        if (!isActive) {
+          return;
+        }
+
+        setSuggestedToolCategories([]);
+        setSuggestedToolSubcategories([]);
+        setSuggestedTools([]);
+        setToolCatalogError("Unable to load suggested tools.");
+      } finally {
+        if (isActive) {
+          setToolCatalogBusy(false);
+        }
+      }
+    })();
+
+    return () => {
+      isActive = false;
+    };
+  }, [supabase]);
+
+  useEffect(() => {
+    if (toolPickerCategoryId) {
+      return;
+    }
+
+    if (suggestedToolCategories.length === 0) {
+      return;
+    }
+
+    setToolPickerCategoryId(suggestedToolCategories[0].id);
+  }, [suggestedToolCategories, toolPickerCategoryId]);
+
+  useEffect(() => {
+    if (!newSuggestedToolCategoryId && suggestedToolCategories.length > 0) {
+      setNewSuggestedToolCategoryId(suggestedToolCategories[0].id);
+    }
+  }, [newSuggestedToolCategoryId, suggestedToolCategories]);
+
+  useEffect(() => {
+    if (!toolPickerCategoryId) {
+      setToolPickerSubcategoryId("");
+      return;
+    }
+
+    if (
+      toolPickerSubcategoryId &&
+      toolPickerSubcategoryId !== "__none__" &&
+      !suggestedToolSubcategories.some(
+        (subcategory) =>
+          subcategory.id === toolPickerSubcategoryId &&
+          subcategory.categoryId === toolPickerCategoryId,
+      )
+    ) {
+      setToolPickerSubcategoryId("");
+    }
+  }, [suggestedToolSubcategories, toolPickerCategoryId, toolPickerSubcategoryId]);
+
+  useEffect(() => {
+    if (!newSuggestedToolCategoryId) {
+      setNewSuggestedToolSubcategoryId("");
+      return;
+    }
+
+    if (
+      newSuggestedToolSubcategoryId &&
+      !suggestedToolSubcategories.some(
+        (subcategory) =>
+          subcategory.id === newSuggestedToolSubcategoryId &&
+          subcategory.categoryId === newSuggestedToolCategoryId,
+      )
+    ) {
+      setNewSuggestedToolSubcategoryId("");
+    }
+  }, [newSuggestedToolCategoryId, newSuggestedToolSubcategoryId, suggestedToolSubcategories]);
+
+  useEffect(() => {
+    if (!toolPickerToolId) {
+      return;
+    }
+
+    if (!pickerToolOptions.some((tool) => tool.id === toolPickerToolId)) {
+      setToolPickerToolId("");
+    }
+  }, [pickerToolOptions, toolPickerToolId]);
+
+  useEffect(() => {
     const query = partId.trim();
     if (query.length < 2) {
       setPartSuggestions([]);
@@ -1133,6 +1449,319 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       partId: true,
     }));
     partInputRef.current?.focus();
+  }
+
+  function toggleSelectedTool(toolId: string) {
+    setSelectedToolIds((current) =>
+      current.includes(toolId)
+        ? current.filter((currentToolId) => currentToolId !== toolId)
+        : [...current, toolId],
+    );
+  }
+
+  async function createSuggestedToolCategoryFromEditor() {
+    setToolCatalogError(null);
+    setToolSetupBusy(true);
+
+    try {
+      const normalizedName = newSuggestedToolCategoryName.trim();
+      if (!normalizedName) {
+        throw new Error("Enter a category name first.");
+      }
+
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+      if (userError || !user) {
+        throw new Error("You must be signed in.");
+      }
+
+      const { data, error: insertError } = await supabase
+        .from("suggested_tool_categories")
+        .insert({
+          name: normalizedName,
+          sort_order: suggestedToolCategories.length,
+          created_by: user.id,
+        })
+        .select("id")
+        .single();
+
+      if (insertError) {
+        if (insertError.code === "23505") {
+          throw new Error("Category already exists.");
+        }
+        throw new Error(insertError.message);
+      }
+
+      const insertedCategory = data as { id: string } | null;
+      if (!insertedCategory?.id) {
+        throw new Error("Unable to create category.");
+      }
+
+      setNewSuggestedToolCategoryName("");
+      await (async () => {
+        const [
+          { data: categoryData, error: categoryError },
+          { data: subcategoryData, error: subcategoryError },
+          { data: toolData, error: toolError },
+        ] = await Promise.all([
+          supabase
+            .from("suggested_tool_categories")
+            .select("id, name, sort_order")
+            .order("sort_order", { ascending: true })
+            .order("name", { ascending: true }),
+          supabase
+            .from("suggested_tool_subcategories")
+            .select("id, category_id, name, sort_order")
+            .order("sort_order", { ascending: true })
+            .order("name", { ascending: true }),
+          supabase
+            .from("suggested_tools")
+            .select("id, name, category_id, subcategory_id, sort_order")
+            .order("sort_order", { ascending: true })
+            .order("name", { ascending: true }),
+        ]);
+
+        if (categoryError) {
+          throw categoryError;
+        }
+        if (subcategoryError) {
+          throw subcategoryError;
+        }
+        if (toolError) {
+          throw toolError;
+        }
+
+        setSuggestedToolCategories(
+          ((categoryData ?? []) as Array<{ id: string; name: string; sort_order: number }>).map(
+            (category) => ({
+              id: category.id,
+              name: category.name,
+              sortOrder: category.sort_order ?? 0,
+            }),
+          ),
+        );
+        setSuggestedToolSubcategories(
+          ((subcategoryData ?? []) as Array<{
+            id: string;
+            category_id: string;
+            name: string;
+            sort_order: number;
+          }>).map((subcategory) => ({
+            id: subcategory.id,
+            categoryId: subcategory.category_id,
+            name: subcategory.name,
+            sortOrder: subcategory.sort_order ?? 0,
+          })),
+        );
+        setSuggestedTools(
+          ((toolData ?? []) as Array<{
+            id: string;
+            name: string;
+            category_id: string;
+            subcategory_id: string | null;
+            sort_order: number;
+          }>).map((tool) => ({
+            id: tool.id,
+            name: tool.name,
+            categoryId: tool.category_id,
+            subcategoryId: tool.subcategory_id,
+            sortOrder: tool.sort_order ?? 0,
+          })),
+        );
+      })();
+
+      setToolPickerCategoryId(insertedCategory.id);
+      setNewSuggestedToolCategoryId(insertedCategory.id);
+    } catch (caughtError) {
+      setToolCatalogError(
+        caughtError instanceof Error ? caughtError.message : "Unable to create category.",
+      );
+    } finally {
+      setToolSetupBusy(false);
+    }
+  }
+
+  async function createSuggestedToolSubcategoryFromEditor() {
+    setToolCatalogError(null);
+    setToolSetupBusy(true);
+
+    try {
+      const normalizedName = newSuggestedToolSubcategoryName.trim();
+      const normalizedCategoryId = newSuggestedToolCategoryId.trim();
+
+      if (!normalizedCategoryId) {
+        throw new Error("Select a category before creating a sub-category.");
+      }
+
+      if (!normalizedName) {
+        throw new Error("Enter a sub-category name first.");
+      }
+
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+      if (userError || !user) {
+        throw new Error("You must be signed in.");
+      }
+
+      const existingCount = suggestedToolSubcategories.filter(
+        (subcategory) => subcategory.categoryId === normalizedCategoryId,
+      ).length;
+
+      const { data, error: insertError } = await supabase
+        .from("suggested_tool_subcategories")
+        .insert({
+          category_id: normalizedCategoryId,
+          name: normalizedName,
+          sort_order: existingCount,
+          created_by: user.id,
+        })
+        .select("id")
+        .single();
+
+      if (insertError) {
+        if (insertError.code === "23505") {
+          throw new Error("Sub-category already exists for this category.");
+        }
+        throw new Error(insertError.message);
+      }
+
+      const insertedSubcategory = data as { id: string } | null;
+      if (!insertedSubcategory?.id) {
+        throw new Error("Unable to create sub-category.");
+      }
+
+      const { data: refreshedSubcategories, error: refreshError } = await supabase
+        .from("suggested_tool_subcategories")
+        .select("id, category_id, name, sort_order")
+        .order("sort_order", { ascending: true })
+        .order("name", { ascending: true });
+
+      if (refreshError) {
+        throw new Error(refreshError.message);
+      }
+
+      setSuggestedToolSubcategories(
+        ((refreshedSubcategories ?? []) as Array<{
+          id: string;
+          category_id: string;
+          name: string;
+          sort_order: number;
+        }>).map((subcategory) => ({
+          id: subcategory.id,
+          categoryId: subcategory.category_id,
+          name: subcategory.name,
+          sortOrder: subcategory.sort_order ?? 0,
+        })),
+      );
+      setNewSuggestedToolSubcategoryName("");
+      setNewSuggestedToolSubcategoryId(insertedSubcategory.id);
+      setToolPickerCategoryId(normalizedCategoryId);
+      setToolPickerSubcategoryId(insertedSubcategory.id);
+    } catch (caughtError) {
+      setToolCatalogError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Unable to create sub-category.",
+      );
+    } finally {
+      setToolSetupBusy(false);
+    }
+  }
+
+  async function createSuggestedToolFromEditor() {
+    setToolCatalogError(null);
+    setToolSetupBusy(true);
+
+    try {
+      const normalizedName = newSuggestedToolName.trim();
+      const normalizedCategoryId = newSuggestedToolCategoryId.trim();
+      const normalizedSubcategoryId = newSuggestedToolSubcategoryId.trim() || null;
+
+      if (!normalizedCategoryId) {
+        throw new Error("Select a category before creating a tool.");
+      }
+
+      if (!normalizedName) {
+        throw new Error("Enter a tool name first.");
+      }
+
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+      if (userError || !user) {
+        throw new Error("You must be signed in.");
+      }
+
+      const { data, error: insertError } = await supabase
+        .from("suggested_tools")
+        .insert({
+          name: normalizedName,
+          category_id: normalizedCategoryId,
+          subcategory_id: normalizedSubcategoryId,
+          sort_order: suggestedTools.length,
+          created_by: user.id,
+        })
+        .select("id")
+        .single();
+
+      if (insertError) {
+        if (insertError.code === "23505") {
+          throw new Error(
+            "Tool already exists in this category/sub-category.",
+          );
+        }
+        throw new Error(insertError.message);
+      }
+
+      const insertedTool = data as { id: string } | null;
+      if (!insertedTool?.id) {
+        throw new Error("Unable to create tool.");
+      }
+
+      const { data: refreshedTools, error: refreshError } = await supabase
+        .from("suggested_tools")
+        .select("id, name, category_id, subcategory_id, sort_order")
+        .order("sort_order", { ascending: true })
+        .order("name", { ascending: true });
+
+      if (refreshError) {
+        throw new Error(refreshError.message);
+      }
+
+      setSuggestedTools(
+        ((refreshedTools ?? []) as Array<{
+          id: string;
+          name: string;
+          category_id: string;
+          subcategory_id: string | null;
+          sort_order: number;
+        }>).map((tool) => ({
+          id: tool.id,
+          name: tool.name,
+          categoryId: tool.category_id,
+          subcategoryId: tool.subcategory_id,
+          sortOrder: tool.sort_order ?? 0,
+        })),
+      );
+      setNewSuggestedToolName("");
+      setToolPickerCategoryId(normalizedCategoryId);
+      setToolPickerSubcategoryId(normalizedSubcategoryId ?? "");
+      setToolPickerToolId(insertedTool.id);
+      setSelectedToolIds((current) =>
+        current.includes(insertedTool.id) ? current : [...current, insertedTool.id],
+      );
+    } catch (caughtError) {
+      setToolCatalogError(
+        caughtError instanceof Error ? caughtError.message : "Unable to create tool.",
+      );
+    } finally {
+      setToolSetupBusy(false);
+    }
   }
 
   function closeNavigationModal() {
@@ -1846,6 +2475,66 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         changeEventType = "updated";
       }
 
+      const normalizedSelectedToolIds = Array.from(
+        new Set(selectedToolIds.map((value) => value.trim()).filter(Boolean)),
+      );
+      const { data: existingInstructionTools, error: existingInstructionToolsError } =
+        await supabase
+          .from("instruction_suggested_tools")
+          .select("suggested_tool_id")
+          .eq("instruction_id", instructionId);
+
+      if (existingInstructionToolsError) {
+        throw new Error(
+          existingInstructionToolsError.message ?? "Unable to load linked suggested tools.",
+        );
+      }
+
+      const existingToolIds = new Set(
+        ((existingInstructionTools ?? []) as Array<{ suggested_tool_id: string }>).map(
+          (entry) => entry.suggested_tool_id,
+        ),
+      );
+      const selectedToolIdSet = new Set(normalizedSelectedToolIds);
+
+      const toolIdsToRemove = [...existingToolIds].filter(
+        (toolId) => !selectedToolIdSet.has(toolId),
+      );
+      const toolIdsToInsert = normalizedSelectedToolIds.filter(
+        (toolId) => !existingToolIds.has(toolId),
+      );
+
+      if (toolIdsToRemove.length > 0) {
+        const { error: removeToolsError } = await supabase
+          .from("instruction_suggested_tools")
+          .delete()
+          .eq("instruction_id", instructionId)
+          .in("suggested_tool_id", toolIdsToRemove);
+
+        if (removeToolsError) {
+          throw new Error(removeToolsError.message ?? "Unable to unlink removed suggested tools.");
+        }
+      }
+
+      if (toolIdsToInsert.length > 0) {
+        const { error: insertToolsError } = await supabase
+          .from("instruction_suggested_tools")
+          .upsert(
+            toolIdsToInsert.map((toolId) => ({
+              instruction_id: instructionId,
+              suggested_tool_id: toolId,
+              created_by: user.id,
+            })),
+            {
+              onConflict: "instruction_id,suggested_tool_id",
+            },
+          );
+
+        if (insertToolsError) {
+          throw new Error(insertToolsError.message ?? "Unable to link selected suggested tools.");
+        }
+      }
+
       if (changeOccurredAt && changeComputation.sourcePayload) {
         try {
           await supabase.from("instruction_change_events").upsert(
@@ -2106,6 +2795,250 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
               )}
             />
           </label>
+        </div>
+
+        <div className="grid gap-3 rounded-2xl border border-cyan-500/30 bg-cyan-500/5 px-3 py-3.5">
+          <div className="grid gap-0.5">
+            <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+              Suggested Tools
+            </p>
+            <p className="text-xs text-slate-600 dark:text-slate-300">
+              Pick tools from categorized lists. You can also add new categories,
+              sub-categories, and tools while setting up this instruction.
+            </p>
+          </div>
+
+          {toolCatalogError ? (
+            <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-200">
+              {toolCatalogError}
+            </p>
+          ) : null}
+
+          <div className="grid gap-2 md:grid-cols-[200px_200px_minmax(0,1fr)_auto] md:items-end">
+            <label className="grid gap-1 text-xs font-semibold text-slate-700 dark:text-slate-200">
+              <span>Category</span>
+              <select
+                value={toolPickerCategoryId}
+                onChange={(event) => {
+                  setToolPickerCategoryId(event.target.value);
+                  setToolPickerSubcategoryId("");
+                  setToolPickerToolId("");
+                }}
+                className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                disabled={toolCatalogBusy || suggestedToolCategories.length === 0}
+              >
+                {suggestedToolCategories.length === 0 ? (
+                  <option value="">No categories</option>
+                ) : null}
+                {suggestedToolCategories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="grid gap-1 text-xs font-semibold text-slate-700 dark:text-slate-200">
+              <span>Sub-Category</span>
+              <select
+                value={toolPickerSubcategoryId}
+                onChange={(event) => {
+                  setToolPickerSubcategoryId(event.target.value);
+                  setToolPickerToolId("");
+                }}
+                className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                disabled={toolCatalogBusy || !toolPickerCategoryId}
+              >
+                <option value="">All in category</option>
+                <option value="__none__">No sub-category</option>
+                {pickerSubcategoryOptions.map((subcategory) => (
+                  <option key={subcategory.id} value={subcategory.id}>
+                    {subcategory.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="grid gap-1 text-xs font-semibold text-slate-700 dark:text-slate-200">
+              <span>Tool</span>
+              <select
+                value={toolPickerToolId}
+                onChange={(event) => setToolPickerToolId(event.target.value)}
+                className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                disabled={toolCatalogBusy || pickerToolOptions.length === 0}
+              >
+                <option value="">
+                  {pickerToolOptions.length === 0 ? "No matching tools" : "Select a tool"}
+                </option>
+                {pickerToolOptions.map((tool) => (
+                  <option key={tool.id} value={tool.id}>
+                    {tool.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <button
+              type="button"
+              disabled={!toolPickerToolId}
+              onClick={() => {
+                if (!toolPickerToolId) {
+                  return;
+                }
+                toggleSelectedTool(toolPickerToolId);
+              }}
+              className="rounded-lg border border-cyan-500/40 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-100"
+            >
+              {selectedToolSet.has(toolPickerToolId) ? "Remove" : "Add"}
+            </button>
+          </div>
+
+          <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
+            <div className="grid gap-1.5 rounded-xl border border-slate-300/70 bg-white/70 p-2 dark:border-slate-700 dark:bg-slate-950/60">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                New Category
+              </p>
+              <input
+                value={newSuggestedToolCategoryName}
+                onChange={(event) => setNewSuggestedToolCategoryName(event.target.value)}
+                placeholder="Bolts, Fixtures, Pneumatic Tools..."
+                className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+              />
+              <button
+                type="button"
+                disabled={toolSetupBusy || !newSuggestedToolCategoryName.trim()}
+                onClick={() => {
+                  void createSuggestedToolCategoryFromEditor();
+                }}
+                className="rounded-lg border border-cyan-500/35 px-2 py-1.5 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-200"
+              >
+                {toolSetupBusy ? "Working..." : "Add Category"}
+              </button>
+            </div>
+
+            <div className="grid gap-1.5 rounded-xl border border-slate-300/70 bg-white/70 p-2 dark:border-slate-700 dark:bg-slate-950/60">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                New Sub-Category
+              </p>
+              <select
+                value={newSuggestedToolCategoryId}
+                onChange={(event) => setNewSuggestedToolCategoryId(event.target.value)}
+                className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+              >
+                <option value="">Select category</option>
+                {suggestedToolCategories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+              <input
+                value={newSuggestedToolSubcategoryName}
+                onChange={(event) => setNewSuggestedToolSubcategoryName(event.target.value)}
+                placeholder="SHCS, FHCS, BHCS..."
+                className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+              />
+              <button
+                type="button"
+                disabled={
+                  toolSetupBusy ||
+                  !newSuggestedToolCategoryId ||
+                  !newSuggestedToolSubcategoryName.trim()
+                }
+                onClick={() => {
+                  void createSuggestedToolSubcategoryFromEditor();
+                }}
+                className="rounded-lg border border-cyan-500/35 px-2 py-1.5 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-200"
+              >
+                {toolSetupBusy ? "Working..." : "Add Sub-Category"}
+              </button>
+            </div>
+
+            <div className="grid gap-1.5 rounded-xl border border-slate-300/70 bg-white/70 p-2 dark:border-slate-700 dark:bg-slate-950/60">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                New Tool
+              </p>
+              <select
+                value={newSuggestedToolCategoryId}
+                onChange={(event) => setNewSuggestedToolCategoryId(event.target.value)}
+                className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+              >
+                <option value="">Select category</option>
+                {suggestedToolCategories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={newSuggestedToolSubcategoryId}
+                onChange={(event) => setNewSuggestedToolSubcategoryId(event.target.value)}
+                className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                disabled={!newSuggestedToolCategoryId}
+              >
+                <option value="">No sub-category</option>
+                {newToolSubcategoryOptions.map((subcategory) => (
+                  <option key={subcategory.id} value={subcategory.id}>
+                    {subcategory.name}
+                  </option>
+                ))}
+              </select>
+              <input
+                value={newSuggestedToolName}
+                onChange={(event) => setNewSuggestedToolName(event.target.value)}
+                placeholder="Torque wrench, impact driver..."
+                className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+              />
+              <button
+                type="button"
+                disabled={
+                  toolSetupBusy || !newSuggestedToolCategoryId || !newSuggestedToolName.trim()
+                }
+                onClick={() => {
+                  void createSuggestedToolFromEditor();
+                }}
+                className="rounded-lg border border-cyan-500/35 px-2 py-1.5 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-200"
+              >
+                {toolSetupBusy ? "Working..." : "Add Tool"}
+              </button>
+            </div>
+          </div>
+
+          <div className="grid gap-1">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Selected Tools ({selectedTools.length})
+            </p>
+            {selectedTools.length === 0 ? (
+              <p className="rounded-lg border border-slate-300/70 bg-white/80 px-2.5 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300">
+                No tools selected yet.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {selectedTools.map((tool) => {
+                  const category = toolCategoryById.get(tool.categoryId);
+                  const subcategory = tool.subcategoryId
+                    ? toolSubcategoryById.get(tool.subcategoryId)
+                    : null;
+                  const subtitle = subcategory
+                    ? `${category?.name ?? "Category"} > ${subcategory.name}`
+                    : `${category?.name ?? "Category"}`;
+
+                  return (
+                    <button
+                      key={tool.id}
+                      type="button"
+                      onClick={() => toggleSelectedTool(tool.id)}
+                      className="inline-flex items-center gap-1 rounded-full border border-cyan-500/45 bg-cyan-500/15 px-2.5 py-1 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
+                      title={subtitle}
+                    >
+                      <span>{tool.name}</span>
+                      <span className="opacity-70">x</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-cyan-500/30 bg-cyan-500/5 px-3 py-2.5">

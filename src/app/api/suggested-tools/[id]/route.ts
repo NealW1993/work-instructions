@@ -58,6 +58,13 @@ export async function DELETE(
     .eq("id", id);
 
   if (deleteError) {
+    if (deleteError.code === "23503") {
+      return NextResponse.json(
+        { error: "Tool is linked to one or more instructions and cannot be deleted yet." },
+        { status: 409 },
+      );
+    }
+
     return NextResponse.json({ error: deleteError.message }, { status: 500 });
   }
 

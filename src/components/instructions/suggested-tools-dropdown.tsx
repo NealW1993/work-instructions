@@ -8,7 +8,8 @@ import { cn } from "@/lib/utils";
 export interface SuggestedToolOption {
   id: string;
   name: string;
-  toolType: string;
+  categoryName: string;
+  subcategoryName: string | null;
 }
 
 interface SuggestedToolsDropdownProps {
@@ -39,19 +40,27 @@ export function SuggestedToolsDropdown({ tools, className }: SuggestedToolsDropd
   }, [open]);
 
   const groupedTools = useMemo(() => {
-    const grouped = new Map<string, SuggestedToolOption[]>();
+    const grouped = new Map<string, Map<string, SuggestedToolOption[]>>();
     for (const tool of tools) {
-      const key = tool.toolType.trim() || "General";
-      const existing = grouped.get(key) ?? [];
-      existing.push(tool);
-      grouped.set(key, existing);
+      const categoryName = tool.categoryName.trim() || "General";
+      const subcategoryName = tool.subcategoryName?.trim() || "No Sub-Category";
+      const groupedByCategory = grouped.get(categoryName) ?? new Map<string, SuggestedToolOption[]>();
+      const groupedBySubcategory = groupedByCategory.get(subcategoryName) ?? [];
+      groupedBySubcategory.push(tool);
+      groupedByCategory.set(subcategoryName, groupedBySubcategory);
+      grouped.set(categoryName, groupedByCategory);
     }
 
     return Array.from(grouped.entries())
       .sort(([first], [second]) => first.localeCompare(second))
-      .map(([toolType, entries]) => ({
-        toolType,
-        entries: [...entries].sort((first, second) => first.name.localeCompare(second.name)),
+      .map(([categoryName, subcategoryMap]) => ({
+        categoryName,
+        subcategories: Array.from(subcategoryMap.entries())
+          .sort(([first], [second]) => first.localeCompare(second))
+          .map(([subcategoryName, entries]) => ({
+            subcategoryName,
+            entries: [...entries].sort((first, second) => first.name.localeCompare(second.name)),
+          })),
       }));
   }, [tools]);
 
@@ -121,29 +130,34 @@ export function SuggestedToolsDropdown({ tools, className }: SuggestedToolsDropd
           ) : (
             <div className="grid max-h-72 gap-2 overflow-y-auto pr-1">
               {groupedTools.map((group) => (
-                <div key={group.toolType} className="grid gap-1.5">
+                <div key={group.categoryName} className="grid gap-1.5">
                   <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                    {group.toolType}
+                    {group.categoryName}
                   </p>
-                  <div className="grid gap-1">
-                    {group.entries.map((tool) => (
-                      <label
-                        key={tool.id}
-                        className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300/70 bg-slate-100/70 px-2.5 py-1.5 text-xs text-slate-700 transition hover:bg-slate-200/70 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-800/70"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checkedToolIds.includes(tool.id)}
-                          onChange={() => handleToolToggle(tool.id)}
-                          className="h-4 w-4 rounded border-slate-400 text-cyan-600 focus:ring-cyan-500"
-                        />
-                        <span className="flex-1">{tool.name}</span>
-                        {checkedToolIds.includes(tool.id) ? (
-                          <CheckSquare size={13} className="text-emerald-600 dark:text-emerald-300" />
-                        ) : null}
-                      </label>
-                    ))}
-                  </div>
+                  {group.subcategories.map((subcategory) => (
+                    <div key={`${group.categoryName}:${subcategory.subcategoryName}`} className="grid gap-1">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500/90 dark:text-slate-400/90">
+                        {subcategory.subcategoryName}
+                      </p>
+                      {subcategory.entries.map((tool) => (
+                        <label
+                          key={tool.id}
+                          className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300/70 bg-slate-100/70 px-2.5 py-1.5 text-xs text-slate-700 transition hover:bg-slate-200/70 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-800/70"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checkedToolIds.includes(tool.id)}
+                            onChange={() => handleToolToggle(tool.id)}
+                            className="h-4 w-4 rounded border-slate-400 text-cyan-600 focus:ring-cyan-500"
+                          />
+                          <span className="flex-1">{tool.name}</span>
+                          {checkedToolIds.includes(tool.id) ? (
+                            <CheckSquare size={13} className="text-emerald-600 dark:text-emerald-300" />
+                          ) : null}
+                        </label>
+                      ))}
+                    </div>
+                  ))}
                 </div>
               ))}
             </div>

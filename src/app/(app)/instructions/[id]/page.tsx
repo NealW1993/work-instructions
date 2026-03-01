@@ -187,7 +187,28 @@ interface InstructionReviewStatusRow {
 interface SuggestedToolRow {
   id: string;
   name: string;
-  tool_type: string;
+  category_id: string;
+  subcategory_id: string | null;
+  suggested_tool_categories:
+    | {
+        name: string;
+      }
+    | Array<{
+        name: string;
+      }>
+    | null;
+  suggested_tool_subcategories:
+    | {
+        name: string;
+      }
+    | Array<{
+        name: string;
+      }>
+    | null;
+}
+
+interface InstructionSuggestedToolLinkRow {
+  suggested_tool_id: string;
 }
 
 const DEFAULT_REVIEW_WINDOW_DAYS = 30;
@@ -799,7 +820,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
     { count: instructionLikeCount },
     { data: reviewSettingsData, error: reviewSettingsError },
     { data: reviewStatusData, error: reviewStatusError },
-    { data: suggestedToolsData, error: suggestedToolsError },
+    { data: suggestedToolLinkData, error: suggestedToolLinkError },
   ] = await Promise.all([
     supabase
       .from("user_pinned_instructions")
@@ -828,21 +849,68 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
       .eq("instruction_id", instruction.id)
       .maybeSingle<InstructionReviewStatusRow>(),
     supabase
-      .from("suggested_tools")
-      .select("id, name, tool_type")
-      .order("tool_type", { ascending: true })
-      .order("name", { ascending: true }),
+      .from("instruction_suggested_tools")
+      .select("suggested_tool_id")
+      .eq("instruction_id", instruction.id),
   ]);
 
-  const suggestedTools: SuggestedToolOption[] = !suggestedToolsError
-    ? ((suggestedToolsData ?? []) as SuggestedToolRow[])
-        .map((tool) => ({
-          id: tool.id,
-          name: tool.name.trim(),
-          toolType: tool.tool_type.trim(),
-        }))
-        .filter((tool) => tool.name.length > 0 && tool.toolType.length > 0)
-    : [];
+  let suggestedTools: SuggestedToolOption[] = [];
+
+  if (suggestedToolLinkError) {
+    throw new Error(suggestedToolLinkError.message);
+  }
+
+  const linkedToolIds = ((suggestedToolLinkData ?? []) as InstructionSuggestedToolLinkRow[])
+    .map((link) => link.suggested_tool_id)
+    .filter((value) => value.trim().length > 0);
+
+  if (linkedToolIds.length > 0) {
+    const { data: suggestedToolsData, error: suggestedToolsError } = await supabase
+      .from("suggested_tools")
+      .select(
+        "id, name, category_id, subcategory_id, suggested_tool_categories(name), suggested_tool_subcategories(name)",
+      )
+      .in("id", linkedToolIds)
+      .order("name", { ascending: true });
+
+    if (suggestedToolsError) {
+      throw new Error(suggestedToolsError.message);
+    }
+
+    const getRelatedName = (
+      relation:
+        | {
+            name: string;
+          }
+        | Array<{
+            name: string;
+          }>
+        | null
+        | undefined,
+    ) => {
+      if (!relation) {
+        return "";
+      }
+
+      if (Array.isArray(relation)) {
+        return relation[0]?.name ?? "";
+      }
+
+      return relation.name;
+    };
+
+    suggestedTools = ((suggestedToolsData ?? []) as SuggestedToolRow[])
+      .map((tool) => ({
+        id: tool.id,
+        name: tool.name.trim(),
+        categoryName: getRelatedName(tool.suggested_tool_categories).trim() || "General",
+        subcategoryName: (() => {
+          const normalized = getRelatedName(tool.suggested_tool_subcategories).trim();
+          return normalized.length > 0 ? normalized : null;
+        })(),
+      }))
+      .filter((tool) => tool.name.length > 0);
+  }
 
   const reviewWindowDays =
     !reviewSettingsError
