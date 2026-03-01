@@ -14,9 +14,9 @@ export default async function NewInstructionPage() {
 
   return (
     <div className="grid gap-4">
-      <header className="grid gap-2">
+      <header className="flex flex-wrap items-start gap-3">
         <InstructionBackButton fallbackHref="/dashboard" />
-        <div>
+        <div className="grid min-w-0 gap-1">
           <h1 className="text-3xl font-extrabold text-slate-900 dark:text-slate-100">
             New Work Instruction
           </h1>

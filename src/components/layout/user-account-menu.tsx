@@ -614,34 +614,27 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
             onClick={handleThemeToggle}
             aria-label={`Switch to ${isDarkTheme ? "light" : "dark"} mode`}
             aria-pressed={isDarkTheme}
+            aria-busy={themeSaving}
             className="inline-flex items-center justify-between gap-3 rounded-xl border border-cyan-500/40 bg-cyan-500/14 px-3 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/24"
           >
             <span className="inline-flex items-center gap-2">
               {isDarkTheme ? <Moon size={15} /> : <Sun size={15} />}
               Theme
             </span>
-            <span className="inline-flex items-center gap-2">
-              <span className="text-xs uppercase tracking-wide text-cyan-100/85">
-                {isDarkTheme ? "Dark" : "Light"}
-              </span>
+            <span
+              className={cn(
+                "relative inline-flex h-5 w-10 shrink-0 overflow-hidden rounded-md border transition-[background-color,border-color] duration-140 ease-[cubic-bezier(0.2,0.8,0.2,1)]",
+                isDarkTheme
+                  ? "border-cyan-300/50 bg-cyan-400/45"
+                  : "border-slate-400/45 bg-slate-700/80",
+              )}
+            >
               <span
                 className={cn(
-                  "relative inline-flex h-5 w-10 shrink-0 overflow-hidden rounded-md border transition-[background-color,border-color] duration-140 ease-[cubic-bezier(0.2,0.8,0.2,1)]",
-                  isDarkTheme
-                    ? "border-cyan-300/50 bg-cyan-400/45"
-                    : "border-slate-400/45 bg-slate-700/80",
+                  "absolute left-[2px] top-[2px] h-3.5 w-3.5 rounded-[3px] bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.2)] transition-transform duration-140 ease-[cubic-bezier(0.2,0.8,0.2,1)]",
+                  isDarkTheme ? "translate-x-[22px]" : "translate-x-0",
                 )}
-              >
-                <span
-                  className={cn(
-                    "absolute left-[2px] top-[2px] h-3.5 w-3.5 rounded-[3px] bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.2)] transition-transform duration-140 ease-[cubic-bezier(0.2,0.8,0.2,1)]",
-                    isDarkTheme ? "translate-x-[22px]" : "translate-x-0",
-                  )}
-                />
-              </span>
-              {themeSaving ? (
-                <span className="h-1.5 w-1.5 rounded-full bg-cyan-200/85" />
-              ) : null}
+              />
             </span>
           </button>
 

@@ -2405,8 +2405,8 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         onSubmit={handleSubmit}
         className="grid min-w-0 gap-5 overflow-hidden rounded-3xl border border-white/30 bg-white/75 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7"
       >
-        <div className="grid gap-3 md:gap-4">
-          <label className="grid w-full gap-1.5 text-sm md:max-w-[200px]">
+        <div className="grid gap-3 md:grid-cols-[220px_minmax(0,1fr)_220px_140px] md:items-end md:gap-4">
+          <label className="grid min-w-0 gap-1.5 text-sm">
             <span className="font-semibold">Part ID</span>
             <div className="relative">
               <input
@@ -2471,9 +2471,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
               ) : null}
             </div>
           </label>
-        </div>
 
-        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_140px] md:items-end md:gap-4">
           <label className="grid gap-1.5 text-sm">
             <span className="font-semibold">Work Item Title</span>
             <input
