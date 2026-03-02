@@ -705,7 +705,7 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
               "inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition",
               isDarkTheme
                 ? "border-rose-500/55 bg-rose-600/30 text-rose-100 hover:bg-rose-600/40"
-                : "border-orange-600/75 bg-orange-200 text-rose-900 hover:bg-orange-300",
+                : "border-rose-800/85 bg-rose-700 text-white hover:bg-rose-800",
             )}
           >
             <LogOut size={15} />

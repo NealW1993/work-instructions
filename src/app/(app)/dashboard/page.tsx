@@ -99,6 +99,33 @@ interface DashboardInstructionReviewSettingsRow {
   review_window_days: number;
 }
 
+interface DashboardInstructionReviewStatusRow {
+  instruction_id: string;
+  status: "up_to_date" | "needs_review";
+  last_calibrated_at: string;
+  flagged_at: string | null;
+  updated_at: string;
+}
+
+interface DashboardReviewStateSourcePayload {
+  kind?: unknown;
+  nextStatus?: unknown;
+  reviewOrigin?: unknown;
+  note?: unknown;
+}
+
+interface DashboardNeedsReviewEventRow {
+  instruction_id: string;
+  occurred_at: string;
+  detail: string | null;
+  source_payload: unknown;
+}
+
+interface DashboardNeedsReviewMetadata {
+  reviewOrigin: "user" | "system";
+  note: string | null;
+}
+
 const DEFAULT_REVIEW_WINDOW_DAYS = 30;
 const MIN_REVIEW_WINDOW_DAYS = 1;
 const MAX_REVIEW_WINDOW_DAYS = 365;
@@ -310,6 +337,42 @@ function buildCreatorNameMap(
   return new Map((users ?? []).map((entry) => [entry.id, entry.full_name || "Unknown"]));
 }
 
+function isInstructionReviewState(value: unknown): value is "up_to_date" | "needs_review" {
+  return value === "up_to_date" || value === "needs_review";
+}
+
+function normalizeNeedsReviewMetadata(
+  sourcePayload: unknown,
+  detail: string | null,
+): DashboardNeedsReviewMetadata | null {
+  if (sourcePayload && typeof sourcePayload === "object" && !Array.isArray(sourcePayload)) {
+    const payload = sourcePayload as DashboardReviewStateSourcePayload;
+    if (
+      payload.kind === "instruction_review_state" &&
+      isInstructionReviewState(payload.nextStatus) &&
+      payload.nextStatus === "needs_review"
+    ) {
+      return {
+        reviewOrigin: payload.reviewOrigin === "system" ? "system" : "user",
+        note:
+          typeof payload.note === "string" && payload.note.trim().length > 0
+            ? payload.note.trim()
+            : null,
+      };
+    }
+  }
+
+  const normalizedDetail = detail?.trim().toLowerCase() ?? "";
+  if (!normalizedDetail.includes("review state changed to needs review")) {
+    return null;
+  }
+
+  return {
+    reviewOrigin: normalizedDetail.includes("system counter") ? "system" : "user",
+    note: null,
+  };
+}
+
 export default async function DashboardPage({ searchParams }: DashboardPageProps) {
   const { supabase, profile } = await requireAuthenticatedUser();
   const params = await searchParams;
@@ -331,7 +394,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     )
     .eq("is_archived", false)
     .order("created_at", { ascending: false })
-    .limit(6);
+    .limit(24);
 
   const pinnedRequest = supabase
     .from("user_pinned_instructions")
@@ -447,6 +510,24 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       instructionIdSet.add(instruction.id);
     }
   }
+  for (const instruction of rawNewest) {
+    instructionIdSet.add(instruction.id);
+  }
+  for (const row of rawPinned) {
+    const instruction = normalizeInstruction(row.work_instructions);
+    if (instruction) {
+      instructionIdSet.add(instruction.id);
+    }
+  }
+  for (const row of rawAuthoredLikes) {
+    const instruction = normalizeInstruction(row.work_instructions);
+    if (instruction) {
+      instructionIdSet.add(instruction.id);
+    }
+  }
+  for (const instruction of rawHistoryInstructions) {
+    instructionIdSet.add(instruction.id);
+  }
 
   const instructionReviewStatusByInstructionId: Record<
     string,
@@ -476,10 +557,74 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       break;
     }
 
-    for (const row of (reviewStatusRows ??
-      []) as DashboardInstructionReviewStatusData[]) {
-      instructionReviewStatusByInstructionId[row.instruction_id] = row;
+    for (const row of (reviewStatusRows ?? []) as DashboardInstructionReviewStatusRow[]) {
+      instructionReviewStatusByInstructionId[row.instruction_id] = {
+        instruction_id: row.instruction_id,
+        status: row.status,
+        last_calibrated_at: row.last_calibrated_at,
+        flagged_at: row.flagged_at,
+        updated_at: row.updated_at,
+        needs_review_note: null,
+        needs_review_origin: null,
+      };
     }
+  }
+
+  const needsReviewInstructionIds = Object.values(instructionReviewStatusByInstructionId)
+    .filter((status) => status.status === "needs_review")
+    .map((status) => status.instruction_id);
+  const latestNeedsReviewMetadataByInstructionId = new Map<
+    string,
+    DashboardNeedsReviewMetadata
+  >();
+
+  for (
+    let batchStartIndex = 0;
+    batchStartIndex < needsReviewInstructionIds.length;
+    batchStartIndex += REVIEW_STATUS_BATCH_SIZE
+  ) {
+    const batchIds = needsReviewInstructionIds.slice(
+      batchStartIndex,
+      batchStartIndex + REVIEW_STATUS_BATCH_SIZE,
+    );
+
+    const { data: reviewEvents, error: reviewEventsError } = await runDashboardQuery(
+      supabase
+        .from("instruction_change_events")
+        .select("instruction_id, occurred_at, detail, source_payload")
+        .eq("event_type", "updated")
+        .in("instruction_id", batchIds)
+        .ilike("detail", "Review state changed to Needs Review%")
+        .order("occurred_at", { ascending: false })
+        .range(0, 4999),
+      "Needs-review metadata query timed out.",
+    );
+
+    if (reviewEventsError) {
+      break;
+    }
+
+    for (const event of (reviewEvents ?? []) as DashboardNeedsReviewEventRow[]) {
+      if (latestNeedsReviewMetadataByInstructionId.has(event.instruction_id)) {
+        continue;
+      }
+
+      const metadata = normalizeNeedsReviewMetadata(event.source_payload, event.detail);
+      if (metadata) {
+        latestNeedsReviewMetadataByInstructionId.set(event.instruction_id, metadata);
+      }
+    }
+  }
+
+  for (const instructionId of needsReviewInstructionIds) {
+    const reviewStatus = instructionReviewStatusByInstructionId[instructionId];
+    if (!reviewStatus) {
+      continue;
+    }
+
+    const metadata = latestNeedsReviewMetadataByInstructionId.get(instructionId);
+    reviewStatus.needs_review_note = metadata?.note ?? null;
+    reviewStatus.needs_review_origin = metadata?.reviewOrigin ?? null;
   }
 
   const profileIds = new Set<string>();

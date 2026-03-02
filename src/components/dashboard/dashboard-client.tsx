@@ -118,6 +118,8 @@ export interface DashboardInstructionReviewStatusData {
   last_calibrated_at: string;
   flagged_at: string | null;
   updated_at: string;
+  needs_review_note: string | null;
+  needs_review_origin: "user" | "system" | null;
 }
 
 interface DashboardDepartmentOption {
@@ -238,6 +240,7 @@ const FINDER_SELECTED_DEPARTMENT_SETTING_PATH = [
 ] as const;
 const RECENT_UPDATES_EVENT_LIMIT = 20;
 const RECENT_UPDATES_SCROLL_CARD_LIMIT = 5;
+const NEWEST_SCROLL_CARD_LIMIT = 6;
 const RECENT_UPDATES_TIME_RANGE_SETTING_PATH = [
   "dashboard",
   "recentUpdates",
@@ -345,6 +348,24 @@ const WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
     description: "Donut graph of created, updated, and review actions.",
     category: "kpi",
   },
+  {
+    id: "kpi_review_origin_mix",
+    title: "KPI: Review Origin Mix",
+    description: "Donut graph of user-triggered versus system timeline review changes.",
+    category: "kpi",
+  },
+  {
+    id: "kpi_department_event_share",
+    title: "KPI: Department Event Share",
+    description: "Donut graph of event volume share by department.",
+    category: "kpi",
+  },
+  {
+    id: "kpi_actor_activity_mix",
+    title: "KPI: Actor Activity Mix",
+    description: "Donut graph of event activity by user.",
+    category: "kpi",
+  },
 ];
 
 const WIDGET_SIZE_OPTIONS: Array<{ value: DashboardWidgetSize; label: string }> = [
@@ -369,6 +390,9 @@ const RESET_DEFAULT_WIDGET_SIZE_BY_ID: Record<DashboardWidgetId, DashboardWidget
   kpi_review_health: "wide",
   kpi_revision_cycle_time: "wide",
   kpi_event_mix: "standard",
+  kpi_review_origin_mix: "standard",
+  kpi_department_event_share: "wide",
+  kpi_actor_activity_mix: "standard",
 };
 
 function isDashboardWidgetId(value: string): value is DashboardWidgetId {
@@ -446,8 +470,31 @@ function formatElapsedDaysLabel(daysElapsed: number | null) {
   return `Updated ${daysElapsed} days ago`;
 }
 
+function getNeedsReviewPillTooltip(
+  reviewStatus: DashboardInstructionReviewStatusData | null | undefined,
+) {
+  if (!reviewStatus || reviewStatus.status !== "needs_review") {
+    return "";
+  }
+
+  const note = reviewStatus.needs_review_note?.trim();
+  if (note) {
+    return note;
+  }
+
+  return "Mandatory review per system timeline.";
+}
+
 function isRecentUpdatesTimeRangeDays(value: number): value is RecentUpdatesTimeRangeDays {
   return RECENT_UPDATES_TIME_RANGE_OPTIONS.some((option) => option.value === value);
+}
+
+function truncateKpiLegendLabel(value: string, maxLength = 24) {
+  const normalized = value.trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(1, maxLength - 1)).trimEnd()}…`;
 }
 
 function normalizeWidgetTitleOverride(value: unknown): string | null {
@@ -1715,6 +1762,7 @@ export function DashboardClient({
   const finderPreferencesHydratedRef = useRef(false);
   const widgetTitleInputRef = useRef<HTMLInputElement | null>(null);
   const cancelWidgetTitleCommitRef = useRef(false);
+  const newestListRef = useRef<HTMLDivElement | null>(null);
   const systemHistoryListRef = useRef<HTMLDivElement | null>(null);
   const recentUpdatesListRef = useRef<HTMLDivElement | null>(null);
   const [query, setQuery] = useState(initialQuery);
@@ -1737,6 +1785,7 @@ export function DashboardClient({
   const [layoutDirty, setLayoutDirty] = useState(false);
   const [layoutSaving, setLayoutSaving] = useState(false);
   const [layoutError, setLayoutError] = useState<string | null>(null);
+  const [newestTimeRangeDays, setNewestTimeRangeDays] = useState<KpiTimeRangeDays>(30);
   const [kpiTimeRangeDays, setKpiTimeRangeDays] = useState<KpiTimeRangeDays>(30);
   const [activeKpiDrilldown, setActiveKpiDrilldown] =
     useState<KpiDrilldownPanelData | null>(null);
@@ -1754,6 +1803,7 @@ export function DashboardClient({
   );
   const [recentUpdatesTimeRangeDays, setRecentUpdatesTimeRangeDays] =
     useState<RecentUpdatesTimeRangeDays>(DEFAULT_RECENT_UPDATES_TIME_RANGE_DAYS);
+  const [newestListMaxHeight, setNewestListMaxHeight] = useState<number | null>(null);
   const [recentUpdatesListMaxHeight, setRecentUpdatesListMaxHeight] = useState<number | null>(
     null,
   );
@@ -2663,15 +2713,92 @@ export function DashboardClient({
     );
   }, [pinnedInstructions, selectedDepartmentId]);
 
+  const newestRangeStartTimestamp = useMemo(() => {
+    const today = new Date();
+    const todayStart = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate(),
+    ).getTime();
+    return todayStart - (newestTimeRangeDays - 1) * ONE_DAY_MS;
+  }, [newestTimeRangeDays]);
+
+  const newestDateRangeLabel = useMemo(() => {
+    const today = new Date();
+    const todayStart = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate(),
+    ).getTime();
+    return `${formatKpiLongDate(newestRangeStartTimestamp)} - ${formatKpiLongDate(todayStart)}`;
+  }, [newestRangeStartTimestamp]);
+
   const filteredNewestInstructions = useMemo(() => {
-    if (selectedDepartmentId === "all") {
-      return newestInstructions;
+    const departmentScoped =
+      selectedDepartmentId === "all"
+        ? newestInstructions
+        : newestInstructions.filter(
+            (instruction) => instruction.workItem.department_id === selectedDepartmentId,
+          );
+
+    return departmentScoped.filter(
+      (instruction) => toSortableTimestamp(instruction.created_at) >= newestRangeStartTimestamp,
+    );
+  }, [newestInstructions, newestRangeStartTimestamp, selectedDepartmentId]);
+
+  const shouldScrollNewest = filteredNewestInstructions.length > NEWEST_SCROLL_CARD_LIMIT;
+
+  const recalculateNewestListMaxHeight = useCallback(() => {
+    const listElement = newestListRef.current;
+    if (!listElement || !shouldScrollNewest) {
+      setNewestListMaxHeight(null);
+      return;
     }
 
-    return newestInstructions.filter(
-      (instruction) => instruction.workItem.department_id === selectedDepartmentId,
+    const cards = Array.from(
+      listElement.querySelectorAll<HTMLElement>("[data-newest-card='true']"),
     );
-  }, [newestInstructions, selectedDepartmentId]);
+    const visibleCardCount = Math.min(cards.length, NEWEST_SCROLL_CARD_LIMIT);
+    if (visibleCardCount === 0) {
+      setNewestListMaxHeight(null);
+      return;
+    }
+
+    let totalHeight = 0;
+    for (let index = 0; index < visibleCardCount; index += 1) {
+      totalHeight += cards[index].offsetHeight;
+    }
+
+    const styles = window.getComputedStyle(listElement);
+    const parsedGap = Number.parseFloat(styles.rowGap || styles.gap || "0");
+    if (Number.isFinite(parsedGap) && parsedGap > 0 && visibleCardCount > 1) {
+      totalHeight += parsedGap * (visibleCardCount - 1);
+    }
+
+    const nextMaxHeight = Math.ceil(totalHeight);
+    setNewestListMaxHeight((currentHeight) =>
+      currentHeight === nextMaxHeight ? currentHeight : nextMaxHeight,
+    );
+  }, [shouldScrollNewest]);
+
+  useEffect(() => {
+    recalculateNewestListMaxHeight();
+  }, [filteredNewestInstructions, recalculateNewestListMaxHeight]);
+
+  useEffect(() => {
+    const listElement = newestListRef.current;
+    if (!listElement || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      recalculateNewestListMaxHeight();
+    });
+    observer.observe(listElement);
+    return () => {
+      observer.disconnect();
+    };
+  }, [filteredNewestInstructions.length, recalculateNewestListMaxHeight]);
 
   const departmentFilteredSystemHistoryEvents = useMemo(() => {
     if (selectedDepartmentId === "all") {
@@ -3649,6 +3776,189 @@ export function DashboardClient({
     };
   }, [kpiEventsInRange]);
 
+  const reviewOriginMixMetric = useMemo(() => {
+    const segmentsById: Record<"user" | "system", KpiDonutSegment> = {
+      user: {
+        id: "review-origin-user",
+        label: "User Triggered",
+        value: 0,
+        color: "#3B82F6",
+      },
+      system: {
+        id: "review-origin-system",
+        label: "System Timeline",
+        value: 0,
+        color: "#F97316",
+      },
+    };
+    const rowsBySegmentId = new Map<string, KpiDrilldownRow[]>();
+
+    for (const { event, timestamp } of kpiEventsInRange) {
+      const eventType = classifyKpiEventType(event);
+      if (eventType !== "needs_review" && eventType !== "up_to_date") {
+        continue;
+      }
+
+      const segment =
+        event.detail.trim().toLowerCase().includes("system counter")
+          ? segmentsById.system
+          : segmentsById.user;
+      segment.value += 1;
+
+      const existingRows = rowsBySegmentId.get(segment.id) ?? [];
+      existingRows.push({
+        id: event.id,
+        label: getLabelWithDepartment(event.workItem),
+        title: getWorkItemTitle(event.workItem),
+        detail: `${event.action_label} by ${event.actor_name} on ${new Date(
+          timestamp,
+        ).toLocaleDateString()}`,
+        value: 1,
+        href: `/instructions/${event.instruction_id}`,
+      });
+      rowsBySegmentId.set(segment.id, existingRows);
+    }
+
+    return {
+      segments: Object.values(segmentsById).filter((segment) => segment.value > 0),
+      rowsBySegmentId,
+    };
+  }, [kpiEventsInRange]);
+
+  const departmentEventShareMetric = useMemo(() => {
+    const totalsByDepartment = new Map<
+      string,
+      {
+        id: string;
+        label: string;
+        color: string;
+        value: number;
+        rows: KpiDrilldownRow[];
+      }
+    >();
+
+    for (const { event, timestamp } of kpiEventsInRange) {
+      const existing = totalsByDepartment.get(event.workItem.department_id) ?? {
+        id: event.workItem.department_id,
+        label: event.workItem.department_name,
+        color: normalizeDepartmentColor(event.workItem.department_color),
+        value: 0,
+        rows: [],
+      };
+      existing.value += 1;
+      existing.rows.push({
+        id: event.id,
+        label: getLabelWithDepartment(event.workItem),
+        title: getWorkItemTitle(event.workItem),
+        detail: `${event.action_label} by ${event.actor_name} on ${new Date(
+          timestamp,
+        ).toLocaleDateString()}`,
+        value: 1,
+        href: `/instructions/${event.instruction_id}`,
+      });
+      totalsByDepartment.set(event.workItem.department_id, existing);
+    }
+
+    const ranked = [...totalsByDepartment.values()].sort((a, b) => b.value - a.value);
+    const topDepartments = ranked.slice(0, 5);
+    const remainingDepartments = ranked.slice(5);
+    const rowsBySegmentId = new Map<string, KpiDrilldownRow[]>();
+    const segments: KpiDonutSegment[] = topDepartments.map((entry) => {
+      rowsBySegmentId.set(entry.id, entry.rows);
+      return {
+        id: entry.id,
+        label: truncateKpiLegendLabel(entry.label, 20),
+        value: entry.value,
+        color: entry.color,
+      };
+    });
+
+    if (remainingDepartments.length > 0) {
+      const otherRows = remainingDepartments.flatMap((entry) => entry.rows);
+      const otherValue = remainingDepartments.reduce((sum, entry) => sum + entry.value, 0);
+      rowsBySegmentId.set("department-other", otherRows);
+      segments.push({
+        id: "department-other",
+        label: "Other Departments",
+        value: otherValue,
+        color: "#64748B",
+      });
+    }
+
+    return { segments, rowsBySegmentId };
+  }, [kpiEventsInRange]);
+
+  const actorActivityMixMetric = useMemo(() => {
+    const colorRamp = [
+      "#06B6D4",
+      "#3B82F6",
+      "#8B5CF6",
+      "#F59E0B",
+      "#22C55E",
+      "#F43F5E",
+    ];
+    const totalsByActor = new Map<
+      string,
+      {
+        id: string;
+        label: string;
+        value: number;
+        rows: KpiDrilldownRow[];
+      }
+    >();
+
+    for (const { event, timestamp } of kpiEventsInRange) {
+      const actorKey = event.actor_name.trim() || "Unknown User";
+      const existing = totalsByActor.get(actorKey) ?? {
+        id: actorKey,
+        label: actorKey,
+        value: 0,
+        rows: [],
+      };
+      existing.value += 1;
+      existing.rows.push({
+        id: event.id,
+        label: getLabelWithDepartment(event.workItem),
+        title: getWorkItemTitle(event.workItem),
+        detail: `${event.action_label} by ${event.actor_name} on ${new Date(
+          timestamp,
+        ).toLocaleDateString()}`,
+        value: 1,
+        href: `/instructions/${event.instruction_id}`,
+      });
+      totalsByActor.set(actorKey, existing);
+    }
+
+    const ranked = [...totalsByActor.values()].sort((a, b) => b.value - a.value);
+    const topActors = ranked.slice(0, 5);
+    const remainingActors = ranked.slice(5);
+    const rowsBySegmentId = new Map<string, KpiDrilldownRow[]>();
+    const segments: KpiDonutSegment[] = topActors.map((entry, index) => {
+      const segmentId = `actor-${index + 1}-${entry.id}`;
+      rowsBySegmentId.set(segmentId, entry.rows);
+      return {
+        id: segmentId,
+        label: truncateKpiLegendLabel(entry.label, 20),
+        value: entry.value,
+        color: colorRamp[index % colorRamp.length] ?? "#0EA5E9",
+      };
+    });
+
+    if (remainingActors.length > 0) {
+      const otherRows = remainingActors.flatMap((entry) => entry.rows);
+      const otherValue = remainingActors.reduce((sum, entry) => sum + entry.value, 0);
+      rowsBySegmentId.set("actors-other", otherRows);
+      segments.push({
+        id: "actors-other",
+        label: "Other Users",
+        value: otherValue,
+        color: "#94A3B8",
+      });
+    }
+
+    return { segments, rowsBySegmentId };
+  }, [kpiEventsInRange]);
+
   const kpiDateRangeLabel = useMemo(() => {
     const first = kpiDateBuckets[0];
     const last = kpiDateBuckets[kpiDateBuckets.length - 1];
@@ -4597,7 +4907,12 @@ export function DashboardClient({
                         ) : null}
                         {instructionReviewStatusByInstructionId[entry.instruction.id]?.status ===
                           "needs_review" && (
-                          <span className="inline-flex items-center gap-0.5 rounded-full border border-amber-500/45 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">
+                          <span
+                            title={getNeedsReviewPillTooltip(
+                              instructionReviewStatusByInstructionId[entry.instruction.id],
+                            )}
+                            className="inline-flex items-center gap-0.5 rounded-full border border-amber-500/45 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300"
+                          >
                             <TriangleAlert size={10} />
                             Needs Review
                           </span>
@@ -4666,7 +4981,12 @@ export function DashboardClient({
                 ) : null}
                 {instructionReviewStatusByInstructionId[instruction.id]?.status ===
                   "needs_review" && (
-                  <span className="inline-flex items-center gap-0.5 rounded-full border border-amber-500/45 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">
+                  <span
+                    title={getNeedsReviewPillTooltip(
+                      instructionReviewStatusByInstructionId[instruction.id],
+                    )}
+                    className="inline-flex items-center gap-0.5 rounded-full border border-amber-500/45 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300"
+                  >
                     <TriangleAlert size={10} />
                     Needs Review
                   </span>
@@ -4693,56 +5013,99 @@ export function DashboardClient({
           {newestError}
         </p>
       ) : filteredNewestInstructions.length === 0 ? (
-        <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-          No instructions available for {selectedDepartmentName}.
-        </p>
+        <div className="grid gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                Created Date Range
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{newestDateRangeLabel}</p>
+            </div>
+            <KpiTimeRangePicker
+              value={newestTimeRangeDays}
+              onChange={setNewestTimeRangeDays}
+            />
+          </div>
+          <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+            No instructions created in the last {newestTimeRangeDays} days for{" "}
+            {selectedDepartmentName}.
+          </p>
+        </div>
       ) : (
-        <div className="grid gap-2">
-          {filteredNewestInstructions.map((instruction) => (
-            <Link
-              key={instruction.id}
-              href={`/instructions/${instruction.id}`}
-              style={{
-                borderColor: colorWithAlpha(instruction.workItem.department_color, 0.45),
-                backgroundColor: colorWithAlpha(instruction.workItem.department_color, 0.14),
-                boxShadow: `inset 4px 0 0 ${colorWithAlpha(
-                  instruction.workItem.department_color,
-                  0.85,
-                )}`,
-              }}
-              className="rounded-xl border p-3 transition hover:brightness-105"
-            >
-              <div className="flex flex-wrap items-center gap-1.5">
-                <PartDepartmentHeading workItem={instruction.workItem} />
-                {getForkLabel(
-                  instruction.fork_number,
-                  instruction.fork_root_instruction_id,
-                ) ? (
-                  <span className="inline-flex items-center rounded-full border border-cyan-500/45 bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-200">
-                    {getForkLabel(
-                      instruction.fork_number,
-                      instruction.fork_root_instruction_id,
-                    )}
-                  </span>
-                ) : null}
-                {instructionReviewStatusByInstructionId[instruction.id]?.status ===
-                  "needs_review" && (
-                  <span className="inline-flex items-center gap-0.5 rounded-full border border-amber-500/45 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">
-                    <TriangleAlert size={10} />
-                    Needs Review
-                  </span>
-                )}
-              </div>
-              <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
-                {instruction.workItem.item_title}
+        <div className="grid gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                Created Date Range
               </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Revision {instruction.revision} | Created{" "}
-                <LocalDateTime value={instruction.created_at} mode="date" /> by{" "}
-                {instruction.creator_name}
-              </p>
-            </Link>
-          ))}
+              <p className="text-xs text-slate-500 dark:text-slate-400">{newestDateRangeLabel}</p>
+            </div>
+            <KpiTimeRangePicker
+              value={newestTimeRangeDays}
+              onChange={setNewestTimeRangeDays}
+            />
+          </div>
+          <div
+            ref={newestListRef}
+            className={cn("grid gap-2", shouldScrollNewest ? "overflow-y-auto pr-1" : "")}
+            style={
+              shouldScrollNewest && newestListMaxHeight !== null
+                ? { maxHeight: `${newestListMaxHeight}px` }
+                : undefined
+            }
+          >
+            {filteredNewestInstructions.map((instruction) => (
+              <Link
+                key={instruction.id}
+                data-newest-card="true"
+                href={`/instructions/${instruction.id}`}
+                style={{
+                  borderColor: colorWithAlpha(instruction.workItem.department_color, 0.45),
+                  backgroundColor: colorWithAlpha(instruction.workItem.department_color, 0.14),
+                  boxShadow: `inset 4px 0 0 ${colorWithAlpha(
+                    instruction.workItem.department_color,
+                    0.85,
+                  )}`,
+                }}
+                className="rounded-xl border p-3 transition hover:brightness-105"
+              >
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <PartDepartmentHeading workItem={instruction.workItem} />
+                  {getForkLabel(
+                    instruction.fork_number,
+                    instruction.fork_root_instruction_id,
+                  ) ? (
+                    <span className="inline-flex items-center rounded-full border border-cyan-500/45 bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-200">
+                      {getForkLabel(
+                        instruction.fork_number,
+                        instruction.fork_root_instruction_id,
+                      )}
+                    </span>
+                  ) : null}
+                  {instructionReviewStatusByInstructionId[instruction.id]?.status ===
+                    "needs_review" && (
+                    <span
+                      title={getNeedsReviewPillTooltip(
+                        instructionReviewStatusByInstructionId[instruction.id],
+                      )}
+                      className="inline-flex items-center gap-0.5 rounded-full border border-amber-500/45 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300"
+                    >
+                      <TriangleAlert size={10} />
+                      Needs Review
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
+                  {instruction.workItem.item_title}
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Revision {instruction.revision} | Created{" "}
+                  <LocalDateTime value={instruction.created_at} mode="date" /> by{" "}
+                  {instruction.creator_name}
+                </p>
+              </Link>
+            ))}
+          </div>
         </div>
       );
     }
@@ -4850,6 +5213,11 @@ export function DashboardClient({
                     ) : null}
                   </p>
                   <span
+                    title={
+                      entry.isFlagged
+                        ? getNeedsReviewPillTooltip(entry.reviewStatus)
+                        : undefined
+                    }
                     className={cn(
                       "rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide",
                       entry.isFlagged
@@ -5412,6 +5780,117 @@ export function DashboardClient({
       );
     }
 
+    if (widgetId === "kpi_review_origin_mix") {
+      return (
+        <div className="grid gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                Time Series Filter
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiDateRangeLabel}</p>
+            </div>
+            <KpiTimeRangePicker
+              value={kpiTimeRangeDays}
+              onChange={setKpiTimeRangeDays}
+            />
+          </div>
+          {reviewOriginMixMetric.segments.length === 0 ? (
+            <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+              No review-origin events are available for this time range.
+            </p>
+          ) : (
+            <KpiDonutChart
+              segments={reviewOriginMixMetric.segments}
+              widgetSize={widgetSize}
+              onSelectSegment={(segment) => {
+                setActiveKpiDrilldown({
+                  title: "Review Origin Mix Drill Down",
+                  subtitle: `${segment.label} | ${kpiDateRangeLabel}`,
+                  yAxisLabel: "Events",
+                  rows: reviewOriginMixMetric.rowsBySegmentId.get(segment.id) ?? [],
+                });
+              }}
+            />
+          )}
+        </div>
+      );
+    }
+
+    if (widgetId === "kpi_department_event_share") {
+      return (
+        <div className="grid gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                Time Series Filter
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiDateRangeLabel}</p>
+            </div>
+            <KpiTimeRangePicker
+              value={kpiTimeRangeDays}
+              onChange={setKpiTimeRangeDays}
+            />
+          </div>
+          {departmentEventShareMetric.segments.length === 0 ? (
+            <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+              No department event-share data is available for this range.
+            </p>
+          ) : (
+            <KpiDonutChart
+              segments={departmentEventShareMetric.segments}
+              widgetSize={widgetSize}
+              onSelectSegment={(segment) => {
+                setActiveKpiDrilldown({
+                  title: "Department Event Share Drill Down",
+                  subtitle: `${segment.label} | ${kpiDateRangeLabel}`,
+                  yAxisLabel: "Events",
+                  rows: departmentEventShareMetric.rowsBySegmentId.get(segment.id) ?? [],
+                });
+              }}
+            />
+          )}
+        </div>
+      );
+    }
+
+    if (widgetId === "kpi_actor_activity_mix") {
+      return (
+        <div className="grid gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                Time Series Filter
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiDateRangeLabel}</p>
+            </div>
+            <KpiTimeRangePicker
+              value={kpiTimeRangeDays}
+              onChange={setKpiTimeRangeDays}
+            />
+          </div>
+          {actorActivityMixMetric.segments.length === 0 ? (
+            <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+              No actor activity data is available for this range.
+            </p>
+          ) : (
+            <KpiDonutChart
+              segments={actorActivityMixMetric.segments}
+              widgetSize={widgetSize}
+              onSelectSegment={(segment) => {
+                setActiveKpiDrilldown({
+                  title: "Actor Activity Mix Drill Down",
+                  subtitle: `${segment.label} | ${kpiDateRangeLabel}`,
+                  yAxisLabel: "Events",
+                  rows: actorActivityMixMetric.rowsBySegmentId.get(segment.id) ?? [],
+                });
+              }}
+            />
+          )}
+        </div>
+      );
+    }
+
     const isMyImpactCompact = widgetSize === "compact";
 
     return (
@@ -5481,7 +5960,12 @@ export function DashboardClient({
                   ) : null}
                   {instructionReviewStatusByInstructionId[entry.instruction.id]?.status ===
                     "needs_review" && (
-                    <span className="inline-flex items-center gap-0.5 rounded-full border border-amber-500/45 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">
+                    <span
+                      title={getNeedsReviewPillTooltip(
+                        instructionReviewStatusByInstructionId[entry.instruction.id],
+                      )}
+                      className="inline-flex items-center gap-0.5 rounded-full border border-amber-500/45 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300"
+                    >
                       <TriangleAlert size={10} />
                       Needs Review
                     </span>

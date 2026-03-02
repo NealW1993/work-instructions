@@ -12,7 +12,10 @@ export type DashboardWidgetId =
   | "kpi_department_workload"
   | "kpi_review_health"
   | "kpi_revision_cycle_time"
-  | "kpi_event_mix";
+  | "kpi_event_mix"
+  | "kpi_review_origin_mix"
+  | "kpi_department_event_share"
+  | "kpi_actor_activity_mix";
 
 export type DashboardWidgetSize = "compact" | "standard" | "wide" | "full";
 
@@ -43,6 +46,9 @@ export const DASHBOARD_WIDGET_IDS: DashboardWidgetId[] = [
   "kpi_review_health",
   "kpi_revision_cycle_time",
   "kpi_event_mix",
+  "kpi_review_origin_mix",
+  "kpi_department_event_share",
+  "kpi_actor_activity_mix",
 ];
 
 export const DASHBOARD_WIDGET_SIZES: DashboardWidgetSize[] = [
@@ -73,6 +79,9 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
       { id: "kpi_review_health", visible: false, size: "wide" },
       { id: "kpi_revision_cycle_time", visible: false, size: "wide" },
       { id: "kpi_event_mix", visible: false, size: "standard" },
+      { id: "kpi_review_origin_mix", visible: false, size: "standard" },
+      { id: "kpi_department_event_share", visible: false, size: "wide" },
+      { id: "kpi_actor_activity_mix", visible: false, size: "standard" },
     ],
   },
   {
@@ -93,6 +102,9 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
       { id: "kpi_review_health", visible: false, size: "wide" },
       { id: "kpi_revision_cycle_time", visible: false, size: "wide" },
       { id: "kpi_event_mix", visible: false, size: "standard" },
+      { id: "kpi_review_origin_mix", visible: false, size: "standard" },
+      { id: "kpi_department_event_share", visible: false, size: "wide" },
+      { id: "kpi_actor_activity_mix", visible: false, size: "standard" },
     ],
   },
   {
@@ -113,6 +125,9 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
       { id: "kpi_review_health", visible: false, size: "wide" },
       { id: "kpi_revision_cycle_time", visible: false, size: "wide" },
       { id: "kpi_event_mix", visible: false, size: "standard" },
+      { id: "kpi_review_origin_mix", visible: false, size: "standard" },
+      { id: "kpi_department_event_share", visible: false, size: "wide" },
+      { id: "kpi_actor_activity_mix", visible: false, size: "standard" },
     ],
   },
   {
@@ -133,6 +148,9 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
       { id: "kpi_review_health", visible: false, size: "wide" },
       { id: "kpi_revision_cycle_time", visible: false, size: "wide" },
       { id: "kpi_event_mix", visible: false, size: "standard" },
+      { id: "kpi_review_origin_mix", visible: false, size: "standard" },
+      { id: "kpi_department_event_share", visible: false, size: "wide" },
+      { id: "kpi_actor_activity_mix", visible: false, size: "standard" },
     ],
   },
   {
@@ -153,6 +171,9 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
       { id: "kpi_review_health", visible: false, size: "wide" },
       { id: "kpi_revision_cycle_time", visible: false, size: "wide" },
       { id: "kpi_event_mix", visible: false, size: "standard" },
+      { id: "kpi_review_origin_mix", visible: false, size: "standard" },
+      { id: "kpi_department_event_share", visible: false, size: "wide" },
+      { id: "kpi_actor_activity_mix", visible: false, size: "standard" },
     ],
   },
   {
@@ -173,6 +194,9 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
       { id: "kpi_review_health", visible: false, size: "wide" },
       { id: "kpi_revision_cycle_time", visible: false, size: "wide" },
       { id: "kpi_event_mix", visible: false, size: "standard" },
+      { id: "kpi_review_origin_mix", visible: false, size: "standard" },
+      { id: "kpi_department_event_share", visible: false, size: "wide" },
+      { id: "kpi_actor_activity_mix", visible: false, size: "standard" },
     ],
   },
 ];
