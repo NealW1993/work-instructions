@@ -613,15 +613,6 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
             </p>
           </div>
 
-          <Link
-            href="/account"
-            onClick={() => closeMenu()}
-            className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
-          >
-            <Settings size={15} />
-            Account Settings
-          </Link>
-
           <button
             type="button"
             onClick={handleThemeToggle}
@@ -650,6 +641,15 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
               />
             </span>
           </button>
+
+          <Link
+            href="/account"
+            onClick={() => closeMenu()}
+            className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
+          >
+            <Settings size={15} />
+            Account Settings
+          </Link>
 
           {isSystemAdmin(profile.role) ? (
             <Link
@@ -701,7 +701,12 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
           <button
             type="button"
             onClick={() => void handleSignOut()}
-            className="inline-flex items-center gap-2 rounded-xl border border-rose-500/45 bg-rose-500/15 px-3 py-2 text-sm font-semibold text-rose-100 transition hover:bg-rose-500/25"
+            className={cn(
+              "inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition",
+              isDarkTheme
+                ? "border-rose-500/55 bg-rose-600/30 text-rose-100 hover:bg-rose-600/40"
+                : "border-orange-600/75 bg-orange-200 text-rose-900 hover:bg-orange-300",
+            )}
           >
             <LogOut size={15} />
             Logout

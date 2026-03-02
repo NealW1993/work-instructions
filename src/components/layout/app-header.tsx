@@ -275,8 +275,10 @@ export function AppHeader({ profile }: { profile: Profile }) {
       instructionRect && instructionRect.right > studioRect.left
         ? Math.round(instructionRect.right - studioRect.left)
         : 560;
+    const viewportMaxWidth = Math.max(320, Math.round(window.innerWidth - 24));
+    const normalizedWidth = Math.min(Math.max(targetWidth, 520), viewportMaxWidth);
 
-    setStudioMenuWidth(Math.max(targetWidth, 520));
+    setStudioMenuWidth(normalizedWidth);
   }, []);
 
   const scrollStudioMenuToBottom = useCallback(() => {
@@ -836,17 +838,19 @@ export function AppHeader({ profile }: { profile: Profile }) {
             data-dashboard-studio-menu="true"
             className={cn(
               "absolute top-[calc(100%+0.5rem)] z-[90] grid max-h-[74vh] gap-2 overflow-y-auto rounded-2xl border border-white/20 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-xl transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
-              mobile ? "left-2 right-2" : "left-0",
+              mobile ? "left-2 right-2" : "right-0",
               studioMenuEntered ? "pointer-events-auto" : "pointer-events-none",
             )}
             style={{
-              ...(mobile ? {} : { width: `${studioMenuWidth}px` }),
+              ...(mobile
+                ? {}
+                : { width: `${studioMenuWidth}px`, maxWidth: "calc(100vw - 16px)" }),
               opacity: studioMenuEntered ? 1 : 0,
               filter: studioMenuEntered ? "blur(0px)" : "blur(6px)",
               transform: studioMenuEntered
                 ? "translateY(0px) scale(1)"
                 : "translateY(-8px) scale(0.98)",
-              transformOrigin: mobile ? "top center" : "top left",
+              transformOrigin: mobile ? "top center" : "top right",
             }}
           >
             <section className="order-2 grid gap-2 rounded-xl border border-white/15 bg-white/5 p-2">

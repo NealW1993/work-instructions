@@ -2636,6 +2636,23 @@ export function DashboardClient({
       .filter((item): item is DashboardWorkItemData => item !== null);
   }, [departmentFilteredItems, normalizedQuery]);
 
+  const filteredFinderInstructionCards = useMemo(
+    () =>
+      filteredItems
+        .flatMap((item) =>
+          item.work_instructions.map((instruction) => ({
+            workItem: item,
+            instruction,
+          })),
+        )
+        .sort(
+          (a, b) =>
+            toSortableTimestamp(b.instruction.updated_at) -
+            toSortableTimestamp(a.instruction.updated_at),
+        ),
+    [filteredItems],
+  );
+
   const filteredPinnedInstructions = useMemo(() => {
     if (selectedDepartmentId === "all") {
       return pinnedInstructions;
@@ -4535,81 +4552,68 @@ export function DashboardClient({
           {isSearching ? (
             <div className="grid gap-3">
               <p className="text-sm text-slate-600 dark:text-slate-300">
-                {filteredItems.length} matching work item
-                {filteredItems.length === 1 ? "" : "s"} for &quot;{query.trim()}&quot; in{" "}
-                {selectedDepartmentName}.
+                {filteredFinderInstructionCards.length} matching instruction
+                {filteredFinderInstructionCards.length === 1 ? "" : "s"} across{" "}
+                {filteredItems.length} work item{filteredItems.length === 1 ? "" : "s"} for{" "}
+                &quot;{query.trim()}&quot; in {selectedDepartmentName}.
               </p>
 
-              {filteredItems.length === 0 ? (
+              {filteredFinderInstructionCards.length === 0 ? (
                 <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
                   No work instructions found.
                 </p>
               ) : (
-                filteredItems.map((item) => (
-                  <article
-                    key={item.id}
-                    style={{
-                      borderColor: colorWithAlpha(item.department_color, 0.45),
-                      backgroundColor: colorWithAlpha(item.department_color, 0.12),
-                      boxShadow: `inset 4px 0 0 ${colorWithAlpha(item.department_color, 0.9)}`,
-                    }}
-                    className="grid gap-3 rounded-2xl border p-4"
-                  >
-                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <h3 className="leading-tight">
-                          <PartDepartmentHeading workItem={item} />
-                        </h3>
-                        <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
-                          {item.item_title}
-                        </p>
-                      </div>
-                      <span
-                        style={{
-                          borderColor: colorWithAlpha(item.department_color, 0.45),
-                          backgroundColor: colorWithAlpha(item.department_color, 0.2),
-                        }}
-                        className="rounded-full border px-3 py-1 text-xs font-semibold text-slate-900 dark:text-slate-100"
-                      >
-                        {item.work_instructions.length} instruction
-                        {item.work_instructions.length === 1 ? "" : "s"}
-                      </span>
-                    </div>
-
-                    <div className="grid gap-2 md:grid-cols-2">
-                      {item.work_instructions.map((instruction) => (
-                        <Link
-                          key={instruction.id}
-                          href={`/instructions/${instruction.id}`}
-                          style={{
-                            borderColor: colorWithAlpha(item.department_color, 0.45),
-                            backgroundColor: colorWithAlpha(item.department_color, 0.18),
-                          }}
-                          className="rounded-xl border p-3 transition hover:brightness-105"
-                        >
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <p className="font-semibold">Revision {instruction.revision}</p>
+                <div className="grid gap-2">
+                  {filteredFinderInstructionCards.map((entry) => (
+                    <Link
+                      key={entry.instruction.id}
+                      href={`/instructions/${entry.instruction.id}`}
+                      onClick={persistInstructionReturnState}
+                      style={{
+                        borderColor: colorWithAlpha(entry.workItem.department_color, 0.45),
+                        backgroundColor: colorWithAlpha(entry.workItem.department_color, 0.14),
+                        boxShadow: `inset 4px 0 0 ${colorWithAlpha(
+                          entry.workItem.department_color,
+                          0.85,
+                        )}`,
+                      }}
+                      className="rounded-xl border px-3 py-2.5 transition hover:brightness-105"
+                    >
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <PartDepartmentHeading workItem={entry.workItem} />
+                        <span className="inline-flex items-center rounded-full border border-slate-400/45 bg-slate-900/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-700 dark:border-slate-500/55 dark:bg-slate-100/10 dark:text-slate-200">
+                          Rev {entry.instruction.revision}
+                        </span>
+                        {getForkLabel(
+                          entry.instruction.fork_number,
+                          entry.instruction.fork_root_instruction_id,
+                        ) ? (
+                          <span className="inline-flex items-center rounded-full border border-cyan-500/45 bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-200">
                             {getForkLabel(
-                              instruction.fork_number,
-                              instruction.fork_root_instruction_id,
-                            ) ? (
-                              <span className="inline-flex items-center rounded-full border border-cyan-500/45 bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-200">
-                                {getForkLabel(
-                                  instruction.fork_number,
-                                  instruction.fork_root_instruction_id,
-                                )}
-                              </span>
-                            ) : null}
-                          </div>
-                          <p className="text-xs text-slate-500 dark:text-slate-400">
-                            Created <LocalDateTime value={instruction.created_at} mode="date" /> by{" "}
-                            {instruction.creator_name}
-                          </p>
-                        </Link>
-                      ))}
-                    </div>
-                  </article>
-                ))
+                              entry.instruction.fork_number,
+                              entry.instruction.fork_root_instruction_id,
+                            )}
+                          </span>
+                        ) : null}
+                        {instructionReviewStatusByInstructionId[entry.instruction.id]?.status ===
+                          "needs_review" && (
+                          <span className="inline-flex items-center gap-0.5 rounded-full border border-amber-500/45 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300">
+                            <TriangleAlert size={10} />
+                            Needs Review
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
+                        {entry.workItem.item_title}
+                      </p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        Updated <LocalDateTime value={entry.instruction.updated_at} mode="date" />{" "}
+                        by {entry.instruction.updater_name}
+                      </p>
+                    </Link>
+                  ))}
+                </div>
               )}
             </div>
           ) : (
