@@ -8,9 +8,10 @@ import { cn } from "@/lib/utils";
 interface InstructionActionMenuProps {
   children: ReactNode;
   className?: string;
+  toolCount?: number;
 }
 
-export function InstructionActionMenu({ children, className }: InstructionActionMenuProps) {
+export function InstructionActionMenu({ children, className, toolCount }: InstructionActionMenuProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -54,9 +55,14 @@ export function InstructionActionMenu({ children, className }: InstructionAction
         onClick={() => setOpen((current) => !current)}
         aria-expanded={open}
         aria-label="Open instruction action menu"
-        className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-500/35 bg-cyan-500/10 text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-100"
+        className="relative inline-flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-500/35 bg-cyan-500/10 text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-100"
       >
         <SlidersHorizontal size={17} />
+        {toolCount !== undefined && toolCount > 0 ? (
+          <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-cyan-500 px-0.5 text-[9px] font-bold text-white">
+            {toolCount}
+          </span>
+        ) : null}
         <span className="sr-only">Open instruction action menu</span>
       </button>
 

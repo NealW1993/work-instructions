@@ -587,33 +587,35 @@ export function AccountSettingsPanel({
 
   return (
     <>
-      <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
-        <div className="grid gap-3">
-          <div className="w-fit rounded-xl border border-cyan-500/35 bg-cyan-500/10 px-4 py-2.5">
-            <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-200">
-              All-Time Total Usage
-            </p>
-            <p className="mt-0.5 font-mono text-xl font-extrabold text-cyan-900 dark:text-cyan-100">
+      <section className="grid gap-3 rounded-2xl border border-white/30 bg-white/80 p-4 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-5">
+        {/* Header row: usage stat */}
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/70 pb-3 dark:border-white/10">
+          <div className="flex items-center gap-2.5">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              All-Time Usage
+            </span>
+            <span className="font-mono text-base font-extrabold text-cyan-700 dark:text-cyan-300">
               {totalSignedInLabel}
-            </p>
+            </span>
           </div>
         </div>
 
         {message ? (
-          <p className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-200">
+          <p className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-200">
             {message}
           </p>
         ) : null}
         {error ? (
-          <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-200">
+          <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-700 dark:text-rose-200">
             {error}
           </p>
         ) : null}
 
-        <form className="grid gap-4 md:max-w-5xl" onSubmit={handleSubmit}>
+        <form className="grid gap-3 md:max-w-5xl" onSubmit={handleSubmit}>
+          {/* Row 1: Identity fields */}
           <div className="grid gap-3 md:grid-cols-3">
             <label className="grid gap-1 text-sm">
-              <span>Full Name</span>
+              <span className="font-medium text-slate-700 dark:text-slate-300">Full Name</span>
               <input
                 required
                 value={fullName}
@@ -622,7 +624,7 @@ export function AccountSettingsPanel({
               />
             </label>
             <label className="grid gap-1 text-sm">
-              <span>Email</span>
+              <span className="font-medium text-slate-700 dark:text-slate-300">Email</span>
               <input
                 required
                 type="email"
@@ -632,7 +634,7 @@ export function AccountSettingsPanel({
               />
             </label>
             <label className="grid gap-1 text-sm">
-              <span>Employee ID</span>
+              <span className="font-medium text-slate-700 dark:text-slate-300">Employee ID</span>
               <div
                 aria-readonly="true"
                 className="rounded-xl border border-slate-300/80 bg-slate-100 px-3 py-2 text-slate-600 select-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
@@ -642,17 +644,18 @@ export function AccountSettingsPanel({
             </label>
           </div>
 
+          {/* Row 2: Color pickers + preview */}
           <div className="grid gap-3 md:grid-cols-3 md:items-start">
-            <fieldset className="grid gap-2 text-sm">
-              <legend className="mb-1">Icon Color</legend>
-              <div className="flex flex-wrap gap-2">
+            <fieldset className="grid gap-1.5 text-sm">
+              <legend className="mb-0.5 font-medium text-slate-700 dark:text-slate-300">Icon Color</legend>
+              <div className="flex flex-wrap gap-1.5">
                 {ICON_COLOR_OPTIONS.map((presetColor) => (
                   <button
                     key={presetColor}
                     type="button"
                     onClick={() => setIconColor(presetColor)}
                     aria-label={`Set icon color to ${presetColor}`}
-                    className={`h-8 w-8 rounded-full border transition ${
+                    className={`h-7 w-7 rounded-full border transition ${
                       normalizedIconColor === presetColor
                         ? "border-slate-900 ring-2 ring-cyan-500/40 dark:border-slate-100"
                         : "border-slate-300 dark:border-slate-700"
@@ -661,12 +664,12 @@ export function AccountSettingsPanel({
                   />
                 ))}
               </div>
-              <div className="flex flex-wrap items-center gap-2 md:flex-nowrap">
+              <div className="flex items-center gap-2">
                 <input
                   type="color"
                   value={ICON_COLOR_PATTERN.test(normalizedIconColor) ? normalizedIconColor : DEFAULT_ICON_COLOR}
                   onChange={(event) => setIconColor(normalizeIconColor(event.target.value))}
-                  className="h-10 w-12 cursor-pointer rounded-lg border border-slate-300 bg-transparent p-1 dark:border-slate-700"
+                  className="h-8 w-10 cursor-pointer rounded-lg border border-slate-300 bg-transparent p-0.5 dark:border-slate-700"
                 />
                 <input
                   value={iconColor}
@@ -674,47 +677,40 @@ export function AccountSettingsPanel({
                   onChange={(event) =>
                     setIconColor(normalizeIconColor(event.target.value.slice(0, 7)))
                   }
-                  className="w-28 rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-sm uppercase text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  className="w-24 rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 font-mono text-xs uppercase text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   placeholder="#0EA5E9"
                 />
-                <span className="text-xs text-slate-500 dark:text-slate-400">
-                  Pick a preset or enter a hex code.
-                </span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">Hex</span>
               </div>
             </fieldset>
 
-            <fieldset className="grid gap-2 text-sm">
-              <legend className="mb-1 opacity-0 select-none" aria-hidden="true">
-                Profile Preview
-              </legend>
-              <div className="inline-flex min-h-[120px] w-full items-center justify-center rounded-xl border border-slate-300/80 bg-white/75 px-3 py-2 dark:border-slate-700 dark:bg-slate-950/60">
-                <span
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full text-xs font-extrabold"
-                  style={{
-                    backgroundColor: ICON_COLOR_PATTERN.test(normalizedIconColor)
-                      ? normalizedIconColor
-                      : DEFAULT_ICON_COLOR,
-                    color: FONT_COLOR_PATTERN.test(normalizedFontColor)
-                      ? normalizedFontColor
-                      : DEFAULT_FONT_COLOR,
-                  }}
-                >
-                  {iconInitials}
-                </span>
-                <span className="ml-2 text-xs text-slate-600 dark:text-slate-300">Profile icon preview</span>
-              </div>
-            </fieldset>
+            <div className="flex items-center justify-center rounded-xl border border-slate-300/80 bg-white/75 px-3 py-3 dark:border-slate-700 dark:bg-slate-950/60">
+              <span
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full text-xs font-extrabold"
+                style={{
+                  backgroundColor: ICON_COLOR_PATTERN.test(normalizedIconColor)
+                    ? normalizedIconColor
+                    : DEFAULT_ICON_COLOR,
+                  color: FONT_COLOR_PATTERN.test(normalizedFontColor)
+                    ? normalizedFontColor
+                    : DEFAULT_FONT_COLOR,
+                }}
+              >
+                {iconInitials}
+              </span>
+              <span className="ml-2 text-xs text-slate-500 dark:text-slate-300">Profile icon preview</span>
+            </div>
 
-            <fieldset className="grid gap-2 text-sm">
-              <legend className="mb-1">Font Color</legend>
-              <div className="flex flex-wrap gap-2">
+            <fieldset className="grid gap-1.5 text-sm">
+              <legend className="mb-0.5 font-medium text-slate-700 dark:text-slate-300">Font Color</legend>
+              <div className="flex flex-wrap gap-1.5">
                 {FONT_COLOR_OPTIONS.map((presetColor) => (
                   <button
                     key={presetColor}
                     type="button"
                     onClick={() => setFontColor(presetColor)}
                     aria-label={`Set font color to ${presetColor}`}
-                    className={`h-8 w-8 rounded-full border transition ${
+                    className={`h-7 w-7 rounded-full border transition ${
                       normalizedFontColor === presetColor
                         ? "border-slate-900 ring-2 ring-cyan-500/40 dark:border-slate-100"
                         : "border-slate-300 dark:border-slate-700"
@@ -723,12 +719,12 @@ export function AccountSettingsPanel({
                   />
                 ))}
               </div>
-              <div className="flex flex-wrap items-center gap-2 md:flex-nowrap">
+              <div className="flex items-center gap-2">
                 <input
                   type="color"
                   value={FONT_COLOR_PATTERN.test(normalizedFontColor) ? normalizedFontColor : DEFAULT_FONT_COLOR}
                   onChange={(event) => setFontColor(normalizeFontColor(event.target.value))}
-                  className="h-10 w-12 cursor-pointer rounded-lg border border-slate-300 bg-transparent p-1 dark:border-slate-700"
+                  className="h-8 w-10 cursor-pointer rounded-lg border border-slate-300 bg-transparent p-0.5 dark:border-slate-700"
                 />
                 <input
                   value={fontColor}
@@ -736,86 +732,80 @@ export function AccountSettingsPanel({
                   onChange={(event) =>
                     setFontColor(normalizeFontColor(event.target.value.slice(0, 7)))
                   }
-                  className="w-28 rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-sm uppercase text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  className="w-24 rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 font-mono text-xs uppercase text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   placeholder="#FFFFFF"
                 />
-                <span className="text-xs text-slate-500 dark:text-slate-400">
-                  Initials text color in your account menu icon.
-                </span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">Hex</span>
               </div>
             </fieldset>
           </div>
 
-          <div className="mt-1 grid gap-3 md:grid-cols-[auto_auto_1fr] md:items-end">
+          {/* Row 3: Actions */}
+          <div className="flex flex-wrap items-center gap-2 border-t border-slate-200/70 pt-3 dark:border-white/10">
             <button
               type="submit"
               disabled={saveDisabled}
-              className={`w-fit rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+              className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
                 saveDisabled
                   ? "cursor-not-allowed border border-slate-300 bg-slate-200 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400"
                   : "bg-gradient-to-r from-cyan-500 to-blue-600 text-white hover:brightness-110"
               }`}
             >
-              {busy ? "Saving..." : "Save account changes"}
+              {busy ? "Saving..." : "Save changes"}
             </button>
 
-            <div className="grid gap-1 text-sm">
-              <span>PIN</span>
+            <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-100/60 px-1.5 py-1 dark:border-slate-700 dark:bg-slate-900/40">
+              <span className="pl-1 text-xs font-medium text-slate-500 dark:text-slate-400">Theme</span>
               <button
                 type="button"
-                onClick={() => {
-                  if (wantsPinChange) {
-                    setWantsPinChange(false);
-                    setPin("");
-                    setConfirmPin("");
-                    return;
-                  }
-
-                  setWantsPinChange(true);
-                }}
-                className={`w-fit rounded-xl border px-3 py-1.5 text-sm font-semibold transition ${
-                  wantsPinChange
-                    ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
-                    : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-900"
+                onClick={() => applyThemeSelection("dark")}
+                className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                  themePreference === "dark"
+                    ? "bg-cyan-500/20 text-cyan-900 dark:text-cyan-100"
+                    : "text-slate-600 hover:bg-slate-200/70 dark:text-slate-300 dark:hover:bg-slate-800"
                 }`}
               >
-                {wantsPinChange ? "Cancel PIN change" : "Change PIN"}
+                Dark
+              </button>
+              <button
+                type="button"
+                onClick={() => applyThemeSelection("light")}
+                className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                  themePreference === "light"
+                    ? "bg-cyan-500/20 text-cyan-900 dark:text-cyan-100"
+                    : "text-slate-600 hover:bg-slate-200/70 dark:text-slate-300 dark:hover:bg-slate-800"
+                }`}
+              >
+                Light
               </button>
             </div>
 
-            <fieldset className="grid gap-1 text-sm md:justify-self-start">
-              <legend className="mb-1">Theme</legend>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => applyThemeSelection("dark")}
-                  className={`rounded-xl border px-3 py-1.5 text-sm font-semibold transition ${
-                    themePreference === "dark"
-                      ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
-                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-900"
-                  }`}
-                >
-                  Dark
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyThemeSelection("light")}
-                  className={`rounded-xl border px-3 py-1.5 text-sm font-semibold transition ${
-                    themePreference === "light"
-                      ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
-                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-900"
-                  }`}
-                >
-                  Light
-                </button>
-              </div>
-            </fieldset>
+            <button
+              type="button"
+              onClick={() => {
+                if (wantsPinChange) {
+                  setWantsPinChange(false);
+                  setPin("");
+                  setConfirmPin("");
+                  return;
+                }
+
+                setWantsPinChange(true);
+              }}
+              className={`rounded-xl border px-3 py-2 text-sm font-semibold transition ${
+                wantsPinChange
+                  ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
+                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-900"
+              }`}
+            >
+              {wantsPinChange ? "Cancel PIN" : "Change PIN"}
+            </button>
           </div>
 
           {wantsPinChange ? (
             <div className="grid gap-3 md:grid-cols-2">
               <label className="grid gap-1 text-sm">
-                <span>New 6-Digit PIN</span>
+                <span className="font-medium text-slate-700 dark:text-slate-300">New 6-Digit PIN</span>
                 <PinInput
                   value={pin}
                   onChange={setPin}
@@ -823,7 +813,7 @@ export function AccountSettingsPanel({
                 />
               </label>
               <label className="grid gap-1 text-sm">
-                <span>Confirm New PIN</span>
+                <span className="font-medium text-slate-700 dark:text-slate-300">Confirm New PIN</span>
                 <PinInput
                   value={confirmPin}
                   onChange={setConfirmPin}

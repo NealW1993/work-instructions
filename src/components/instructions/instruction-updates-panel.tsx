@@ -124,14 +124,14 @@ interface SourceMediaPreviewProps {
 function SourceMediaPreview({ media, tone }: SourceMediaPreviewProps) {
   const toneClasses =
     tone === "added"
-      ? "border-emerald-500/35 bg-emerald-500/10"
-      : "border-rose-500/35 bg-rose-500/10";
+      ? "border-emerald-500/35 bg-emerald-50 dark:bg-emerald-500/10"
+      : "border-rose-500/35 bg-rose-50 dark:bg-rose-500/10";
 
-  const linkClasses = tone === "added" ? "text-emerald-100" : "text-rose-100";
+  const linkClasses = tone === "added" ? "text-emerald-700 dark:text-emerald-100" : "text-rose-700 dark:text-rose-100";
 
   return (
     <figure className={cn("grid gap-2 rounded-lg border p-2", toneClasses)}>
-      <div className="overflow-hidden rounded-md border border-white/15 bg-slate-950/60">
+      <div className="overflow-hidden rounded-md border border-slate-200 dark:border-white/15 bg-slate-100 dark:bg-slate-950/60">
         {media.type === "video" ? (
           <video src={media.src} controls preload="metadata" className="max-h-64 w-full object-contain" />
         ) : (
@@ -314,7 +314,7 @@ export function InstructionUpdatesPanel({ events, className }: InstructionUpdate
     >
       <div className="flex min-h-full items-start justify-center py-2 md:py-6">
         <article
-          className="grid w-full max-w-3xl gap-3 rounded-2xl border border-white/20 bg-slate-950/95 p-5 shadow-2xl md:max-h-[calc(100dvh-3rem)] md:overflow-y-auto"
+          className="grid w-full max-w-3xl gap-3 rounded-2xl border border-slate-200 dark:border-white/20 bg-white dark:bg-slate-950/95 p-5 shadow-2xl md:max-h-[calc(100dvh-3rem)] md:overflow-y-auto"
           role="dialog"
           aria-modal="true"
           aria-label="Update source details"
@@ -322,16 +322,16 @@ export function InstructionUpdatesPanel({ events, className }: InstructionUpdate
         >
           <div className="flex items-start justify-between gap-3">
             <div className="grid gap-1">
-              <h3 className="text-lg font-bold text-slate-100">Update Source</h3>
-              <p className="text-xs text-slate-300">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">Update Source</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-300">
                 <LocalDateTime value={selectedSourceEvent.occurredAt} mode="dateTime" /> by{" "}
-                <span className="font-semibold">{selectedSourceEvent.actorName}</span>
+                <span className="font-semibold text-slate-700 dark:text-slate-100">{selectedSourceEvent.actorName}</span>
               </p>
             </div>
             <button
               type="button"
               onClick={() => setSelectedSourceEventId(null)}
-              className="inline-flex items-center rounded-lg border border-slate-500/45 bg-slate-900/40 px-2.5 py-1 text-xs font-semibold text-slate-200 transition hover:bg-slate-800/60"
+              className="inline-flex items-center rounded-lg border border-slate-300 dark:border-slate-500/45 bg-slate-100 dark:bg-slate-900/40 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:text-slate-200 transition hover:bg-slate-200 dark:hover:bg-slate-800/60"
             >
               Close
             </button>
@@ -377,10 +377,10 @@ export function InstructionUpdatesPanel({ events, className }: InstructionUpdate
 
               {selectedSourceEvent.sourcePayload?.addedTextSnippet ? (
                 <div className="grid gap-1.5">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
                     Added Text
                   </p>
-                  <pre className="max-h-48 overflow-auto rounded-lg border border-emerald-500/35 bg-emerald-500/10 p-3 text-sm text-emerald-100 whitespace-pre-wrap">
+                  <pre className="max-h-48 overflow-auto rounded-lg border border-emerald-500/35 bg-emerald-50 dark:bg-emerald-500/10 p-3 text-sm text-emerald-900 dark:text-emerald-100 whitespace-pre-wrap">
                     {selectedSourceEvent.sourcePayload.addedTextSnippet}
                   </pre>
                 </div>
@@ -389,10 +389,10 @@ export function InstructionUpdatesPanel({ events, className }: InstructionUpdate
               {selectedSourceEvent.sourcePayload?.removedTextSnippet &&
               !shouldSuppressRemovedSnippet(selectedSourceEvent.sourcePayload) ? (
                 <div className="grid gap-1.5">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-rose-300">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-rose-700 dark:text-rose-300">
                     Removed Text
                   </p>
-                  <pre className="max-h-48 overflow-auto rounded-lg border border-rose-500/35 bg-rose-500/10 p-3 text-sm text-rose-100 whitespace-pre-wrap">
+                  <pre className="max-h-48 overflow-auto rounded-lg border border-rose-500/35 bg-rose-50 dark:bg-rose-500/10 p-3 text-sm text-rose-900 dark:text-rose-100 whitespace-pre-wrap">
                     {selectedSourceEvent.sourcePayload.removedTextSnippet}
                   </pre>
                 </div>
@@ -400,7 +400,7 @@ export function InstructionUpdatesPanel({ events, className }: InstructionUpdate
 
               {(selectedSourceEvent.sourcePayload?.addedMedia?.length ?? 0) > 0 ? (
                 <div className="grid gap-1.5">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
                     Added Media
                   </p>
                   <div className="grid gap-2">
@@ -417,10 +417,10 @@ export function InstructionUpdatesPanel({ events, className }: InstructionUpdate
 
               {(selectedSourceEvent.sourcePayload?.removedMedia?.length ?? 0) > 0 ? (
                 <div className="grid gap-1.5">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-rose-300">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-rose-700 dark:text-rose-300">
                     Removed Media
                   </p>
-                  <p className="text-xs text-rose-100/85">
+                  <p className="text-xs text-rose-700 dark:text-rose-100/85">
                     Some removed media may no longer be available to preview.
                   </p>
                   <div className="grid gap-2">
@@ -444,13 +444,13 @@ export function InstructionUpdatesPanel({ events, className }: InstructionUpdate
               ) : null}
 
               {selectedSourceEvent.sourcePayload?.mediaFormattingUpdated ? (
-                <p className="rounded-lg border border-cyan-500/35 bg-cyan-500/10 px-3 py-2 text-sm text-cyan-100">
+                <p className="rounded-lg border border-cyan-500/35 bg-cyan-50 dark:bg-cyan-500/10 px-3 py-2 text-sm text-cyan-800 dark:text-cyan-100">
                   Media formatting changed in this update.
                 </p>
               ) : null}
             </div>
           ) : (
-            <p className="rounded-lg border border-slate-500/40 bg-slate-900/40 p-3 text-sm text-slate-300">
+            <p className="rounded-lg border border-slate-300 dark:border-slate-500/40 bg-slate-100 dark:bg-slate-900/40 p-3 text-sm text-slate-600 dark:text-slate-300">
               Source snippets are not available for this update event.
             </p>
           )}

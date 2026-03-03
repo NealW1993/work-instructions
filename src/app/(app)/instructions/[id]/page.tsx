@@ -1182,7 +1182,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
                   className="shrink-0"
                 />
               ) : null}
-              <InstructionActionMenu>
+              <InstructionActionMenu toolCount={suggestedTools.length}>
                 <SuggestedToolsDropdown tools={suggestedTools} className="w-full" />
                 <InstructionUpdatesPanel
                   events={instructionUpdateEvents}

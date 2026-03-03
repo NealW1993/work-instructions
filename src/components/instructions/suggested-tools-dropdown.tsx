@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckSquare, ChevronDown, Wrench, X } from "lucide-react";
+import { CheckSquare, ChevronDown, Wrench } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { cn } from "@/lib/utils";
@@ -72,9 +72,8 @@ export function SuggestedToolsDropdown({ tools, className }: SuggestedToolsDropd
       >
         <Wrench size={14} />
         Tool List
-        <span className="inline-flex items-center gap-0.5 rounded-full border border-cyan-500/45 bg-cyan-500/15 px-1.5 py-0.5 text-[10px]">
-          <span>{totalCount}</span>
-          <X size={10} aria-hidden="true" className="opacity-80" />
+        <span className="rounded-full border border-cyan-500/45 bg-cyan-500/15 px-1.5 py-0.5 text-[10px]">
+          {totalCount}
         </span>
         <ChevronDown
           size={14}
