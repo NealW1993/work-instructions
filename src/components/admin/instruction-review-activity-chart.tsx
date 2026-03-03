@@ -211,6 +211,28 @@ function getSeriesBarHeight(count: number, maxCount: number): number {
   return Math.min(100, Math.max((count / maxCount) * 100, 0));
 }
 
+function resolveAxisStep(maxCount: number): number {
+  if (maxCount <= 6) {
+    return 1;
+  }
+
+  const roughStep = Math.max(1, Math.ceil(maxCount / 5));
+  const magnitude = 10 ** Math.floor(Math.log10(roughStep));
+  const normalized = roughStep / magnitude;
+
+  if (normalized <= 1) {
+    return magnitude;
+  }
+  if (normalized <= 2) {
+    return 2 * magnitude;
+  }
+  if (normalized <= 5) {
+    return 5 * magnitude;
+  }
+
+  return 10 * magnitude;
+}
+
 function isReviewPeriod(value: unknown): value is ReviewPeriod {
   return value === "year" || value === "month" || value === "week" || value === "day";
 }
@@ -642,16 +664,23 @@ export function InstructionReviewActivityChart({
     () => Math.max(...activeBuckets.flatMap((b) => [b.needsReviewCount, b.upToDateCount]), 1),
     [activeBuckets],
   );
-  const axisMax = maxCount;
+  const axisStep = useMemo(() => resolveAxisStep(maxCount), [maxCount]);
+  const axisMax = useMemo(
+    () => Math.max(axisStep, Math.ceil(maxCount / axisStep) * axisStep),
+    [axisStep, maxCount],
+  );
   const axisTicks = useMemo(() => {
-    const ticks = Array.from({ length: 5 }, (_, index) =>
-      Math.ceil((axisMax * (4 - index)) / 4),
-    );
-    ticks[ticks.length - 1] = 0;
+    const ticks: number[] = [];
+    for (let value = axisMax; value >= 0; value -= axisStep) {
+      ticks.push(value);
+    }
+    if (ticks[ticks.length - 1] !== 0) {
+      ticks.push(0);
+    }
     return ticks;
-  }, [axisMax]);
-  const axisTickOffsets = axisTicks.map((_, index) =>
-    axisTicks.length <= 1 ? 0 : (index / (axisTicks.length - 1)) * 100,
+  }, [axisMax, axisStep]);
+  const axisTickOffsets = axisTicks.map((tick) =>
+    axisMax <= 0 ? 100 : (1 - tick / axisMax) * 100,
   );
   const labelStep =
     period === "year" || period === "week" ? 1 : period === "month" ? 4 : 4;
@@ -987,7 +1016,7 @@ export function InstructionReviewActivityChart({
                       type="button"
                       onClick={() => setSelectedBucketKey(bucket.key)}
                       className={cn(
-                        "group flex h-full min-w-0 items-end justify-center gap-[3px] rounded-md px-0.5 pb-1 pt-1 outline-none transition focus-visible:ring-2 focus-visible:ring-cyan-500/70",
+                        "group flex h-full min-w-0 items-end justify-center gap-[3px] rounded-md px-0.5 outline-none transition focus-visible:ring-2 focus-visible:ring-cyan-500/70",
                         isSelected
                           ? "bg-cyan-500/15 ring-1 ring-cyan-500/45"
                           : "hover:bg-cyan-500/10",

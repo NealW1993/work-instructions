@@ -238,6 +238,10 @@ export function AppHeader({ profile }: { profile: Profile }) {
     canSendDashboardLayoutActions && !activeDashboardLayoutState.layoutSaving;
   const canResetLayout =
     canSendDashboardLayoutActions && !activeDashboardLayoutState.layoutSaving;
+  const canUndoLayout =
+    canSendDashboardLayoutActions &&
+    activeDashboardLayoutState.canUndoLayout &&
+    !activeDashboardLayoutState.layoutSaving;
   const dashboardNeedsAttention =
     canSendDashboardLayoutActions &&
     (activeDashboardLayoutState.layoutDirty ||
@@ -549,6 +553,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
         layoutDirty: Boolean(detail.layoutDirty),
         layoutSaving: Boolean(detail.layoutSaving),
         layoutError: detail.layoutError ?? null,
+        canUndoLayout: Boolean(detail.canUndoLayout),
         activeLayoutPresetId:
           typeof detail.activeLayoutPresetId === "string"
             ? detail.activeLayoutPresetId
@@ -722,7 +727,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
       triggerDashboardAction(detail);
       closeDashboardMenu();
       closeInstructionMenu();
-      if (options?.closeStudioMenuAfterAction ?? true) {
+      if (options?.closeStudioMenuAfterAction ?? false) {
         closeStudioMenu();
       }
     },
@@ -1243,6 +1248,16 @@ export function AppHeader({ profile }: { profile: Profile }) {
               >
                 <BookmarkPlus size={14} />
                 Save Layout as Default
+              </button>
+
+              <button
+                type="button"
+                disabled={!canUndoLayout}
+                onClick={() => handleDashboardStudioAction({ command: "undo-layout-change" })}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <Undo2 size={14} />
+                Undo Last Change
               </button>
 
               <div className="grid gap-2 sm:grid-cols-2">

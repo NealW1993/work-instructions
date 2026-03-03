@@ -26,6 +26,7 @@ interface InstructionPrintRecord {
   revision: number;
   body_markdown: string;
   uncommon_tools: string;
+  instruction_media: InstructionPrintMediaRow[] | null;
   work_items:
     | {
         part_id: string;
@@ -61,6 +62,19 @@ interface InstructionSuggestedToolLinkRow {
 interface SuggestedToolRow {
   id: string;
   name: string;
+}
+
+interface InstructionPrintMediaRow {
+  public_url: string;
+  media_type: "image" | "video";
+  caption: string | null;
+  sort_order: number;
+}
+
+interface PrintMediaItem {
+  type: "image" | "video";
+  src: string;
+  caption: string | null;
 }
 
 function getWorkItem(relation: InstructionPrintRecord["work_items"]) {
@@ -170,6 +184,143 @@ function renderInstructionContent(value: string) {
   );
 }
 
+function stripHtmlTags(value: string) {
+  return value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function readHtmlAttribute(tagMarkup: string, attributeName: string) {
+  const attributePattern = new RegExp(
+    `${attributeName}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`,
+    "i",
+  );
+  const match = tagMarkup.match(attributePattern);
+  return (match?.[1] ?? match?.[2] ?? "").trim();
+}
+
+function collectPrintMediaFromHtmlSnippet(
+  snippet: string,
+  fallbackCaption: string | null,
+  dedupeKeys: Set<string>,
+  results: PrintMediaItem[],
+) {
+  const imageTagPattern = /<img\b[^>]*>/gi;
+  let imageMatch: RegExpExecArray | null = imageTagPattern.exec(snippet);
+  while (imageMatch) {
+    const tagMarkup = imageMatch[0];
+    const source = readHtmlAttribute(tagMarkup, "src");
+    if (source) {
+      const dedupeKey = `image|${source}`;
+      if (!dedupeKeys.has(dedupeKey)) {
+        dedupeKeys.add(dedupeKey);
+        const altCaption = readHtmlAttribute(tagMarkup, "alt");
+        const titleCaption = readHtmlAttribute(tagMarkup, "title");
+        const caption =
+          fallbackCaption ?? (altCaption || titleCaption ? altCaption || titleCaption : null);
+        results.push({
+          type: "image",
+          src: source,
+          caption: caption?.trim() ? caption.trim() : null,
+        });
+      }
+    }
+
+    imageMatch = imageTagPattern.exec(snippet);
+  }
+
+  const videoTagPattern = /<video\b[^>]*>/gi;
+  let videoMatch: RegExpExecArray | null = videoTagPattern.exec(snippet);
+  while (videoMatch) {
+    const tagMarkup = videoMatch[0];
+    const source = readHtmlAttribute(tagMarkup, "src");
+    if (source) {
+      const dedupeKey = `video|${source}`;
+      if (!dedupeKeys.has(dedupeKey)) {
+        dedupeKeys.add(dedupeKey);
+        results.push({
+          type: "video",
+          src: source,
+          caption: fallbackCaption?.trim() ? fallbackCaption.trim() : null,
+        });
+      }
+    }
+
+    videoMatch = videoTagPattern.exec(snippet);
+  }
+}
+
+function extractPrintMediaFromBody(value: string) {
+  const dedupeKeys = new Set<string>();
+  const results: PrintMediaItem[] = [];
+
+  if (!value.trim()) {
+    return results;
+  }
+
+  const figurePattern = /<figure\b[\s\S]*?<\/figure>/gi;
+  let figureMatch: RegExpExecArray | null = figurePattern.exec(value);
+  while (figureMatch) {
+    const figureMarkup = figureMatch[0];
+    const captionMatch = figureMarkup.match(/<figcaption\b[^>]*>([\s\S]*?)<\/figcaption>/i);
+    const figureCaption = captionMatch ? stripHtmlTags(captionMatch[1]) : null;
+    collectPrintMediaFromHtmlSnippet(figureMarkup, figureCaption, dedupeKeys, results);
+    figureMatch = figurePattern.exec(value);
+  }
+
+  collectPrintMediaFromHtmlSnippet(value, null, dedupeKeys, results);
+
+  const markdownImagePattern = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+  let markdownMatch: RegExpExecArray | null = markdownImagePattern.exec(value);
+  while (markdownMatch) {
+    const normalizedSource = markdownMatch[2].trim().replace(/^<|>$/g, "");
+    if (normalizedSource) {
+      const dedupeKey = `image|${normalizedSource}`;
+      if (!dedupeKeys.has(dedupeKey)) {
+        dedupeKeys.add(dedupeKey);
+        const altText = markdownMatch[1]?.trim() ?? "";
+        results.push({
+          type: "image",
+          src: normalizedSource,
+          caption: altText || null,
+        });
+      }
+    }
+
+    markdownMatch = markdownImagePattern.exec(value);
+  }
+
+  return results;
+}
+
+function normalizeInstructionMediaForPrint(media: InstructionPrintMediaRow[] | null | undefined) {
+  if (!media || media.length === 0) {
+    return [] as PrintMediaItem[];
+  }
+
+  return [...media]
+    .sort((first, second) => first.sort_order - second.sort_order)
+    .map((mediaItem) => ({
+      type: mediaItem.media_type,
+      src: mediaItem.public_url.trim(),
+      caption: mediaItem.caption?.trim() || null,
+    }))
+    .filter((mediaItem) => mediaItem.src.length > 0);
+}
+
+function mergePrintMediaGroups(...groups: PrintMediaItem[][]) {
+  const dedupedMediaByKey = new Map<string, PrintMediaItem>();
+
+  for (const group of groups) {
+    for (const mediaItem of group) {
+      const key = `${mediaItem.type}|${mediaItem.src}`;
+      if (!dedupedMediaByKey.has(key)) {
+        dedupedMediaByKey.set(key, mediaItem);
+      }
+    }
+  }
+
+  return Array.from(dedupedMediaByKey.values());
+}
+
 export default async function InstructionPrintPage({
   params,
   searchParams,
@@ -192,7 +343,7 @@ export default async function InstructionPrintPage({
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, revision, body_markdown, uncommon_tools, work_items(part_id, item_title, departments(name))",
+      "id, revision, body_markdown, uncommon_tools, instruction_media(public_url, media_type, caption, sort_order), work_items(part_id, item_title, departments(name))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -252,6 +403,9 @@ export default async function InstructionPrintPage({
   const toolNames = Array.from(toolNamesByKey.values()).sort((first, second) =>
     first.localeCompare(second),
   );
+  const printBodyMedia = extractPrintMediaFromBody(instruction.body_markdown);
+  const printInstructionMedia = normalizeInstructionMediaForPrint(instruction.instruction_media);
+  const printMedia = mergePrintMediaGroups(printBodyMedia, printInstructionMedia);
 
   return (
     <>
@@ -260,9 +414,8 @@ export default async function InstructionPrintPage({
         waitForSelector={printMediaMode === "append-to-end" ? ".print-media-end-target" : undefined}
       />
       <PrintMediaIsolator
-        mode={printMediaMode}
+        mode="paginate-inline"
         proseSelector=".print-work-instructions-body .prose, .print-work-instructions-body .prose-markdown"
-        destinationSelector=".print-media-end-target"
       />
       <style>
         {`@media print {
@@ -321,7 +474,7 @@ export default async function InstructionPrintPage({
             margin: 0 auto;
             object-fit: contain;
           }
-          .print-sheet.print-mode-append .print-media-inline-hidden {
+          .print-sheet.print-mode-append .print-work-instructions-body .print-media-block {
             display: none !important;
           }
           .print-sheet.print-mode-append .print-media-end-section[data-has-media="false"] {
@@ -406,9 +559,35 @@ export default async function InstructionPrintPage({
           </div>
         </section>
 
-        <section className="print-media-end-section mt-6 grid gap-2" data-has-media="false">
+        <section
+          className="print-media-end-section mt-6 grid gap-2"
+          data-has-media={printMedia.length > 0 ? "true" : "false"}
+        >
           <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">Media</h2>
-          <div className="print-media-end-target" />
+          <div className="print-media-end-target grid gap-2">
+            {printMedia.map((mediaItem, index) => (
+              <figure
+                key={`${mediaItem.type}-${mediaItem.src}-${index}`}
+                className="print-media-end-item"
+              >
+                {mediaItem.type === "video" ? (
+                  <video src={mediaItem.src} controls preload="auto" />
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={mediaItem.src}
+                    alt={mediaItem.caption ?? "Instruction media"}
+                    loading="eager"
+                  />
+                )}
+                {mediaItem.caption ? (
+                  <figcaption className="print-media-end-caption">
+                    {mediaItem.caption}
+                  </figcaption>
+                ) : null}
+              </figure>
+            ))}
+          </div>
         </section>
       </article>
     </>

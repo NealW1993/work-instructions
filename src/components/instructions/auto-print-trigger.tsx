@@ -46,8 +46,33 @@ export function AutoPrintTrigger({ enabled, waitForSelector }: AutoPrintTriggerP
         return;
       }
 
-      const imagePromises = Array.from(mediaRoot.querySelectorAll("img")).map((imageElement) => {
-        if (imageElement.complete) {
+      const imageElements = Array.from(mediaRoot.querySelectorAll("img"));
+      const videoElements = Array.from(mediaRoot.querySelectorAll("video"));
+      const imageSources = imageElements
+        .map((imageElement) => imageElement.currentSrc || imageElement.getAttribute("src")?.trim() || "")
+        .filter((source) => source.length > 0);
+
+      const preloadImageSource = (source: string) =>
+        new Promise<void>((resolve) => {
+          const preloadImage = new Image();
+          preloadImage.decoding = "sync";
+          preloadImage.onload = () => resolve();
+          preloadImage.onerror = () => resolve();
+          preloadImage.src = source;
+        });
+
+      const preloadImages =
+        imageSources.length === 0
+          ? Promise.resolve()
+          : Promise.all(imageSources.map((source) => preloadImageSource(source))).then(() => undefined);
+
+      imageElements.forEach((imageElement) => {
+        imageElement.loading = "eager";
+        imageElement.decoding = "sync";
+      });
+
+      const imagePromises = imageElements.map((imageElement) => {
+        if (imageElement.complete && imageElement.naturalWidth > 0) {
           return Promise.resolve();
         }
 
@@ -58,7 +83,7 @@ export function AutoPrintTrigger({ enabled, waitForSelector }: AutoPrintTriggerP
         });
       });
 
-      const videoPromises = Array.from(mediaRoot.querySelectorAll("video")).map((videoElement) => {
+      const videoPromises = videoElements.map((videoElement) => {
         if (videoElement.readyState >= 2) {
           return Promise.resolve();
         }
@@ -66,16 +91,20 @@ export function AutoPrintTrigger({ enabled, waitForSelector }: AutoPrintTriggerP
         return new Promise<void>((resolve) => {
           const finish = () => resolve();
           videoElement.addEventListener("loadeddata", finish, { once: true });
+          videoElement.addEventListener("canplay", finish, { once: true });
           videoElement.addEventListener("error", finish, { once: true });
         });
       });
 
-      const waitForAllMedia = Promise.all([...imagePromises, ...videoPromises]).then(() => undefined);
+      const waitForAllMedia = Promise.all([preloadImages, ...imagePromises, ...videoPromises]).then(() => undefined);
       const timeout = new Promise<void>((resolve) => {
-        window.setTimeout(resolve, 2200);
+        window.setTimeout(resolve, 4500);
       });
 
       await Promise.race([waitForAllMedia, timeout]);
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 120);
+      });
     };
 
     void (async () => {

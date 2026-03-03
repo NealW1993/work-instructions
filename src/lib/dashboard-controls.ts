@@ -13,6 +13,7 @@ export type DashboardLayoutCommand =
   | "save-layout"
   | "save-layout-default"
   | "discard-changes"
+  | "undo-layout-change"
   | "load-default"
   | "reset-defaults"
   | "apply-layout-preset"
@@ -47,6 +48,7 @@ export interface DashboardLayoutStateEventDetail {
   layoutDirty: boolean;
   layoutSaving: boolean;
   layoutError: string | null;
+  canUndoLayout: boolean;
   activeLayoutPresetId: string | null;
   layoutPresets: DashboardLayoutPresetState[];
   studioWidgets: DashboardLayoutStudioWidgetState[];
@@ -58,6 +60,7 @@ export const DASHBOARD_LAYOUT_DEFAULT_STATE: DashboardLayoutStateEventDetail = {
   layoutDirty: false,
   layoutSaving: false,
   layoutError: null,
+  canUndoLayout: false,
   activeLayoutPresetId: null,
   layoutPresets: [],
   studioWidgets: [],

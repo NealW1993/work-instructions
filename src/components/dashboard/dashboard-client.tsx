@@ -252,6 +252,7 @@ const KPI_WIDGET_TIME_RANGES_SETTING_PATH = [
 ] as const;
 
 const DEFAULT_KPI_TIME_RANGE_DAYS: KpiTimeRangeDays = 30;
+const MAX_LAYOUT_UNDO_STEPS = 30;
 
 function isKpiTimeRangeDays(value: number): value is KpiTimeRangeDays {
   return value === 7 || value === 30 || value === 90;
@@ -2268,12 +2269,14 @@ export function DashboardClient({
   const realtimeRefreshTimeoutRef = useRef<number | null>(null);
   const layoutDirtyRef = useRef(false);
   const layoutSavingRef = useRef(false);
+  const layoutUndoStackRef = useRef<DashboardWidgetLayoutItem[][]>([]);
   const customizeOpenRef = useRef(false);
   const saveLayoutActionRef = useRef<(() => Promise<void>) | null>(null);
   const saveLayoutAsDefaultActionRef = useRef<(() => Promise<void>) | null>(null);
   const loadDefaultLayoutActionRef = useRef<(() => Promise<void>) | null>(null);
   const resetDefaultsActionRef = useRef<(() => Promise<void>) | null>(null);
   const discardLayoutActionRef = useRef<(() => void) | null>(null);
+  const undoLayoutActionRef = useRef<(() => void) | null>(null);
   const applyLayoutPresetActionRef = useRef<((presetId: string) => void) | null>(null);
   const toggleWidgetActionRef = useRef<((widgetId: DashboardWidgetId) => void) | null>(
     null,
@@ -2306,6 +2309,7 @@ export function DashboardClient({
   const navigationBypassRef = useRef(false);
   const returnStateAppliedRef = useRef(false);
   const finderPreferencesHydratedRef = useRef(false);
+  const previousUserIdRef = useRef(currentUserId);
   const widgetTitleInputRef = useRef<HTMLInputElement | null>(null);
   const cancelWidgetTitleCommitRef = useRef(false);
   const newestListRef = useRef<HTMLDivElement | null>(null);
@@ -2331,6 +2335,7 @@ export function DashboardClient({
   const [layoutDirty, setLayoutDirty] = useState(false);
   const [layoutSaving, setLayoutSaving] = useState(false);
   const [layoutError, setLayoutError] = useState<string | null>(null);
+  const [layoutUndoStack, setLayoutUndoStack] = useState<DashboardWidgetLayoutItem[][]>([]);
   const [newestTimeRangeDays, setNewestTimeRangeDays] = useState<KpiTimeRangeDays>(30);
   const [kpiTimeRangeByWidget, setKpiTimeRangeByWidget] = useState<Partial<Record<string, KpiTimeRangeDays>>>({});
   const [activeKpiDrilldown, setActiveKpiDrilldown] =
@@ -2445,6 +2450,7 @@ export function DashboardClient({
           layoutDirty,
           layoutSaving,
           layoutError,
+          canUndoLayout: layoutUndoStack.length > 0,
           activeLayoutPresetId,
           layoutPresets: DASHBOARD_LAYOUT_PRESETS.map((preset) => ({
             id: preset.id,
@@ -2454,7 +2460,15 @@ export function DashboardClient({
         },
       }),
     );
-  }, [customizeOpen, layoutDirty, layoutError, layoutSaving, widgetLayout, widgetTitleById]);
+  }, [
+    customizeOpen,
+    layoutDirty,
+    layoutError,
+    layoutSaving,
+    layoutUndoStack.length,
+    widgetLayout,
+    widgetTitleById,
+  ]);
 
   const persistInstructionReturnState = useCallback(() => {
     if (typeof window === "undefined") {
@@ -2784,6 +2798,10 @@ export function DashboardClient({
   }, [layoutSaving]);
 
   useEffect(() => {
+    layoutUndoStackRef.current = layoutUndoStack;
+  }, [layoutUndoStack]);
+
+  useEffect(() => {
     customizeOpenRef.current = customizeOpen;
     if (!customizeOpen) {
       if (dragAutoScrollFrameRef.current !== null) {
@@ -2845,6 +2863,7 @@ export function DashboardClient({
             layoutDirty: false,
             layoutSaving: false,
             layoutError: null,
+            canUndoLayout: false,
             activeLayoutPresetId: null,
             layoutPresets: [],
             studioWidgets: [],
@@ -2855,6 +2874,10 @@ export function DashboardClient({
   }, []);
 
   useEffect(() => {
+    const previousUserId = previousUserIdRef.current;
+    const userChanged = previousUserId !== currentUserId;
+    previousUserIdRef.current = currentUserId;
+
     const serverDefaultLayout = normalizeDashboardLayout(initialDashboardDefaultLayout);
     setDefaultWidgetLayout(cloneWidgetLayout(serverDefaultLayout));
 
@@ -2869,6 +2892,9 @@ export function DashboardClient({
     setSavedWidgetLayout(cloneWidgetLayout(nextLayout));
     setWidgetLayout(cloneWidgetLayout(nextLayout));
     setLayoutDirty(false);
+    if (userChanged) {
+      setLayoutUndoStack([]);
+    }
 
     if (snapshotLayout && areWidgetLayoutsEqual(snapshotLayout, serverLayout)) {
       clearSavedLayoutSnapshot(currentUserId);
@@ -4187,6 +4213,7 @@ export function DashboardClient({
       return;
     }
 
+    pushLayoutUndoSnapshot(widgetLayout);
     await persistDashboardLayout({
       layout: nextLayout,
       saveAsDefault: false,
@@ -4202,11 +4229,48 @@ export function DashboardClient({
       return;
     }
 
+    pushLayoutUndoSnapshot(widgetLayout);
     await persistDashboardLayout({
       layout: resetLayout,
       saveAsDefault: false,
       successNotice: "Dashboard reset. All widgets are visible. Saved default unchanged.",
     });
+  }
+
+  function pushLayoutUndoSnapshot(layout: DashboardWidgetLayoutItem[]) {
+    const snapshot = cloneWidgetLayout(layout);
+    setLayoutUndoStack((currentStack) => {
+      const latestSnapshot = currentStack[currentStack.length - 1];
+      if (latestSnapshot && areWidgetLayoutsEqual(latestSnapshot, snapshot)) {
+        return currentStack;
+      }
+
+      if (currentStack.length >= MAX_LAYOUT_UNDO_STEPS) {
+        return [...currentStack.slice(1), snapshot];
+      }
+
+      return [...currentStack, snapshot];
+    });
+  }
+
+  function undoDashboardLayoutChange() {
+    const latestSnapshot = layoutUndoStackRef.current[layoutUndoStackRef.current.length - 1];
+    if (!latestSnapshot) {
+      return;
+    }
+
+    const restoredLayout = cloneWidgetLayout(latestSnapshot);
+    setWidgetLayout((currentLayout) => {
+      if (areWidgetLayoutsEqual(currentLayout, restoredLayout)) {
+        return currentLayout;
+      }
+
+      setLayoutDirty(!areWidgetLayoutsEqual(restoredLayout, savedWidgetLayout));
+      setLayoutError(null);
+      setLayoutNotice("Reverted last dashboard layout change.");
+      return restoredLayout;
+    });
+    setLayoutUndoStack((currentStack) => currentStack.slice(0, -1));
   }
 
   function updateWidgetLayout(
@@ -4218,6 +4282,7 @@ export function DashboardClient({
         return current;
       }
 
+      pushLayoutUndoSnapshot(current);
       setLayoutDirty(!areWidgetLayoutsEqual(next, savedWidgetLayout));
       setLayoutError(null);
       return next;
@@ -4452,19 +4517,16 @@ export function DashboardClient({
       return;
     }
 
-    setWidgetLayout((current) => {
-      const nextLayout = preset.layout.map((entry) => ({ ...entry }));
-      if (areWidgetLayoutsEqual(current, nextLayout)) {
-        return current;
-      }
-
-      setLayoutDirty(!areWidgetLayoutsEqual(nextLayout, savedWidgetLayout));
-      setLayoutError(null);
-      return nextLayout;
-    });
+    updateWidgetLayout(() => preset.layout.map((entry) => ({ ...entry })));
   }
 
   function discardDashboardLayoutChanges() {
+    if (areWidgetLayoutsEqual(widgetLayout, savedWidgetLayout)) {
+      setLayoutError(null);
+      return;
+    }
+
+    pushLayoutUndoSnapshot(widgetLayout);
     setWidgetLayout(cloneWidgetLayout(savedWidgetLayout));
     setLayoutDirty(false);
     setLayoutError(null);
@@ -4475,6 +4537,7 @@ export function DashboardClient({
   loadDefaultLayoutActionRef.current = loadDefaultDashboardLayout;
   resetDefaultsActionRef.current = resetDashboardLayout;
   discardLayoutActionRef.current = discardDashboardLayoutChanges;
+  undoLayoutActionRef.current = undoDashboardLayoutChange;
   applyLayoutPresetActionRef.current = applyLayoutPreset;
   toggleWidgetActionRef.current = toggleWidget;
   setWidgetVisibilityActionRef.current = setWidgetVisibility;
@@ -4552,6 +4615,14 @@ export function DashboardClient({
           return;
         }
         discardLayoutActionRef.current?.();
+        return;
+      }
+
+      if (detail.command === "undo-layout-change") {
+        if (layoutSavingRef.current || layoutUndoStackRef.current.length === 0) {
+          return;
+        }
+        undoLayoutActionRef.current?.();
         return;
       }
 

@@ -472,7 +472,7 @@ function renderInstructionContent(value: string) {
   );
 }
 
-interface PrintBodyMediaItem {
+interface PrintMediaItem {
   type: "image" | "video";
   src: string;
   caption: string | null;
@@ -495,7 +495,7 @@ function collectPrintMediaFromHtmlSnippet(
   snippet: string,
   fallbackCaption: string | null,
   dedupeKeys: Set<string>,
-  results: PrintBodyMediaItem[],
+  results: PrintMediaItem[],
 ) {
   const imgTagPattern = /<img\b[^>]*>/gi;
   let imgMatch: RegExpExecArray | null = imgTagPattern.exec(snippet);
@@ -544,7 +544,7 @@ function collectPrintMediaFromHtmlSnippet(
 
 function extractPrintMediaFromBody(value: string) {
   const dedupeKeys = new Set<string>();
-  const results: PrintBodyMediaItem[] = [];
+  const results: PrintMediaItem[] = [];
 
   if (!value.trim()) {
     return results;
@@ -583,6 +583,32 @@ function extractPrintMediaFromBody(value: string) {
   }
 
   return results;
+}
+
+function normalizeInstructionMediaForPrint(media: InstructionMedia[]) {
+  return [...media]
+    .sort((first, second) => first.sort_order - second.sort_order)
+    .map((mediaItem) => ({
+      type: mediaItem.media_type,
+      src: mediaItem.public_url.trim(),
+      caption: mediaItem.caption?.trim() || null,
+    }))
+    .filter((mediaItem) => mediaItem.src.length > 0);
+}
+
+function mergePrintMediaGroups(...groups: PrintMediaItem[][]) {
+  const dedupedMediaByKey = new Map<string, PrintMediaItem>();
+
+  for (const group of groups) {
+    for (const mediaItem of group) {
+      const key = `${mediaItem.type}|${mediaItem.src}`;
+      if (!dedupedMediaByKey.has(key)) {
+        dedupedMediaByKey.set(key, mediaItem);
+      }
+    }
+  }
+
+  return Array.from(dedupedMediaByKey.values());
 }
 
 function normalizeInstructionUpdateSourcePayload(
@@ -1131,6 +1157,8 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
     first.localeCompare(second),
   );
   const printBodyMedia = extractPrintMediaFromBody(instruction.body_markdown);
+  const printInstructionMedia = normalizeInstructionMediaForPrint(instruction.instruction_media);
+  const printMedia = mergePrintMediaGroups(printBodyMedia, printInstructionMedia);
 
   return (
     <article className="grid gap-5">
@@ -1141,12 +1169,30 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
       <InstructionViewTracker instructionId={instruction.id} />
       <PrintMediaIsolator
         mode="from-document"
-        inlineProseSelector=".print-work-instructions-body .prose, .print-work-instructions-body .prose-markdown"
-        appendProseSelector=".screen-work-instructions-body .prose, .screen-work-instructions-body .prose-markdown, .print-work-instructions-body .prose, .print-work-instructions-body .prose-markdown"
-        destinationSelector=".print-media-end-target"
+        proseSelector=".print-work-instructions-body .prose, .print-work-instructions-body .prose-markdown"
       />
       <style>
-        {`@media print {
+        {`.print-preview-sheet {
+          position: fixed;
+          left: -100000px;
+          top: 0;
+          width: 1px;
+          height: 1px;
+          overflow: hidden;
+          opacity: 0;
+          pointer-events: none;
+        }
+        @media print {
+          .print-preview-sheet {
+            position: static !important;
+            left: auto !important;
+            top: auto !important;
+            width: auto !important;
+            height: auto !important;
+            overflow: visible !important;
+            opacity: 1 !important;
+            pointer-events: auto !important;
+          }
           html:not([data-print-media-mode="append-to-end"]) .print-media-end-section {
             display: none !important;
           }
@@ -1204,10 +1250,14 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
             font-size: 0.8rem;
             color: #334155;
           }
+          html[data-print-media-mode="append-to-end"] .print-media-end-target {
+            display: grid !important;
+            gap: 0.5rem !important;
+          }
         }`}
       </style>
 
-      <section className="hidden print:block print:bg-white print:text-slate-900">
+      <section className="print-preview-sheet print:bg-white print:text-slate-900">
         <h1 className="text-3xl font-extrabold text-slate-900">{workItem.item_title}</h1>
         <p className="mt-1 text-sm text-slate-700">
           Revision <span className="font-semibold">{instruction.revision}</span>
@@ -1235,11 +1285,11 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
 
         <section
           className="print-media-end-section mt-6 grid gap-2"
-          data-has-media={printBodyMedia.length > 0 ? "true" : "false"}
+          data-has-media={printMedia.length > 0 ? "true" : "false"}
         >
           <h2 className="text-xl font-bold text-slate-900">Media</h2>
           <div className="print-media-end-target grid gap-2">
-            {printBodyMedia.map((mediaItem, index) => (
+            {printMedia.map((mediaItem, index) => (
               <figure
                 key={`${mediaItem.type}-${mediaItem.src}-${index}`}
                 className="print-media-end-item"
