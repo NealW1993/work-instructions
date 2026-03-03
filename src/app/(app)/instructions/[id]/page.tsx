@@ -1313,7 +1313,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
                             : "border-amber-500/45 bg-amber-500/15 text-amber-800 dark:text-amber-200"
                         }`}
                       >
-                        {forkRow.merged_into_root_at ? "Merged" : "Open"}
+                        {forkRow.merged_into_root_at ? "Merged" : "Currently Open"}
                       </span>
                     </div>
                     <p className="text-xs text-slate-600 dark:text-slate-300">

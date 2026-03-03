@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import sanitizeHtml from "sanitize-html";
 
 import { AutoPrintTrigger } from "@/components/instructions/auto-print-trigger";
+import { PrintMediaIsolator } from "@/components/instructions/print-media-isolator";
 import { PrintPageControls } from "@/components/instructions/print-page-controls";
 import { requireAuthenticatedUser } from "@/lib/auth";
 
@@ -243,6 +244,7 @@ export default async function InstructionPrintPage({
   return (
     <>
       <AutoPrintTrigger enabled={autoPrintEnabled} />
+      <PrintMediaIsolator />
       <style>
         {`@media print {
           @page { margin: 0.5in 0.6in; }
@@ -273,9 +275,27 @@ export default async function InstructionPrintPage({
             border: none !important;
             padding: 0 !important;
           }
-          figure, img, table, pre, blockquote {
+          table, pre, blockquote {
             break-inside: avoid;
             page-break-inside: avoid;
+          }
+          .print-media-block {
+            break-before: page !important;
+            page-break-before: always !important;
+            break-after: page !important;
+            page-break-after: always !important;
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+          .print-media-block img,
+          .print-media-block video {
+            display: block;
+            max-width: 100% !important;
+            max-height: 9in !important;
+            width: auto !important;
+            height: auto !important;
+            margin: 0 auto;
+            object-fit: contain;
           }
           h1, h2, h3 {
             break-after: avoid;
@@ -285,9 +305,10 @@ export default async function InstructionPrintPage({
             orphans: 3;
             widows: 3;
           }
-          img {
+          img, video {
             max-width: 100% !important;
             height: auto !important;
+            display: block;
           }
         }`}
       </style>
