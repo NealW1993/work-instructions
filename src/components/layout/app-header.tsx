@@ -72,7 +72,7 @@ function HeaderDate() {
   if (!label) return null;
 
   return (
-    <span className="hidden select-none text-sm font-medium text-white/75 md:block">
+    <span className="hidden select-none text-sm font-medium text-slate-900 dark:text-white/75 md:block">
       {label}
     </span>
   );

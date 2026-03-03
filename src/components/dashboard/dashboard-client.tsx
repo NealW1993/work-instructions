@@ -246,6 +246,17 @@ const RECENT_UPDATES_TIME_RANGE_SETTING_PATH = [
   "recentUpdates",
   "timeRangeDays",
 ] as const;
+const KPI_WIDGET_TIME_RANGES_SETTING_PATH = [
+  "dashboard",
+  "kpiWidgetTimeRanges",
+] as const;
+
+const DEFAULT_KPI_TIME_RANGE_DAYS: KpiTimeRangeDays = 30;
+
+function isKpiTimeRangeDays(value: number): value is KpiTimeRangeDays {
+  return value === 7 || value === 30 || value === 90;
+}
+
 const MAX_WIDGET_TITLE_LENGTH = 80;
 const DEFAULT_REVIEW_WINDOW_DAYS = 30;
 
@@ -1706,6 +1717,534 @@ function KpiDonutChart({
   );
 }
 
+function computeKpiMetricsForRange(
+  days: KpiTimeRangeDays,
+  filteredSystemHistoryEvents: DashboardSystemHistoryEventData[],
+  instructionEntriesScoped: Array<{
+    instruction: DashboardWorkItemInstructionData;
+    workItem: DashboardWorkItemData;
+  }>,
+  reviewStatusMap: Record<string, DashboardInstructionReviewStatusData>,
+  reviewWindowDays: number,
+) {
+  // Build date buckets
+  const today = new Date();
+  const todayStart = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate(),
+  ).getTime();
+
+  const dateRangeBuckets = Array.from({ length: days }, (_, index) => {
+    const offset = days - 1 - index;
+    const start = todayStart - offset * ONE_DAY_MS;
+    return {
+      id: `kpi-day-${start}`,
+      start,
+      end: start + ONE_DAY_MS,
+      shortLabel: formatKpiShortDate(start),
+      fullLabel: formatKpiLongDate(start),
+    };
+  });
+
+  const rangeStart = dateRangeBuckets[0]?.start ?? 0;
+  const rangeEnd = (dateRangeBuckets[dateRangeBuckets.length - 1]?.end ?? 0) + 1;
+  const bucketIndexByStart = new Map(
+    dateRangeBuckets.map((bucket, index) => [bucket.start, index]),
+  );
+
+  const eventsInRange = filteredSystemHistoryEvents
+    .map((event) => ({
+      event,
+      timestamp: toSortableTimestamp(event.occurred_at),
+    }))
+    .filter(
+      (entry) =>
+        entry.timestamp >= rangeStart &&
+        entry.timestamp < rangeEnd &&
+        entry.timestamp > 0,
+    );
+
+  // dateRangeLabel
+  const first = dateRangeBuckets[0];
+  const last = dateRangeBuckets[dateRangeBuckets.length - 1];
+  const dateRangeLabel =
+    first && last ? `${first.fullLabel} - ${last.fullLabel}` : "";
+
+  // throughputMetric
+  const throughputPoints = dateRangeBuckets.map((bucket) => ({
+    id: bucket.id,
+    shortLabel: bucket.shortLabel,
+    fullLabel: bucket.fullLabel,
+    value: 0,
+  }));
+  const throughputRowsByPointId = new Map<string, KpiDrilldownRow[]>();
+
+  for (const { event, timestamp } of eventsInRange) {
+    const dayStart = toDayStartTimestamp(event.occurred_at);
+    if (dayStart === null) {
+      continue;
+    }
+    const bucketIndex = bucketIndexByStart.get(dayStart);
+    if (bucketIndex === undefined) {
+      continue;
+    }
+    const point = throughputPoints[bucketIndex];
+    if (!point) {
+      continue;
+    }
+    point.value += 1;
+    const existing = throughputRowsByPointId.get(point.id) ?? [];
+    existing.push({
+      id: event.id,
+      label: getLabelWithDepartment(event.workItem),
+      title: getWorkItemTitle(event.workItem),
+      detail: `${event.action_label} by ${event.actor_name} at ${new Date(
+        timestamp,
+      ).toLocaleTimeString()}`,
+      value: 1,
+      href: `/instructions/${event.instruction_id}`,
+    });
+    throughputRowsByPointId.set(point.id, existing);
+  }
+  const throughputMetric = { points: throughputPoints, rowsByPointId: throughputRowsByPointId };
+
+  // creationVelocityMetric
+  const creationVelocityPoints = dateRangeBuckets.map((bucket) => ({
+    id: `${bucket.id}-created`,
+    shortLabel: bucket.shortLabel,
+    fullLabel: bucket.fullLabel,
+    value: 0,
+  }));
+  const creationVelocityRowsByPointId = new Map<string, KpiDrilldownRow[]>();
+
+  for (const entry of instructionEntriesScoped) {
+    const timestamp = toSortableTimestamp(entry.instruction.created_at);
+    if (timestamp < rangeStart || timestamp >= rangeEnd || timestamp <= 0) {
+      continue;
+    }
+    const dayStart = toDayStartTimestamp(entry.instruction.created_at);
+    if (dayStart === null) {
+      continue;
+    }
+    const bucketIndex = bucketIndexByStart.get(dayStart);
+    if (bucketIndex === undefined) {
+      continue;
+    }
+    const point = creationVelocityPoints[bucketIndex];
+    if (!point) {
+      continue;
+    }
+    point.value += 1;
+    const existing = creationVelocityRowsByPointId.get(point.id) ?? [];
+    existing.push({
+      id: entry.instruction.id,
+      label: getLabelWithDepartment(entry.workItem),
+      title: getWorkItemTitle(entry.workItem),
+      detail: `Revision ${entry.instruction.revision} created by ${entry.instruction.creator_name}`,
+      value: 1,
+      href: `/instructions/${entry.instruction.id}`,
+    });
+    creationVelocityRowsByPointId.set(point.id, existing);
+  }
+  const creationVelocityMetric = {
+    points: creationVelocityPoints,
+    rowsByPointId: creationVelocityRowsByPointId,
+  };
+
+  // departmentWorkloadMetric
+  const totalsByDepartmentWorkload = new Map<
+    string,
+    {
+      id: string;
+      label: string;
+      color: string;
+      value: number;
+      rows: KpiDrilldownRow[];
+    }
+  >();
+
+  for (const { event, timestamp } of eventsInRange) {
+    const existing = totalsByDepartmentWorkload.get(event.workItem.department_id) ?? {
+      id: event.workItem.department_id,
+      label: event.workItem.department_name,
+      color: normalizeDepartmentColor(event.workItem.department_color),
+      value: 0,
+      rows: [],
+    };
+    existing.value += 1;
+    existing.rows.push({
+      id: event.id,
+      label: getLabelWithDepartment(event.workItem),
+      title: getWorkItemTitle(event.workItem),
+      detail: `${event.action_label} by ${event.actor_name} on ${new Date(
+        timestamp,
+      ).toLocaleDateString()}`,
+      value: 1,
+      href: `/instructions/${event.instruction_id}`,
+    });
+    totalsByDepartmentWorkload.set(event.workItem.department_id, existing);
+  }
+
+  const rankedWorkload = [...totalsByDepartmentWorkload.values()]
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 8);
+  const departmentWorkloadBars: KpiBarPoint[] = rankedWorkload.map((entry) => ({
+    id: entry.id,
+    label:
+      entry.label.length > 12
+        ? `${entry.label.slice(0, 11).trimEnd()}…`
+        : entry.label,
+    value: entry.value,
+    color: entry.color,
+  }));
+  const departmentWorkloadRowsByBarId = new Map(
+    rankedWorkload.map((entry) => [entry.id, entry.rows]),
+  );
+  const departmentWorkloadMetric = {
+    bars: departmentWorkloadBars,
+    rowsByBarId: departmentWorkloadRowsByBarId,
+  };
+
+  // reviewHealthMetric
+  const reviewHealthPoints = dateRangeBuckets.map((bucket) => ({
+    id: `${bucket.id}-review-health`,
+    shortLabel: bucket.shortLabel,
+    fullLabel: bucket.fullLabel,
+    healthy: 0,
+    attention: 0,
+  }));
+  const reviewHealthRowsByPointId = new Map<string, KpiDrilldownRow[]>();
+
+  for (const entry of instructionEntriesScoped) {
+    const timestamp = toSortableTimestamp(entry.instruction.updated_at);
+    if (timestamp < rangeStart || timestamp >= rangeEnd || timestamp <= 0) {
+      continue;
+    }
+    const dayStart = toDayStartTimestamp(entry.instruction.updated_at);
+    if (dayStart === null) {
+      continue;
+    }
+    const bucketIndex = bucketIndexByStart.get(dayStart);
+    if (bucketIndex === undefined) {
+      continue;
+    }
+    const point = reviewHealthPoints[bucketIndex];
+    if (!point) {
+      continue;
+    }
+    const reviewStatus = reviewStatusMap[entry.instruction.id] ?? null;
+    const daysSinceCalibration = toElapsedCalendarDays(
+      reviewStatus?.last_calibrated_at ?? entry.instruction.updated_at,
+    );
+    const needsAttention =
+      reviewStatus?.status === "needs_review" ||
+      (daysSinceCalibration !== null && daysSinceCalibration >= reviewWindowDays);
+
+    if (needsAttention) {
+      point.attention += 1;
+    } else {
+      point.healthy += 1;
+    }
+
+    const existing = reviewHealthRowsByPointId.get(point.id) ?? [];
+    existing.push({
+      id: entry.instruction.id,
+      label: getLabelWithDepartment(entry.workItem),
+      title: getWorkItemTitle(entry.workItem),
+      detail: needsAttention
+        ? `Needs attention | Revision ${entry.instruction.revision}`
+        : `Healthy | Revision ${entry.instruction.revision}`,
+      value: 1,
+      href: `/instructions/${entry.instruction.id}`,
+    });
+    reviewHealthRowsByPointId.set(point.id, existing);
+  }
+  const reviewHealthMetric = {
+    points: reviewHealthPoints,
+    rowsByPointId: reviewHealthRowsByPointId,
+  };
+
+  // revisionCycleMetric
+  const revisionCyclePoints: KpiScatterPoint[] = [];
+  const revisionCycleRowsByPointId = new Map<string, KpiDrilldownRow[]>();
+
+  const sortedEntries = [...instructionEntriesScoped].sort(
+    (left, right) =>
+      toSortableTimestamp(right.instruction.updated_at) -
+      toSortableTimestamp(left.instruction.updated_at),
+  );
+
+  for (const entry of sortedEntries) {
+    const updatedTimestamp = toSortableTimestamp(entry.instruction.updated_at);
+    if (
+      updatedTimestamp < rangeStart ||
+      updatedTimestamp >= rangeEnd ||
+      updatedTimestamp <= 0
+    ) {
+      continue;
+    }
+    const daysSinceUpdate = toElapsedCalendarDays(entry.instruction.updated_at);
+    const xValue = Math.max(0, daysSinceUpdate ?? 0);
+    const yValue = Math.max(1, entry.instruction.revision);
+    const pointId = `${entry.instruction.id}-${entry.instruction.revision}`;
+    revisionCyclePoints.push({
+      id: pointId,
+      label: getLabelWithDepartment(entry.workItem),
+      xValue,
+      yValue,
+      color: normalizeDepartmentColor(entry.workItem.department_color),
+    });
+    revisionCycleRowsByPointId.set(pointId, [
+      {
+        id: entry.instruction.id,
+        label: getLabelWithDepartment(entry.workItem),
+        title: getWorkItemTitle(entry.workItem),
+        detail: `Revision ${entry.instruction.revision} updated by ${entry.instruction.updater_name}`,
+        value: yValue,
+        href: `/instructions/${entry.instruction.id}`,
+      },
+    ]);
+
+    if (revisionCyclePoints.length >= 80) {
+      break;
+    }
+  }
+  const revisionCycleMetric = {
+    points: revisionCyclePoints,
+    rowsByPointId: revisionCycleRowsByPointId,
+  };
+
+  // eventMixMetric
+  const eventMixSegmentsById: Record<
+    "created" | "updated" | "needs_review" | "up_to_date",
+    KpiDonutSegment
+  > = {
+    created: { id: "created", label: "Created", value: 0, color: "#0EA5E9" },
+    updated: { id: "updated", label: "Updated", value: 0, color: "#2563EB" },
+    needs_review: {
+      id: "needs_review",
+      label: "Needs Review",
+      value: 0,
+      color: "#F59E0B",
+    },
+    up_to_date: {
+      id: "up_to_date",
+      label: "Marked Up To Date",
+      value: 0,
+      color: "#22C55E",
+    },
+  };
+  const eventMixRowsBySegmentId = new Map<string, KpiDrilldownRow[]>();
+
+  for (const { event, timestamp } of eventsInRange) {
+    const segmentId = classifyKpiEventType(event);
+    const segment = eventMixSegmentsById[segmentId];
+    if (!segment) {
+      continue;
+    }
+    segment.value += 1;
+    const existingRows = eventMixRowsBySegmentId.get(segment.id) ?? [];
+    existingRows.push({
+      id: event.id,
+      label: getLabelWithDepartment(event.workItem),
+      title: getWorkItemTitle(event.workItem),
+      detail: `${event.action_label} by ${event.actor_name} on ${new Date(
+        timestamp,
+      ).toLocaleDateString()}`,
+      value: 1,
+      href: `/instructions/${event.instruction_id}`,
+    });
+    eventMixRowsBySegmentId.set(segment.id, existingRows);
+  }
+  const eventMixMetric = {
+    segments: Object.values(eventMixSegmentsById).filter((segment) => segment.value > 0),
+    rowsBySegmentId: eventMixRowsBySegmentId,
+  };
+
+  // reviewOriginMixMetric
+  const reviewOriginSegmentsById: Record<"user" | "system", KpiDonutSegment> = {
+    user: {
+      id: "review-origin-user",
+      label: "User Triggered",
+      value: 0,
+      color: "#3B82F6",
+    },
+    system: {
+      id: "review-origin-system",
+      label: "System Timeline",
+      value: 0,
+      color: "#F97316",
+    },
+  };
+  const reviewOriginRowsBySegmentId = new Map<string, KpiDrilldownRow[]>();
+
+  for (const { event, timestamp } of eventsInRange) {
+    const eventType = classifyKpiEventType(event);
+    if (eventType !== "needs_review" && eventType !== "up_to_date") {
+      continue;
+    }
+    const segment =
+      event.detail.trim().toLowerCase().includes("system counter")
+        ? reviewOriginSegmentsById.system
+        : reviewOriginSegmentsById.user;
+    segment.value += 1;
+    const existingRows = reviewOriginRowsBySegmentId.get(segment.id) ?? [];
+    existingRows.push({
+      id: event.id,
+      label: getLabelWithDepartment(event.workItem),
+      title: getWorkItemTitle(event.workItem),
+      detail: `${event.action_label} by ${event.actor_name} on ${new Date(
+        timestamp,
+      ).toLocaleDateString()}`,
+      value: 1,
+      href: `/instructions/${event.instruction_id}`,
+    });
+    reviewOriginRowsBySegmentId.set(segment.id, existingRows);
+  }
+  const reviewOriginMixMetric = {
+    segments: Object.values(reviewOriginSegmentsById).filter((segment) => segment.value > 0),
+    rowsBySegmentId: reviewOriginRowsBySegmentId,
+  };
+
+  // departmentEventShareMetric
+  const totalsByDepartmentShare = new Map<
+    string,
+    {
+      id: string;
+      label: string;
+      color: string;
+      value: number;
+      rows: KpiDrilldownRow[];
+    }
+  >();
+
+  for (const { event, timestamp } of eventsInRange) {
+    const existing = totalsByDepartmentShare.get(event.workItem.department_id) ?? {
+      id: event.workItem.department_id,
+      label: event.workItem.department_name,
+      color: normalizeDepartmentColor(event.workItem.department_color),
+      value: 0,
+      rows: [],
+    };
+    existing.value += 1;
+    existing.rows.push({
+      id: event.id,
+      label: getLabelWithDepartment(event.workItem),
+      title: getWorkItemTitle(event.workItem),
+      detail: `${event.action_label} by ${event.actor_name} on ${new Date(
+        timestamp,
+      ).toLocaleDateString()}`,
+      value: 1,
+      href: `/instructions/${event.instruction_id}`,
+    });
+    totalsByDepartmentShare.set(event.workItem.department_id, existing);
+  }
+
+  const rankedDepartmentShare = [...totalsByDepartmentShare.values()].sort(
+    (a, b) => b.value - a.value,
+  );
+  const departmentShareRowsBySegmentId = new Map<string, KpiDrilldownRow[]>();
+  const departmentShareSegments: KpiDonutSegment[] = rankedDepartmentShare.map((entry) => {
+    departmentShareRowsBySegmentId.set(entry.id, entry.rows);
+    return {
+      id: entry.id,
+      label: entry.label,
+      value: entry.value,
+      color: entry.color,
+    };
+  });
+  const departmentEventShareMetric = {
+    segments: departmentShareSegments,
+    rowsBySegmentId: departmentShareRowsBySegmentId,
+  };
+
+  // actorActivityMixMetric
+  const actorColorRamp = [
+    "#06B6D4",
+    "#3B82F6",
+    "#8B5CF6",
+    "#F59E0B",
+    "#22C55E",
+    "#F43F5E",
+  ];
+  const totalsByActor = new Map<
+    string,
+    {
+      id: string;
+      label: string;
+      value: number;
+      rows: KpiDrilldownRow[];
+    }
+  >();
+
+  for (const { event, timestamp } of eventsInRange) {
+    const actorKey = event.actor_name.trim() || "Unknown User";
+    const existing = totalsByActor.get(actorKey) ?? {
+      id: actorKey,
+      label: actorKey,
+      value: 0,
+      rows: [],
+    };
+    existing.value += 1;
+    existing.rows.push({
+      id: event.id,
+      label: getLabelWithDepartment(event.workItem),
+      title: getWorkItemTitle(event.workItem),
+      detail: `${event.action_label} by ${event.actor_name} on ${new Date(
+        timestamp,
+      ).toLocaleDateString()}`,
+      value: 1,
+      href: `/instructions/${event.instruction_id}`,
+    });
+    totalsByActor.set(actorKey, existing);
+  }
+
+  const rankedActors = [...totalsByActor.values()].sort((a, b) => b.value - a.value);
+  const topActors = rankedActors.slice(0, 5);
+  const remainingActors = rankedActors.slice(5);
+  const actorRowsBySegmentId = new Map<string, KpiDrilldownRow[]>();
+  const actorSegments: KpiDonutSegment[] = topActors.map((entry, index) => {
+    const segmentId = `actor-${index + 1}-${entry.id}`;
+    actorRowsBySegmentId.set(segmentId, entry.rows);
+    return {
+      id: segmentId,
+      label: truncateKpiLegendLabel(entry.label, 20),
+      value: entry.value,
+      color: actorColorRamp[index % actorColorRamp.length] ?? "#0EA5E9",
+    };
+  });
+
+  if (remainingActors.length > 0) {
+    const otherRows = remainingActors.flatMap((entry) => entry.rows);
+    const otherValue = remainingActors.reduce((sum, entry) => sum + entry.value, 0);
+    actorRowsBySegmentId.set("actors-other", otherRows);
+    actorSegments.push({
+      id: "actors-other",
+      label: "Other Users",
+      value: otherValue,
+      color: "#94A3B8",
+    });
+  }
+  const actorActivityMixMetric = {
+    segments: actorSegments,
+    rowsBySegmentId: actorRowsBySegmentId,
+  };
+
+  return {
+    dateRangeLabel,
+    throughputMetric,
+    creationVelocityMetric,
+    departmentWorkloadMetric,
+    reviewHealthMetric,
+    revisionCycleMetric,
+    eventMixMetric,
+    reviewOriginMixMetric,
+    departmentEventShareMetric,
+    actorActivityMixMetric,
+  };
+}
+
 export function DashboardClient({
   initialQuery,
   searchError,
@@ -1793,7 +2332,7 @@ export function DashboardClient({
   const [layoutSaving, setLayoutSaving] = useState(false);
   const [layoutError, setLayoutError] = useState<string | null>(null);
   const [newestTimeRangeDays, setNewestTimeRangeDays] = useState<KpiTimeRangeDays>(30);
-  const [kpiTimeRangeDays, setKpiTimeRangeDays] = useState<KpiTimeRangeDays>(30);
+  const [kpiTimeRangeByWidget, setKpiTimeRangeByWidget] = useState<Partial<Record<string, KpiTimeRangeDays>>>({});
   const [activeKpiDrilldown, setActiveKpiDrilldown] =
     useState<KpiDrilldownPanelData | null>(null);
   const [portalReady, setPortalReady] = useState(false);
@@ -1830,6 +2369,14 @@ export function DashboardClient({
     (activeLikeCelebration?.newLikesCount ?? 0) > 0,
   );
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+
+  const getKpiWidgetTimeRange = (widgetId: string): KpiTimeRangeDays =>
+    kpiTimeRangeByWidget[widgetId] ?? DEFAULT_KPI_TIME_RANGE_DAYS;
+
+  function setKpiWidgetTimeRange(widgetId: string, days: KpiTimeRangeDays) {
+    setKpiTimeRangeByWidget((prev) => ({ ...prev, [widgetId]: days }));
+  }
+
   const celebrationConfettiPieces = useMemo(
     () =>
       Array.from({ length: 72 }, (_, index) => ({
@@ -1996,6 +2543,34 @@ export function DashboardClient({
         setRecentUpdatesTimeRangeDays(parsedRecentUpdatesTimeRange);
       }
 
+      const rawKpiWidgetTimeRanges = getUserSettingAtPath(
+        settings,
+        KPI_WIDGET_TIME_RANGES_SETTING_PATH,
+      );
+      if (
+        rawKpiWidgetTimeRanges &&
+        typeof rawKpiWidgetTimeRanges === "object" &&
+        !Array.isArray(rawKpiWidgetTimeRanges)
+      ) {
+        const parsedRanges: Partial<Record<string, KpiTimeRangeDays>> = {};
+        for (const [wId, rawVal] of Object.entries(
+          rawKpiWidgetTimeRanges as Record<string, unknown>,
+        )) {
+          const numVal =
+            typeof rawVal === "number"
+              ? rawVal
+              : typeof rawVal === "string"
+                ? Number.parseInt(rawVal, 10)
+                : Number.NaN;
+          if (isKpiTimeRangeDays(numVal)) {
+            parsedRanges[wId] = numVal;
+          }
+        }
+        if (Object.keys(parsedRanges).length > 0) {
+          setKpiTimeRangeByWidget(parsedRanges);
+        }
+      }
+
       const rawWidgetTitleOverrides = getUserSettingAtPath(
         settings,
         WIDGET_TITLE_OVERRIDES_SETTING_PATH,
@@ -2146,6 +2721,18 @@ export function DashboardClient({
       value: recentUpdatesTimeRangeDays,
     });
   }, [recentUpdatesTimeRangeDays, supabase]);
+
+  useEffect(() => {
+    if (!finderPreferencesHydratedRef.current) {
+      return;
+    }
+
+    void patchCurrentUserSetting({
+      supabase,
+      path: KPI_WIDGET_TIME_RANGES_SETTING_PATH.join("."),
+      value: kpiTimeRangeByWidget,
+    });
+  }, [supabase, kpiTimeRangeByWidget]);
 
   useEffect(() => {
     if (!finderPreferencesHydratedRef.current) {
@@ -3399,48 +3986,6 @@ export function DashboardClient({
     };
   }, [departmentDrilldownDepartmentId, departmentInsights, flattenedInstructionEntries]);
 
-  const kpiDateBuckets = useMemo(() => {
-    const today = new Date();
-    const todayStart = new Date(
-      today.getFullYear(),
-      today.getMonth(),
-      today.getDate(),
-    ).getTime();
-
-    return Array.from({ length: kpiTimeRangeDays }, (_, index) => {
-      const offset = kpiTimeRangeDays - 1 - index;
-      const start = todayStart - offset * ONE_DAY_MS;
-      return {
-        id: `kpi-day-${start}`,
-        start,
-        end: start + ONE_DAY_MS,
-        shortLabel: formatKpiShortDate(start),
-        fullLabel: formatKpiLongDate(start),
-      };
-    });
-  }, [kpiTimeRangeDays]);
-
-  const kpiRangeStart = kpiDateBuckets[0]?.start ?? 0;
-  const kpiRangeEnd = (kpiDateBuckets[kpiDateBuckets.length - 1]?.end ?? 0) + 1;
-  const kpiBucketIndexByStart = useMemo(
-    () => new Map(kpiDateBuckets.map((bucket, index) => [bucket.start, index])),
-    [kpiDateBuckets],
-  );
-
-  const kpiEventsInRange = useMemo(() => {
-    return filteredSystemHistoryEvents
-      .map((event) => ({
-        event,
-        timestamp: toSortableTimestamp(event.occurred_at),
-      }))
-      .filter(
-        (entry) =>
-          entry.timestamp >= kpiRangeStart &&
-          entry.timestamp < kpiRangeEnd &&
-          entry.timestamp > 0,
-      );
-  }, [filteredSystemHistoryEvents, kpiRangeEnd, kpiRangeStart]);
-
   const kpiInstructionEntriesScoped = useMemo(() => {
     const departmentScoped =
       selectedDepartmentId === "all"
@@ -3460,506 +4005,37 @@ export function DashboardClient({
     );
   }, [flattenedInstructionEntries, normalizedQuery, selectedDepartmentId]);
 
-  const throughputMetric = useMemo(() => {
-    const points = kpiDateBuckets.map((bucket) => ({
-      id: bucket.id,
-      shortLabel: bucket.shortLabel,
-      fullLabel: bucket.fullLabel,
-      value: 0,
-    }));
-    const rowsByPointId = new Map<string, KpiDrilldownRow[]>();
-
-    for (const { event, timestamp } of kpiEventsInRange) {
-      const dayStart = toDayStartTimestamp(event.occurred_at);
-      if (dayStart === null) {
-        continue;
-      }
-      const bucketIndex = kpiBucketIndexByStart.get(dayStart);
-      if (bucketIndex === undefined) {
-        continue;
-      }
-
-      const point = points[bucketIndex];
-      if (!point) {
-        continue;
-      }
-
-      point.value += 1;
-      const existing = rowsByPointId.get(point.id) ?? [];
-      existing.push({
-        id: event.id,
-        label: getLabelWithDepartment(event.workItem),
-        title: getWorkItemTitle(event.workItem),
-        detail: `${event.action_label} by ${event.actor_name} at ${new Date(
-          timestamp,
-        ).toLocaleTimeString()}`,
-        value: 1,
-        href: `/instructions/${event.instruction_id}`,
-      });
-      rowsByPointId.set(point.id, existing);
-    }
-
-    return { points, rowsByPointId };
-  }, [kpiBucketIndexByStart, kpiDateBuckets, kpiEventsInRange]);
-
-  const creationVelocityMetric = useMemo(() => {
-    const points = kpiDateBuckets.map((bucket) => ({
-      id: `${bucket.id}-created`,
-      shortLabel: bucket.shortLabel,
-      fullLabel: bucket.fullLabel,
-      value: 0,
-    }));
-    const rowsByPointId = new Map<string, KpiDrilldownRow[]>();
-
-    for (const entry of kpiInstructionEntriesScoped) {
-      const timestamp = toSortableTimestamp(entry.instruction.created_at);
-      if (timestamp < kpiRangeStart || timestamp >= kpiRangeEnd || timestamp <= 0) {
-        continue;
-      }
-
-      const dayStart = toDayStartTimestamp(entry.instruction.created_at);
-      if (dayStart === null) {
-        continue;
-      }
-
-      const bucketIndex = kpiBucketIndexByStart.get(dayStart);
-      if (bucketIndex === undefined) {
-        continue;
-      }
-
-      const point = points[bucketIndex];
-      if (!point) {
-        continue;
-      }
-
-      point.value += 1;
-      const existing = rowsByPointId.get(point.id) ?? [];
-      existing.push({
-        id: entry.instruction.id,
-        label: getLabelWithDepartment(entry.workItem),
-        title: getWorkItemTitle(entry.workItem),
-        detail: `Revision ${entry.instruction.revision} created by ${entry.instruction.creator_name}`,
-        value: 1,
-        href: `/instructions/${entry.instruction.id}`,
-      });
-      rowsByPointId.set(point.id, existing);
-    }
-
-    return { points, rowsByPointId };
-  }, [
-    kpiInstructionEntriesScoped,
-    kpiBucketIndexByStart,
-    kpiDateBuckets,
-    kpiRangeEnd,
-    kpiRangeStart,
-  ]);
-
-  const departmentWorkloadMetric = useMemo(() => {
-    const totalsByDepartment = new Map<
-      string,
-      {
-        id: string;
-        label: string;
-        color: string;
-        value: number;
-        rows: KpiDrilldownRow[];
-      }
-    >();
-
-    for (const { event, timestamp } of kpiEventsInRange) {
-      const existing = totalsByDepartment.get(event.workItem.department_id) ?? {
-        id: event.workItem.department_id,
-        label: event.workItem.department_name,
-        color: normalizeDepartmentColor(event.workItem.department_color),
-        value: 0,
-        rows: [],
-      };
-      existing.value += 1;
-      existing.rows.push({
-        id: event.id,
-        label: getLabelWithDepartment(event.workItem),
-        title: getWorkItemTitle(event.workItem),
-        detail: `${event.action_label} by ${event.actor_name} on ${new Date(
-          timestamp,
-        ).toLocaleDateString()}`,
-        value: 1,
-        href: `/instructions/${event.instruction_id}`,
-      });
-      totalsByDepartment.set(event.workItem.department_id, existing);
-    }
-
-    const ranked = [...totalsByDepartment.values()]
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 8);
-    const bars: KpiBarPoint[] = ranked.map((entry) => ({
-      id: entry.id,
-      label:
-        entry.label.length > 12
-          ? `${entry.label.slice(0, 11).trimEnd()}…`
-          : entry.label,
-      value: entry.value,
-      color: entry.color,
-    }));
-    const rowsByBarId = new Map(ranked.map((entry) => [entry.id, entry.rows]));
-
-    return { bars, rowsByBarId };
-  }, [kpiEventsInRange]);
-
-  const reviewHealthMetric = useMemo(() => {
-    const points = kpiDateBuckets.map((bucket) => ({
-      id: `${bucket.id}-review-health`,
-      shortLabel: bucket.shortLabel,
-      fullLabel: bucket.fullLabel,
-      healthy: 0,
-      attention: 0,
-    }));
-    const rowsByPointId = new Map<string, KpiDrilldownRow[]>();
-
-    for (const entry of kpiInstructionEntriesScoped) {
-      const timestamp = toSortableTimestamp(entry.instruction.updated_at);
-      if (timestamp < kpiRangeStart || timestamp >= kpiRangeEnd || timestamp <= 0) {
-        continue;
-      }
-
-      const dayStart = toDayStartTimestamp(entry.instruction.updated_at);
-      if (dayStart === null) {
-        continue;
-      }
-      const bucketIndex = kpiBucketIndexByStart.get(dayStart);
-      if (bucketIndex === undefined) {
-        continue;
-      }
-      const point = points[bucketIndex];
-      if (!point) {
-        continue;
-      }
-
-      const reviewStatus = instructionReviewStatusByInstructionId[entry.instruction.id] ?? null;
-      const daysSinceCalibration = toElapsedCalendarDays(
-        reviewStatus?.last_calibrated_at ?? entry.instruction.updated_at,
-      );
-      const needsAttention =
-        reviewStatus?.status === "needs_review" ||
-        (daysSinceCalibration !== null &&
-          daysSinceCalibration >= normalizedReviewWindowDays);
-
-      if (needsAttention) {
-        point.attention += 1;
-      } else {
-        point.healthy += 1;
-      }
-
-      const existing = rowsByPointId.get(point.id) ?? [];
-      existing.push({
-        id: entry.instruction.id,
-        label: getLabelWithDepartment(entry.workItem),
-        title: getWorkItemTitle(entry.workItem),
-        detail: needsAttention
-          ? `Needs attention | Revision ${entry.instruction.revision}`
-          : `Healthy | Revision ${entry.instruction.revision}`,
-        value: 1,
-        href: `/instructions/${entry.instruction.id}`,
-      });
-      rowsByPointId.set(point.id, existing);
-    }
-
-    return { points, rowsByPointId };
-  }, [
-    kpiInstructionEntriesScoped,
-    instructionReviewStatusByInstructionId,
-    kpiBucketIndexByStart,
-    kpiDateBuckets,
-    kpiRangeEnd,
-    kpiRangeStart,
-    normalizedReviewWindowDays,
-  ]);
-
-  const revisionCycleMetric = useMemo(() => {
-    const points: KpiScatterPoint[] = [];
-    const rowsByPointId = new Map<string, KpiDrilldownRow[]>();
-
-    const sortedEntries = [...kpiInstructionEntriesScoped].sort(
-      (left, right) =>
-        toSortableTimestamp(right.instruction.updated_at) -
-        toSortableTimestamp(left.instruction.updated_at),
-    );
-
-    for (const entry of sortedEntries) {
-      const updatedTimestamp = toSortableTimestamp(entry.instruction.updated_at);
-      if (
-        updatedTimestamp < kpiRangeStart ||
-        updatedTimestamp >= kpiRangeEnd ||
-        updatedTimestamp <= 0
-      ) {
-        continue;
-      }
-
-      const daysSinceUpdate = toElapsedCalendarDays(entry.instruction.updated_at);
-      const xValue = Math.max(0, daysSinceUpdate ?? 0);
-      const yValue = Math.max(1, entry.instruction.revision);
-      const pointId = `${entry.instruction.id}-${entry.instruction.revision}`;
-      points.push({
-        id: pointId,
-        label: getLabelWithDepartment(entry.workItem),
-        xValue,
-        yValue,
-        color: normalizeDepartmentColor(entry.workItem.department_color),
-      });
-      rowsByPointId.set(pointId, [
-        {
-          id: entry.instruction.id,
-          label: getLabelWithDepartment(entry.workItem),
-          title: getWorkItemTitle(entry.workItem),
-          detail: `Revision ${entry.instruction.revision} updated by ${entry.instruction.updater_name}`,
-          value: yValue,
-          href: `/instructions/${entry.instruction.id}`,
-        },
-      ]);
-
-      if (points.length >= 80) {
-        break;
-      }
-    }
-
-    return { points, rowsByPointId };
-  }, [kpiInstructionEntriesScoped, kpiRangeEnd, kpiRangeStart]);
-
-  const eventMixMetric = useMemo(() => {
-    const segmentsById: Record<
-      "created" | "updated" | "needs_review" | "up_to_date",
-      KpiDonutSegment
-    > = {
-      created: {
-        id: "created",
-        label: "Created",
-        value: 0,
-        color: "#0EA5E9",
-      },
-      updated: {
-        id: "updated",
-        label: "Updated",
-        value: 0,
-        color: "#2563EB",
-      },
-      needs_review: {
-        id: "needs_review",
-        label: "Needs Review",
-        value: 0,
-        color: "#F59E0B",
-      },
-      up_to_date: {
-        id: "up_to_date",
-        label: "Marked Up To Date",
-        value: 0,
-        color: "#22C55E",
-      },
-    };
-    const rowsBySegmentId = new Map<string, KpiDrilldownRow[]>();
-
-    for (const { event, timestamp } of kpiEventsInRange) {
-      const segmentId = classifyKpiEventType(event);
-      const segment = segmentsById[segmentId];
-      if (!segment) {
-        continue;
-      }
-      segment.value += 1;
-      const existingRows = rowsBySegmentId.get(segment.id) ?? [];
-      existingRows.push({
-        id: event.id,
-        label: getLabelWithDepartment(event.workItem),
-        title: getWorkItemTitle(event.workItem),
-        detail: `${event.action_label} by ${event.actor_name} on ${new Date(
-          timestamp,
-        ).toLocaleDateString()}`,
-        value: 1,
-        href: `/instructions/${event.instruction_id}`,
-      });
-      rowsBySegmentId.set(segment.id, existingRows);
-    }
-
-    return {
-      segments: Object.values(segmentsById).filter((segment) => segment.value > 0),
-      rowsBySegmentId,
-    };
-  }, [kpiEventsInRange]);
-
-  const reviewOriginMixMetric = useMemo(() => {
-    const segmentsById: Record<"user" | "system", KpiDonutSegment> = {
-      user: {
-        id: "review-origin-user",
-        label: "User Triggered",
-        value: 0,
-        color: "#3B82F6",
-      },
-      system: {
-        id: "review-origin-system",
-        label: "System Timeline",
-        value: 0,
-        color: "#F97316",
-      },
-    };
-    const rowsBySegmentId = new Map<string, KpiDrilldownRow[]>();
-
-    for (const { event, timestamp } of kpiEventsInRange) {
-      const eventType = classifyKpiEventType(event);
-      if (eventType !== "needs_review" && eventType !== "up_to_date") {
-        continue;
-      }
-
-      const segment =
-        event.detail.trim().toLowerCase().includes("system counter")
-          ? segmentsById.system
-          : segmentsById.user;
-      segment.value += 1;
-
-      const existingRows = rowsBySegmentId.get(segment.id) ?? [];
-      existingRows.push({
-        id: event.id,
-        label: getLabelWithDepartment(event.workItem),
-        title: getWorkItemTitle(event.workItem),
-        detail: `${event.action_label} by ${event.actor_name} on ${new Date(
-          timestamp,
-        ).toLocaleDateString()}`,
-        value: 1,
-        href: `/instructions/${event.instruction_id}`,
-      });
-      rowsBySegmentId.set(segment.id, existingRows);
-    }
-
-    return {
-      segments: Object.values(segmentsById).filter((segment) => segment.value > 0),
-      rowsBySegmentId,
-    };
-  }, [kpiEventsInRange]);
-
-  const departmentEventShareMetric = useMemo(() => {
-    const totalsByDepartment = new Map<
-      string,
-      {
-        id: string;
-        label: string;
-        color: string;
-        value: number;
-        rows: KpiDrilldownRow[];
-      }
-    >();
-
-    for (const { event, timestamp } of kpiEventsInRange) {
-      const existing = totalsByDepartment.get(event.workItem.department_id) ?? {
-        id: event.workItem.department_id,
-        label: event.workItem.department_name,
-        color: normalizeDepartmentColor(event.workItem.department_color),
-        value: 0,
-        rows: [],
-      };
-      existing.value += 1;
-      existing.rows.push({
-        id: event.id,
-        label: getLabelWithDepartment(event.workItem),
-        title: getWorkItemTitle(event.workItem),
-        detail: `${event.action_label} by ${event.actor_name} on ${new Date(
-          timestamp,
-        ).toLocaleDateString()}`,
-        value: 1,
-        href: `/instructions/${event.instruction_id}`,
-      });
-      totalsByDepartment.set(event.workItem.department_id, existing);
-    }
-
-    const ranked = [...totalsByDepartment.values()].sort((a, b) => b.value - a.value);
-    const rowsBySegmentId = new Map<string, KpiDrilldownRow[]>();
-    const segments: KpiDonutSegment[] = ranked.map((entry) => {
-      rowsBySegmentId.set(entry.id, entry.rows);
-      return {
-        id: entry.id,
-        label: entry.label,
-        value: entry.value,
-        color: entry.color,
-      };
-    });
-
-    return { segments, rowsBySegmentId };
-  }, [kpiEventsInRange]);
-
-  const actorActivityMixMetric = useMemo(() => {
-    const colorRamp = [
-      "#06B6D4",
-      "#3B82F6",
-      "#8B5CF6",
-      "#F59E0B",
-      "#22C55E",
-      "#F43F5E",
-    ];
-    const totalsByActor = new Map<
-      string,
-      {
-        id: string;
-        label: string;
-        value: number;
-        rows: KpiDrilldownRow[];
-      }
-    >();
-
-    for (const { event, timestamp } of kpiEventsInRange) {
-      const actorKey = event.actor_name.trim() || "Unknown User";
-      const existing = totalsByActor.get(actorKey) ?? {
-        id: actorKey,
-        label: actorKey,
-        value: 0,
-        rows: [],
-      };
-      existing.value += 1;
-      existing.rows.push({
-        id: event.id,
-        label: getLabelWithDepartment(event.workItem),
-        title: getWorkItemTitle(event.workItem),
-        detail: `${event.action_label} by ${event.actor_name} on ${new Date(
-          timestamp,
-        ).toLocaleDateString()}`,
-        value: 1,
-        href: `/instructions/${event.instruction_id}`,
-      });
-      totalsByActor.set(actorKey, existing);
-    }
-
-    const ranked = [...totalsByActor.values()].sort((a, b) => b.value - a.value);
-    const topActors = ranked.slice(0, 5);
-    const remainingActors = ranked.slice(5);
-    const rowsBySegmentId = new Map<string, KpiDrilldownRow[]>();
-    const segments: KpiDonutSegment[] = topActors.map((entry, index) => {
-      const segmentId = `actor-${index + 1}-${entry.id}`;
-      rowsBySegmentId.set(segmentId, entry.rows);
-      return {
-        id: segmentId,
-        label: truncateKpiLegendLabel(entry.label, 20),
-        value: entry.value,
-        color: colorRamp[index % colorRamp.length] ?? "#0EA5E9",
-      };
-    });
-
-    if (remainingActors.length > 0) {
-      const otherRows = remainingActors.flatMap((entry) => entry.rows);
-      const otherValue = remainingActors.reduce((sum, entry) => sum + entry.value, 0);
-      rowsBySegmentId.set("actors-other", otherRows);
-      segments.push({
-        id: "actors-other",
-        label: "Other Users",
-        value: otherValue,
-        color: "#94A3B8",
-      });
-    }
-
-    return { segments, rowsBySegmentId };
-  }, [kpiEventsInRange]);
-
-  const kpiDateRangeLabel = useMemo(() => {
-    const first = kpiDateBuckets[0];
-    const last = kpiDateBuckets[kpiDateBuckets.length - 1];
-    if (!first || !last) {
-      return "";
-    }
-    return `${first.fullLabel} - ${last.fullLabel}`;
-  }, [kpiDateBuckets]);
+  const kpiMetricsByRange = useMemo(
+    () => ({
+      7: computeKpiMetricsForRange(
+        7,
+        filteredSystemHistoryEvents,
+        kpiInstructionEntriesScoped,
+        instructionReviewStatusByInstructionId,
+        normalizedReviewWindowDays,
+      ),
+      30: computeKpiMetricsForRange(
+        30,
+        filteredSystemHistoryEvents,
+        kpiInstructionEntriesScoped,
+        instructionReviewStatusByInstructionId,
+        normalizedReviewWindowDays,
+      ),
+      90: computeKpiMetricsForRange(
+        90,
+        filteredSystemHistoryEvents,
+        kpiInstructionEntriesScoped,
+        instructionReviewStatusByInstructionId,
+        normalizedReviewWindowDays,
+      ),
+    }),
+    [
+      filteredSystemHistoryEvents,
+      kpiInstructionEntriesScoped,
+      instructionReviewStatusByInstructionId,
+      normalizedReviewWindowDays,
+    ],
+  );
 
   const widgetDefinitionsById = useMemo(
     () => new Map(WIDGET_DEFINITIONS.map((widget) => [widget.id, widget])),
@@ -5530,7 +5606,8 @@ export function DashboardClient({
     }
 
     if (widgetId === "kpi_throughput") {
-      const totalEvents = throughputMetric.points.reduce(
+      const kpiData = kpiMetricsByRange[getKpiWidgetTimeRange(widgetId)];
+      const totalEvents = kpiData.throughputMetric.points.reduce(
         (sum, point) => sum + point.value,
         0,
       );
@@ -5542,11 +5619,11 @@ export function DashboardClient({
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                 Time Series Filter
               </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiDateRangeLabel}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
             </div>
             <KpiTimeRangePicker
-              value={kpiTimeRangeDays}
-              onChange={setKpiTimeRangeDays}
+              value={getKpiWidgetTimeRange(widgetId)}
+              onChange={(days) => setKpiWidgetTimeRange(widgetId, days)}
             />
           </div>
           <div className="rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/60">
@@ -5555,7 +5632,7 @@ export function DashboardClient({
             </p>
           </div>
           <KpiLineChart
-            points={throughputMetric.points}
+            points={kpiData.throughputMetric.points}
             yAxisLabel="Events"
             widgetSize={widgetSize}
             lineColor="#06B6D4"
@@ -5564,7 +5641,7 @@ export function DashboardClient({
                 title: "Throughput Trend Drill Down",
                 subtitle: `${point.fullLabel} | ${selectedDepartmentName}`,
                 yAxisLabel: "Events",
-                rows: throughputMetric.rowsByPointId.get(point.id) ?? [],
+                rows: kpiData.throughputMetric.rowsByPointId.get(point.id) ?? [],
               });
             }}
           />
@@ -5573,7 +5650,8 @@ export function DashboardClient({
     }
 
     if (widgetId === "kpi_creation_velocity") {
-      const totalCreated = creationVelocityMetric.points.reduce(
+      const kpiData = kpiMetricsByRange[getKpiWidgetTimeRange(widgetId)];
+      const totalCreated = kpiData.creationVelocityMetric.points.reduce(
         (sum, point) => sum + point.value,
         0,
       );
@@ -5585,11 +5663,11 @@ export function DashboardClient({
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                 Time Series Filter
               </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiDateRangeLabel}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
             </div>
             <KpiTimeRangePicker
-              value={kpiTimeRangeDays}
-              onChange={setKpiTimeRangeDays}
+              value={getKpiWidgetTimeRange(widgetId)}
+              onChange={(days) => setKpiWidgetTimeRange(widgetId, days)}
             />
           </div>
           <div className="rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/60">
@@ -5598,7 +5676,7 @@ export function DashboardClient({
             </p>
           </div>
           <KpiLineChart
-            points={creationVelocityMetric.points}
+            points={kpiData.creationVelocityMetric.points}
             yAxisLabel="Created"
             widgetSize={widgetSize}
             lineColor="#3B82F6"
@@ -5608,7 +5686,7 @@ export function DashboardClient({
                 title: "Creation Velocity Drill Down",
                 subtitle: `${point.fullLabel} | ${selectedDepartmentName}`,
                 yAxisLabel: "Created",
-                rows: creationVelocityMetric.rowsByPointId.get(point.id) ?? [],
+                rows: kpiData.creationVelocityMetric.rowsByPointId.get(point.id) ?? [],
               });
             }}
           />
@@ -5617,7 +5695,8 @@ export function DashboardClient({
     }
 
     if (widgetId === "kpi_department_workload") {
-      const totalEvents = departmentWorkloadMetric.bars.reduce(
+      const kpiData = kpiMetricsByRange[getKpiWidgetTimeRange(widgetId)];
+      const totalEvents = kpiData.departmentWorkloadMetric.bars.reduce(
         (sum, bar) => sum + bar.value,
         0,
       );
@@ -5629,11 +5708,11 @@ export function DashboardClient({
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                 Time Series Filter
               </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiDateRangeLabel}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
             </div>
             <KpiTimeRangePicker
-              value={kpiTimeRangeDays}
-              onChange={setKpiTimeRangeDays}
+              value={getKpiWidgetTimeRange(widgetId)}
+              onChange={(days) => setKpiWidgetTimeRange(widgetId, days)}
             />
           </div>
           <div className="rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/60">
@@ -5642,21 +5721,21 @@ export function DashboardClient({
               {totalEvents === 1 ? "" : "s"}.
             </p>
           </div>
-          {departmentWorkloadMetric.bars.length === 0 ? (
+          {kpiData.departmentWorkloadMetric.bars.length === 0 ? (
             <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
               No department event load data is available for this range.
             </p>
           ) : (
             <KpiBarChart
-              bars={departmentWorkloadMetric.bars}
+              bars={kpiData.departmentWorkloadMetric.bars}
               yAxisLabel="Events"
               widgetSize={widgetSize}
               onSelectBar={(bar) => {
                 setActiveKpiDrilldown({
                   title: "Department Workload Drill Down",
-                  subtitle: `${bar.label} | ${kpiDateRangeLabel}`,
+                  subtitle: `${bar.label} | ${kpiData.dateRangeLabel}`,
                   yAxisLabel: "Events",
-                  rows: departmentWorkloadMetric.rowsByBarId.get(bar.id) ?? [],
+                  rows: kpiData.departmentWorkloadMetric.rowsByBarId.get(bar.id) ?? [],
                 });
               }}
             />
@@ -5666,6 +5745,7 @@ export function DashboardClient({
     }
 
     if (widgetId === "kpi_review_health") {
+      const kpiData = kpiMetricsByRange[getKpiWidgetTimeRange(widgetId)];
       return (
         <div className="grid gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -5673,15 +5753,15 @@ export function DashboardClient({
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                 Time Series Filter
               </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiDateRangeLabel}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
             </div>
             <KpiTimeRangePicker
-              value={kpiTimeRangeDays}
-              onChange={setKpiTimeRangeDays}
+              value={getKpiWidgetTimeRange(widgetId)}
+              onChange={(days) => setKpiWidgetTimeRange(widgetId, days)}
             />
           </div>
           <KpiStackedBarChart
-            points={reviewHealthMetric.points}
+            points={kpiData.reviewHealthMetric.points}
             yAxisLabel="Instruction Updates"
             widgetSize={widgetSize}
             onSelectPoint={(point) => {
@@ -5689,7 +5769,7 @@ export function DashboardClient({
                 title: "Review Health Drill Down",
                 subtitle: `${point.fullLabel} | ${selectedDepartmentName}`,
                 yAxisLabel: "Instructions",
-                rows: reviewHealthMetric.rowsByPointId.get(point.id) ?? [],
+                rows: kpiData.reviewHealthMetric.rowsByPointId.get(point.id) ?? [],
               });
             }}
           />
@@ -5698,6 +5778,7 @@ export function DashboardClient({
     }
 
     if (widgetId === "kpi_revision_cycle_time") {
+      const kpiData = kpiMetricsByRange[getKpiWidgetTimeRange(widgetId)];
       return (
         <div className="grid gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -5705,20 +5786,20 @@ export function DashboardClient({
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                 Time Series Filter
               </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiDateRangeLabel}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
             </div>
             <KpiTimeRangePicker
-              value={kpiTimeRangeDays}
-              onChange={setKpiTimeRangeDays}
+              value={getKpiWidgetTimeRange(widgetId)}
+              onChange={(days) => setKpiWidgetTimeRange(widgetId, days)}
             />
           </div>
-          {revisionCycleMetric.points.length === 0 ? (
+          {kpiData.revisionCycleMetric.points.length === 0 ? (
             <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
               No revision cycle points are available for this time window.
             </p>
           ) : (
             <KpiScatterChart
-              points={revisionCycleMetric.points}
+              points={kpiData.revisionCycleMetric.points}
               xAxisLabel="days since update"
               yAxisLabel="Revision"
               widgetSize={widgetSize}
@@ -5727,7 +5808,7 @@ export function DashboardClient({
                   title: "Revision Cycle Time Drill Down",
                   subtitle: point.label,
                   yAxisLabel: "Revision",
-                  rows: revisionCycleMetric.rowsByPointId.get(point.id) ?? [],
+                  rows: kpiData.revisionCycleMetric.rowsByPointId.get(point.id) ?? [],
                 });
               }}
             />
@@ -5737,6 +5818,7 @@ export function DashboardClient({
     }
 
     if (widgetId === "kpi_event_mix") {
+      const kpiData = kpiMetricsByRange[getKpiWidgetTimeRange(widgetId)];
       return (
         <div className="grid gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -5744,27 +5826,27 @@ export function DashboardClient({
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                 Time Series Filter
               </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiDateRangeLabel}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
             </div>
             <KpiTimeRangePicker
-              value={kpiTimeRangeDays}
-              onChange={setKpiTimeRangeDays}
+              value={getKpiWidgetTimeRange(widgetId)}
+              onChange={(days) => setKpiWidgetTimeRange(widgetId, days)}
             />
           </div>
-          {eventMixMetric.segments.length === 0 ? (
+          {kpiData.eventMixMetric.segments.length === 0 ? (
             <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
               No event mix data is available for this time range.
             </p>
           ) : (
             <KpiDonutChart
-              segments={eventMixMetric.segments}
+              segments={kpiData.eventMixMetric.segments}
               widgetSize={widgetSize}
               onSelectSegment={(segment) => {
                 setActiveKpiDrilldown({
                   title: "Event Mix Drill Down",
-                  subtitle: `${segment.label} | ${kpiDateRangeLabel}`,
+                  subtitle: `${segment.label} | ${kpiData.dateRangeLabel}`,
                   yAxisLabel: "Events",
-                  rows: eventMixMetric.rowsBySegmentId.get(segment.id) ?? [],
+                  rows: kpiData.eventMixMetric.rowsBySegmentId.get(segment.id) ?? [],
                 });
               }}
             />
@@ -5774,6 +5856,7 @@ export function DashboardClient({
     }
 
     if (widgetId === "kpi_review_origin_mix") {
+      const kpiData = kpiMetricsByRange[getKpiWidgetTimeRange(widgetId)];
       return (
         <div className="grid gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -5781,27 +5864,27 @@ export function DashboardClient({
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                 Time Series Filter
               </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiDateRangeLabel}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
             </div>
             <KpiTimeRangePicker
-              value={kpiTimeRangeDays}
-              onChange={setKpiTimeRangeDays}
+              value={getKpiWidgetTimeRange(widgetId)}
+              onChange={(days) => setKpiWidgetTimeRange(widgetId, days)}
             />
           </div>
-          {reviewOriginMixMetric.segments.length === 0 ? (
+          {kpiData.reviewOriginMixMetric.segments.length === 0 ? (
             <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
               No review-origin events are available for this time range.
             </p>
           ) : (
             <KpiDonutChart
-              segments={reviewOriginMixMetric.segments}
+              segments={kpiData.reviewOriginMixMetric.segments}
               widgetSize={widgetSize}
               onSelectSegment={(segment) => {
                 setActiveKpiDrilldown({
                   title: "Review Origin Mix Drill Down",
-                  subtitle: `${segment.label} | ${kpiDateRangeLabel}`,
+                  subtitle: `${segment.label} | ${kpiData.dateRangeLabel}`,
                   yAxisLabel: "Events",
-                  rows: reviewOriginMixMetric.rowsBySegmentId.get(segment.id) ?? [],
+                  rows: kpiData.reviewOriginMixMetric.rowsBySegmentId.get(segment.id) ?? [],
                 });
               }}
             />
@@ -5811,6 +5894,7 @@ export function DashboardClient({
     }
 
     if (widgetId === "kpi_department_event_share") {
+      const kpiData = kpiMetricsByRange[getKpiWidgetTimeRange(widgetId)];
       return (
         <div className="grid gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -5818,27 +5902,27 @@ export function DashboardClient({
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                 Time Series Filter
               </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiDateRangeLabel}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
             </div>
             <KpiTimeRangePicker
-              value={kpiTimeRangeDays}
-              onChange={setKpiTimeRangeDays}
+              value={getKpiWidgetTimeRange(widgetId)}
+              onChange={(days) => setKpiWidgetTimeRange(widgetId, days)}
             />
           </div>
-          {departmentEventShareMetric.segments.length === 0 ? (
+          {kpiData.departmentEventShareMetric.segments.length === 0 ? (
             <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
               No department event-share data is available for this range.
             </p>
           ) : (
             <KpiDonutChart
-              segments={departmentEventShareMetric.segments}
+              segments={kpiData.departmentEventShareMetric.segments}
               widgetSize={widgetSize}
               onSelectSegment={(segment) => {
                 setActiveKpiDrilldown({
                   title: "Department Event Share Drill Down",
-                  subtitle: `${segment.label} | ${kpiDateRangeLabel}`,
+                  subtitle: `${segment.label} | ${kpiData.dateRangeLabel}`,
                   yAxisLabel: "Events",
-                  rows: departmentEventShareMetric.rowsBySegmentId.get(segment.id) ?? [],
+                  rows: kpiData.departmentEventShareMetric.rowsBySegmentId.get(segment.id) ?? [],
                 });
               }}
             />
@@ -5848,6 +5932,7 @@ export function DashboardClient({
     }
 
     if (widgetId === "kpi_actor_activity_mix") {
+      const kpiData = kpiMetricsByRange[getKpiWidgetTimeRange(widgetId)];
       return (
         <div className="grid gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -5855,27 +5940,27 @@ export function DashboardClient({
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                 Time Series Filter
               </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiDateRangeLabel}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
             </div>
             <KpiTimeRangePicker
-              value={kpiTimeRangeDays}
-              onChange={setKpiTimeRangeDays}
+              value={getKpiWidgetTimeRange(widgetId)}
+              onChange={(days) => setKpiWidgetTimeRange(widgetId, days)}
             />
           </div>
-          {actorActivityMixMetric.segments.length === 0 ? (
+          {kpiData.actorActivityMixMetric.segments.length === 0 ? (
             <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
               No actor activity data is available for this range.
             </p>
           ) : (
             <KpiDonutChart
-              segments={actorActivityMixMetric.segments}
+              segments={kpiData.actorActivityMixMetric.segments}
               widgetSize={widgetSize}
               onSelectSegment={(segment) => {
                 setActiveKpiDrilldown({
                   title: "Actor Activity Mix Drill Down",
-                  subtitle: `${segment.label} | ${kpiDateRangeLabel}`,
+                  subtitle: `${segment.label} | ${kpiData.dateRangeLabel}`,
                   yAxisLabel: "Events",
-                  rows: actorActivityMixMetric.rowsBySegmentId.get(segment.id) ?? [],
+                  rows: kpiData.actorActivityMixMetric.rowsBySegmentId.get(segment.id) ?? [],
                 });
               }}
             />

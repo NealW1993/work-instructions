@@ -245,6 +245,7 @@ export default async function InstructionPrintPage({
       <AutoPrintTrigger enabled={autoPrintEnabled} />
       <style>
         {`@media print {
+          @page { margin: 0.5in 0.6in; }
           header { display: none !important; }
           main {
             max-width: 100% !important;
@@ -258,7 +259,7 @@ export default async function InstructionPrintPage({
             box-shadow: none !important;
             background: #fff !important;
             margin: 0 !important;
-            padding: 0.5in 0.6in !important;
+            padding: 0 !important;
             border-radius: 0 !important;
             overflow: visible !important;
             max-width: 100% !important;
@@ -272,9 +273,17 @@ export default async function InstructionPrintPage({
             border: none !important;
             padding: 0 !important;
           }
-          figure, img, table, pre {
+          figure, img, table, pre, blockquote {
             break-inside: avoid;
             page-break-inside: avoid;
+          }
+          h1, h2, h3 {
+            break-after: avoid;
+            page-break-after: avoid;
+          }
+          p, li {
+            orphans: 3;
+            widows: 3;
           }
           img {
             max-width: 100% !important;
