@@ -55,9 +55,16 @@ export function PrintInstructionButton({
       return;
     }
 
-    await new Promise<void>((resolve) => {
-      requestAnimationFrame(() => resolve());
-    });
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const hasMedia = Boolean(document.querySelector(".print-media-end-target img, .print-media-end-target video"));
+      if (hasMedia) {
+        break;
+      }
+
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 100);
+      });
+    }
 
     const mediaRoot = document.querySelector<HTMLElement>(".print-media-end-target");
     if (!mediaRoot) {
@@ -90,7 +97,7 @@ export function PrintInstructionButton({
 
     const waitForAllMedia = Promise.all([...imagePromises, ...videoPromises]).then(() => undefined);
     const timeout = new Promise<void>((resolve) => {
-      window.setTimeout(resolve, 1200);
+      window.setTimeout(resolve, 2200);
     });
 
     await Promise.race([waitForAllMedia, timeout]);

@@ -4,7 +4,10 @@ import remarkGfm from "remark-gfm";
 import sanitizeHtml from "sanitize-html";
 
 import { AutoPrintTrigger } from "@/components/instructions/auto-print-trigger";
-import { PrintMediaIsolator } from "@/components/instructions/print-media-isolator";
+import {
+  PrintMediaIsolator,
+  type PrintMediaMode,
+} from "@/components/instructions/print-media-isolator";
 import { PrintPageControls } from "@/components/instructions/print-page-controls";
 import { requireAuthenticatedUser } from "@/lib/auth";
 
@@ -14,6 +17,7 @@ interface InstructionPrintPageProps {
   }>;
   searchParams: Promise<{
     autoprint?: string;
+    mediaMode?: string;
   }>;
 }
 
@@ -175,6 +179,14 @@ export default async function InstructionPrintPage({
   const autoPrintEnabled =
     resolvedSearchParams.autoprint === "1" ||
     resolvedSearchParams.autoprint === "true";
+  const printMediaMode: PrintMediaMode =
+    resolvedSearchParams.mediaMode === "end" ||
+    resolvedSearchParams.mediaMode === "append" ||
+    resolvedSearchParams.mediaMode === "append-to-end"
+      ? "append-to-end"
+      : "paginate-inline";
+  const printModeClassName =
+    printMediaMode === "append-to-end" ? "print-mode-append" : "print-mode-inline";
   const { supabase } = await requireAuthenticatedUser();
 
   const { data, error } = await supabase
@@ -243,9 +255,12 @@ export default async function InstructionPrintPage({
 
   return (
     <>
-      <AutoPrintTrigger enabled={autoPrintEnabled} />
+      <AutoPrintTrigger
+        enabled={autoPrintEnabled}
+        waitForSelector={printMediaMode === "append-to-end" ? ".print-media-end-target" : undefined}
+      />
       <PrintMediaIsolator
-        mode="from-document"
+        mode={printMediaMode}
         proseSelector=".print-work-instructions-body .prose, .print-work-instructions-body .prose-markdown"
         destinationSelector=".print-media-end-target"
       />
@@ -283,10 +298,10 @@ export default async function InstructionPrintPage({
             break-inside: avoid;
             page-break-inside: avoid;
           }
-          html:not([data-print-media-mode="append-to-end"]) .print-media-end-section {
+          .print-sheet.print-mode-inline .print-media-end-section {
             display: none !important;
           }
-          html:not([data-print-media-mode="append-to-end"]) .print-media-block {
+          .print-sheet.print-mode-inline .print-media-block {
             break-before: page !important;
             page-break-before: always !important;
             break-after: page !important;
@@ -294,10 +309,10 @@ export default async function InstructionPrintPage({
             break-inside: avoid !important;
             page-break-inside: avoid !important;
           }
-          html:not([data-print-media-mode="append-to-end"]) .print-media-block img,
-          html:not([data-print-media-mode="append-to-end"]) .print-media-block video,
-          html:not([data-print-media-mode="append-to-end"]) img.print-media-block,
-          html:not([data-print-media-mode="append-to-end"]) video.print-media-block {
+          .print-sheet.print-mode-inline .print-media-block img,
+          .print-sheet.print-mode-inline .print-media-block video,
+          .print-sheet.print-mode-inline img.print-media-block,
+          .print-sheet.print-mode-inline video.print-media-block {
             display: block;
             max-width: 100% !important;
             max-height: 9in !important;
@@ -306,26 +321,26 @@ export default async function InstructionPrintPage({
             margin: 0 auto;
             object-fit: contain;
           }
-          html[data-print-media-mode="append-to-end"] .print-media-inline-hidden {
+          .print-sheet.print-mode-append .print-media-inline-hidden {
             display: none !important;
           }
-          html[data-print-media-mode="append-to-end"] .print-media-end-section[data-has-media="false"] {
+          .print-sheet.print-mode-append .print-media-end-section[data-has-media="false"] {
             display: none !important;
           }
-          html[data-print-media-mode="append-to-end"] .print-media-end-section {
+          .print-sheet.print-mode-append .print-media-end-section {
             break-before: page !important;
             page-break-before: always !important;
           }
-          html[data-print-media-mode="append-to-end"] .print-media-end-item {
+          .print-sheet.print-mode-append .print-media-end-item {
             break-inside: avoid !important;
             page-break-inside: avoid !important;
           }
-          html[data-print-media-mode="append-to-end"] .print-media-end-item + .print-media-end-item {
+          .print-sheet.print-mode-append .print-media-end-item + .print-media-end-item {
             break-before: page !important;
             page-break-before: always !important;
           }
-          html[data-print-media-mode="append-to-end"] .print-media-end-item img,
-          html[data-print-media-mode="append-to-end"] .print-media-end-item video {
+          .print-sheet.print-mode-append .print-media-end-item img,
+          .print-sheet.print-mode-append .print-media-end-item video {
             display: block;
             max-width: 100% !important;
             max-height: 9in !important;
@@ -334,7 +349,7 @@ export default async function InstructionPrintPage({
             margin: 0 auto;
             object-fit: contain;
           }
-          html[data-print-media-mode="append-to-end"] .print-media-end-caption {
+          .print-sheet.print-mode-append .print-media-end-caption {
             margin-top: 0.3rem;
             text-align: center;
             font-size: 0.8rem;
@@ -355,7 +370,9 @@ export default async function InstructionPrintPage({
           }
         }`}
       </style>
-      <article className="print-sheet mx-auto max-w-4xl rounded-2xl border border-slate-300/70 bg-white p-6 shadow-lg dark:border-slate-700 dark:bg-slate-950">
+      <article
+        className={`print-sheet ${printModeClassName} mx-auto max-w-4xl rounded-2xl border border-slate-300/70 bg-white p-6 shadow-lg dark:border-slate-700 dark:bg-slate-950`}
+      >
         <PrintPageControls instructionHref={`/instructions/${instruction.id}`} />
 
         <section className="border-b border-slate-300 pb-4 dark:border-slate-700">

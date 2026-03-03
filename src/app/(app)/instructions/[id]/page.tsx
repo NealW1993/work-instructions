@@ -1059,6 +1059,9 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
           html[data-print-media-mode="append-to-end"] .print-media-inline-hidden {
             display: none !important;
           }
+          html[data-print-media-mode="append-to-end"] .print-work-instructions-body .print-media-block {
+            display: none !important;
+          }
           html[data-print-media-mode="append-to-end"] .print-media-end-section[data-has-media="false"] {
             display: none !important;
           }

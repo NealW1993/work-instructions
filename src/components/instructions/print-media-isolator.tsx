@@ -125,7 +125,7 @@ export function PrintMediaIsolator({
           .querySelectorAll<HTMLElement>(`.${MEDIA_BLOCK_CLASS}, .${INLINE_HIDDEN_CLASS}`)
           .forEach((block) => {
             block.classList.remove(MEDIA_BLOCK_CLASS, INLINE_HIDDEN_CLASS);
-        });
+          });
       });
     }
 
@@ -227,6 +227,8 @@ export function PrintMediaIsolator({
       const activeMode = resolveActiveMode();
       const allContainers = getAllContainers();
       resetMarkedState(allContainers);
+      const inlineContainers = getContainers(resolvedInlineSelector);
+      markMediaBlocks(inlineContainers);
 
       if (activeMode === "append-to-end") {
         const appendContainers = getContainers(resolvedAppendSelector);
@@ -235,8 +237,6 @@ export function PrintMediaIsolator({
       }
 
       clearDestination();
-      const inlineContainers = getContainers(resolvedInlineSelector);
-      markMediaBlocks(inlineContainers);
     }
 
     prepareMediaForPrint();
