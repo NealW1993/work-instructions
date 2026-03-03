@@ -1026,26 +1026,28 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
       />
       <InstructionViewTracker instructionId={instruction.id} />
       <PrintMediaIsolator
-        mode="append-to-end"
-        proseSelector=".print-work-instructions-body .prose, .print-work-instructions-body .prose-markdown"
+        mode="from-document"
+        inlineProseSelector=".print-work-instructions-body .prose, .print-work-instructions-body .prose-markdown"
+        appendProseSelector=".screen-work-instructions-body .prose, .screen-work-instructions-body .prose-markdown, .print-work-instructions-body .prose, .print-work-instructions-body .prose-markdown"
         destinationSelector=".print-media-end-target"
       />
       <style>
         {`@media print {
-          .print-media-inline-hidden {
+          html:not([data-print-media-mode="append-to-end"]) .print-media-end-section {
             display: none !important;
           }
-          .print-media-end-section[data-has-media="false"] {
-            display: none !important;
-          }
-          .print-media-end-item {
+          html:not([data-print-media-mode="append-to-end"]) .print-media-block {
             break-before: page !important;
             page-break-before: always !important;
+            break-after: page !important;
+            page-break-after: always !important;
             break-inside: avoid !important;
             page-break-inside: avoid !important;
           }
-          .print-media-end-item img,
-          .print-media-end-item video {
+          html:not([data-print-media-mode="append-to-end"]) .print-media-block img,
+          html:not([data-print-media-mode="append-to-end"]) .print-media-block video,
+          html:not([data-print-media-mode="append-to-end"]) img.print-media-block,
+          html:not([data-print-media-mode="append-to-end"]) video.print-media-block {
             display: block !important;
             width: auto !important;
             height: auto !important;
@@ -1054,7 +1056,35 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
             margin: 0 auto !important;
             object-fit: contain !important;
           }
-          .print-media-end-caption {
+          html[data-print-media-mode="append-to-end"] .print-media-inline-hidden {
+            display: none !important;
+          }
+          html[data-print-media-mode="append-to-end"] .print-media-end-section[data-has-media="false"] {
+            display: none !important;
+          }
+          html[data-print-media-mode="append-to-end"] .print-media-end-section {
+            break-before: page !important;
+            page-break-before: always !important;
+          }
+          html[data-print-media-mode="append-to-end"] .print-media-end-item {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+          html[data-print-media-mode="append-to-end"] .print-media-end-item + .print-media-end-item {
+            break-before: page !important;
+            page-break-before: always !important;
+          }
+          html[data-print-media-mode="append-to-end"] .print-media-end-item img,
+          html[data-print-media-mode="append-to-end"] .print-media-end-item video {
+            display: block !important;
+            width: auto !important;
+            height: auto !important;
+            max-width: 100% !important;
+            max-height: 9in !important;
+            margin: 0 auto !important;
+            object-fit: contain !important;
+          }
+          html[data-print-media-mode="append-to-end"] .print-media-end-caption {
             margin-top: 0.3rem;
             text-align: center;
             font-size: 0.8rem;
@@ -1232,7 +1262,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
                   className="h-fit w-full justify-center self-start"
                 />
                 <PrintInstructionButton
-                  className="w-full justify-center px-3 py-1.5 text-xs"
+                  className="w-full px-3 py-1.5 text-xs"
                 />
                 {!instructionIsArchived ? (
                   <div className="grid grid-cols-2 gap-2">
@@ -1301,9 +1331,11 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
 
         <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
           <h2 className="text-xl font-bold">Work Instructions</h2>
-          <InstructionBodyLightbox>
-            {renderInstructionContent(instruction.body_markdown)}
-          </InstructionBodyLightbox>
+          <div className="screen-work-instructions-body">
+            <InstructionBodyLightbox>
+              {renderInstructionContent(instruction.body_markdown)}
+            </InstructionBodyLightbox>
+          </div>
         </section>
 
         {instruction.instruction_media.length > 0 ? (

@@ -245,7 +245,7 @@ export default async function InstructionPrintPage({
     <>
       <AutoPrintTrigger enabled={autoPrintEnabled} />
       <PrintMediaIsolator
-        mode="append-to-end"
+        mode="from-document"
         proseSelector=".print-work-instructions-body .prose, .print-work-instructions-body .prose-markdown"
         destinationSelector=".print-media-end-target"
       />
@@ -283,20 +283,21 @@ export default async function InstructionPrintPage({
             break-inside: avoid;
             page-break-inside: avoid;
           }
-          .print-media-inline-hidden {
+          html:not([data-print-media-mode="append-to-end"]) .print-media-end-section {
             display: none !important;
           }
-          .print-media-end-section[data-has-media="false"] {
-            display: none !important;
-          }
-          .print-media-end-item {
+          html:not([data-print-media-mode="append-to-end"]) .print-media-block {
             break-before: page !important;
             page-break-before: always !important;
+            break-after: page !important;
+            page-break-after: always !important;
             break-inside: avoid !important;
             page-break-inside: avoid !important;
           }
-          .print-media-end-item img,
-          .print-media-end-item video {
+          html:not([data-print-media-mode="append-to-end"]) .print-media-block img,
+          html:not([data-print-media-mode="append-to-end"]) .print-media-block video,
+          html:not([data-print-media-mode="append-to-end"]) img.print-media-block,
+          html:not([data-print-media-mode="append-to-end"]) video.print-media-block {
             display: block;
             max-width: 100% !important;
             max-height: 9in !important;
@@ -305,7 +306,35 @@ export default async function InstructionPrintPage({
             margin: 0 auto;
             object-fit: contain;
           }
-          .print-media-end-caption {
+          html[data-print-media-mode="append-to-end"] .print-media-inline-hidden {
+            display: none !important;
+          }
+          html[data-print-media-mode="append-to-end"] .print-media-end-section[data-has-media="false"] {
+            display: none !important;
+          }
+          html[data-print-media-mode="append-to-end"] .print-media-end-section {
+            break-before: page !important;
+            page-break-before: always !important;
+          }
+          html[data-print-media-mode="append-to-end"] .print-media-end-item {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+          html[data-print-media-mode="append-to-end"] .print-media-end-item + .print-media-end-item {
+            break-before: page !important;
+            page-break-before: always !important;
+          }
+          html[data-print-media-mode="append-to-end"] .print-media-end-item img,
+          html[data-print-media-mode="append-to-end"] .print-media-end-item video {
+            display: block;
+            max-width: 100% !important;
+            max-height: 9in !important;
+            width: auto !important;
+            height: auto !important;
+            margin: 0 auto;
+            object-fit: contain;
+          }
+          html[data-print-media-mode="append-to-end"] .print-media-end-caption {
             margin-top: 0.3rem;
             text-align: center;
             font-size: 0.8rem;
