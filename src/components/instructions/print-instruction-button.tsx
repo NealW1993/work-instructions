@@ -50,23 +50,70 @@ export function PrintInstructionButton({
     };
   }, [open]);
 
-  function printWithMode(mode: PrintMediaMode) {
+  async function waitForMediaReadyForPrint(mode: PrintMediaMode) {
+    if (mode !== "append-to-end") {
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve());
+    });
+
+    const mediaRoot = document.querySelector<HTMLElement>(".print-media-end-target");
+    if (!mediaRoot) {
+      return;
+    }
+
+    const imagePromises = Array.from(mediaRoot.querySelectorAll("img")).map((imageElement) => {
+      if (imageElement.complete) {
+        return Promise.resolve();
+      }
+
+      return new Promise<void>((resolve) => {
+        const finish = () => resolve();
+        imageElement.addEventListener("load", finish, { once: true });
+        imageElement.addEventListener("error", finish, { once: true });
+      });
+    });
+
+    const videoPromises = Array.from(mediaRoot.querySelectorAll("video")).map((videoElement) => {
+      if (videoElement.readyState >= 2) {
+        return Promise.resolve();
+      }
+
+      return new Promise<void>((resolve) => {
+        const finish = () => resolve();
+        videoElement.addEventListener("loadeddata", finish, { once: true });
+        videoElement.addEventListener("error", finish, { once: true });
+      });
+    });
+
+    const waitForAllMedia = Promise.all([...imagePromises, ...videoPromises]).then(() => undefined);
+    const timeout = new Promise<void>((resolve) => {
+      window.setTimeout(resolve, 1200);
+    });
+
+    await Promise.race([waitForAllMedia, timeout]);
+  }
+
+  async function printWithMode(mode: PrintMediaMode) {
     document.documentElement.setAttribute(PRINT_MEDIA_MODE_ATTRIBUTE, mode);
     window.dispatchEvent(new Event(PRINT_MEDIA_MODE_EVENT));
     setOpen(false);
+
+    await waitForMediaReadyForPrint(mode);
     window.print();
   }
 
   return (
-    <div ref={menuRef} className="relative">
+    <div ref={menuRef} className={cn("relative", className)}>
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
         aria-expanded={open}
         aria-haspopup="menu"
         className={cn(
-          "inline-flex items-center justify-between gap-2 rounded-xl border border-sky-500/35 bg-sky-500/12 px-3 py-1.5 text-xs font-semibold text-sky-800 transition hover:bg-sky-500/20 dark:text-sky-100",
-          className,
+          "inline-flex w-full items-center justify-between gap-2 rounded-xl border border-sky-500/35 bg-sky-500/12 px-3 py-2 text-sm font-semibold text-sky-800 transition hover:bg-sky-500/20 dark:text-sky-100",
         )}
       >
         <span className="inline-flex items-center gap-2">

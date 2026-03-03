@@ -204,6 +204,14 @@ export function PrintMediaIsolator({
             figureElement.append(captionElement);
           }
 
+          figureElement.querySelectorAll("img").forEach((imageElement) => {
+            imageElement.loading = "eager";
+            imageElement.decoding = "sync";
+          });
+          figureElement.querySelectorAll("video").forEach((videoElement) => {
+            videoElement.preload = "auto";
+          });
+
           destination.append(figureElement);
           hasMedia = true;
         });

@@ -1028,7 +1028,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
       <PrintMediaIsolator
         mode="from-document"
         inlineProseSelector=".print-work-instructions-body .prose, .print-work-instructions-body .prose-markdown"
-        appendProseSelector=".screen-work-instructions-body .prose, .screen-work-instructions-body .prose-markdown, .print-work-instructions-body .prose, .print-work-instructions-body .prose-markdown"
+        appendProseSelector=".screen-work-instructions-body .prose, .screen-work-instructions-body .prose-markdown"
         destinationSelector=".print-media-end-target"
       />
       <style>
@@ -1256,14 +1256,14 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
                 />
               ) : null}
               <InstructionActionMenu toolCount={suggestedTools.length}>
-                <SuggestedToolsDropdown tools={suggestedTools} className="w-full" />
                 <InstructionUpdatesPanel
                   events={instructionUpdateEvents}
                   className="h-fit w-full justify-center self-start"
                 />
-                <PrintInstructionButton
-                  className="w-full px-3 py-1.5 text-xs"
-                />
+                <div className="grid grid-cols-2 gap-2">
+                  <SuggestedToolsDropdown tools={suggestedTools} className="w-full" />
+                  <PrintInstructionButton className="w-full" />
+                </div>
                 {!instructionIsArchived ? (
                   <div className="grid grid-cols-2 gap-2">
                     <LikeInstructionButton
