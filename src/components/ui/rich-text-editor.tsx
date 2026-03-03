@@ -23,6 +23,7 @@ import {
   AlignLeft,
   AlignRight,
   Bold,
+  CheckSquare,
   Eraser,
   GripVertical,
   Heading1,
@@ -1087,7 +1088,7 @@ export function RichTextEditor({
           onClick={() => runAndRefresh(() => editor.chain().focus().toggleTaskList().run())}
           isActive={editor.isActive("taskList")}
         >
-          <ListOrdered size={14} />
+          <CheckSquare size={14} />
         </ToolbarButton>
         <ToolbarButton
           ariaLabel="Block Quote"

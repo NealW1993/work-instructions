@@ -244,7 +244,11 @@ export default async function InstructionPrintPage({
   return (
     <>
       <AutoPrintTrigger enabled={autoPrintEnabled} />
-      <PrintMediaIsolator />
+      <PrintMediaIsolator
+        mode="append-to-end"
+        proseSelector=".print-work-instructions-body .prose, .print-work-instructions-body .prose-markdown"
+        destinationSelector=".print-media-end-target"
+      />
       <style>
         {`@media print {
           @page { margin: 0.5in 0.6in; }
@@ -279,16 +283,20 @@ export default async function InstructionPrintPage({
             break-inside: avoid;
             page-break-inside: avoid;
           }
-          .print-media-block {
+          .print-media-inline-hidden {
+            display: none !important;
+          }
+          .print-media-end-section[data-has-media="false"] {
+            display: none !important;
+          }
+          .print-media-end-item {
             break-before: page !important;
             page-break-before: always !important;
-            break-after: page !important;
-            page-break-after: always !important;
             break-inside: avoid !important;
             page-break-inside: avoid !important;
           }
-          .print-media-block img,
-          .print-media-block video {
+          .print-media-end-item img,
+          .print-media-end-item video {
             display: block;
             max-width: 100% !important;
             max-height: 9in !important;
@@ -296,6 +304,12 @@ export default async function InstructionPrintPage({
             height: auto !important;
             margin: 0 auto;
             object-fit: contain;
+          }
+          .print-media-end-caption {
+            margin-top: 0.3rem;
+            text-align: center;
+            font-size: 0.8rem;
+            color: #334155;
           }
           h1, h2, h3 {
             break-after: avoid;
@@ -341,9 +355,14 @@ export default async function InstructionPrintPage({
           <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">
             Work Instructions
           </h2>
-          <div className="rounded-xl border border-slate-300/70 bg-white p-4 dark:border-slate-700 dark:bg-slate-950">
+          <div className="print-work-instructions-body rounded-xl border border-slate-300/70 bg-white p-4 dark:border-slate-700 dark:bg-slate-950">
             {renderInstructionContent(instruction.body_markdown)}
           </div>
+        </section>
+
+        <section className="print-media-end-section mt-6 grid gap-2" data-has-media="false">
+          <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">Media</h2>
+          <div className="print-media-end-target" />
         </section>
       </article>
     </>

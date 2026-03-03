@@ -24,6 +24,7 @@ import { InstructionViewTracker } from "@/components/instructions/instruction-vi
 import { LikeInstructionButton } from "@/components/instructions/like-instruction-button";
 import { PinInstructionButton } from "@/components/instructions/pin-instruction-button";
 import { PrintInstructionButton } from "@/components/instructions/print-instruction-button";
+import { PrintMediaIsolator } from "@/components/instructions/print-media-isolator";
 import { RestoreArchivedInstructionButton } from "@/components/instructions/restore-archived-instruction-button";
 import {
   type InstructionUpdateEvent,
@@ -1024,6 +1025,43 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
         instructionIsArchived={instructionIsArchived}
       />
       <InstructionViewTracker instructionId={instruction.id} />
+      <PrintMediaIsolator
+        mode="append-to-end"
+        proseSelector=".print-work-instructions-body .prose, .print-work-instructions-body .prose-markdown"
+        destinationSelector=".print-media-end-target"
+      />
+      <style>
+        {`@media print {
+          .print-media-inline-hidden {
+            display: none !important;
+          }
+          .print-media-end-section[data-has-media="false"] {
+            display: none !important;
+          }
+          .print-media-end-item {
+            break-before: page !important;
+            page-break-before: always !important;
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+          .print-media-end-item img,
+          .print-media-end-item video {
+            display: block !important;
+            width: auto !important;
+            height: auto !important;
+            max-width: 100% !important;
+            max-height: 9in !important;
+            margin: 0 auto !important;
+            object-fit: contain !important;
+          }
+          .print-media-end-caption {
+            margin-top: 0.3rem;
+            text-align: center;
+            font-size: 0.8rem;
+            color: #334155;
+          }
+        }`}
+      </style>
 
       <section className="hidden print:block print:bg-white print:text-slate-900">
         <h1 className="text-3xl font-extrabold text-slate-900">{workItem.item_title}</h1>
@@ -1046,9 +1084,14 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
 
         <section className="mt-6 grid gap-2">
           <h2 className="text-xl font-bold text-slate-900">Work Instructions</h2>
-          <div className="rounded-xl border border-slate-300 bg-white p-4">
+          <div className="print-work-instructions-body rounded-xl border border-slate-300 bg-white p-4">
             {renderInstructionContent(instruction.body_markdown)}
           </div>
+        </section>
+
+        <section className="print-media-end-section mt-6 grid gap-2" data-has-media="false">
+          <h2 className="text-xl font-bold text-slate-900">Media</h2>
+          <div className="print-media-end-target" />
         </section>
       </section>
 
