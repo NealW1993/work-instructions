@@ -191,11 +191,11 @@ export function ReviewCoverageKpiPanel() {
                 />
               ) : null}
             </svg>
-            <div className="pointer-events-none absolute inset-0 text-center">
-              <p className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-2xl font-extrabold text-slate-900 dark:text-slate-100">
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-0.5">
+              <p className="text-2xl font-extrabold leading-none text-slate-900 dark:text-slate-100">
                 {needsReviewCount}
               </p>
-              <p className="absolute bottom-3 left-1/2 -translate-x-1/2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
                 Needs Review
               </p>
             </div>

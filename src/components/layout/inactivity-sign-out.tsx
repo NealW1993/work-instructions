@@ -60,6 +60,7 @@ export function InactivitySignOut({ inactivityTimeoutMinutes }: InactivitySignOu
 
     const timeoutMs = resolvedTimeoutMinutes * 60 * 1000;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let lastActivityAt = Date.now();
 
     async function handleSignOut() {
       const supabase = getSupabaseBrowserClient();
@@ -107,10 +108,30 @@ export function InactivitySignOut({ inactivityTimeoutMinutes }: InactivitySignOu
     }
 
     function resetTimer() {
+      lastActivityAt = Date.now();
       if (timeoutId !== null) {
         clearTimeout(timeoutId);
       }
       timeoutId = setTimeout(handleSignOut, timeoutMs);
+    }
+
+    // When the browser/tab becomes visible again (e.g. after laptop wakes from sleep),
+    // check whether the timeout has already elapsed. Browsers freeze JS timers while
+    // suspended, so a setTimeout alone cannot be relied upon for this case.
+    function handleVisibilityChange() {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+      const elapsed = Date.now() - lastActivityAt;
+      if (elapsed >= timeoutMs) {
+        void handleSignOut();
+      } else {
+        // Re-arm the timer for the remaining time so it fires correctly.
+        if (timeoutId !== null) {
+          clearTimeout(timeoutId);
+        }
+        timeoutId = setTimeout(handleSignOut, timeoutMs - elapsed);
+      }
     }
 
     // Start the timer and listen for activity
@@ -118,6 +139,7 @@ export function InactivitySignOut({ inactivityTimeoutMinutes }: InactivitySignOu
     for (const event of ACTIVITY_EVENTS) {
       window.addEventListener(event, resetTimer, { passive: true });
     }
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       if (timeoutId !== null) {
@@ -126,6 +148,7 @@ export function InactivitySignOut({ inactivityTimeoutMinutes }: InactivitySignOu
       for (const event of ACTIVITY_EVENTS) {
         window.removeEventListener(event, resetTimer);
       }
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [inactivityTimeoutMinutes, posthog, router]);
 

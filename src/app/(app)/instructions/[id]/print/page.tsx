@@ -250,6 +250,7 @@ export default async function InstructionPrintPage({
             max-width: 100% !important;
             padding: 0 !important;
             margin: 0 !important;
+            overflow: visible !important;
           }
           .print-toolbar { display: none !important; }
           .print-sheet {
@@ -257,7 +258,27 @@ export default async function InstructionPrintPage({
             box-shadow: none !important;
             background: #fff !important;
             margin: 0 !important;
+            padding: 0.5in 0.6in !important;
+            border-radius: 0 !important;
+            overflow: visible !important;
+            max-width: 100% !important;
+          }
+          .print-sheet * {
+            overflow: visible !important;
+          }
+          .print-sheet .rounded-xl,
+          .print-sheet .rounded-2xl {
+            border-radius: 0 !important;
+            border: none !important;
             padding: 0 !important;
+          }
+          figure, img, table, pre {
+            break-inside: avoid;
+            page-break-inside: avoid;
+          }
+          img {
+            max-width: 100% !important;
+            height: auto !important;
           }
         }`}
       </style>

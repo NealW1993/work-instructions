@@ -43,6 +43,40 @@ import type { Profile } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const DASHBOARD_RETURN_STATE_KEY = "__dashboardInstructionReturnState";
+
+function HeaderDate() {
+  const [label, setLabel] = useState("");
+
+  useEffect(() => {
+    function update() {
+      const now = new Date();
+      const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+      const day = days[now.getDay()];
+      const dd = String(now.getDate()).padStart(2, "0");
+      const mm = String(now.getMonth() + 1).padStart(2, "0");
+      const yyyy = now.getFullYear();
+      setLabel(`${day} ${dd}/${mm}/${yyyy}`);
+    }
+
+    update();
+
+    // Refresh the label at midnight so it stays accurate.
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
+    const timerId = setTimeout(update, tomorrow.getTime() - now.getTime());
+    return () => clearTimeout(timerId);
+  }, []);
+
+  if (!label) return null;
+
+  return (
+    <span className="hidden select-none text-sm font-medium text-white/75 md:block">
+      {label}
+    </span>
+  );
+}
 const MENU_ANIMATION_MS = 260;
 const HEADER_BACKGROUND_PLAYBACK_RATE = 0.45;
 const WIDGET_SIZE_OPTIONS = [
@@ -1389,21 +1423,24 @@ export function AppHeader({ profile }: { profile: Profile }) {
 
       <div className="relative z-10 mx-auto w-full max-w-7xl px-4 py-3 md:px-8">
         <div className="flex items-center justify-end gap-3">
-          <Link
-            href="/dashboard"
-            onClick={handleDashboardLinkClick}
-            aria-label="Delta Dashboard"
-            className="mr-auto inline-flex items-center rounded-lg px-1 py-1 transition hover:opacity-90"
-          >
-            <Image
-              src="/delta-logo.svg"
-              alt="Delta"
-              width={36}
-              height={36}
-              priority
-              className="h-9 w-9"
-            />
-          </Link>
+          <div className="mr-auto flex items-center gap-3">
+            <Link
+              href="/dashboard"
+              onClick={handleDashboardLinkClick}
+              aria-label="Delta Dashboard"
+              className="inline-flex items-center rounded-lg px-1 py-1 transition hover:opacity-90"
+            >
+              <Image
+                src="/delta-logo.svg"
+                alt="Delta"
+                width={36}
+                height={36}
+                priority
+                className="h-9 w-9"
+              />
+            </Link>
+            <HeaderDate />
+          </div>
           <nav className="hidden items-center gap-3 md:flex">
             {renderDashboardStudioControl(false)}
             {renderDashboardControl(false)}
