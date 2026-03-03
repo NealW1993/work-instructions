@@ -472,6 +472,119 @@ function renderInstructionContent(value: string) {
   );
 }
 
+interface PrintBodyMediaItem {
+  type: "image" | "video";
+  src: string;
+  caption: string | null;
+}
+
+function stripHtmlTags(value: string) {
+  return value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function readHtmlAttribute(tagMarkup: string, attributeName: string) {
+  const attributePattern = new RegExp(
+    `${attributeName}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`,
+    "i",
+  );
+  const match = tagMarkup.match(attributePattern);
+  return (match?.[1] ?? match?.[2] ?? "").trim();
+}
+
+function collectPrintMediaFromHtmlSnippet(
+  snippet: string,
+  fallbackCaption: string | null,
+  dedupeKeys: Set<string>,
+  results: PrintBodyMediaItem[],
+) {
+  const imgTagPattern = /<img\b[^>]*>/gi;
+  let imgMatch: RegExpExecArray | null = imgTagPattern.exec(snippet);
+  while (imgMatch) {
+    const tagMarkup = imgMatch[0];
+    const source = readHtmlAttribute(tagMarkup, "src");
+    if (source) {
+      const dedupeKey = `image|${source}`;
+      if (!dedupeKeys.has(dedupeKey)) {
+        dedupeKeys.add(dedupeKey);
+        const altCaption = readHtmlAttribute(tagMarkup, "alt");
+        const titleCaption = readHtmlAttribute(tagMarkup, "title");
+        const caption =
+          fallbackCaption ?? (altCaption || titleCaption ? altCaption || titleCaption : null);
+        results.push({
+          type: "image",
+          src: source,
+          caption: caption?.trim() ? caption.trim() : null,
+        });
+      }
+    }
+
+    imgMatch = imgTagPattern.exec(snippet);
+  }
+
+  const videoTagPattern = /<video\b[^>]*>/gi;
+  let videoMatch: RegExpExecArray | null = videoTagPattern.exec(snippet);
+  while (videoMatch) {
+    const tagMarkup = videoMatch[0];
+    const source = readHtmlAttribute(tagMarkup, "src");
+    if (source) {
+      const dedupeKey = `video|${source}`;
+      if (!dedupeKeys.has(dedupeKey)) {
+        dedupeKeys.add(dedupeKey);
+        results.push({
+          type: "video",
+          src: source,
+          caption: fallbackCaption?.trim() ? fallbackCaption.trim() : null,
+        });
+      }
+    }
+
+    videoMatch = videoTagPattern.exec(snippet);
+  }
+}
+
+function extractPrintMediaFromBody(value: string) {
+  const dedupeKeys = new Set<string>();
+  const results: PrintBodyMediaItem[] = [];
+
+  if (!value.trim()) {
+    return results;
+  }
+
+  const figurePattern = /<figure\b[\s\S]*?<\/figure>/gi;
+  let figureMatch: RegExpExecArray | null = figurePattern.exec(value);
+  while (figureMatch) {
+    const figureMarkup = figureMatch[0];
+    const captionMatch = figureMarkup.match(/<figcaption\b[^>]*>([\s\S]*?)<\/figcaption>/i);
+    const figureCaption = captionMatch ? stripHtmlTags(captionMatch[1]) : null;
+    collectPrintMediaFromHtmlSnippet(figureMarkup, figureCaption, dedupeKeys, results);
+    figureMatch = figurePattern.exec(value);
+  }
+
+  collectPrintMediaFromHtmlSnippet(value, null, dedupeKeys, results);
+
+  const markdownImagePattern = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+  let markdownMatch: RegExpExecArray | null = markdownImagePattern.exec(value);
+  while (markdownMatch) {
+    const normalizedSource = markdownMatch[2].trim().replace(/^<|>$/g, "");
+    if (normalizedSource) {
+      const dedupeKey = `image|${normalizedSource}`;
+      if (!dedupeKeys.has(dedupeKey)) {
+        dedupeKeys.add(dedupeKey);
+        const altText = markdownMatch[1]?.trim() ?? "";
+        results.push({
+          type: "image",
+          src: normalizedSource,
+          caption: altText || null,
+        });
+      }
+    }
+
+    markdownMatch = markdownImagePattern.exec(value);
+  }
+
+  return results;
+}
+
 function normalizeInstructionUpdateSourcePayload(
   value: unknown,
 ): InstructionUpdateSourcePayload | null {
@@ -1017,6 +1130,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const printToolNames = Array.from(printToolNamesByKey.values()).sort((first, second) =>
     first.localeCompare(second),
   );
+  const printBodyMedia = extractPrintMediaFromBody(instruction.body_markdown);
 
   return (
     <article className="grid gap-5">
@@ -1026,10 +1140,8 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
       />
       <InstructionViewTracker instructionId={instruction.id} />
       <PrintMediaIsolator
-        mode="from-document"
-        inlineProseSelector=".print-work-instructions-body .prose, .print-work-instructions-body .prose-markdown"
-        appendProseSelector=".screen-work-instructions-body .prose, .screen-work-instructions-body .prose-markdown"
-        destinationSelector=".print-media-end-target"
+        mode="paginate-inline"
+        proseSelector=".print-work-instructions-body .prose, .print-work-instructions-body .prose-markdown"
       />
       <style>
         {`@media print {
@@ -1056,13 +1168,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
             margin: 0 auto !important;
             object-fit: contain !important;
           }
-          html[data-print-media-mode="append-to-end"] .print-media-inline-hidden {
-            display: none !important;
-          }
           html[data-print-media-mode="append-to-end"] .print-work-instructions-body .print-media-block {
-            display: none !important;
-          }
-          html[data-print-media-mode="append-to-end"] .print-media-end-section[data-has-media="false"] {
             display: none !important;
           }
           html[data-print-media-mode="append-to-end"] .print-media-end-section {
@@ -1122,10 +1228,35 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
           </div>
         </section>
 
-        <section className="print-media-end-section mt-6 grid gap-2" data-has-media="false">
-          <h2 className="text-xl font-bold text-slate-900">Media</h2>
-          <div className="print-media-end-target" />
-        </section>
+        {printBodyMedia.length > 0 ? (
+          <section className="print-media-end-section mt-6 grid gap-2">
+            <h2 className="text-xl font-bold text-slate-900">Media</h2>
+            <div className="print-media-end-target grid gap-2">
+              {printBodyMedia.map((mediaItem, index) => (
+                <figure
+                  key={`${mediaItem.type}-${mediaItem.src}-${index}`}
+                  className="print-media-end-item"
+                >
+                  {mediaItem.type === "video" ? (
+                    <video src={mediaItem.src} controls preload="auto" />
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={mediaItem.src}
+                      alt={mediaItem.caption ?? "Instruction media"}
+                      loading="eager"
+                    />
+                  )}
+                  {mediaItem.caption ? (
+                    <figcaption className="print-media-end-caption">
+                      {mediaItem.caption}
+                    </figcaption>
+                  ) : null}
+                </figure>
+              ))}
+            </div>
+          </section>
+        ) : null}
       </section>
 
       <div className="grid gap-5 print:hidden">
