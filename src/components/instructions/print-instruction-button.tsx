@@ -22,20 +22,6 @@ export function PrintInstructionButton({
   const menuRef = useRef<HTMLDivElement | null>(null);
   const activePrintModeRef = useRef<PrintMediaMode>("paginate-inline");
 
-  function isFirefoxBrowser() {
-    return typeof navigator !== "undefined" && /firefox/i.test(navigator.userAgent);
-  }
-
-  function openDedicatedPrintPage(mode: PrintMediaMode) {
-    const instructionPath = window.location.pathname.replace(/\/+$/, "");
-    const mediaModeParam = mode === "append-to-end" ? "append-to-end" : "paginate-inline";
-    const printPageUrl = `${instructionPath}/print?autoprint=1&mediaMode=${encodeURIComponent(mediaModeParam)}`;
-    const popup = window.open(printPageUrl, "_blank", "noopener,noreferrer");
-    if (!popup) {
-      window.location.assign(printPageUrl);
-    }
-  }
-
   useEffect(() => {
     const handleBeforePrint = () => {
       const mode = activePrintModeRef.current;
@@ -199,12 +185,6 @@ export function PrintInstructionButton({
   }
 
   async function printWithMode(mode: PrintMediaMode) {
-    if (isFirefoxBrowser()) {
-      setOpen(false);
-      openDedicatedPrintPage(mode);
-      return;
-    }
-
     activePrintModeRef.current = mode;
     document.documentElement.setAttribute(PRINT_MEDIA_MODE_ATTRIBUTE, mode);
     window.dispatchEvent(new Event(PRINT_MEDIA_MODE_EVENT));

@@ -14,8 +14,10 @@ import {
   X,
 } from "lucide-react";
 import {
+  type Dispatch,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  type SetStateAction,
   useCallback,
   useEffect,
   useMemo,
@@ -2270,6 +2272,7 @@ export function DashboardClient({
   const layoutDirtyRef = useRef(false);
   const layoutSavingRef = useRef(false);
   const layoutUndoStackRef = useRef<DashboardWidgetLayoutItem[][]>([]);
+  const layoutRedoStackRef = useRef<DashboardWidgetLayoutItem[][]>([]);
   const customizeOpenRef = useRef(false);
   const saveLayoutActionRef = useRef<(() => Promise<void>) | null>(null);
   const saveLayoutAsDefaultActionRef = useRef<(() => Promise<void>) | null>(null);
@@ -2277,6 +2280,7 @@ export function DashboardClient({
   const resetDefaultsActionRef = useRef<(() => Promise<void>) | null>(null);
   const discardLayoutActionRef = useRef<(() => void) | null>(null);
   const undoLayoutActionRef = useRef<(() => void) | null>(null);
+  const redoLayoutActionRef = useRef<(() => void) | null>(null);
   const applyLayoutPresetActionRef = useRef<((presetId: string) => void) | null>(null);
   const toggleWidgetActionRef = useRef<((widgetId: DashboardWidgetId) => void) | null>(
     null,
@@ -2336,6 +2340,7 @@ export function DashboardClient({
   const [layoutSaving, setLayoutSaving] = useState(false);
   const [layoutError, setLayoutError] = useState<string | null>(null);
   const [layoutUndoStack, setLayoutUndoStack] = useState<DashboardWidgetLayoutItem[][]>([]);
+  const [layoutRedoStack, setLayoutRedoStack] = useState<DashboardWidgetLayoutItem[][]>([]);
   const [newestTimeRangeDays, setNewestTimeRangeDays] = useState<KpiTimeRangeDays>(30);
   const [kpiTimeRangeByWidget, setKpiTimeRangeByWidget] = useState<Partial<Record<string, KpiTimeRangeDays>>>({});
   const [activeKpiDrilldown, setActiveKpiDrilldown] =
@@ -2451,6 +2456,7 @@ export function DashboardClient({
           layoutSaving,
           layoutError,
           canUndoLayout: layoutUndoStack.length > 0,
+          canRedoLayout: layoutRedoStack.length > 0,
           activeLayoutPresetId,
           layoutPresets: DASHBOARD_LAYOUT_PRESETS.map((preset) => ({
             id: preset.id,
@@ -2466,6 +2472,7 @@ export function DashboardClient({
     layoutError,
     layoutSaving,
     layoutUndoStack.length,
+    layoutRedoStack.length,
     widgetLayout,
     widgetTitleById,
   ]);
@@ -2802,6 +2809,10 @@ export function DashboardClient({
   }, [layoutUndoStack]);
 
   useEffect(() => {
+    layoutRedoStackRef.current = layoutRedoStack;
+  }, [layoutRedoStack]);
+
+  useEffect(() => {
     customizeOpenRef.current = customizeOpen;
     if (!customizeOpen) {
       if (dragAutoScrollFrameRef.current !== null) {
@@ -2864,6 +2875,7 @@ export function DashboardClient({
             layoutSaving: false,
             layoutError: null,
             canUndoLayout: false,
+            canRedoLayout: false,
             activeLayoutPresetId: null,
             layoutPresets: [],
             studioWidgets: [],
@@ -2894,6 +2906,7 @@ export function DashboardClient({
     setLayoutDirty(false);
     if (userChanged) {
       setLayoutUndoStack([]);
+      setLayoutRedoStack([]);
     }
 
     if (snapshotLayout && areWidgetLayoutsEqual(snapshotLayout, serverLayout)) {
@@ -4237,9 +4250,12 @@ export function DashboardClient({
     });
   }
 
-  function pushLayoutUndoSnapshot(layout: DashboardWidgetLayoutItem[]) {
+  function pushLayoutSnapshot(
+    updateStack: Dispatch<SetStateAction<DashboardWidgetLayoutItem[][]>>,
+    layout: DashboardWidgetLayoutItem[],
+  ) {
     const snapshot = cloneWidgetLayout(layout);
-    setLayoutUndoStack((currentStack) => {
+    updateStack((currentStack) => {
       const latestSnapshot = currentStack[currentStack.length - 1];
       if (latestSnapshot && areWidgetLayoutsEqual(latestSnapshot, snapshot)) {
         return currentStack;
@@ -4251,6 +4267,20 @@ export function DashboardClient({
 
       return [...currentStack, snapshot];
     });
+  }
+
+  function pushLayoutUndoSnapshot(
+    layout: DashboardWidgetLayoutItem[],
+    options?: { clearRedoStack?: boolean },
+  ) {
+    pushLayoutSnapshot(setLayoutUndoStack, layout);
+    if (options?.clearRedoStack ?? true) {
+      setLayoutRedoStack([]);
+    }
+  }
+
+  function pushLayoutRedoSnapshot(layout: DashboardWidgetLayoutItem[]) {
+    pushLayoutSnapshot(setLayoutRedoStack, layout);
   }
 
   function undoDashboardLayoutChange() {
@@ -4265,12 +4295,34 @@ export function DashboardClient({
         return currentLayout;
       }
 
+      pushLayoutRedoSnapshot(currentLayout);
       setLayoutDirty(!areWidgetLayoutsEqual(restoredLayout, savedWidgetLayout));
       setLayoutError(null);
       setLayoutNotice("Reverted last dashboard layout change.");
       return restoredLayout;
     });
     setLayoutUndoStack((currentStack) => currentStack.slice(0, -1));
+  }
+
+  function redoDashboardLayoutChange() {
+    const latestSnapshot = layoutRedoStackRef.current[layoutRedoStackRef.current.length - 1];
+    if (!latestSnapshot) {
+      return;
+    }
+
+    const restoredLayout = cloneWidgetLayout(latestSnapshot);
+    setWidgetLayout((currentLayout) => {
+      if (areWidgetLayoutsEqual(currentLayout, restoredLayout)) {
+        return currentLayout;
+      }
+
+      pushLayoutUndoSnapshot(currentLayout, { clearRedoStack: false });
+      setLayoutDirty(!areWidgetLayoutsEqual(restoredLayout, savedWidgetLayout));
+      setLayoutError(null);
+      setLayoutNotice("Reapplied last dashboard layout change.");
+      return restoredLayout;
+    });
+    setLayoutRedoStack((currentStack) => currentStack.slice(0, -1));
   }
 
   function updateWidgetLayout(
@@ -4538,6 +4590,7 @@ export function DashboardClient({
   resetDefaultsActionRef.current = resetDashboardLayout;
   discardLayoutActionRef.current = discardDashboardLayoutChanges;
   undoLayoutActionRef.current = undoDashboardLayoutChange;
+  redoLayoutActionRef.current = redoDashboardLayoutChange;
   applyLayoutPresetActionRef.current = applyLayoutPreset;
   toggleWidgetActionRef.current = toggleWidget;
   setWidgetVisibilityActionRef.current = setWidgetVisibility;
@@ -4623,6 +4676,14 @@ export function DashboardClient({
           return;
         }
         undoLayoutActionRef.current?.();
+        return;
+      }
+
+      if (detail.command === "redo-layout-change") {
+        if (layoutSavingRef.current || layoutRedoStackRef.current.length === 0) {
+          return;
+        }
+        redoLayoutActionRef.current?.();
         return;
       }
 
