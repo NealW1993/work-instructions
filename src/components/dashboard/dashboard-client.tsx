@@ -1679,10 +1679,17 @@ function KpiDonutChart({
                 className={cn("rounded-sm", isFull ? "h-3.5 w-3.5" : "h-2.5 w-2.5")}
                 style={{ backgroundColor: segment.color }}
               />
-              <span className={cn(isFull ? "text-base" : "")}>{segment.label}</span>
               <span
                 className={cn(
-                  "ml-auto text-slate-500 dark:text-slate-400",
+                  "min-w-0 flex-1 whitespace-normal break-words",
+                  isFull ? "text-base" : "",
+                )}
+              >
+                {segment.label}
+              </span>
+              <span
+                className={cn(
+                  "ml-auto shrink-0 text-slate-500 dark:text-slate-400",
                   isFull ? "text-base font-bold" : "",
                 )}
               >
@@ -3860,30 +3867,16 @@ export function DashboardClient({
     }
 
     const ranked = [...totalsByDepartment.values()].sort((a, b) => b.value - a.value);
-    const topDepartments = ranked.slice(0, 5);
-    const remainingDepartments = ranked.slice(5);
     const rowsBySegmentId = new Map<string, KpiDrilldownRow[]>();
-    const segments: KpiDonutSegment[] = topDepartments.map((entry) => {
+    const segments: KpiDonutSegment[] = ranked.map((entry) => {
       rowsBySegmentId.set(entry.id, entry.rows);
       return {
         id: entry.id,
-        label: truncateKpiLegendLabel(entry.label, 20),
+        label: entry.label,
         value: entry.value,
         color: entry.color,
       };
     });
-
-    if (remainingDepartments.length > 0) {
-      const otherRows = remainingDepartments.flatMap((entry) => entry.rows);
-      const otherValue = remainingDepartments.reduce((sum, entry) => sum + entry.value, 0);
-      rowsBySegmentId.set("department-other", otherRows);
-      segments.push({
-        id: "department-other",
-        label: "Other Departments",
-        value: otherValue,
-        color: "#64748B",
-      });
-    }
 
     return { segments, rowsBySegmentId };
   }, [kpiEventsInRange]);

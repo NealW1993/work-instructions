@@ -21,6 +21,10 @@ export function InstructionActionMenu({ children, className }: InstructionAction
 
     const handlePointerDown = (event: MouseEvent) => {
       const target = event.target as Node | null;
+      if (target instanceof Element && target.closest(".app-modal-shell")) {
+        return;
+      }
+
       if (!menuRef.current || !target || menuRef.current.contains(target)) {
         return;
       }

@@ -40,6 +40,7 @@ import {
   Underline as UnderlineIcon,
   Undo2,
   Video,
+  X,
 } from "lucide-react";
 import {
   type ChangeEvent,
@@ -268,7 +269,7 @@ function ToolbarButton({
   );
 }
 
-function MediaNodeView({ node, selected, updateAttributes }: NodeViewProps) {
+function MediaNodeView({ node, selected, updateAttributes, deleteNode }: NodeViewProps) {
   const mediaType: "image" | "video" =
     node.type.name === "resizableVideo" ? "video" : "image";
   const src = String(node.attrs.src ?? "");
@@ -430,6 +431,20 @@ function MediaNodeView({ node, selected, updateAttributes }: NodeViewProps) {
           )}
         >
           <MoveDiagonal2 size={16} />
+        </button>
+
+        <button
+          type="button"
+          contentEditable={false}
+          aria-label={`Delete ${mediaType}`}
+          title="Delete media"
+          onMouseDown={(event) => {
+            event.preventDefault();
+            deleteNode();
+          }}
+          className="absolute bottom-2 right-2 z-30 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/55 bg-rose-600/90 text-white shadow-lg transition hover:bg-rose-500"
+        >
+          <X size={16} />
         </button>
       </div>
     </NodeViewWrapper>

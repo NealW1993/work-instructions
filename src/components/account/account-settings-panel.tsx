@@ -190,6 +190,7 @@ export function AccountSettingsPanel({
     iconColorChanged ||
     fontColorChanged ||
     pinChanged;
+  const saveDisabled = busy || pinMismatch || !hasChanges;
   const iconInitials = getInitials(normalizedFullName || savedFullName);
   const totalSignedInLabel = useMemo(() => {
     const baseMs = Math.max(0, initialTotalSignedInSeconds) * 1000;
@@ -570,6 +571,8 @@ export function AccountSettingsPanel({
         setMessage("Account updated.");
       }
 
+      window.scrollTo({ top: 0, behavior: "smooth" });
+
       if (fullNameChanged || emailChanged || iconColorChanged || fontColorChanged) {
         router.refresh();
       }
@@ -607,186 +610,210 @@ export function AccountSettingsPanel({
           </p>
         ) : null}
 
-        <form className="grid gap-3 md:max-w-2xl" onSubmit={handleSubmit}>
-          <label className="grid gap-1 text-sm">
-            <span>Full Name</span>
-            <input
-              required
-              value={fullName}
-              onChange={(event) => setFullName(event.target.value)}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-            />
-          </label>
-          <label className="grid gap-1 text-sm">
-            <span>Email</span>
-            <input
-              required
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-            />
-          </label>
-          <label className="grid gap-1 text-sm">
-            <span>Employee ID</span>
-            <div
-              aria-readonly="true"
-              className="rounded-xl border border-slate-300/80 bg-slate-100 px-3 py-2 text-slate-600 select-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
-            >
-              {savedEmployeeId || "N/A"}
-            </div>
-          </label>
-
-          <fieldset className="grid gap-1 text-sm">
-            <legend>Theme</legend>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => applyThemeSelection("dark")}
-                className={`rounded-xl border px-3 py-1.5 text-sm font-semibold transition ${
-                  themePreference === "dark"
-                    ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
-                    : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-900"
-                }`}
+        <form className="grid gap-4 md:max-w-5xl" onSubmit={handleSubmit}>
+          <div className="grid gap-3 md:grid-cols-3">
+            <label className="grid gap-1 text-sm">
+              <span>Full Name</span>
+              <input
+                required
+                value={fullName}
+                onChange={(event) => setFullName(event.target.value)}
+                className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              />
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span>Email</span>
+              <input
+                required
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              />
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span>Employee ID</span>
+              <div
+                aria-readonly="true"
+                className="rounded-xl border border-slate-300/80 bg-slate-100 px-3 py-2 text-slate-600 select-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
               >
-                Dark
-              </button>
-              <button
-                type="button"
-                onClick={() => applyThemeSelection("light")}
-                className={`rounded-xl border px-3 py-1.5 text-sm font-semibold transition ${
-                  themePreference === "light"
-                    ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
-                    : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-900"
-                }`}
-              >
-                Light
-              </button>
-            </div>
-          </fieldset>
+                {savedEmployeeId || "N/A"}
+              </div>
+            </label>
+          </div>
 
-          <fieldset className="grid gap-2 text-sm">
-            <legend>Icon Color</legend>
-            <div className="flex flex-wrap gap-2">
-              {ICON_COLOR_OPTIONS.map((presetColor) => (
-                <button
-                  key={presetColor}
-                  type="button"
-                  onClick={() => setIconColor(presetColor)}
-                  aria-label={`Set icon color to ${presetColor}`}
-                  className={`h-8 w-8 rounded-full border transition ${
-                    normalizedIconColor === presetColor
-                      ? "border-slate-900 ring-2 ring-cyan-500/40 dark:border-slate-100"
-                      : "border-slate-300 dark:border-slate-700"
-                  }`}
-                  style={{ backgroundColor: presetColor }}
+          <div className="grid gap-3 md:grid-cols-3 md:items-start">
+            <fieldset className="grid gap-2 text-sm">
+              <legend className="mb-1">Icon Color</legend>
+              <div className="flex flex-wrap gap-2">
+                {ICON_COLOR_OPTIONS.map((presetColor) => (
+                  <button
+                    key={presetColor}
+                    type="button"
+                    onClick={() => setIconColor(presetColor)}
+                    aria-label={`Set icon color to ${presetColor}`}
+                    className={`h-8 w-8 rounded-full border transition ${
+                      normalizedIconColor === presetColor
+                        ? "border-slate-900 ring-2 ring-cyan-500/40 dark:border-slate-100"
+                        : "border-slate-300 dark:border-slate-700"
+                    }`}
+                    style={{ backgroundColor: presetColor }}
+                  />
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-2 md:flex-nowrap">
+                <input
+                  type="color"
+                  value={ICON_COLOR_PATTERN.test(normalizedIconColor) ? normalizedIconColor : DEFAULT_ICON_COLOR}
+                  onChange={(event) => setIconColor(normalizeIconColor(event.target.value))}
+                  className="h-10 w-12 cursor-pointer rounded-lg border border-slate-300 bg-transparent p-1 dark:border-slate-700"
                 />
-              ))}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <input
-                type="color"
-                value={ICON_COLOR_PATTERN.test(normalizedIconColor) ? normalizedIconColor : DEFAULT_ICON_COLOR}
-                onChange={(event) => setIconColor(normalizeIconColor(event.target.value))}
-                className="h-10 w-12 cursor-pointer rounded-lg border border-slate-300 bg-transparent p-1 dark:border-slate-700"
-              />
-              <input
-                value={iconColor}
-                maxLength={7}
-                onChange={(event) =>
-                  setIconColor(normalizeIconColor(event.target.value.slice(0, 7)))
-                }
-                className="w-28 rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-sm uppercase text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                placeholder="#0EA5E9"
-              />
-              <span className="text-xs text-slate-500 dark:text-slate-400">
-                Pick a preset or enter a hex code.
-              </span>
-            </div>
-            <div className="inline-flex w-fit items-center gap-2 rounded-xl border border-slate-300/80 bg-white/75 px-3 py-2 dark:border-slate-700 dark:bg-slate-950/60">
-              <span
-                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-xs font-extrabold"
-                style={{
-                  backgroundColor: ICON_COLOR_PATTERN.test(normalizedIconColor)
-                    ? normalizedIconColor
-                    : DEFAULT_ICON_COLOR,
-                  color: FONT_COLOR_PATTERN.test(normalizedFontColor)
-                    ? normalizedFontColor
-                    : DEFAULT_FONT_COLOR,
-                }}
-              >
-                {iconInitials}
-              </span>
-              <span className="text-xs text-slate-600 dark:text-slate-300">Profile icon preview</span>
-            </div>
-          </fieldset>
-
-          <fieldset className="grid gap-2 text-sm">
-            <legend>Font Color</legend>
-            <div className="flex flex-wrap gap-2">
-              {FONT_COLOR_OPTIONS.map((presetColor) => (
-                <button
-                  key={presetColor}
-                  type="button"
-                  onClick={() => setFontColor(presetColor)}
-                  aria-label={`Set font color to ${presetColor}`}
-                  className={`h-8 w-8 rounded-full border transition ${
-                    normalizedFontColor === presetColor
-                      ? "border-slate-900 ring-2 ring-cyan-500/40 dark:border-slate-100"
-                      : "border-slate-300 dark:border-slate-700"
-                  }`}
-                  style={{ backgroundColor: presetColor }}
+                <input
+                  value={iconColor}
+                  maxLength={7}
+                  onChange={(event) =>
+                    setIconColor(normalizeIconColor(event.target.value.slice(0, 7)))
+                  }
+                  className="w-28 rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-sm uppercase text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  placeholder="#0EA5E9"
                 />
-              ))}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <input
-                type="color"
-                value={FONT_COLOR_PATTERN.test(normalizedFontColor) ? normalizedFontColor : DEFAULT_FONT_COLOR}
-                onChange={(event) => setFontColor(normalizeFontColor(event.target.value))}
-                className="h-10 w-12 cursor-pointer rounded-lg border border-slate-300 bg-transparent p-1 dark:border-slate-700"
-              />
-              <input
-                value={fontColor}
-                maxLength={7}
-                onChange={(event) =>
-                  setFontColor(normalizeFontColor(event.target.value.slice(0, 7)))
-                }
-                className="w-28 rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-sm uppercase text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                placeholder="#FFFFFF"
-              />
-              <span className="text-xs text-slate-500 dark:text-slate-400">
-                Initials text color in your account menu icon.
-              </span>
-            </div>
-          </fieldset>
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  Pick a preset or enter a hex code.
+                </span>
+              </div>
+            </fieldset>
 
-          <div className="grid gap-1 text-sm">
-            <span>PIN</span>
+            <fieldset className="grid gap-2 text-sm">
+              <legend className="mb-1 opacity-0 select-none" aria-hidden="true">
+                Profile Preview
+              </legend>
+              <div className="inline-flex min-h-[120px] w-full items-center justify-center rounded-xl border border-slate-300/80 bg-white/75 px-3 py-2 dark:border-slate-700 dark:bg-slate-950/60">
+                <span
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full text-xs font-extrabold"
+                  style={{
+                    backgroundColor: ICON_COLOR_PATTERN.test(normalizedIconColor)
+                      ? normalizedIconColor
+                      : DEFAULT_ICON_COLOR,
+                    color: FONT_COLOR_PATTERN.test(normalizedFontColor)
+                      ? normalizedFontColor
+                      : DEFAULT_FONT_COLOR,
+                  }}
+                >
+                  {iconInitials}
+                </span>
+                <span className="ml-2 text-xs text-slate-600 dark:text-slate-300">Profile icon preview</span>
+              </div>
+            </fieldset>
+
+            <fieldset className="grid gap-2 text-sm">
+              <legend className="mb-1">Font Color</legend>
+              <div className="flex flex-wrap gap-2">
+                {FONT_COLOR_OPTIONS.map((presetColor) => (
+                  <button
+                    key={presetColor}
+                    type="button"
+                    onClick={() => setFontColor(presetColor)}
+                    aria-label={`Set font color to ${presetColor}`}
+                    className={`h-8 w-8 rounded-full border transition ${
+                      normalizedFontColor === presetColor
+                        ? "border-slate-900 ring-2 ring-cyan-500/40 dark:border-slate-100"
+                        : "border-slate-300 dark:border-slate-700"
+                    }`}
+                    style={{ backgroundColor: presetColor }}
+                  />
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-2 md:flex-nowrap">
+                <input
+                  type="color"
+                  value={FONT_COLOR_PATTERN.test(normalizedFontColor) ? normalizedFontColor : DEFAULT_FONT_COLOR}
+                  onChange={(event) => setFontColor(normalizeFontColor(event.target.value))}
+                  className="h-10 w-12 cursor-pointer rounded-lg border border-slate-300 bg-transparent p-1 dark:border-slate-700"
+                />
+                <input
+                  value={fontColor}
+                  maxLength={7}
+                  onChange={(event) =>
+                    setFontColor(normalizeFontColor(event.target.value.slice(0, 7)))
+                  }
+                  className="w-28 rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-sm uppercase text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  placeholder="#FFFFFF"
+                />
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  Initials text color in your account menu icon.
+                </span>
+              </div>
+            </fieldset>
+          </div>
+
+          <div className="mt-1 grid gap-3 md:grid-cols-[auto_auto_1fr] md:items-end">
             <button
-              type="button"
-              onClick={() => {
-                if (wantsPinChange) {
-                  setWantsPinChange(false);
-                  setPin("");
-                  setConfirmPin("");
-                  return;
-                }
-
-                setWantsPinChange(true);
-              }}
-              className={`w-fit rounded-xl border px-3 py-1.5 text-sm font-semibold transition ${
-                wantsPinChange
-                  ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
-                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-900"
+              type="submit"
+              disabled={saveDisabled}
+              className={`w-fit rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+                saveDisabled
+                  ? "cursor-not-allowed border border-slate-300 bg-slate-200 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400"
+                  : "bg-gradient-to-r from-cyan-500 to-blue-600 text-white hover:brightness-110"
               }`}
             >
-              {wantsPinChange ? "Cancel PIN change" : "Change PIN"}
+              {busy ? "Saving..." : "Save account changes"}
             </button>
+
+            <div className="grid gap-1 text-sm">
+              <span>PIN</span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (wantsPinChange) {
+                    setWantsPinChange(false);
+                    setPin("");
+                    setConfirmPin("");
+                    return;
+                  }
+
+                  setWantsPinChange(true);
+                }}
+                className={`w-fit rounded-xl border px-3 py-1.5 text-sm font-semibold transition ${
+                  wantsPinChange
+                    ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
+                    : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-900"
+                }`}
+              >
+                {wantsPinChange ? "Cancel PIN change" : "Change PIN"}
+              </button>
+            </div>
+
+            <fieldset className="grid gap-1 text-sm md:justify-self-start">
+              <legend className="mb-1">Theme</legend>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => applyThemeSelection("dark")}
+                  className={`rounded-xl border px-3 py-1.5 text-sm font-semibold transition ${
+                    themePreference === "dark"
+                      ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
+                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-900"
+                  }`}
+                >
+                  Dark
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyThemeSelection("light")}
+                  className={`rounded-xl border px-3 py-1.5 text-sm font-semibold transition ${
+                    themePreference === "light"
+                      ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
+                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-900"
+                  }`}
+                >
+                  Light
+                </button>
+              </div>
+            </fieldset>
           </div>
 
           {wantsPinChange ? (
-            <>
+            <div className="grid gap-3 md:grid-cols-2">
               <label className="grid gap-1 text-sm">
                 <span>New 6-Digit PIN</span>
                 <PinInput
@@ -803,7 +830,7 @@ export function AccountSettingsPanel({
                   className="tracking-[0.3em]"
                 />
               </label>
-            </>
+            </div>
           ) : null}
 
           {pinMismatch ? (
@@ -811,14 +838,6 @@ export function AccountSettingsPanel({
               PIN and Confirm PIN do not match.
             </p>
           ) : null}
-
-          <button
-            type="submit"
-            disabled={busy || pinMismatch}
-            className="mt-1 w-fit rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            {busy ? "Saving..." : "Save account changes"}
-          </button>
         </form>
       </section>
 
