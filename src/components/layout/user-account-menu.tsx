@@ -6,7 +6,6 @@ import {
   CircleHelp,
   ChevronDown,
   Clock3,
-  Download,
   LogOut,
   Moon,
   Settings,
@@ -19,7 +18,7 @@ import { usePostHog } from "posthog-js/react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { canEditInstructions, canViewKpis, isSystemAdmin } from "@/lib/roles";
+import { canViewKpis, isSystemAdmin } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
   clearSessionStart,
@@ -670,17 +669,6 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
             >
               <BarChart3 size={15} />
               KPI Dashboard
-            </Link>
-          ) : null}
-
-          {canEditInstructions(profile.role) ? (
-            <Link
-              href="/admin/export"
-              onClick={() => closeMenu()}
-              className="inline-flex items-center gap-2 rounded-xl border border-sky-500/40 bg-sky-500/15 px-3 py-2 text-sm font-semibold text-sky-100 transition hover:bg-sky-500/25"
-            >
-              <Download size={15} />
-              Export Data
             </Link>
           ) : null}
 

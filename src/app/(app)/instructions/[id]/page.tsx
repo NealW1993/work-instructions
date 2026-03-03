@@ -1140,8 +1140,10 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
       />
       <InstructionViewTracker instructionId={instruction.id} />
       <PrintMediaIsolator
-        mode="paginate-inline"
-        proseSelector=".print-work-instructions-body .prose, .print-work-instructions-body .prose-markdown"
+        mode="from-document"
+        inlineProseSelector=".print-work-instructions-body .prose, .print-work-instructions-body .prose-markdown"
+        appendProseSelector=".screen-work-instructions-body .prose, .screen-work-instructions-body .prose-markdown, .print-work-instructions-body .prose, .print-work-instructions-body .prose-markdown"
+        destinationSelector=".print-media-end-target"
       />
       <style>
         {`@media print {
@@ -1174,6 +1176,9 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
           html[data-print-media-mode="append-to-end"] .print-media-end-section {
             break-before: page !important;
             page-break-before: always !important;
+          }
+          html[data-print-media-mode="append-to-end"] .print-media-end-section[data-has-media="false"] {
+            display: none !important;
           }
           html[data-print-media-mode="append-to-end"] .print-media-end-item {
             break-inside: avoid !important;
@@ -1228,35 +1233,36 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
           </div>
         </section>
 
-        {printBodyMedia.length > 0 ? (
-          <section className="print-media-end-section mt-6 grid gap-2">
-            <h2 className="text-xl font-bold text-slate-900">Media</h2>
-            <div className="print-media-end-target grid gap-2">
-              {printBodyMedia.map((mediaItem, index) => (
-                <figure
-                  key={`${mediaItem.type}-${mediaItem.src}-${index}`}
-                  className="print-media-end-item"
-                >
-                  {mediaItem.type === "video" ? (
-                    <video src={mediaItem.src} controls preload="auto" />
-                  ) : (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={mediaItem.src}
-                      alt={mediaItem.caption ?? "Instruction media"}
-                      loading="eager"
-                    />
-                  )}
-                  {mediaItem.caption ? (
-                    <figcaption className="print-media-end-caption">
-                      {mediaItem.caption}
-                    </figcaption>
-                  ) : null}
-                </figure>
-              ))}
-            </div>
-          </section>
-        ) : null}
+        <section
+          className="print-media-end-section mt-6 grid gap-2"
+          data-has-media={printBodyMedia.length > 0 ? "true" : "false"}
+        >
+          <h2 className="text-xl font-bold text-slate-900">Media</h2>
+          <div className="print-media-end-target grid gap-2">
+            {printBodyMedia.map((mediaItem, index) => (
+              <figure
+                key={`${mediaItem.type}-${mediaItem.src}-${index}`}
+                className="print-media-end-item"
+              >
+                {mediaItem.type === "video" ? (
+                  <video src={mediaItem.src} controls preload="auto" />
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={mediaItem.src}
+                    alt={mediaItem.caption ?? "Instruction media"}
+                    loading="eager"
+                  />
+                )}
+                {mediaItem.caption ? (
+                  <figcaption className="print-media-end-caption">
+                    {mediaItem.caption}
+                  </figcaption>
+                ) : null}
+              </figure>
+            ))}
+          </div>
+        </section>
       </section>
 
       <div className="grid gap-5 print:hidden">

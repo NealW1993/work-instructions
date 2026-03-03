@@ -8,7 +8,7 @@ import {
   isExportDatasetId,
   isExportFormat,
 } from "@/lib/export-data";
-import { canEditInstructions } from "@/lib/roles";
+import { isSystemAdmin } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 interface ExportRequestBody {
@@ -236,9 +236,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  if (!canEditInstructions(profile.role)) {
+  if (!isSystemAdmin(profile.role)) {
     return NextResponse.json(
-      { error: "Admin privileges are required to export data." },
+      { error: "System admin privileges are required to export data." },
       { status: 403 },
     );
   }

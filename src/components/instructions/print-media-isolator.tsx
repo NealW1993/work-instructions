@@ -72,6 +72,23 @@ function getMediaCaption(sourceBlock: HTMLElement, mediaElement: HTMLElement) {
   return null;
 }
 
+function getMediaSource(mediaElement: HTMLElement) {
+  if (mediaElement instanceof HTMLImageElement) {
+    return mediaElement.currentSrc?.trim() || mediaElement.getAttribute("src")?.trim() || "";
+  }
+
+  if (mediaElement instanceof HTMLVideoElement) {
+    return (
+      mediaElement.currentSrc?.trim() ||
+      mediaElement.getAttribute("src")?.trim() ||
+      mediaElement.querySelector("source")?.getAttribute("src")?.trim() ||
+      ""
+    );
+  }
+
+  return mediaElement.getAttribute("src")?.trim() ?? "";
+}
+
 export function PrintMediaIsolator({
   mode = "from-document",
   proseSelector = DEFAULT_PROSE_SELECTOR,
@@ -169,7 +186,7 @@ export function PrintMediaIsolator({
         container.querySelectorAll<HTMLElement>("img, video").forEach((mediaElement) => {
           const sourceBlock = resolveMediaBlock(container, mediaElement);
           const caption = getMediaCaption(sourceBlock, mediaElement) ?? "";
-          const src = mediaElement.getAttribute("src")?.trim() ?? "";
+          const src = getMediaSource(mediaElement);
           const signature = `${mediaElement.tagName.toLowerCase()}|${src}|${caption}`;
           if (seenMedia.has(signature)) {
             return;
@@ -210,6 +227,9 @@ export function PrintMediaIsolator({
           });
           figureElement.querySelectorAll("video").forEach((videoElement) => {
             videoElement.preload = "auto";
+            if (videoElement.readyState < 2) {
+              videoElement.load();
+            }
           });
 
           destination.append(figureElement);

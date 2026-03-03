@@ -55,6 +55,18 @@ export function PrintInstructionButton({
       return;
     }
 
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve());
+    });
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve());
+    });
+
+    const mediaRoot = document.querySelector<HTMLElement>(".print-media-end-target");
+    if (!mediaRoot) {
+      return;
+    }
+
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const hasMedia = Boolean(document.querySelector(".print-media-end-target img, .print-media-end-target video"));
       if (hasMedia) {
@@ -66,13 +78,59 @@ export function PrintInstructionButton({
       });
     }
 
-    const mediaRoot = document.querySelector<HTMLElement>(".print-media-end-target");
-    if (!mediaRoot) {
+    const imageElements = Array.from(mediaRoot.querySelectorAll("img"));
+    const videoElements = Array.from(mediaRoot.querySelectorAll("video"));
+    if (imageElements.length === 0 && videoElements.length === 0) {
       return;
     }
 
-    const imagePromises = Array.from(mediaRoot.querySelectorAll("img")).map((imageElement) => {
-      if (imageElement.complete) {
+    const imageSources = imageElements
+      .map((imageElement) => imageElement.currentSrc || imageElement.getAttribute("src")?.trim() || "")
+      .filter((source) => source.length > 0);
+
+    const preloadImageSource = (source: string) =>
+      new Promise<void>((resolve) => {
+        const preloadImage = new Image();
+        preloadImage.decoding = "sync";
+        preloadImage.onload = () => resolve();
+        preloadImage.onerror = () => resolve();
+        preloadImage.src = source;
+      });
+
+    const preloadImages =
+      imageSources.length === 0
+        ? Promise.resolve()
+        : Promise.all(imageSources.map((source) => preloadImageSource(source))).then(() => undefined);
+
+    const preloadVideos =
+      videoElements.length === 0
+        ? Promise.resolve()
+        : Promise.all(
+            videoElements.map(
+              (videoElement) =>
+                new Promise<void>((resolve) => {
+                  videoElement.preload = "auto";
+                  if (videoElement.readyState >= 2) {
+                    resolve();
+                    return;
+                  }
+
+                  const finish = () => resolve();
+                  videoElement.addEventListener("loadeddata", finish, { once: true });
+                  videoElement.addEventListener("canplay", finish, { once: true });
+                  videoElement.addEventListener("error", finish, { once: true });
+                  videoElement.load();
+                }),
+            ),
+          ).then(() => undefined);
+
+    imageElements.forEach((imageElement) => {
+      imageElement.loading = "eager";
+      imageElement.decoding = "sync";
+    });
+
+    const imagePromises = imageElements.map((imageElement) => {
+      if (imageElement.complete && imageElement.naturalWidth > 0) {
         return Promise.resolve();
       }
 
@@ -83,7 +141,7 @@ export function PrintInstructionButton({
       });
     });
 
-    const videoPromises = Array.from(mediaRoot.querySelectorAll("video")).map((videoElement) => {
+    const videoPromises = videoElements.map((videoElement) => {
       if (videoElement.readyState >= 2) {
         return Promise.resolve();
       }
@@ -91,16 +149,25 @@ export function PrintInstructionButton({
       return new Promise<void>((resolve) => {
         const finish = () => resolve();
         videoElement.addEventListener("loadeddata", finish, { once: true });
+        videoElement.addEventListener("canplay", finish, { once: true });
         videoElement.addEventListener("error", finish, { once: true });
       });
     });
 
-    const waitForAllMedia = Promise.all([...imagePromises, ...videoPromises]).then(() => undefined);
+    const waitForAllMedia = Promise.all([
+      preloadImages,
+      preloadVideos,
+      ...imagePromises,
+      ...videoPromises,
+    ]).then(() => undefined);
     const timeout = new Promise<void>((resolve) => {
-      window.setTimeout(resolve, 2200);
+      window.setTimeout(resolve, 4500);
     });
 
     await Promise.race([waitForAllMedia, timeout]);
+    await new Promise<void>((resolve) => {
+      window.setTimeout(resolve, 120);
+    });
   }
 
   async function printWithMode(mode: PrintMediaMode) {
