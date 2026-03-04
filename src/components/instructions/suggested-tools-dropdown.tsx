@@ -63,7 +63,7 @@ export function SuggestedToolsDropdown({ tools, className }: SuggestedToolsDropd
         type="button"
         onClick={() => setOpen((current) => !current)}
         className={cn(
-          "inline-flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition",
+          "inline-flex w-auto items-center justify-center gap-1.5 rounded-xl border px-2 py-1.5 text-sm font-semibold transition",
           open
             ? "border-cyan-500/45 bg-cyan-500/20 text-cyan-900 dark:text-cyan-100"
             : "border-cyan-500/30 bg-cyan-500/10 text-cyan-800 hover:bg-cyan-500/20 dark:text-cyan-200",
@@ -71,12 +71,11 @@ export function SuggestedToolsDropdown({ tools, className }: SuggestedToolsDropd
         aria-expanded={open}
       >
         <Wrench size={14} />
-        Tool List
-        <span className="rounded-full border border-cyan-500/45 bg-cyan-500/15 px-1.5 py-0.5 text-[10px]">
-          ({totalCount})
+        <span className="rounded-full bg-slate-900/15 px-2 py-0.5 text-xs font-bold dark:bg-white/20">
+          {totalCount}
         </span>
         <ChevronDown
-          size={14}
+          size={13}
           className={cn("transition", open ? "rotate-180" : "rotate-0")}
         />
       </button>
@@ -85,7 +84,7 @@ export function SuggestedToolsDropdown({ tools, className }: SuggestedToolsDropd
         <div className="absolute right-0 z-40 mt-2 grid w-[min(24rem,90vw)] gap-3 rounded-xl border border-slate-300/80 bg-white/95 p-3 shadow-2xl backdrop-blur-xl dark:border-slate-700/80 dark:bg-slate-900/95">
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-              Check List
+              Tool List
             </p>
             <button
               type="button"

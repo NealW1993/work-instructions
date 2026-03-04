@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import {
   ChevronDown,
   Loader2,
-  SlidersHorizontal,
   Sparkles,
+  Wrench,
   UploadCloud,
 } from "lucide-react";
 import { createPortal } from "react-dom";
@@ -2866,12 +2866,18 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
               type="button"
               onClick={() => setEditorParametersOpen((current) => !current)}
               aria-expanded={editorParametersOpen}
-              aria-label="Toggle instruction parameters"
-              title="Instruction Parameters"
-              className="inline-flex h-11 min-w-11 items-center justify-center gap-1 rounded-xl border border-cyan-500/35 bg-cyan-500/10 px-2 text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-100"
+              aria-label="Toggle tool list panel"
+              title="Tool List"
+              className="inline-flex h-9 min-w-20 items-center justify-center gap-1.5 rounded-xl border border-cyan-500/35 bg-cyan-500/10 px-2 text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-100"
             >
-              <SlidersHorizontal size={17} />
-              <span className="text-[10px] font-semibold">({toolListCount})</span>
+              <Wrench size={14} />
+              <span className="rounded-full bg-slate-900/15 px-2 py-0.5 text-xs font-bold dark:bg-white/20">
+                {toolListCount}
+              </span>
+              <ChevronDown
+                size={13}
+                className={cn("transition", editorParametersOpen ? "rotate-180" : "rotate-0")}
+              />
             </button>
           }
           aboveEditorContent={

@@ -1306,9 +1306,6 @@ export function AppHeader({ profile }: { profile: Profile }) {
                 </button>
               </div>
 
-              <div className="rounded-lg border border-white/15 bg-white/5 px-2.5 py-2 text-[11px] text-slate-300">
-                Manage dashboard layout and KPI widgets here while customize mode is active.
-              </div>
               {activeDashboardLayoutState.layoutError ? (
                 <p className="rounded-lg border border-rose-500/40 bg-rose-500/15 px-2.5 py-2 text-[11px] text-rose-100">
                   {activeDashboardLayoutState.layoutError}

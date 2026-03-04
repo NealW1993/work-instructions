@@ -205,14 +205,14 @@ export function PrintInstructionButton({
         aria-expanded={open}
         aria-haspopup="menu"
         className={cn(
-          "inline-flex w-full items-center justify-between gap-2 rounded-xl border border-sky-500/35 bg-sky-500/12 px-3 py-2 text-sm font-semibold text-sky-800 transition hover:bg-sky-500/20 dark:text-sky-100",
+          "relative inline-flex w-full items-center justify-center gap-2 rounded-xl border border-sky-500/35 bg-sky-500/12 px-3 py-2 text-sm font-semibold text-sky-800 transition hover:bg-sky-500/20 dark:text-sky-100",
         )}
       >
         <span className="inline-flex items-center gap-2">
           <Printer size={14} />
           Print
         </span>
-        <ChevronDown size={13} />
+        <ChevronDown size={13} className="absolute right-3" />
       </button>
       {open ? (
         <div

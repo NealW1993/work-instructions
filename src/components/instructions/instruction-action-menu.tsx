@@ -59,9 +59,9 @@ export function InstructionActionMenu({
         onClick={() => setOpen((current) => !current)}
         aria-expanded={open}
         aria-label="Open instruction action menu"
-        className="relative inline-flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-500/35 bg-cyan-500/10 text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-100"
+        className="relative inline-flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-500/35 bg-cyan-500/10 text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-100"
       >
-        <SlidersHorizontal size={17} />
+        <SlidersHorizontal size={16} />
         {badgeCount !== undefined && badgeCount >= 0 ? (
           <span className="absolute -right-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-cyan-500 px-1 text-[9px] font-bold leading-none text-white">
             ({badgeCount})

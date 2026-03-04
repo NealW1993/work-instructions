@@ -1450,7 +1450,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
               ) : null}
               <SuggestedToolsDropdown
                 tools={suggestedTools}
-                className="w-full min-w-44 sm:w-auto"
+                className="shrink-0"
               />
               {!instructionIsArchived ? (
                 <LikeInstructionButton
@@ -1458,7 +1458,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
                   userId={profile.id}
                   initialLiked={Boolean(likedInstruction)}
                   initialLikeCount={instructionLikeCount ?? 0}
-                  className="h-11 justify-center px-3 py-2"
+                  className="justify-center"
                 />
               ) : null}
               <InstructionActionMenu badgeCount={instructionUpdatedEventCount}>
