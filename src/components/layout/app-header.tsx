@@ -56,7 +56,7 @@ function HeaderDate() {
       const dd = String(now.getDate()).padStart(2, "0");
       const mm = String(now.getMonth() + 1).padStart(2, "0");
       const yyyy = now.getFullYear();
-      setLabel(`${day} ${dd}/${mm}/${yyyy}`);
+      setLabel(`${day} ${mm}/${dd}/${yyyy}`);
     }
 
     update();
