@@ -141,15 +141,6 @@ export function KpiSummaryCards({ cards }: { cards: KpiSummaryCardConfig[] }) {
               >
                 <header className="flex items-start justify-between gap-3 border-b border-white/10 p-5">
                   <div className="grid gap-1">
-                    <p
-                      className={cn(
-                        "inline-flex w-fit items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide",
-                        MODAL_TONE_CLASSES[selectedCard.tone],
-                      )}
-                    >
-                      {SelectedCardIcon ? <SelectedCardIcon size={13} /> : null}
-                      KPI Detail
-                    </p>
                     <h2 className="text-lg font-bold text-slate-100">{selectedCard.label}</h2>
                     <p className="text-3xl font-extrabold text-slate-100">{selectedCard.value}</p>
                   </div>
