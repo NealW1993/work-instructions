@@ -22,21 +22,37 @@ interface ActivityTrendPoint {
   updated: number;
 }
 
-interface ContributorEntry {
+interface AllTimeContributorEntry {
+  rank: number;
   userId: string;
   label: string;
-  updates: number;
+  viewed: number;
+  created: number;
+  updated: number;
+  forked: number;
+  totalActions: number;
 }
 
 interface ActivityApiResponse {
   period: ActivityPeriod;
   periodLabel: string;
   trendPoints: ActivityTrendPoint[];
-  contributors: ContributorEntry[];
+  topContributorsAllTime: AllTimeContributorEntry[];
   totalCreated: number;
   totalUpdated: number;
   prevPeriodParams: string;
   nextPeriodParams: string;
+}
+
+interface UsageByUserEntry {
+  id: string;
+  label: string;
+  totalSeconds: number;
+  activeSession: boolean;
+}
+
+interface KpiActivitySectionProps {
+  usageByActiveUsers: UsageByUserEntry[];
 }
 
 interface ActivityDetailEvent {
@@ -77,6 +93,16 @@ function getBucketRange(period: ActivityPeriod, key: string): { from: string; to
   const from = new Date(`${key}T00:00:00`).toISOString();
   const to = new Date(new Date(from).getTime() + 24 * 60 * 60 * 1000).toISOString();
   return { from, to };
+}
+
+function formatDurationFromSeconds(totalSeconds: number) {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const seconds = safeSeconds % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(
+    seconds,
+  ).padStart(2, "0")}`;
 }
 
 interface TooltipProps {
@@ -135,7 +161,7 @@ function isValidActivityPeriodParams(value: unknown): value is string {
   return period === "day" || period === "week" || period === "month" || period === "year";
 }
 
-export function KpiActivitySection() {
+export function KpiActivitySection({ usageByActiveUsers }: KpiActivitySectionProps) {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [periodParams, setPeriodParams] = useState("period=week");
   const [filtersHydrated, setFiltersHydrated] = useState(false);
@@ -230,7 +256,7 @@ export function KpiActivitySection() {
   const currentPeriod = data?.period ?? "week";
   const periodLabel = data?.periodLabel ?? "";
   const trendPoints: ActivityTrendPoint[] = data?.trendPoints ?? [];
-  const contributors: ContributorEntry[] = data?.contributors ?? [];
+  const topContributorsAllTime: AllTimeContributorEntry[] = data?.topContributorsAllTime ?? [];
   const totalCreated = data?.totalCreated ?? 0;
   const totalUpdated = data?.totalUpdated ?? 0;
 
@@ -242,7 +268,19 @@ export function KpiActivitySection() {
   const trendAxisTickOffsets = trendAxisTicks.map((_, index) =>
     trendAxisTicks.length <= 1 ? 0 : (index / (trendAxisTicks.length - 1)) * 100,
   );
-  const maxContributorUpdates = Math.max(...contributors.map((c) => c.updates), 1);
+  const maxContributorActions = Math.max(
+    ...topContributorsAllTime.map((entry) => entry.totalActions),
+    1,
+  );
+  const maxUsageByUserSeconds = Math.max(
+    ...usageByActiveUsers.map((entry) => entry.totalSeconds),
+    1,
+  );
+  const shouldScrollUsageByUser = usageByActiveUsers.length > 5;
+  const totalUsageSecondsAcrossActiveUsers = usageByActiveUsers.reduce(
+    (sum, entry) => sum + entry.totalSeconds,
+    0,
+  );
 
   // Show fewer x-axis labels when many columns to avoid overlap
   const labelStep = numPoints <= 12 ? 1 : numPoints <= 20 ? 2 : 4;
@@ -309,7 +347,10 @@ export function KpiActivitySection() {
   return (
     <>
       {/* Activity Trend */}
-      <section className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-6">
+      <section
+        id="kpi-activity-trend"
+        className="scroll-mt-24 grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-6"
+      >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3">
             <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
@@ -528,6 +569,73 @@ export function KpiActivitySection() {
         )}
       </section>
 
+      <section
+        id="kpi-active-users-all-time-usage"
+        className="scroll-mt-24 grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-6"
+      >
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
+            Active Users: All-Time Usage
+          </h2>
+          <p className="text-xs text-slate-600 dark:text-slate-300">
+            Includes current in-progress session time.
+          </p>
+        </div>
+
+        {usageByActiveUsers.length === 0 ? (
+          <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+            No active users found.
+          </p>
+        ) : (
+          <div
+            className={
+              shouldScrollUsageByUser
+                ? "grid max-h-[24rem] gap-2 overflow-y-auto pr-1"
+                : "grid gap-2"
+            }
+          >
+            {usageByActiveUsers.map((entry) => {
+              const width = (entry.totalSeconds / maxUsageByUserSeconds) * 100;
+              const usageSharePercent =
+                totalUsageSecondsAcrossActiveUsers > 0
+                  ? (entry.totalSeconds / totalUsageSecondsAcrossActiveUsers) * 100
+                  : 0;
+
+              return (
+                <article
+                  key={entry.id}
+                  className="group relative grid gap-1 rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50"
+                >
+                  <KpiTooltip
+                    title={entry.label}
+                    lines={[
+                      `${formatDurationFromSeconds(entry.totalSeconds)} total tracked usage.`,
+                      entry.activeSession
+                        ? "Active live session is currently running."
+                        : "No active live session right now.",
+                      `${usageSharePercent.toFixed(1)}% of all active-user usage time.`,
+                    ]}
+                  />
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <p className="font-semibold text-slate-800 dark:text-slate-100">{entry.label}</p>
+                    <p className="font-mono text-slate-600 dark:text-slate-300">
+                      {formatDurationFromSeconds(entry.totalSeconds)}
+                      {entry.activeSession ? " (live)" : ""}
+                    </p>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-300/40 dark:bg-slate-700/50">
+                    <div
+                      className="h-2 rounded-full bg-gradient-to-r from-cyan-500 to-blue-500"
+                      style={{ width: `${Math.max(width, 2)}%` }}
+                    />
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
       {/* Drill-down modal */}
       {canUsePortal && selectedBucket
         ? createPortal(
@@ -618,13 +726,16 @@ export function KpiActivitySection() {
         : null}
 
       {/* Top Contributors */}
-      <section className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-6">
+      <section
+        id="kpi-top-contributors"
+        className="scroll-mt-24 grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-6"
+      >
         <div className="flex flex-wrap items-end justify-between gap-2">
           <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
             Top Contributors
           </h2>
           <p className="text-xs text-slate-600 dark:text-slate-300">
-            Ranked by instruction update events.
+            All-time rank by viewed, created, updated, and forked instruction activity.
           </p>
         </div>
 
@@ -636,15 +747,18 @@ export function KpiActivitySection() {
           <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-700 dark:text-rose-200">
             {error}
           </p>
-        ) : contributors.length === 0 ? (
+        ) : topContributorsAllTime.length === 0 ? (
           <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-            No update activity recorded for {periodLabel}.
+            No all-time contributor activity has been recorded yet.
           </p>
         ) : (
           <div className="grid gap-2">
-            {contributors.map((entry) => {
-              const width = (entry.updates / maxContributorUpdates) * 100;
-              const sharePercent = totalUpdated > 0 ? (entry.updates / totalUpdated) * 100 : 0;
+            {topContributorsAllTime.map((entry) => {
+              const width = (entry.totalActions / maxContributorActions) * 100;
+              const allTimeTotal =
+                entry.viewed + entry.created + entry.updated + entry.forked;
+              const updateSharePercent =
+                entry.totalActions > 0 ? (entry.updated / entry.totalActions) * 100 : 0;
               return (
                 <article
                   key={entry.userId}
@@ -652,16 +766,28 @@ export function KpiActivitySection() {
                 >
                   <KpiTooltip
                     align="right"
-                    title={entry.label}
+                    title={`#${entry.rank} ${entry.label}`}
                     lines={[
-                      `${entry.updates} update event${entry.updates === 1 ? "" : "s"} in ${periodLabel}.`,
-                      `${sharePercent.toFixed(1)}% of all update activity.`,
-                      `Ranked among the top ${contributors.length} contributors.`,
+                      `${allTimeTotal} total all-time action${
+                        allTimeTotal === 1 ? "" : "s"
+                      }.`,
+                      `${entry.viewed} viewed, ${entry.created} created, ${entry.updated} updated, ${entry.forked} forked.`,
+                      `${updateSharePercent.toFixed(1)}% of this user's activity is updates.`,
                     ]}
                   />
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <p className="font-semibold text-slate-800 dark:text-slate-100">{entry.label}</p>
-                    <p className="text-slate-600 dark:text-slate-300">{entry.updates} updates</p>
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold">
+                    <p className="text-slate-800 dark:text-slate-100">
+                      #{entry.rank} {entry.label}
+                    </p>
+                    <p className="text-slate-600 dark:text-slate-300">
+                      {entry.totalActions.toLocaleString()} actions
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600 dark:text-slate-300">
+                    <span>{entry.viewed.toLocaleString()} viewed</span>
+                    <span>{entry.created.toLocaleString()} created</span>
+                    <span>{entry.updated.toLocaleString()} updated</span>
+                    <span>{entry.forked.toLocaleString()} forked</span>
                   </div>
                   <div className="h-2 rounded-full bg-slate-300/40 dark:bg-slate-700/50">
                     <div

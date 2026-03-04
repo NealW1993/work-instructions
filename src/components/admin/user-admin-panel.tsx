@@ -2,7 +2,15 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, ChevronRight, GripVertical } from "lucide-react";
+import {
+  Archive,
+  ChevronDown,
+  ChevronRight,
+  Eye,
+  GripVertical,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 
 import { InstructionReviewActivityChart } from "@/components/admin/instruction-review-activity-chart";
 import { LocalDateTime } from "@/components/ui/local-date-time";
@@ -49,6 +57,46 @@ interface SuggestedToolsResponse {
 interface InstructionReviewSettingsResponse {
   reviewWindowDays: number;
   updatedAt: string | null;
+}
+
+interface AdminWorkInstruction {
+  id: string;
+  workItemId: string;
+  revision: number;
+  isArchived: boolean;
+  createdAt: string;
+  updatedAt: string;
+  partId: string;
+  itemTitle: string;
+  departmentName: string;
+  departmentColorHex: string | null;
+  forkRootInstructionId: string | null;
+  forkNumber: number | null;
+  viewCount: number;
+}
+
+interface WorkInstructionManagementResponse {
+  instructions: AdminWorkInstruction[];
+}
+
+type WorkInstructionBulkAction = "archive" | "permanent_delete";
+
+interface WorkInstructionBulkActionResponse {
+  success?: boolean;
+  action?: WorkInstructionBulkAction;
+  archiveInstructionIds?: string[];
+  deleteInstructionIds?: string[];
+  skippedAlreadyArchivedIds?: string[];
+  skippedNotArchivedIds?: string[];
+  missingInstructionIds?: string[];
+  error?: string;
+}
+
+interface WorkInstructionActionConfirmState {
+  action: WorkInstructionBulkAction;
+  selectedInstructionIds: string[];
+  eligibleInstructionIds: string[];
+  skippedInstructionIds: string[];
 }
 
 interface CreateUserFieldErrors {
@@ -243,6 +291,18 @@ export function UserAdminPanel() {
   const [editingSuggestedToolName, setEditingSuggestedToolName] = useState("");
   const [editingSuggestedToolNameHasError, setEditingSuggestedToolNameHasError] = useState(false);
   const [newSuggestedToolNameHasError, setNewSuggestedToolNameHasError] = useState(false);
+  const [workInstructions, setWorkInstructions] = useState<AdminWorkInstruction[]>([]);
+  const [workInstructionsCollapsed, setWorkInstructionsCollapsed] = useState(true);
+  const [workInstructionSelection, setWorkInstructionSelection] = useState<
+    Record<string, boolean>
+  >({});
+  const [workInstructionBusy, setWorkInstructionBusy] = useState(false);
+  const [workInstructionListMaxHeight, setWorkInstructionListMaxHeight] = useState<number | null>(
+    null,
+  );
+  const [workInstructionActionConfirm, setWorkInstructionActionConfirm] =
+    useState<WorkInstructionActionConfirmState | null>(null);
+  const workInstructionListRef = useRef<HTMLDivElement | null>(null);
 
   const [newDepartmentName, setNewDepartmentName] = useState("");
   const [newDepartmentNameHasError, setNewDepartmentNameHasError] = useState(false);
@@ -275,6 +335,7 @@ export function UserAdminPanel() {
   const usersRefreshTimeoutRef = useRef<number | null>(null);
   const departmentsRefreshTimeoutRef = useRef<number | null>(null);
   const suggestedToolsRefreshTimeoutRef = useRef<number | null>(null);
+  const workInstructionsRefreshTimeoutRef = useRef<number | null>(null);
 
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
@@ -463,6 +524,49 @@ export function UserAdminPanel() {
     }
   }, [getAuthHeaders]);
 
+  const fetchWorkInstructions = useCallback(async () => {
+    setWorkInstructionBusy(true);
+
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/admin/work-instructions", {
+        method: "GET",
+        headers,
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      } & Partial<WorkInstructionManagementResponse>;
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to load work instructions.");
+      }
+
+      const nextInstructions = payload.instructions ?? [];
+      setWorkInstructions(nextInstructions);
+      setWorkInstructionSelection((current) => {
+        const next: Record<string, boolean> = {};
+        const validInstructionIds = new Set(nextInstructions.map((instruction) => instruction.id));
+
+        for (const [instructionId, selected] of Object.entries(current)) {
+          if (selected && validInstructionIds.has(instructionId)) {
+            next[instructionId] = true;
+          }
+        }
+
+        return next;
+      });
+    } catch (caughtError) {
+      const normalizedMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Unable to load work instructions.";
+      setError(normalizedMessage);
+    } finally {
+      setWorkInstructionBusy(false);
+    }
+  }, [getAuthHeaders]);
+
   useEffect(() => {
     setPortalReady(true);
   }, []);
@@ -509,9 +613,16 @@ export function UserAdminPanel() {
         fetchDepartments(),
         fetchInstructionReviewSettings(),
         fetchSuggestedTools(),
+        fetchWorkInstructions(),
       ]);
     })();
-  }, [fetchDepartments, fetchInstructionReviewSettings, fetchSuggestedTools, fetchUsers]);
+  }, [
+    fetchDepartments,
+    fetchInstructionReviewSettings,
+    fetchSuggestedTools,
+    fetchUsers,
+    fetchWorkInstructions,
+  ]);
 
   useEffect(() => {
     void (async () => {
@@ -563,6 +674,20 @@ export function UserAdminPanel() {
     }, 450);
   }, [fetchSuggestedTools]);
 
+  const scheduleWorkInstructionsRefresh = useCallback(() => {
+    if (
+      typeof window === "undefined" ||
+      workInstructionsRefreshTimeoutRef.current !== null
+    ) {
+      return;
+    }
+
+    workInstructionsRefreshTimeoutRef.current = window.setTimeout(() => {
+      workInstructionsRefreshTimeoutRef.current = null;
+      void fetchWorkInstructions();
+    }, 550);
+  }, [fetchWorkInstructions]);
+
   useEffect(() => {
     const usersChannel = supabase
       .channel("admin-users-live")
@@ -601,6 +726,20 @@ export function UserAdminPanel() {
       )
       .subscribe();
 
+    const workInstructionsChannel = supabase
+      .channel("admin-work-instructions-live")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "work_instructions" },
+        () => scheduleWorkInstructionsRefresh(),
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "instruction_view_events" },
+        () => scheduleWorkInstructionsRefresh(),
+      )
+      .subscribe();
+
     return () => {
       if (usersRefreshTimeoutRef.current !== null) {
         window.clearTimeout(usersRefreshTimeoutRef.current);
@@ -614,12 +753,18 @@ export function UserAdminPanel() {
         window.clearTimeout(suggestedToolsRefreshTimeoutRef.current);
         suggestedToolsRefreshTimeoutRef.current = null;
       }
+      if (workInstructionsRefreshTimeoutRef.current !== null) {
+        window.clearTimeout(workInstructionsRefreshTimeoutRef.current);
+        workInstructionsRefreshTimeoutRef.current = null;
+      }
       void supabase.removeChannel(usersChannel);
       void supabase.removeChannel(departmentsChannel);
       void supabase.removeChannel(suggestedToolsChannel);
+      void supabase.removeChannel(workInstructionsChannel);
     };
   }, [
     scheduleDepartmentsRefresh,
+    scheduleWorkInstructionsRefresh,
     scheduleSuggestedToolsRefresh,
     scheduleUsersRefresh,
     supabase,
@@ -1491,6 +1636,190 @@ export function UserAdminPanel() {
     await performDeleteDepartment(confirmDialog.departmentId);
   }
 
+  const syncWorkInstructionListMaxHeight = useCallback(() => {
+    if (
+      typeof window === "undefined" ||
+      workInstructionsCollapsed ||
+      workInstructions.length <= 10
+    ) {
+      setWorkInstructionListMaxHeight(null);
+      return;
+    }
+
+    const listElement = workInstructionListRef.current;
+    if (!listElement) {
+      setWorkInstructionListMaxHeight(null);
+      return;
+    }
+
+    const firstCard = listElement.querySelector<HTMLElement>("[data-work-instruction-card='true']");
+    if (!firstCard) {
+      setWorkInstructionListMaxHeight(null);
+      return;
+    }
+
+    const computedStyles = window.getComputedStyle(listElement);
+    const rawGap = computedStyles.rowGap || computedStyles.gap || "0";
+    const rowGap = Number.parseFloat(rawGap);
+    const resolvedRowGap = Number.isFinite(rowGap) ? rowGap : 0;
+    const maxHeight = firstCard.getBoundingClientRect().height * 10 + resolvedRowGap * 9 + 2;
+
+    setWorkInstructionListMaxHeight(Math.ceil(maxHeight));
+  }, [workInstructions.length, workInstructionsCollapsed]);
+
+  useEffect(() => {
+    syncWorkInstructionListMaxHeight();
+  }, [syncWorkInstructionListMaxHeight]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const onResize = () => syncWorkInstructionListMaxHeight();
+    window.addEventListener("resize", onResize);
+
+    return () => {
+      window.removeEventListener("resize", onResize);
+    };
+  }, [syncWorkInstructionListMaxHeight]);
+
+  function toggleWorkInstructionSelection(instructionId: string, selected: boolean) {
+    setWorkInstructionSelection((current) => ({
+      ...current,
+      [instructionId]: selected,
+    }));
+  }
+
+  function selectAllWorkInstructions() {
+    setWorkInstructionSelection(() => {
+      const next: Record<string, boolean> = {};
+      for (const instruction of workInstructions) {
+        next[instruction.id] = true;
+      }
+      return next;
+    });
+  }
+
+  function clearWorkInstructionSelection() {
+    setWorkInstructionSelection({});
+  }
+
+  function openWorkInstructionActionConfirm(action: WorkInstructionBulkAction) {
+    const selectedInstructionIds = workInstructions
+      .filter((instruction) => workInstructionSelection[instruction.id])
+      .map((instruction) => instruction.id);
+
+    if (selectedInstructionIds.length === 0) {
+      setError("Select at least one work instruction first.");
+      return;
+    }
+
+    const selectedById = new Map(
+      workInstructions
+        .filter((instruction) => selectedInstructionIds.includes(instruction.id))
+        .map((instruction) => [instruction.id, instruction] as const),
+    );
+
+    const eligibleInstructionIds = selectedInstructionIds.filter((instructionId) => {
+      const instruction = selectedById.get(instructionId);
+      if (!instruction) {
+        return false;
+      }
+
+      if (action === "archive") {
+        return !instruction.isArchived;
+      }
+
+      return instruction.isArchived;
+    });
+
+    const skippedInstructionIds = selectedInstructionIds.filter(
+      (instructionId) => !eligibleInstructionIds.includes(instructionId),
+    );
+
+    if (eligibleInstructionIds.length === 0) {
+      if (action === "archive") {
+        setError("All selected instructions are already archived.");
+      } else {
+        setError("Permanent delete only applies to archived instructions.");
+      }
+      return;
+    }
+
+    setError(null);
+    setWorkInstructionActionConfirm({
+      action,
+      selectedInstructionIds,
+      eligibleInstructionIds,
+      skippedInstructionIds,
+    });
+  }
+
+  async function performWorkInstructionBulkAction() {
+    if (!workInstructionActionConfirm) {
+      return;
+    }
+
+    setWorkInstructionBusy(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch("/api/admin/work-instructions", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          action: workInstructionActionConfirm.action,
+          instructionIds: workInstructionActionConfirm.eligibleInstructionIds,
+        }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as WorkInstructionBulkActionResponse;
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to update work instructions.");
+      }
+
+      if (workInstructionActionConfirm.action === "archive") {
+        const archivedCount = payload.archiveInstructionIds?.length ?? 0;
+        const skippedCount =
+          (payload.skippedAlreadyArchivedIds?.length ?? 0) +
+          (workInstructionActionConfirm.skippedInstructionIds.length ?? 0) +
+          (payload.missingInstructionIds?.length ?? 0);
+        setMessage(
+          skippedCount > 0
+            ? `Archived ${archivedCount} work instruction(s). Skipped ${skippedCount}.`
+            : `Archived ${archivedCount} work instruction(s).`,
+        );
+      } else {
+        const deletedCount = payload.deleteInstructionIds?.length ?? 0;
+        const skippedCount =
+          (payload.skippedNotArchivedIds?.length ?? 0) +
+          (workInstructionActionConfirm.skippedInstructionIds.length ?? 0) +
+          (payload.missingInstructionIds?.length ?? 0);
+        setMessage(
+          skippedCount > 0
+            ? `Permanently deleted ${deletedCount} work instruction(s). Skipped ${skippedCount}.`
+            : `Permanently deleted ${deletedCount} work instruction(s).`,
+        );
+      }
+
+      setWorkInstructionActionConfirm(null);
+      clearWorkInstructionSelection();
+      await fetchWorkInstructions();
+    } catch (caughtError) {
+      const normalizedMessage =
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Unable to update work instructions.";
+      setError(normalizedMessage);
+    } finally {
+      setWorkInstructionBusy(false);
+    }
+  }
+
   const dirtyDepartments = departments.filter((department) => {
     const nameUpdate = departmentNameUpdates[department.id] ?? department.name;
     const colorUpdate = departmentColorUpdates[department.id] ?? department.color_hex;
@@ -1539,6 +1868,41 @@ export function UserAdminPanel() {
     () => suggestedTools.filter((tool) => tool.isActive).length,
     [suggestedTools],
   );
+  const sortedWorkInstructions = useMemo(
+    () =>
+      [...workInstructions].sort((first, second) => {
+        if (second.viewCount !== first.viewCount) {
+          return second.viewCount - first.viewCount;
+        }
+
+        if (first.partId !== second.partId) {
+          return first.partId.localeCompare(second.partId);
+        }
+
+        return first.itemTitle.localeCompare(second.itemTitle);
+      }),
+    [workInstructions],
+  );
+  const selectedWorkInstructionIds = useMemo(
+    () =>
+      sortedWorkInstructions
+        .filter((instruction) => workInstructionSelection[instruction.id])
+        .map((instruction) => instruction.id),
+    [sortedWorkInstructions, workInstructionSelection],
+  );
+  const selectedWorkInstructionArchivedCount = useMemo(
+    () =>
+      sortedWorkInstructions.filter(
+        (instruction) =>
+          workInstructionSelection[instruction.id] && instruction.isArchived,
+      ).length,
+    [sortedWorkInstructions, workInstructionSelection],
+  );
+  const selectedWorkInstructionActiveCount =
+    selectedWorkInstructionIds.length - selectedWorkInstructionArchivedCount;
+  const allWorkInstructionsSelected =
+    sortedWorkInstructions.length > 0 &&
+    selectedWorkInstructionIds.length === sortedWorkInstructions.length;
 
   return (
     <div className="grid gap-5">
@@ -1615,6 +1979,198 @@ export function UserAdminPanel() {
           getAuthHeaders={getAuthHeaders}
           reloadToken={reviewActivityReloadToken}
         />
+      </div>
+
+      <div
+        onClick={(event) => {
+          if (isInteractiveClickTarget(event.target)) {
+            return;
+          }
+
+          setWorkInstructionsCollapsed((current) => !current);
+        }}
+        className={cn(
+          "grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7",
+          "cursor-pointer",
+        )}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => setWorkInstructionsCollapsed((current) => !current)}
+            className="flex items-center gap-1.5 text-lg font-bold transition hover:opacity-80"
+          >
+            {workInstructionsCollapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
+            Work Instruction Management
+          </button>
+          <div className="flex items-center gap-2">
+            <span className="rounded-full border border-cyan-500/35 bg-cyan-500/10 px-2 py-0.5 text-xs font-semibold text-cyan-800 dark:text-cyan-200">
+              {sortedWorkInstructions.length} total
+            </span>
+            <button
+              type="button"
+              disabled={workInstructionBusy}
+              onClick={() => void fetchWorkInstructions()}
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-300/70 px-2.5 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-100/70 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800/70"
+            >
+              <RefreshCw size={12} className={workInstructionBusy ? "animate-spin" : ""} />
+              Reload
+            </button>
+          </div>
+        </div>
+
+        {!workInstructionsCollapsed ? (
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            Prune instructions with bulk archive or permanent delete. The list includes active
+            and archived instructions, sorted by total views.
+          </p>
+        ) : null}
+
+        {!workInstructionsCollapsed ? (
+          <>
+            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-300/70 bg-white/70 p-3 text-xs dark:border-slate-700 dark:bg-slate-900/50">
+              <span className="font-semibold text-slate-700 dark:text-slate-200">
+                Selected {selectedWorkInstructionIds.length}/{sortedWorkInstructions.length}
+              </span>
+              <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-200">
+                {selectedWorkInstructionActiveCount} active
+              </span>
+              <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-200">
+                {selectedWorkInstructionArchivedCount} archived
+              </span>
+              <button
+                type="button"
+                disabled={workInstructionBusy || sortedWorkInstructions.length === 0}
+                onClick={() => {
+                  if (allWorkInstructionsSelected) {
+                    clearWorkInstructionSelection();
+                  } else {
+                    selectAllWorkInstructions();
+                  }
+                }}
+                className="rounded-lg border border-slate-300/80 bg-white/80 px-2.5 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-800/70"
+              >
+                {allWorkInstructionsSelected ? "Clear Selection" : "Select All"}
+              </button>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={workInstructionBusy || selectedWorkInstructionActiveCount === 0}
+                onClick={() => openWorkInstructionActionConfirm("archive")}
+                className="inline-flex items-center gap-1 rounded-xl border border-cyan-500/40 bg-cyan-500/12 px-3 py-1.5 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-100"
+              >
+                <Archive size={13} />
+                Archive Selected ({selectedWorkInstructionActiveCount})
+              </button>
+              <button
+                type="button"
+                disabled={workInstructionBusy || selectedWorkInstructionArchivedCount === 0}
+                onClick={() => openWorkInstructionActionConfirm("permanent_delete")}
+                className="inline-flex items-center gap-1 rounded-xl border border-rose-500/45 bg-rose-500/12 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-60 dark:text-rose-200"
+              >
+                <Trash2 size={13} />
+                Delete Permanently ({selectedWorkInstructionArchivedCount})
+              </button>
+            </div>
+
+            {sortedWorkInstructions.length === 0 ? (
+              <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+                No work instructions found.
+              </p>
+            ) : (
+              <div
+                ref={workInstructionListRef}
+                className={cn(
+                  "grid gap-2",
+                  sortedWorkInstructions.length > 10 ? "overflow-y-auto pr-1" : "",
+                )}
+                style={
+                  workInstructionListMaxHeight !== null
+                    ? { maxHeight: `${workInstructionListMaxHeight}px` }
+                    : undefined
+                }
+              >
+                {sortedWorkInstructions.map((instruction) => {
+                  const selected = Boolean(workInstructionSelection[instruction.id]);
+                  const isFork =
+                    Boolean(instruction.forkRootInstructionId) &&
+                    Number.isInteger(instruction.forkNumber) &&
+                    Number(instruction.forkNumber) > 0;
+                  const departmentSwatch =
+                    normalizeColorHex(instruction.departmentColorHex ?? "") ??
+                    DEFAULT_DEPARTMENT_COLORS[0];
+
+                  return (
+                    <div
+                      key={instruction.id}
+                      data-work-instruction-card="true"
+                      className={cn(
+                        "grid gap-1 rounded-xl border px-2.5 py-2 text-xs transition",
+                        selected
+                          ? "border-cyan-500/45 bg-cyan-500/10"
+                          : "border-slate-300/70 bg-white/80 dark:border-slate-700 dark:bg-slate-900/60",
+                      )}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <label className="inline-flex min-w-0 cursor-pointer items-start gap-2">
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={(event) =>
+                              toggleWorkInstructionSelection(
+                                instruction.id,
+                                event.target.checked,
+                              )
+                            }
+                            className="mt-[2px] h-4 w-4 rounded border-slate-400 text-cyan-600 focus:ring-cyan-500"
+                          />
+                          <span className="grid min-w-0 gap-0.5">
+                            <span className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+                              {instruction.partId} - {instruction.itemTitle}
+                            </span>
+                            <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+                              <span
+                                className="h-2.5 w-2.5 rounded-full"
+                                style={{ backgroundColor: departmentSwatch }}
+                              />
+                              {instruction.departmentName}
+                            </span>
+                          </span>
+                        </label>
+                        <div className="flex flex-wrap items-center gap-1">
+                          <span
+                            className={cn(
+                              "rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                              instruction.isArchived
+                                ? "border-amber-500/40 bg-amber-500/15 text-amber-700 dark:text-amber-200"
+                                : "border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-200",
+                            )}
+                          >
+                            {instruction.isArchived ? "Archived" : "Active"}
+                          </span>
+                          <span className="inline-flex items-center gap-1 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-semibold text-cyan-800 dark:text-cyan-100">
+                            <Eye size={11} />
+                            {instruction.viewCount.toLocaleString()} views
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
+                        <span>Rev {instruction.revision}</span>
+                        {isFork ? <span>Fork #{instruction.forkNumber}</span> : null}
+                        <span>
+                          Updated <LocalDateTime value={instruction.updatedAt} mode="dateTime" />
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        ) : null}
       </div>
 
       <div
@@ -2617,6 +3173,75 @@ export function UserAdminPanel() {
           text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
         }
       `}</style>
+
+      {workInstructionActionConfirm && portalReady
+        ? createPortal(
+            <div
+              className="app-modal-shell fixed inset-0 z-[130] flex items-center justify-center bg-slate-900/35 p-4 backdrop-blur-sm dark:bg-slate-950/70"
+              role="presentation"
+              onClick={() => setWorkInstructionActionConfirm(null)}
+            >
+              <article
+                role="dialog"
+                aria-modal="true"
+                aria-label="Confirm work instruction action"
+                onClick={(event) => event.stopPropagation()}
+                className="grid w-full max-w-md gap-4 rounded-2xl border border-slate-300/80 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-950"
+              >
+                <div className="grid gap-1">
+                  <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">
+                    {workInstructionActionConfirm.action === "archive"
+                      ? "Archive selected work instructions?"
+                      : "Permanently delete selected work instructions?"}
+                  </h3>
+                  <p className="text-sm text-slate-600 dark:text-slate-300">
+                    Selected: {workInstructionActionConfirm.selectedInstructionIds.length}. Will
+                    process: {workInstructionActionConfirm.eligibleInstructionIds.length}.
+                  </p>
+                  {workInstructionActionConfirm.skippedInstructionIds.length > 0 ? (
+                    <p className="rounded-xl border border-amber-500/35 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-200">
+                      {workInstructionActionConfirm.skippedInstructionIds.length} selected
+                      instruction(s) will be skipped due to status rules.
+                    </p>
+                  ) : null}
+                  {workInstructionActionConfirm.action === "permanent_delete" ? (
+                    <p className="rounded-xl border border-rose-500/35 bg-rose-500/10 p-2 text-xs text-rose-700 dark:text-rose-200">
+                      Permanent delete removes records from the database and cannot be undone.
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setWorkInstructionActionConfirm(null)}
+                    className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={workInstructionBusy}
+                    onClick={() => void performWorkInstructionBulkAction()}
+                    className={cn(
+                      "rounded-xl border px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-70",
+                      workInstructionActionConfirm.action === "archive"
+                        ? "border-cyan-500/45 bg-cyan-500/15 text-cyan-800 hover:bg-cyan-500/25 dark:text-cyan-100"
+                        : "border-rose-500/45 bg-rose-500/15 text-rose-700 hover:bg-rose-500/25 dark:text-rose-100",
+                    )}
+                  >
+                    {workInstructionBusy
+                      ? "Working..."
+                      : workInstructionActionConfirm.action === "archive"
+                        ? "Archive Selected"
+                        : "Delete Permanently"}
+                  </button>
+                </div>
+              </article>
+            </div>,
+            document.body,
+          )
+        : null}
 
       {confirmDialog && portalReady
         ? createPortal(

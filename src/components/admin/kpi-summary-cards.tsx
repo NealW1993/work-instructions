@@ -14,12 +14,13 @@ export interface KpiSummaryCardConfig {
     | "active-users"
     | "active-instructions"
     | "total-likes"
-    | "updates-last-7-days"
+    | "updates-all-time"
     | "total-active-user-time";
   label: string;
   value: string;
   tone: KpiSummaryTone;
   details: string[];
+  scrollTargetId?: string;
 }
 
 const CARD_TONE_CLASSES: Record<KpiSummaryTone, string> = {
@@ -45,7 +46,7 @@ const ICON_BY_CARD_ID: Record<KpiSummaryCardConfig["id"], LucideIcon> = {
   "active-users": Users,
   "active-instructions": FileText,
   "total-likes": ThumbsUp,
-  "updates-last-7-days": Activity,
+  "updates-all-time": Activity,
   "total-active-user-time": BarChart3,
 };
 
@@ -76,28 +77,49 @@ export function KpiSummaryCards({ cards }: { cards: KpiSummaryCardConfig[] }) {
     };
   }, [selectedCardId]);
 
+  function handleCardClick(card: KpiSummaryCardConfig) {
+    if (!card.scrollTargetId) {
+      setSelectedCardId(card.id);
+      return;
+    }
+
+    const target = document.getElementById(card.scrollTargetId);
+    if (!target) {
+      setSelectedCardId(card.id);
+      return;
+    }
+
+    target.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }
+
   return (
     <>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {cards.map((card) => {
           const Icon = ICON_BY_CARD_ID[card.id];
+          const isScrollCard = Boolean(card.scrollTargetId);
           return (
             <button
               key={card.id}
               type="button"
-              onClick={() => setSelectedCardId(card.id)}
+              onClick={() => handleCardClick(card)}
               className={cn(
                 "grid gap-1 rounded-2xl border p-4 text-left shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/60 dark:focus-visible:ring-cyan-300/70",
                 CARD_TONE_CLASSES[card.tone],
               )}
-              aria-haspopup="dialog"
+              aria-haspopup={isScrollCard ? undefined : "dialog"}
             >
               <p className="inline-flex items-center gap-2 text-xs font-extrabold uppercase tracking-wide opacity-90">
                 <Icon size={14} />
                 {card.label}
               </p>
               <p className="text-2xl font-extrabold">{card.value}</p>
-              <p className="text-[11px] font-semibold opacity-85">Click for details</p>
+              <p className="text-[11px] font-semibold opacity-85">
+                {isScrollCard ? "Click to jump" : "Click for details"}
+              </p>
             </button>
           );
         })}

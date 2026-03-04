@@ -40,12 +40,6 @@ interface KpiInstructionRow {
   is_archived: boolean;
 }
 
-interface KpiInstructionChangeEventRow {
-  occurred_at: string;
-  event_type: "created" | "updated" | string;
-  actor_user_id: string;
-}
-
 interface KpiLikeInstructionRelation {
   created_by: string;
 }
@@ -101,23 +95,6 @@ function toTimestamp(value: string | null | undefined) {
 
 function formatDurationFromSeconds(totalSeconds: number) {
   return formatElapsedHhMmSs(Math.max(0, totalSeconds) * 1000);
-}
-
-function startOfSystemDay(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-}
-
-function addSystemDays(date: Date, daysToAdd: number) {
-  const next = new Date(date);
-  next.setDate(next.getDate() + daysToAdd);
-  return next;
-}
-
-function formatSystemDate(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
 }
 
 function normalizeLikeInstructionRelation(
@@ -235,16 +212,14 @@ export default async function SystemKpisPage() {
 
   const supabaseAdmin = getSupabaseAdminClient();
   const now = new Date();
-  const systemTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "system timezone";
   const nowMs = now.getTime();
-  const thirtyDaysAgoIso = new Date(nowMs - 30 * 24 * 60 * 60 * 1000).toISOString();
 
   const [
     { data: profilesData, error: profilesError },
     { data: departmentsData, error: departmentsError },
     { data: workItemsData, error: workItemsError },
     { data: instructionsData, error: instructionsError },
-    { data: changeEventsData, error: changeEventsError },
+    { count: updatedInstructionCountAllTime, error: updatedInstructionCountError },
   ] = await Promise.all([
     supabaseAdmin
       .from("profiles")
@@ -266,10 +241,8 @@ export default async function SystemKpisPage() {
       .range(0, 9999),
     supabaseAdmin
       .from("instruction_change_events")
-      .select("occurred_at, event_type, actor_user_id")
-      .gte("occurred_at", thirtyDaysAgoIso)
-      .order("occurred_at", { ascending: false })
-      .range(0, 9999),
+      .select("id", { count: "exact", head: true })
+      .eq("event_type", "updated"),
   ]);
   const {
     rows: instructionLikes,
@@ -280,14 +253,13 @@ export default async function SystemKpisPage() {
   const departments = (departmentsData ?? []) as KpiDepartmentRow[];
   const workItems = (workItemsData ?? []) as KpiWorkItemRow[];
   const instructions = (instructionsData ?? []) as KpiInstructionRow[];
-  const changeEvents = (changeEventsData ?? []) as KpiInstructionChangeEventRow[];
 
   const dataErrors = [
     profilesError?.message ?? null,
     departmentsError?.message ?? null,
     workItemsError?.message ?? null,
     instructionsError?.message ?? null,
-    changeEventsError?.message ?? null,
+    updatedInstructionCountError?.message ?? null,
     likesError ?? null,
   ].filter((message): message is string => Boolean(message));
 
@@ -315,8 +287,6 @@ export default async function SystemKpisPage() {
       return a.label.localeCompare(b.label);
     });
 
-  const maxUserUsageSeconds = maxOf(usageByActiveUsers.map((entry) => entry.totalSeconds));
-  const shouldScrollUsageByUser = usageByActiveUsers.length > 5;
   const totalUsageSecondsAcrossActiveUsers = usageByActiveUsers.reduce(
     (sum, entry) => sum + entry.totalSeconds,
     0,
@@ -407,27 +377,7 @@ export default async function SystemKpisPage() {
       return first.label.localeCompare(second.label);
     });
   const totalLikeCount = instructionLikes.length;
-  const todaySystem = startOfSystemDay(now);
-  const tomorrowSystem = addSystemDays(todaySystem, 1);
-  const sevenDaysAgoSystem = addSystemDays(todaySystem, -6);
-  let updatedLast7Days = 0;
-  const recentUpdateContributors = new Set<string>();
-
-  for (const event of changeEvents) {
-    if (event.event_type !== "updated") continue;
-    const occurredAtMs = toTimestamp(event.occurred_at);
-    if (occurredAtMs === null) continue;
-    const occurredAt = new Date(occurredAtMs);
-    if (occurredAt >= sevenDaysAgoSystem && occurredAt < tomorrowSystem) {
-      updatedLast7Days += 1;
-      recentUpdateContributors.add(
-        profileLabelById.get(event.actor_user_id) ?? "Unknown User",
-      );
-    }
-  }
-  const recentUpdateContributorNames = [...recentUpdateContributors].sort((a, b) =>
-    a.localeCompare(b),
-  );
+  const totalUpdatedAllTime = Math.max(0, Number(updatedInstructionCountAllTime ?? 0));
   const activeInstructionCount = instructions.filter((entry) => !entry.is_archived).length;
   const archivedInstructionCount = instructions.filter((entry) => entry.is_archived).length;
   const totalInstructionCount = activeInstructionCount + archivedInstructionCount;
@@ -479,18 +429,15 @@ export default async function SystemKpisPage() {
           : ["No users have received likes yet."],
     },
     {
-      id: "updates-last-7-days",
-      label: "Updates (Last 7 Days)",
-      value: String(updatedLast7Days),
+      id: "updates-all-time",
+      label: "Updates (All-Time)",
+      value: String(totalUpdatedAllTime),
       tone: "violet",
       details: [
-        `${updatedLast7Days} update event${updatedLast7Days === 1 ? "" : "s"} recorded in the trailing 7-day ${systemTimeZone} window.`,
-        `Window start: ${formatSystemDate(sevenDaysAgoSystem)} ${systemTimeZone}.`,
-        `Window end: ${formatSystemDate(todaySystem)} ${systemTimeZone}.`,
-        recentUpdateContributorNames.length > 0
-          ? `Contributors: ${recentUpdateContributorNames.join(", ")}.`
-          : "Contributors: none recorded in this window.",
+        `${totalUpdatedAllTime} update event${totalUpdatedAllTime === 1 ? "" : "s"} recorded across all time.`,
+        "Clicking this card jumps to the Activity Trend chart.",
       ],
+      scrollTargetId: "kpi-activity-trend",
     },
     {
       id: "total-active-user-time",
@@ -504,6 +451,7 @@ export default async function SystemKpisPage() {
           usageByActiveUsers.length === 1 ? "" : "s"
         } included in the aggregate.`,
       ],
+      scrollTargetId: "kpi-active-users-all-time-usage",
     },
   ];
 
@@ -535,71 +483,6 @@ export default async function SystemKpisPage() {
       <ReviewCoverageKpiPanel />
       <AiEnhancementKpiPanel />
       <ForkMergeKpiPanel />
-
-      <section className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-6">
-        <div className="flex flex-wrap items-end justify-between gap-2">
-          <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
-            Active Users: All-Time Usage
-          </h2>
-          <p className="text-xs text-slate-600 dark:text-slate-300">
-            Includes current in-progress session time.
-          </p>
-        </div>
-
-        {usageByActiveUsers.length === 0 ? (
-          <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-            No active users found.
-          </p>
-        ) : (
-          <div
-            className={
-              shouldScrollUsageByUser
-                ? "grid max-h-[24rem] gap-2 overflow-y-auto pr-1"
-                : "grid gap-2"
-            }
-          >
-            {usageByActiveUsers.map((entry) => {
-              const width = (entry.totalSeconds / maxUserUsageSeconds) * 100;
-              const usageSharePercent =
-                totalUsageSecondsAcrossActiveUsers > 0
-                  ? (entry.totalSeconds / totalUsageSecondsAcrossActiveUsers) * 100
-                  : 0;
-
-              return (
-                <article
-                  key={entry.id}
-                  className="group relative grid gap-1 rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50"
-                >
-                  <KpiDataTooltip
-                    tone="cyan"
-                    title={entry.label}
-                    lines={[
-                      `${formatDurationFromSeconds(entry.totalSeconds)} total tracked usage.`,
-                      entry.activeSession
-                        ? "Active live session is currently running."
-                        : "No active live session right now.",
-                      `${usageSharePercent.toFixed(1)}% of all active-user usage time.`,
-                    ]}
-                  />
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <p className="font-semibold text-slate-800 dark:text-slate-100">{entry.label}</p>
-                    <p className="font-mono text-slate-600 dark:text-slate-300">
-                      {formatDurationFromSeconds(entry.totalSeconds)}
-                      {entry.activeSession ? " (live)" : ""}
-                    </p>
-                  </div>
-                  <div className="h-2 rounded-full bg-slate-300/40 dark:bg-slate-700/50">
-                    <div
-                      className="h-2 rounded-full bg-gradient-to-r from-cyan-500 to-blue-500"
-                      style={{ width: `${Math.max(width, 2)}%` }}
-                    />
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </section>
 
       <section className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-6">
           <div className="flex flex-wrap items-end justify-between gap-2">
@@ -672,7 +555,7 @@ export default async function SystemKpisPage() {
           )}
         </section>
 
-        <KpiActivitySection />
+        <KpiActivitySection usageByActiveUsers={usageByActiveUsers} />
     </section>
   );
 }

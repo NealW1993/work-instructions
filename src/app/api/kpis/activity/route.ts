@@ -10,12 +10,17 @@ interface ChangeEventRow {
   occurred_at: string;
   event_type: "created" | "updated" | string;
   actor_user_id: string;
+  source_payload?: unknown;
 }
 
 interface ProfileRow {
   id: string;
   full_name: string;
   email: string;
+}
+
+interface InstructionViewEventRow {
+  viewer_user_id: string | null;
 }
 
 export interface ActivityTrendPoint {
@@ -25,22 +30,29 @@ export interface ActivityTrendPoint {
   updated: number;
 }
 
-export interface ContributorEntry {
+export interface AllTimeContributorEntry {
+  rank: number;
   userId: string;
   label: string;
-  updates: number;
+  viewed: number;
+  created: number;
+  updated: number;
+  forked: number;
+  totalActions: number;
 }
 
 export interface ActivityApiResponse {
   period: ActivityPeriod;
   periodLabel: string;
   trendPoints: ActivityTrendPoint[];
-  contributors: ContributorEntry[];
+  topContributorsAllTime: AllTimeContributorEntry[];
   totalCreated: number;
   totalUpdated: number;
   prevPeriodParams: string;
   nextPeriodParams: string;
 }
+
+const ALL_TIME_METRIC_BATCH_SIZE = 5000;
 
 const MONTH_SHORT = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -109,6 +121,124 @@ function formatHourLabel(hour: number): string {
   if (hour < 12) return `${hour}am`;
   if (hour === 12) return "12pm";
   return `${hour - 12}pm`;
+}
+
+function isForkCreatedPayload(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as { kind?: unknown };
+  return candidate.kind === "fork_created";
+}
+
+function getOrCreateContributorMetric(
+  metrics: Map<string, { viewed: number; created: number; updated: number; forked: number }>,
+  userId: string,
+) {
+  const existing = metrics.get(userId);
+  if (existing) {
+    return existing;
+  }
+
+  const createdMetric = {
+    viewed: 0,
+    created: 0,
+    updated: 0,
+    forked: 0,
+  };
+  metrics.set(userId, createdMetric);
+  return createdMetric;
+}
+
+async function collectAllTimeContributorMetrics(
+  supabaseAdmin: ReturnType<typeof getSupabaseAdminClient>,
+) {
+  const metrics = new Map<
+    string,
+    { viewed: number; created: number; updated: number; forked: number }
+  >();
+
+  let changeOffset = 0;
+  for (;;) {
+    const changeEnd = changeOffset + ALL_TIME_METRIC_BATCH_SIZE - 1;
+    const { data, error } = await supabaseAdmin
+      .from("instruction_change_events")
+      .select("actor_user_id, event_type, source_payload")
+      .order("occurred_at", { ascending: true })
+      .range(changeOffset, changeEnd);
+
+    if (error) {
+      return {
+        metrics,
+        error: error.message,
+      };
+    }
+
+    const rows = (data ?? []) as ChangeEventRow[];
+    for (const row of rows) {
+      const userId = row.actor_user_id?.trim();
+      if (!userId) {
+        continue;
+      }
+
+      const metric = getOrCreateContributorMetric(metrics, userId);
+      if (row.event_type === "updated") {
+        metric.updated += 1;
+      } else if (row.event_type === "created") {
+        if (isForkCreatedPayload(row.source_payload)) {
+          metric.forked += 1;
+        } else {
+          metric.created += 1;
+        }
+      }
+    }
+
+    if (rows.length < ALL_TIME_METRIC_BATCH_SIZE) {
+      break;
+    }
+
+    changeOffset += ALL_TIME_METRIC_BATCH_SIZE;
+  }
+
+  let viewOffset = 0;
+  for (;;) {
+    const viewEnd = viewOffset + ALL_TIME_METRIC_BATCH_SIZE - 1;
+    const { data, error } = await supabaseAdmin
+      .from("instruction_view_events")
+      .select("viewer_user_id")
+      .order("viewed_at", { ascending: true })
+      .range(viewOffset, viewEnd);
+
+    if (error) {
+      return {
+        metrics,
+        error: error.message,
+      };
+    }
+
+    const rows = (data ?? []) as InstructionViewEventRow[];
+    for (const row of rows) {
+      const userId = row.viewer_user_id?.trim();
+      if (!userId) {
+        continue;
+      }
+
+      const metric = getOrCreateContributorMetric(metrics, userId);
+      metric.viewed += 1;
+    }
+
+    if (rows.length < ALL_TIME_METRIC_BATCH_SIZE) {
+      break;
+    }
+
+    viewOffset += ALL_TIME_METRIC_BATCH_SIZE;
+  }
+
+  return {
+    metrics,
+    error: null as string | null,
+  };
 }
 
 interface ActivityRange {
@@ -259,7 +389,11 @@ export async function GET(request: NextRequest) {
   const range = buildRange(period, year, month, day, weekStart, now);
 
   const supabaseAdmin = getSupabaseAdminClient();
-  const [{ data: rawEvents, error: eventsError }, { data: rawProfiles, error: profilesError }] =
+  const [
+    { data: rawEvents, error: eventsError },
+    { data: rawProfiles, error: profilesError },
+    { metrics: allTimeContributorMetrics, error: allTimeMetricsError },
+  ] =
     await Promise.all([
       supabaseAdmin
         .from("instruction_change_events")
@@ -269,6 +403,7 @@ export async function GET(request: NextRequest) {
         .order("occurred_at", { ascending: true })
         .range(0, 49999),
       supabaseAdmin.from("profiles").select("id, full_name, email").range(0, 4999),
+      collectAllTimeContributorMetrics(supabaseAdmin),
     ]);
 
   if (eventsError) {
@@ -277,6 +412,9 @@ export async function GET(request: NextRequest) {
   if (profilesError) {
     return NextResponse.json({ error: profilesError.message }, { status: 500 });
   }
+  if (allTimeMetricsError) {
+    return NextResponse.json({ error: allTimeMetricsError }, { status: 500 });
+  }
 
   const events = (rawEvents ?? []) as ChangeEventRow[];
   const profiles = (rawProfiles ?? []) as ProfileRow[];
@@ -284,7 +422,6 @@ export async function GET(request: NextRequest) {
 
   const points = range.buildPoints();
   const pointByKey = new Map(points.map((p) => [p.key, p]));
-  const contributorCounts = new Map<string, number>();
   let totalCreated = 0;
   let totalUpdated = 0;
 
@@ -298,10 +435,6 @@ export async function GET(request: NextRequest) {
       totalCreated += 1;
     } else if (eventType === "updated") {
       totalUpdated += 1;
-      contributorCounts.set(
-        event.actor_user_id,
-        (contributorCounts.get(event.actor_user_id) ?? 0) + 1,
-      );
     }
 
     const key = range.getEventKey(occurred);
@@ -315,22 +448,39 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const contributors: ContributorEntry[] = Array.from(contributorCounts.entries())
-    .map(([userId, updates]) => ({
+  const topContributorsAllTime: AllTimeContributorEntry[] = Array.from(
+    allTimeContributorMetrics.entries(),
+  )
+    .map(([userId, counts]) => ({
       userId,
       label: profileNameById.get(userId) ?? "Unknown User",
-      updates,
+      viewed: counts.viewed,
+      created: counts.created,
+      updated: counts.updated,
+      forked: counts.forked,
+      totalActions: counts.viewed + counts.created + counts.updated + counts.forked,
     }))
+    .filter((entry) => entry.totalActions > 0)
     .sort((a, b) =>
-      b.updates !== a.updates ? b.updates - a.updates : a.label.localeCompare(b.label),
+      b.totalActions !== a.totalActions
+        ? b.totalActions - a.totalActions
+        : b.updated !== a.updated
+          ? b.updated - a.updated
+          : b.viewed !== a.viewed
+            ? b.viewed - a.viewed
+            : a.label.localeCompare(b.label),
     )
-    .slice(0, 12);
+    .map((entry, index) => ({
+      ...entry,
+      rank: index + 1,
+    }))
+    .slice(0, 20);
 
   const response: ActivityApiResponse = {
     period,
     periodLabel: range.label,
     trendPoints: points,
-    contributors,
+    topContributorsAllTime,
     totalCreated,
     totalUpdated,
     prevPeriodParams: range.prevParams,
