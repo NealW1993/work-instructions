@@ -611,7 +611,7 @@ export function LoginPanel() {
       </div>
 
       {feedbackOpen ? (
-        <div className="app-modal-shell auth-login-shell fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+        <div className="auth-login-shell fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
           <div className="grid w-full max-w-lg gap-3 rounded-2xl border border-white/20 bg-slate-950/90 p-4 text-slate-100 shadow-2xl">
             <div className="grid gap-1">
               <h3 className="text-lg font-bold text-slate-100">Leave Anonymous Feedback</h3>
@@ -666,7 +666,7 @@ export function LoginPanel() {
       ) : null}
 
       {helpOpen ? (
-        <div className="app-modal-shell auth-login-shell fixed inset-0 z-[121] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+        <div className="auth-login-shell fixed inset-0 z-[121] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
           <div className="grid w-full max-w-lg gap-3 rounded-2xl border border-white/20 bg-slate-950/90 p-4 text-slate-100 shadow-2xl">
             <div className="grid gap-1">
               <h3 className="text-lg font-bold text-slate-100">Request Help</h3>
