@@ -80,6 +80,9 @@ interface WorkInstructionManagementResponse {
 }
 
 type WorkInstructionBulkAction = "archive" | "permanent_delete";
+type WorkInstructionConfirmAction =
+  | WorkInstructionBulkAction
+  | "archive_and_delete";
 
 interface WorkInstructionBulkActionResponse {
   success?: boolean;
@@ -93,9 +96,10 @@ interface WorkInstructionBulkActionResponse {
 }
 
 interface WorkInstructionActionConfirmState {
-  action: WorkInstructionBulkAction;
+  action: WorkInstructionConfirmAction;
   selectedInstructionIds: string[];
-  eligibleInstructionIds: string[];
+  archiveInstructionIds: string[];
+  deleteInstructionIds: string[];
   skippedInstructionIds: string[];
 }
 
@@ -1705,7 +1709,7 @@ export function UserAdminPanel() {
     setWorkInstructionSelection({});
   }
 
-  function openWorkInstructionActionConfirm(action: WorkInstructionBulkAction) {
+  function openWorkInstructionActionConfirm(action: WorkInstructionConfirmAction) {
     const selectedInstructionIds = workInstructions
       .filter((instruction) => workInstructionSelection[instruction.id])
       .map((instruction) => instruction.id);
@@ -1721,26 +1725,57 @@ export function UserAdminPanel() {
         .map((instruction) => [instruction.id, instruction] as const),
     );
 
-    const eligibleInstructionIds = selectedInstructionIds.filter((instructionId) => {
+    const archiveInstructionIds = selectedInstructionIds.filter((instructionId) => {
       const instruction = selectedById.get(instructionId);
       if (!instruction) {
         return false;
       }
 
-      if (action === "archive") {
-        return !instruction.isArchived;
+      return !instruction.isArchived;
+    });
+    const deleteInstructionIds = selectedInstructionIds.filter((instructionId) => {
+      const instruction = selectedById.get(instructionId);
+      if (!instruction) {
+        return false;
       }
 
       return instruction.isArchived;
     });
+    const requestedArchiveIds =
+      action === "archive" || action === "archive_and_delete"
+        ? archiveInstructionIds
+        : [];
+    const requestedDeleteIds =
+      action === "permanent_delete" || action === "archive_and_delete"
+        ? deleteInstructionIds
+        : [];
+    const requestedInstructionIds = new Set<string>([
+      ...requestedArchiveIds,
+      ...requestedDeleteIds,
+    ]);
 
     const skippedInstructionIds = selectedInstructionIds.filter(
-      (instructionId) => !eligibleInstructionIds.includes(instructionId),
+      (instructionId) => !requestedInstructionIds.has(instructionId),
     );
 
-    if (eligibleInstructionIds.length === 0) {
+    const eligibleCount = requestedArchiveIds.length + requestedDeleteIds.length;
+    if (
+      action === "archive_and_delete" &&
+      (requestedArchiveIds.length === 0 || requestedDeleteIds.length === 0)
+    ) {
+      setError(
+        "Archive + Delete requires selecting at least one active and one archived instruction.",
+      );
+      return;
+    }
+
+    if (eligibleCount === 0) {
       if (action === "archive") {
         setError("All selected instructions are already archived.");
+      } else if (action === "archive_and_delete") {
+        setError(
+          "Archive + Delete requires selecting at least one active and one archived instruction.",
+        );
       } else {
         setError("Permanent delete only applies to archived instructions.");
       }
@@ -1751,7 +1786,8 @@ export function UserAdminPanel() {
     setWorkInstructionActionConfirm({
       action,
       selectedInstructionIds,
-      eligibleInstructionIds,
+      archiveInstructionIds: requestedArchiveIds,
+      deleteInstructionIds: requestedDeleteIds,
       skippedInstructionIds,
     });
   }
@@ -1767,42 +1803,83 @@ export function UserAdminPanel() {
 
     try {
       const headers = await getAuthHeaders();
-      const response = await fetch("/api/admin/work-instructions", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          action: workInstructionActionConfirm.action,
-          instructionIds: workInstructionActionConfirm.eligibleInstructionIds,
-        }),
-      });
+      const callWorkInstructionBulkAction = async (
+        action: WorkInstructionBulkAction,
+        instructionIds: string[],
+      ) => {
+        if (instructionIds.length === 0) {
+          return null;
+        }
 
-      const payload = (await response.json().catch(() => ({}))) as WorkInstructionBulkActionResponse;
+        const response = await fetch("/api/admin/work-instructions", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            action,
+            instructionIds,
+          }),
+        });
 
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Unable to update work instructions.");
-      }
+        const payload = (await response.json().catch(() => ({}))) as WorkInstructionBulkActionResponse;
+
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Unable to update work instructions.");
+        }
+
+        return payload;
+      };
 
       if (workInstructionActionConfirm.action === "archive") {
-        const archivedCount = payload.archiveInstructionIds?.length ?? 0;
+        const archivePayload = await callWorkInstructionBulkAction(
+          "archive",
+          workInstructionActionConfirm.archiveInstructionIds,
+        );
+        const archivedCount = archivePayload?.archiveInstructionIds?.length ?? 0;
         const skippedCount =
-          (payload.skippedAlreadyArchivedIds?.length ?? 0) +
+          (archivePayload?.skippedAlreadyArchivedIds?.length ?? 0) +
           (workInstructionActionConfirm.skippedInstructionIds.length ?? 0) +
-          (payload.missingInstructionIds?.length ?? 0);
+          (archivePayload?.missingInstructionIds?.length ?? 0);
         setMessage(
           skippedCount > 0
             ? `Archived ${archivedCount} work instruction(s). Skipped ${skippedCount}.`
             : `Archived ${archivedCount} work instruction(s).`,
         );
-      } else {
-        const deletedCount = payload.deleteInstructionIds?.length ?? 0;
+      } else if (workInstructionActionConfirm.action === "permanent_delete") {
+        const deletePayload = await callWorkInstructionBulkAction(
+          "permanent_delete",
+          workInstructionActionConfirm.deleteInstructionIds,
+        );
+        const deletedCount = deletePayload?.deleteInstructionIds?.length ?? 0;
         const skippedCount =
-          (payload.skippedNotArchivedIds?.length ?? 0) +
+          (deletePayload?.skippedNotArchivedIds?.length ?? 0) +
           (workInstructionActionConfirm.skippedInstructionIds.length ?? 0) +
-          (payload.missingInstructionIds?.length ?? 0);
+          (deletePayload?.missingInstructionIds?.length ?? 0);
         setMessage(
           skippedCount > 0
             ? `Permanently deleted ${deletedCount} work instruction(s). Skipped ${skippedCount}.`
             : `Permanently deleted ${deletedCount} work instruction(s).`,
+        );
+      } else {
+        const archivePayload = await callWorkInstructionBulkAction(
+          "archive",
+          workInstructionActionConfirm.archiveInstructionIds,
+        );
+        const deletePayload = await callWorkInstructionBulkAction(
+          "permanent_delete",
+          workInstructionActionConfirm.deleteInstructionIds,
+        );
+        const archivedCount = archivePayload?.archiveInstructionIds?.length ?? 0;
+        const deletedCount = deletePayload?.deleteInstructionIds?.length ?? 0;
+        const skippedCount =
+          (archivePayload?.skippedAlreadyArchivedIds?.length ?? 0) +
+          (deletePayload?.skippedNotArchivedIds?.length ?? 0) +
+          (archivePayload?.missingInstructionIds?.length ?? 0) +
+          (deletePayload?.missingInstructionIds?.length ?? 0) +
+          (workInstructionActionConfirm.skippedInstructionIds.length ?? 0);
+        setMessage(
+          skippedCount > 0
+            ? `Archived ${archivedCount} and permanently deleted ${deletedCount} work instruction(s). Skipped ${skippedCount}.`
+            : `Archived ${archivedCount} and permanently deleted ${deletedCount} work instruction(s).`,
         );
       }
 
@@ -2072,6 +2149,21 @@ export function UserAdminPanel() {
               >
                 <Trash2 size={13} />
                 Delete Permanently ({selectedWorkInstructionArchivedCount})
+              </button>
+              <button
+                type="button"
+                disabled={
+                  workInstructionBusy ||
+                  selectedWorkInstructionActiveCount === 0 ||
+                  selectedWorkInstructionArchivedCount === 0
+                }
+                onClick={() => openWorkInstructionActionConfirm("archive_and_delete")}
+                className="inline-flex items-center gap-1 rounded-xl border border-amber-500/45 bg-amber-500/12 px-3 py-1.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-60 dark:text-amber-200"
+              >
+                <Archive size={13} />
+                <Trash2 size={13} />
+                Archive + Delete ({selectedWorkInstructionActiveCount}/
+                {selectedWorkInstructionArchivedCount})
               </button>
             </div>
 
@@ -3192,11 +3284,20 @@ export function UserAdminPanel() {
                   <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100">
                     {workInstructionActionConfirm.action === "archive"
                       ? "Archive selected work instructions?"
-                      : "Permanently delete selected work instructions?"}
+                      : workInstructionActionConfirm.action === "permanent_delete"
+                        ? "Permanently delete selected work instructions?"
+                        : "Archive active and delete archived instructions?"}
                   </h3>
+                  {workInstructionActionConfirm.action === "archive_and_delete" ? (
+                    <p className="text-sm text-slate-600 dark:text-slate-300">
+                      Active selections will be archived; archived selections will be permanently
+                      deleted.
+                    </p>
+                  ) : null}
                   <p className="text-sm text-slate-600 dark:text-slate-300">
                     Selected: {workInstructionActionConfirm.selectedInstructionIds.length}. Will
-                    process: {workInstructionActionConfirm.eligibleInstructionIds.length}.
+                    archive: {workInstructionActionConfirm.archiveInstructionIds.length}. Will
+                    delete: {workInstructionActionConfirm.deleteInstructionIds.length}.
                   </p>
                   {workInstructionActionConfirm.skippedInstructionIds.length > 0 ? (
                     <p className="rounded-xl border border-amber-500/35 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-200">
@@ -3204,7 +3305,7 @@ export function UserAdminPanel() {
                       instruction(s) will be skipped due to status rules.
                     </p>
                   ) : null}
-                  {workInstructionActionConfirm.action === "permanent_delete" ? (
+                  {workInstructionActionConfirm.action !== "archive" ? (
                     <p className="rounded-xl border border-rose-500/35 bg-rose-500/10 p-2 text-xs text-rose-700 dark:text-rose-200">
                       Permanent delete removes records from the database and cannot be undone.
                     </p>
@@ -3227,14 +3328,18 @@ export function UserAdminPanel() {
                       "rounded-xl border px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-70",
                       workInstructionActionConfirm.action === "archive"
                         ? "border-cyan-500/45 bg-cyan-500/15 text-cyan-800 hover:bg-cyan-500/25 dark:text-cyan-100"
-                        : "border-rose-500/45 bg-rose-500/15 text-rose-700 hover:bg-rose-500/25 dark:text-rose-100",
+                        : workInstructionActionConfirm.action === "permanent_delete"
+                          ? "border-rose-500/45 bg-rose-500/15 text-rose-700 hover:bg-rose-500/25 dark:text-rose-100"
+                          : "border-amber-500/45 bg-amber-500/15 text-amber-800 hover:bg-amber-500/25 dark:text-amber-100",
                     )}
                   >
                     {workInstructionBusy
                       ? "Working..."
                       : workInstructionActionConfirm.action === "archive"
                         ? "Archive Selected"
-                        : "Delete Permanently"}
+                        : workInstructionActionConfirm.action === "permanent_delete"
+                          ? "Delete Permanently"
+                          : "Archive + Delete"}
                   </button>
                 </div>
               </article>

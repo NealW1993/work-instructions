@@ -974,6 +974,9 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
 
           return fallbackEvents;
         })();
+  const instructionUpdatedEventCount = instructionUpdateEvents.filter(
+    (event) => event.eventType === "updated",
+  ).length;
 
   const [
     { data: pinnedInstruction },
@@ -1445,24 +1448,29 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
                   className="shrink-0"
                 />
               ) : null}
-              <InstructionActionMenu toolCount={suggestedTools.length}>
+              <SuggestedToolsDropdown
+                tools={suggestedTools}
+                className="w-full min-w-44 sm:w-auto"
+              />
+              {!instructionIsArchived ? (
+                <LikeInstructionButton
+                  instructionId={instruction.id}
+                  userId={profile.id}
+                  initialLiked={Boolean(likedInstruction)}
+                  initialLikeCount={instructionLikeCount ?? 0}
+                  className="h-11 justify-center px-3 py-2"
+                />
+              ) : null}
+              <InstructionActionMenu badgeCount={instructionUpdatedEventCount}>
                 <InstructionUpdatesPanel
                   events={instructionUpdateEvents}
                   className="h-fit w-full justify-center self-start"
                 />
-                <div className="grid grid-cols-2 gap-2">
-                  <SuggestedToolsDropdown tools={suggestedTools} className="w-full" />
+                {instructionIsArchived ? (
                   <PrintInstructionButton className="w-full" />
-                </div>
-                {!instructionIsArchived ? (
+                ) : (
                   <div className="grid grid-cols-2 gap-2">
-                    <LikeInstructionButton
-                      instructionId={instruction.id}
-                      userId={profile.id}
-                      initialLiked={Boolean(likedInstruction)}
-                      initialLikeCount={instructionLikeCount ?? 0}
-                      className="w-full justify-center px-2 py-1.5"
-                    />
+                    <PrintInstructionButton className="w-full" />
                     <PinInstructionButton
                       instructionId={instruction.id}
                       userId={profile.id}
@@ -1470,7 +1478,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
                       className="w-full justify-center px-2 py-1.5"
                     />
                   </div>
-                ) : null}
+                )}
                 {showCompactEditorInstructionActions ? (
                   <div className="grid grid-cols-2 gap-2">
                     <Link

@@ -8,10 +8,14 @@ import { cn } from "@/lib/utils";
 interface InstructionActionMenuProps {
   children: ReactNode;
   className?: string;
-  toolCount?: number;
+  badgeCount?: number;
 }
 
-export function InstructionActionMenu({ children, className, toolCount }: InstructionActionMenuProps) {
+export function InstructionActionMenu({
+  children,
+  className,
+  badgeCount,
+}: InstructionActionMenuProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -58,9 +62,9 @@ export function InstructionActionMenu({ children, className, toolCount }: Instru
         className="relative inline-flex h-11 w-11 items-center justify-center rounded-xl border border-cyan-500/35 bg-cyan-500/10 text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-100"
       >
         <SlidersHorizontal size={17} />
-        {toolCount !== undefined && toolCount > 0 ? (
-          <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-cyan-500 px-0.5 text-[9px] font-bold text-white">
-            {toolCount}
+        {badgeCount !== undefined && badgeCount >= 0 ? (
+          <span className="absolute -right-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-cyan-500 px-1 text-[9px] font-bold leading-none text-white">
+            ({badgeCount})
           </span>
         ) : null}
         <span className="sr-only">Open instruction action menu</span>

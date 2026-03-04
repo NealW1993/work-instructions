@@ -73,7 +73,7 @@ export function SuggestedToolsDropdown({ tools, className }: SuggestedToolsDropd
         <Wrench size={14} />
         Tool List
         <span className="rounded-full border border-cyan-500/45 bg-cyan-500/15 px-1.5 py-0.5 text-[10px]">
-          {totalCount}
+          ({totalCount})
         </span>
         <ChevronDown
           size={14}

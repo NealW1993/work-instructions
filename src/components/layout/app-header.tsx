@@ -745,94 +745,102 @@ export function AppHeader({ profile }: { profile: Profile }) {
     ],
   );
 
-  const renderDashboardControl = (mobile: boolean) => (
-    <div
-      data-dashboard-menu-root="true"
-      className={cn(mobile ? "inline-flex max-w-full" : "relative inline-flex")}
-    >
-      <Link
-        href="/dashboard"
-        onClick={handleDashboardLinkClick}
-        className={cn(
-          "inline-flex items-center rounded-l-xl border border-r-0 px-4 py-2 text-sm font-semibold transition",
-          isDashboardActive
-            ? "border-cyan-700 bg-cyan-600 text-white shadow-sm dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900"
-            : "border-slate-300/70 bg-white/80 text-slate-700 hover:border-slate-400 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-800",
-        )}
+  const renderDashboardControl = (mobile: boolean) => {
+    if (showDashboardStudioButton) {
+      return null;
+    }
+
+    return (
+      <div
+        data-dashboard-menu-root="true"
+        className={cn(mobile ? "inline-flex max-w-full" : "relative inline-flex")}
       >
-        Dashboard
-      </Link>
-
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={dashboardMenuVisible}
-        aria-label={
-          dashboardNeedsAttention
-            ? "Open dashboard options. Action required."
-            : "Open dashboard options"
-        }
-        onClick={() => {
-          if (dashboardMenuVisible) {
-            closeDashboardMenu();
-            return;
-          }
-
-          closeStudioMenu();
-          closeInstructionMenu();
-          openDashboardMenu();
-        }}
-        className={cn(
-          "relative inline-flex items-center rounded-r-xl border px-2.5 py-2 transition",
-          isDashboardActive
-            ? "border-cyan-700 bg-cyan-600 text-white hover:bg-cyan-700 dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
-            : "border-slate-300/70 bg-white/80 text-slate-700 hover:border-slate-400 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-800",
-        )}
-      >
-        {dashboardNeedsAttention ? (
-          <span className="absolute -right-1 -top-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-amber-200/40 bg-amber-500 text-amber-950 shadow-lg">
-            <CircleAlert size={11} />
-          </span>
-        ) : null}
-        <ChevronDown
-          size={14}
-          className={cn("transition", dashboardMenuVisible ? "rotate-180" : "")}
-        />
-      </button>
-
-      {dashboardMenuMounted ? (
-        <div
+        <Link
+          href="/dashboard"
+          onClick={handleDashboardLinkClick}
           className={cn(
-            "absolute top-[calc(100%+0.5rem)] z-[90] grid gap-2 rounded-2xl border border-white/20 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-xl transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
-            mobile ? "left-2 right-2" : "left-0",
-            dashboardMenuEntered ? "pointer-events-auto" : "pointer-events-none",
+            "inline-flex items-center rounded-l-xl border border-r-0 px-4 py-2 text-sm font-semibold transition",
+            isDashboardActive
+              ? "border-cyan-700 bg-cyan-600 text-white shadow-sm dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900"
+              : "border-slate-300/70 bg-white/80 text-slate-700 hover:border-slate-400 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-800",
           )}
-          style={{
-            ...(mobile ? {} : { width: `${dashboardMenuWidth}px` }),
-            opacity: dashboardMenuEntered ? 1 : 0,
-            filter: dashboardMenuEntered ? "blur(0px)" : "blur(6px)",
-            transform: dashboardMenuEntered ? "translateY(0px) scale(1)" : "translateY(-8px) scale(0.98)",
-            transformOrigin: mobile ? "top center" : "top left",
-          }}
         >
-          <button
-            type="button"
-            onClick={() => handleDashboardAction("toggle-customize")}
-            className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/25"
-          >
-            <LayoutGrid size={14} />
-            {customizeLabel}
-          </button>
+          Dashboard
+        </Link>
 
-          {activeDashboardLayoutState.layoutError ? (
-            <p className="rounded-xl border border-rose-500/40 bg-rose-500/15 px-3 py-2 text-[11px] text-rose-100">
-              {activeDashboardLayoutState.layoutError}
-            </p>
+        <button
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={dashboardMenuVisible}
+          aria-label={
+            dashboardNeedsAttention
+              ? "Open dashboard options. Action required."
+              : "Open dashboard options"
+          }
+          onClick={() => {
+            if (dashboardMenuVisible) {
+              closeDashboardMenu();
+              return;
+            }
+
+            closeStudioMenu();
+            closeInstructionMenu();
+            openDashboardMenu();
+          }}
+          className={cn(
+            "relative inline-flex items-center rounded-r-xl border px-2.5 py-2 transition",
+            isDashboardActive
+              ? "border-cyan-700 bg-cyan-600 text-white hover:bg-cyan-700 dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
+              : "border-slate-300/70 bg-white/80 text-slate-700 hover:border-slate-400 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-800",
+          )}
+        >
+          {dashboardNeedsAttention ? (
+            <span className="absolute -right-1 -top-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-amber-200/40 bg-amber-500 text-amber-950 shadow-lg">
+              <CircleAlert size={11} />
+            </span>
           ) : null}
-        </div>
-      ) : null}
-    </div>
-  );
+          <ChevronDown
+            size={14}
+            className={cn("transition", dashboardMenuVisible ? "rotate-180" : "")}
+          />
+        </button>
+
+        {dashboardMenuMounted ? (
+          <div
+            className={cn(
+              "absolute top-[calc(100%+0.5rem)] z-[90] grid gap-2 rounded-2xl border border-white/20 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-xl transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
+              mobile ? "left-2 right-2" : "left-0",
+              dashboardMenuEntered ? "pointer-events-auto" : "pointer-events-none",
+            )}
+            style={{
+              ...(mobile ? {} : { width: `${dashboardMenuWidth}px` }),
+              opacity: dashboardMenuEntered ? 1 : 0,
+              filter: dashboardMenuEntered ? "blur(0px)" : "blur(6px)",
+              transform: dashboardMenuEntered
+                ? "translateY(0px) scale(1)"
+                : "translateY(-8px) scale(0.98)",
+              transformOrigin: mobile ? "top center" : "top left",
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => handleDashboardAction("toggle-customize")}
+              className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/25"
+            >
+              <LayoutGrid size={14} />
+              {customizeLabel}
+            </button>
+
+            {activeDashboardLayoutState.layoutError ? (
+              <p className="rounded-xl border border-rose-500/40 bg-rose-500/15 px-3 py-2 text-[11px] text-rose-100">
+                {activeDashboardLayoutState.layoutError}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
 
   const renderDashboardStudioControl = (mobile: boolean) => {
     if (!showDashboardStudioButton) {
