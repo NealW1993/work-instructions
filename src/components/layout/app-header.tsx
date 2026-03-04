@@ -80,13 +80,6 @@ function HeaderDate() {
 }
 const MENU_ANIMATION_MS = 260;
 const HEADER_BACKGROUND_PLAYBACK_RATE = 0.45;
-const WIDGET_SIZE_OPTIONS = [
-  { value: "compact", label: "Compact" },
-  { value: "standard", label: "Standard" },
-  { value: "wide", label: "Wide" },
-  { value: "full", label: "Full Width" },
-] as const;
-
 function applyHeaderVideoPlaybackRate(video: HTMLVideoElement) {
   video.defaultPlaybackRate = HEADER_BACKGROUND_PLAYBACK_RATE;
   video.playbackRate = HEADER_BACKGROUND_PLAYBACK_RATE;
@@ -182,7 +175,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
   const [studioMenuPathname, setStudioMenuPathname] = useState(pathname);
   const [studioMenuMounted, setStudioMenuMounted] = useState(false);
   const [studioMenuEntered, setStudioMenuEntered] = useState(false);
-  const [studioMenuWidth, setStudioMenuWidth] = useState(560);
+  const [studioMenuWidth, setStudioMenuWidth] = useState(620);
   const [studioLayoutPresetsCollapsed, setStudioLayoutPresetsCollapsed] =
     useState(true);
   const [studioWidgetLibraryCollapsed, setStudioWidgetLibraryCollapsed] =
@@ -317,9 +310,9 @@ export function AppHeader({ profile }: { profile: Profile }) {
     const targetWidth =
       instructionRect && instructionRect.right > studioRect.left
         ? Math.round(instructionRect.right - studioRect.left)
-        : 560;
+        : 620;
     const viewportMaxWidth = Math.max(320, Math.round(window.innerWidth - 24));
-    const normalizedWidth = Math.min(Math.max(targetWidth, 520), viewportMaxWidth);
+    const normalizedWidth = Math.min(Math.max(targetWidth, 600), viewportMaxWidth);
 
     setStudioMenuWidth(normalizedWidth);
   }, []);
@@ -912,9 +905,6 @@ export function AppHeader({ profile }: { profile: Profile }) {
                 onClick={() => {
                   const nextCollapsed = !studioLayoutPresetsCollapsed;
                   setStudioLayoutPresetsCollapsed(nextCollapsed);
-                  if (!nextCollapsed) {
-                    scrollStudioMenuToBottom();
-                  }
                 }}
                 className="inline-flex items-center justify-between gap-2 rounded-lg px-1 py-0.5 text-left transition hover:bg-cyan-500/10"
               >
@@ -949,9 +939,6 @@ export function AppHeader({ profile }: { profile: Profile }) {
                             const nextExpandedPresetId =
                               studioExpandedPresetId === preset.id ? null : preset.id;
                             setStudioExpandedPresetId(nextExpandedPresetId);
-                            if (nextExpandedPresetId) {
-                              scrollStudioMenuToBottom();
-                            }
                           }}
                           className="inline-flex items-center justify-between gap-2 rounded-lg px-1 py-0.5 text-left transition hover:bg-white/10"
                         >
@@ -1077,7 +1064,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
                           {widget.visible ? "Visible" : "Hidden"}
                         </span>
                       </div>
-                      <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <button
                           type="button"
                           onClick={() =>
@@ -1099,26 +1086,6 @@ export function AppHeader({ profile }: { profile: Profile }) {
                         >
                           {widget.visible ? "Remove" : "Add"}
                         </button>
-                        <select
-                          value={widget.size}
-                          onChange={(event) =>
-                            handleDashboardStudioAction(
-                              {
-                                command: "set-widget-size",
-                                widgetId: widget.id,
-                                size: event.target.value as DashboardLayoutCommandEventDetail["size"],
-                              },
-                              { closeStudioMenuAfterAction: false },
-                            )
-                          }
-                          className="rounded-lg border border-slate-600 bg-slate-900/70 px-2 py-1 text-xs text-slate-100 outline-none transition focus:border-cyan-400"
-                        >
-                          {WIDGET_SIZE_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
                       </div>
                     </article>
                   ))}
@@ -1172,7 +1139,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
                           {widget.visible ? "Visible" : "Hidden"}
                         </span>
                       </div>
-                      <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <button
                           type="button"
                           onClick={() =>
@@ -1194,26 +1161,6 @@ export function AppHeader({ profile }: { profile: Profile }) {
                         >
                           {widget.visible ? "Remove" : "Add"}
                         </button>
-                        <select
-                          value={widget.size}
-                          onChange={(event) =>
-                            handleDashboardStudioAction(
-                              {
-                                command: "set-widget-size",
-                                widgetId: widget.id,
-                                size: event.target.value as DashboardLayoutCommandEventDetail["size"],
-                              },
-                              { closeStudioMenuAfterAction: false },
-                            )
-                          }
-                          className="rounded-lg border border-slate-600 bg-slate-900/70 px-2 py-1 text-xs text-slate-100 outline-none transition focus:border-cyan-400"
-                        >
-                          {WIDGET_SIZE_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
                       </div>
                     </article>
                   ))}

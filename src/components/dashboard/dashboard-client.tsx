@@ -1110,6 +1110,8 @@ function KpiLineChart({
   const { axisMax, ticks } = getKpiAxisScale(maxValue, viewport.axisTickSteps);
   const xStep = points.length > 1 ? plotWidth / (points.length - 1) : 0;
   const labelStep = getKpiXAxisLabelStep(points.length, viewport.xLabelTargetCount);
+  const yAxisTitleX = padding.left - 20;
+  const yAxisTitleY = padding.top + plotHeight / 2;
 
   const toX = (index: number) =>
     points.length > 1 ? padding.left + xStep * index : padding.left + plotWidth / 2;
@@ -1138,10 +1140,12 @@ function KpiLineChart({
           }}
         >
           <text
-            x={12}
-            y={padding.top + 8}
+            x={yAxisTitleX}
+            y={yAxisTitleY}
+            textAnchor="middle"
+            dominantBaseline="middle"
             className="fill-current text-[11px] font-semibold"
-            transform={`rotate(-90 ${12} ${padding.top + 8})`}
+            transform={`rotate(-90 ${yAxisTitleX} ${yAxisTitleY})`}
           >
             {yAxisLabel}
           </text>
@@ -1230,6 +1234,8 @@ function KpiBarChart({
   );
   const toY = (value: number) => padding.top + ((axisMax - value) / axisMax) * plotHeight;
   const labelStep = getKpiXAxisLabelStep(bars.length, viewport.xLabelTargetCount);
+  const yAxisTitleX = padding.left - 20;
+  const yAxisTitleY = padding.top + plotHeight / 2;
 
   return (
     <div className="grid gap-2">
@@ -1243,10 +1249,12 @@ function KpiBarChart({
           }}
         >
           <text
-            x={12}
-            y={padding.top + 8}
+            x={yAxisTitleX}
+            y={yAxisTitleY}
+            textAnchor="middle"
+            dominantBaseline="middle"
             className="fill-current text-[11px] font-semibold"
-            transform={`rotate(-90 ${12} ${padding.top + 8})`}
+            transform={`rotate(-90 ${yAxisTitleX} ${yAxisTitleY})`}
           >
             {yAxisLabel}
           </text>
