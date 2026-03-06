@@ -55,6 +55,11 @@ import {
 } from "react";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
+import {
+  getUnsupportedVideoUploadMessage,
+  inferVideoMimeType,
+  isMobileSafeVideoUpload,
+} from "@/lib/video";
 import { cn, sanitizeFileName } from "@/lib/utils";
 
 declare module "@tiptap/core" {
@@ -74,6 +79,7 @@ declare module "@tiptap/core" {
     resizableVideo: {
       setResizableVideo: (options: {
         src: string;
+        mimeType?: string | null;
         width?: number;
         align?: MediaAlign;
       }) => ReturnType;
@@ -277,6 +283,10 @@ function MediaNodeView({ node, selected, updateAttributes, deleteNode }: NodeVie
   const alt = String(node.attrs.alt ?? "");
   const width = clampMediaWidth(Number(node.attrs.width ?? DEFAULT_MEDIA_WIDTH));
   const align = normalizeMediaAlign(node.attrs.align as string | undefined);
+  const inferredVideoMimeType =
+    mediaType === "video"
+      ? inferVideoMimeType(String(node.attrs.mimeType ?? "")) ?? inferVideoMimeType(src)
+      : null;
 
   const setAlign = (nextAlign: MediaAlign) => {
     updateAttributes({ align: nextAlign });
@@ -356,12 +366,15 @@ function MediaNodeView({ node, selected, updateAttributes, deleteNode }: NodeVie
 
         {mediaType === "video" ? (
           <video
-            src={src}
             controls
+            playsInline
             contentEditable={false}
             preload="metadata"
             className="block h-auto w-full bg-black"
-          />
+          >
+            <source src={src} type={inferredVideoMimeType ?? undefined} />
+            Video playback unavailable on this device.
+          </video>
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={src} alt={alt || "Inline media"} className="block h-auto w-full" />
@@ -647,10 +660,18 @@ const ResizableVideo = Node.create({
         default: "",
         parseHTML: (element: HTMLElement) => {
           if (element.tagName === "VIDEO") {
-            return element.getAttribute("src") ?? "";
+            return (
+              element.getAttribute("src") ??
+              element.querySelector("source")?.getAttribute("src") ??
+              ""
+            );
           }
 
-          return element.querySelector("video")?.getAttribute("src") ?? "";
+          return (
+            element.querySelector("video")?.getAttribute("src") ??
+            element.querySelector("video source")?.getAttribute("src") ??
+            ""
+          );
         },
       },
       width: {
@@ -662,13 +683,35 @@ const ResizableVideo = Node.create({
         parseHTML: (element: HTMLElement) =>
           normalizeMediaAlign(element.getAttribute("data-align")),
       },
+      mimeType: {
+        default: null,
+        parseHTML: (element: HTMLElement) => {
+          if (element.tagName === "VIDEO") {
+            return (
+              element.getAttribute("data-mime-type") ??
+              element.querySelector("source")?.getAttribute("type") ??
+              inferVideoMimeType(element.getAttribute("src") ?? "")
+            );
+          }
+
+          return (
+            element.getAttribute("data-mime-type") ??
+            element.querySelector("source")?.getAttribute("type") ??
+            inferVideoMimeType(
+              element.querySelector("video")?.getAttribute("src") ??
+                element.querySelector("video source")?.getAttribute("src") ??
+                "",
+            )
+          );
+        },
+      },
     };
   },
 
   parseHTML() {
     return [
       { tag: 'figure[data-type="resizable-video"]' },
-      { tag: "video[src]" },
+      { tag: "video" },
     ];
   },
 
@@ -676,11 +719,14 @@ const ResizableVideo = Node.create({
     const src = String(HTMLAttributes.src ?? "");
     const width = clampMediaWidth(Number(HTMLAttributes.width ?? DEFAULT_MEDIA_WIDTH));
     const align = normalizeMediaAlign(String(HTMLAttributes.align ?? "center"));
+    const mimeType =
+      inferVideoMimeType(String(HTMLAttributes.mimeType ?? "")) ?? inferVideoMimeType(src);
     const figureAttributes = mergeAttributes(
       {
         "data-type": "resizable-video",
         "data-width": String(width),
         "data-align": align,
+        ...(mimeType ? { "data-mime-type": mimeType } : {}),
         style: getMediaFigureStyle(width, align),
       },
       this.options.HTMLAttributes,
@@ -692,10 +738,16 @@ const ResizableVideo = Node.create({
       [
         "video",
         {
-          src,
           controls: "true",
+          playsinline: "true",
+          preload: "metadata",
           style: "display:block;width:100%;height:auto;",
         },
+        ["source", {
+          src,
+          ...(mimeType ? { type: mimeType } : {}),
+        }],
+        "Video playback unavailable on this device.",
       ],
     ];
   },
@@ -710,6 +762,8 @@ const ResizableVideo = Node.create({
               type: this.name,
               attrs: {
                 src: options.src,
+                mimeType:
+                  inferVideoMimeType(options.mimeType ?? "") ?? inferVideoMimeType(options.src),
                 width: clampMediaWidth(options.width ?? DEFAULT_MEDIA_WIDTH),
                 align: normalizeMediaAlign(options.align),
               },
@@ -868,6 +922,11 @@ export function RichTextEditor({
           continue;
         }
 
+        if (mediaType === "video" && !isMobileSafeVideoUpload(file)) {
+          setToolbarMessage(getUnsupportedVideoUploadMessage(file.name));
+          continue;
+        }
+
         try {
           const storagePath = buildMediaStoragePath(file, mediaType);
           const { error: uploadError } = await supabase.storage
@@ -906,6 +965,7 @@ export function RichTextEditor({
                   .focus()
                   .setResizableVideo({
                     src: publicUrl,
+                    mimeType: inferVideoMimeType(file.type) ?? inferVideoMimeType(file.name),
                   })
                   .run();
 
@@ -1244,7 +1304,7 @@ export function RichTextEditor({
       <input
         ref={videoInputRef}
         type="file"
-        accept="video/*"
+        accept=".mp4,.m4v,video/mp4,video/x-m4v"
         multiple
         className="hidden"
         onChange={(event) => {

@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 
 import { LocalDateTime } from "@/components/ui/local-date-time";
 import { cn } from "@/lib/utils";
+import { inferVideoMimeType } from "@/lib/video";
 
 interface InstructionUpdateSourceMedia {
   type: "image" | "video";
@@ -133,7 +134,13 @@ function SourceMediaPreview({ media, tone }: SourceMediaPreviewProps) {
     <figure className={cn("grid gap-2 rounded-lg border p-2", toneClasses)}>
       <div className="overflow-hidden rounded-md border border-slate-200 dark:border-white/15 bg-slate-100 dark:bg-slate-950/60">
         {media.type === "video" ? (
-          <video src={media.src} controls preload="metadata" className="max-h-64 w-full object-contain" />
+          <video controls playsInline preload="metadata" className="max-h-64 w-full object-contain">
+            <source
+              src={media.src}
+              type={inferVideoMimeType(media.src) ?? undefined}
+            />
+            Video playback unavailable on this device.
+          </video>
         ) : (
           // Remote media URLs are dynamic and not known at build time.
           // eslint-disable-next-line @next/next/no-img-element
@@ -480,4 +487,3 @@ export function InstructionUpdatesPanel({ events, className }: InstructionUpdate
     </>
   );
 }
-

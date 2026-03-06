@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { X, ZoomIn } from "lucide-react";
 
 import type { InstructionMedia } from "@/lib/types";
+import { inferVideoMimeType } from "@/lib/video";
 
 interface InstructionMediaSectionProps {
   media: InstructionMedia[];
@@ -79,10 +80,17 @@ export function InstructionMediaSection({ media }: InstructionMediaSectionProps)
           >
             {item.media_type === "video" ? (
               <video
-                src={item.public_url}
                 controls
+                playsInline
+                preload="metadata"
                 className="max-h-[420px] w-full bg-black"
-              />
+              >
+                <source
+                  src={item.public_url}
+                  type={inferVideoMimeType(item.public_url) ?? undefined}
+                />
+                Video playback unavailable on this device.
+              </video>
             ) : (
               <button
                 type="button"

@@ -10,6 +10,7 @@ import {
 } from "@/components/instructions/print-media-isolator";
 import { PrintPageControls } from "@/components/instructions/print-page-controls";
 import { requireAuthenticatedUser } from "@/lib/auth";
+import { inferVideoMimeType, normalizeVideoMarkupForPlayback } from "@/lib/video";
 
 interface InstructionPrintPageProps {
   params: Promise<{
@@ -138,13 +139,15 @@ function sanitizeRichHtml(value: string): string {
       "figure",
       "img",
       "video",
+      "source",
       "label",
       "input",
     ],
     allowedAttributes: {
       figure: ["data-type", "data-align", "data-width", "style", "class"],
       img: ["src", "alt", "title", "width", "height", "style", "class"],
-      video: ["src", "controls", "width", "height", "style", "class"],
+      video: ["src", "controls", "width", "height", "style", "class", "playsinline", "preload", "data-mime-type"],
+      source: ["src", "type"],
       span: ["style"],
       div: ["style", "data-type"],
       p: ["style"],
@@ -172,7 +175,7 @@ function renderInstructionContent(value: string) {
     return (
       <div
         className="prose prose-slate max-w-none dark:prose-invert"
-        dangerouslySetInnerHTML={{ __html: sanitized }}
+        dangerouslySetInnerHTML={{ __html: normalizeVideoMarkupForPlayback(sanitized) }}
       />
     );
   }
@@ -571,7 +574,13 @@ export default async function InstructionPrintPage({
                 className="print-media-end-item"
               >
                 {mediaItem.type === "video" ? (
-                  <video src={mediaItem.src} controls preload="auto" />
+                  <video controls playsInline preload="metadata">
+                    <source
+                      src={mediaItem.src}
+                      type={inferVideoMimeType(mediaItem.src) ?? undefined}
+                    />
+                    Video playback unavailable on this device.
+                  </video>
                 ) : (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img

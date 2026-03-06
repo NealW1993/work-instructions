@@ -71,7 +71,7 @@ export function InstructionActionMenu({
       </button>
 
       {open ? (
-        <div className="absolute right-0 z-30 mt-2 grid w-[min(22rem,calc(100vw-2rem))] gap-2 rounded-2xl border border-white/25 bg-white/95 p-2 shadow-2xl backdrop-blur-xl dark:border-white/15 dark:bg-slate-950/95">
+        <div className="fixed inset-x-4 bottom-4 z-30 grid max-h-[calc(100dvh-2rem)] gap-2 overflow-y-auto rounded-2xl border border-white/25 bg-white/95 p-2 shadow-2xl backdrop-blur-xl dark:border-white/15 dark:bg-slate-950/95 sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-[calc(100%+0.5rem)] sm:w-[min(22rem,calc(100vw-2rem))] sm:max-h-none">
           {children}
         </div>
       ) : null}

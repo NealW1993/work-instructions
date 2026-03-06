@@ -423,7 +423,6 @@ export function LoginPanel() {
       <div className="pointer-events-none fixed inset-0 -z-20 overflow-hidden">
         <video
           ref={backgroundVideoRef}
-          src="/omni-login-left.mp4"
           autoPlay
           loop
           muted
@@ -431,7 +430,9 @@ export function LoginPanel() {
           preload="auto"
           className="h-full w-full object-cover"
           aria-label="Work instructions background video"
-        />
+        >
+          <source src="/omni-login-left.mp4" type="video/mp4" />
+        </video>
       </div>
       <div className="pointer-events-none fixed inset-0 -z-10 bg-slate-950/58" />
       <div className="auth-login-shell relative z-10 mx-auto w-full max-w-2xl rounded-[2rem] border border-white/20 bg-slate-950/32 p-5 text-slate-100 shadow-2xl shadow-black/45 backdrop-blur-2xl md:p-8">

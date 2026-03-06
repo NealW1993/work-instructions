@@ -81,7 +81,7 @@ export function SuggestedToolsDropdown({ tools, className }: SuggestedToolsDropd
       </button>
 
       {open ? (
-        <div className="absolute right-0 z-40 mt-2 grid w-[min(24rem,90vw)] gap-3 rounded-xl border border-slate-300/80 bg-white/95 p-3 shadow-2xl backdrop-blur-xl dark:border-slate-700/80 dark:bg-slate-900/95">
+        <div className="fixed inset-x-4 bottom-4 z-40 grid max-h-[calc(100dvh-2rem)] gap-3 overflow-hidden rounded-xl border border-slate-300/80 bg-white/95 p-3 shadow-2xl backdrop-blur-xl dark:border-slate-700/80 dark:bg-slate-900/95 sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-[calc(100%+0.5rem)] sm:w-[min(24rem,90vw)] sm:max-h-none">
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
               Tool List
@@ -100,7 +100,7 @@ export function SuggestedToolsDropdown({ tools, className }: SuggestedToolsDropd
               No tools in this list yet.
             </p>
           ) : (
-            <div className="grid max-h-72 gap-2 overflow-y-auto pr-1">
+            <div className="grid max-h-[min(18rem,calc(100dvh-10rem))] gap-2 overflow-y-auto pr-1 sm:max-h-72">
               {sortedTools.map((tool) => (
                 <label
                   key={tool.id}

@@ -35,6 +35,7 @@ import { LocalDateTime } from "@/components/ui/local-date-time";
 import { requireAuthenticatedUser } from "@/lib/auth";
 import { canEditInstructions, isSystemAdmin } from "@/lib/roles";
 import type { InstructionMedia } from "@/lib/types";
+import { inferVideoMimeType, normalizeVideoMarkupForPlayback } from "@/lib/video";
 
 interface InstructionPageProps {
   params: Promise<{
@@ -282,13 +283,15 @@ function sanitizeRichHtml(value: string): string {
       "figure",
       "img",
       "video",
+      "source",
       "label",
       "input",
     ],
     allowedAttributes: {
       figure: ["data-type", "data-align", "data-width", "style", "class"],
       img: ["src", "alt", "title", "width", "height", "style", "class"],
-      video: ["src", "controls", "width", "height", "style", "class"],
+      video: ["src", "controls", "width", "height", "style", "class", "playsinline", "preload", "data-mime-type"],
+      source: ["src", "type"],
       span: ["style"],
       div: ["style", "data-type"],
       p: ["style"],
@@ -457,10 +460,11 @@ function renderInstructionContent(value: string) {
   }
 
   if (looksLikeHtml(value)) {
+    const sanitizedMarkup = sanitizeRichHtml(value);
     return (
       <div
         className="prose-markdown"
-        dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(value) }}
+        dangerouslySetInnerHTML={{ __html: normalizeVideoMarkupForPlayback(sanitizedMarkup) }}
       />
     );
   }
@@ -1298,7 +1302,13 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
                 className="print-media-end-item"
               >
                 {mediaItem.type === "video" ? (
-                  <video src={mediaItem.src} controls preload="auto" />
+                  <video controls playsInline preload="metadata">
+                    <source
+                      src={mediaItem.src}
+                      type={inferVideoMimeType(mediaItem.src) ?? undefined}
+                    />
+                    Video playback unavailable on this device.
+                  </video>
                 ) : (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img

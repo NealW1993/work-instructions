@@ -399,7 +399,7 @@ export function InstructionReviewControls({
         {menuMounted ? (
           <div
             className={cn(
-              "absolute right-0 top-[calc(100%+0.35rem)] z-[80] grid min-w-[270px] gap-2 rounded-xl border border-white/20 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-xl transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
+              "fixed inset-x-4 bottom-4 z-[80] grid max-h-[calc(100dvh-2rem)] gap-2 overflow-y-auto rounded-xl border border-white/20 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-xl transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-[calc(100%+0.35rem)] sm:min-w-[270px] sm:max-h-none",
               menuEntered ? "pointer-events-auto" : "pointer-events-none",
             )}
             style={{
