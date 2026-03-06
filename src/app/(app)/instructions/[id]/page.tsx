@@ -1164,7 +1164,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const printMedia = mergePrintMediaGroups(printBodyMedia, printInstructionMedia);
 
   return (
-    <article className="grid gap-5">
+    <article className="grid min-w-0 gap-5">
       <InstructionArchivedRedirectGuard
         instructionId={instruction.id}
         instructionIsArchived={instructionIsArchived}
@@ -1323,7 +1323,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
           fallbackHref={instructionIsArchived ? "/instructions/archived" : "/dashboard"}
         />
 
-        <header className="relative z-20 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+        <header className="relative z-20 min-w-0 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
         {!instructionIsArchived && showReviewIndicator ? (
           <div
             className={`mb-4 rounded-2xl border px-4 py-3 ${
@@ -1527,9 +1527,9 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
         </div>
         </header>
 
-        <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+        <section className="grid min-w-0 gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
           <h2 className="text-xl font-bold">Work Instructions</h2>
-          <div className="screen-work-instructions-body">
+          <div className="screen-work-instructions-body min-w-0 max-w-full">
             <InstructionBodyLightbox>
               {renderInstructionContent(instruction.body_markdown)}
             </InstructionBodyLightbox>
@@ -1537,14 +1537,14 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
         </section>
 
         {instruction.instruction_media.length > 0 ? (
-          <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+          <section className="grid min-w-0 gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
             <h2 className="text-xl font-bold">Media</h2>
             <InstructionMediaSection media={instruction.instruction_media} />
           </section>
         ) : null}
 
         {isForkInstruction || forkCount > 0 ? (
-          <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+          <section className="grid min-w-0 gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
             <div className="grid gap-1">
               <h2 className="text-xl font-bold">Fork Branches</h2>
               <p className="text-sm text-slate-600 dark:text-slate-300">

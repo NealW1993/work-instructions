@@ -143,6 +143,19 @@ h6 {
 
 .prose-markdown {
   color: inherit;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.screen-work-instructions-body {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.prose-markdown > * {
+  max-width: 100%;
 }
 
 .prose-markdown h1,
@@ -169,6 +182,7 @@ h6 {
 .prose-markdown p,
 .prose-markdown li {
   line-height: 1.65;
+  overflow-wrap: anywhere;
 }
 
 .prose-markdown strong,
@@ -260,6 +274,7 @@ h6 {
 .prose-markdown figure {
   margin-top: 0.85rem;
   margin-bottom: 0.85rem;
+  max-width: 100% !important;
   padding-left: 0.85rem;
   border-left: 2px solid color-mix(in oklab, var(--ring) 55%, transparent);
 }
@@ -268,8 +283,22 @@ h6 {
 .prose-markdown figure video {
   display: block;
   width: 100%;
+  max-width: 100%;
   height: auto;
   border-radius: 0.5rem;
+}
+
+.prose-markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.prose-markdown th,
+.prose-markdown td {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 html:not(.dark) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]),

@@ -75,7 +75,10 @@ export function InstructionBodyLightbox({ children }: InstructionBodyLightboxPro
 
   return (
     <>
-      <div onClick={handleClick} className="[&_img]:cursor-zoom-in">
+      <div
+        onClick={handleClick}
+        className="min-w-0 max-w-full overflow-x-auto [&_img]:cursor-zoom-in"
+      >
         {children}
       </div>
       {canUsePortal && lightbox ? createPortal(lightbox, document.body) : null}
