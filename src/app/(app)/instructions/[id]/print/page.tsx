@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { headers } from "next/headers";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import sanitizeHtml from "sanitize-html";
@@ -10,6 +11,12 @@ import {
 } from "@/components/instructions/print-media-isolator";
 import { PrintPageControls } from "@/components/instructions/print-page-controls";
 import { requireAuthenticatedUser } from "@/lib/auth";
+import {
+  type MediaUrlRuntimeContext,
+  getMediaUrlRuntimeFromHeaders,
+  resolveAccessibleMediaUrl,
+  rewriteLoopbackMediaUrlsInHtml,
+} from "@/lib/media-url";
 import { inferVideoMimeType, normalizeVideoMarkupForPlayback } from "@/lib/video";
 
 interface InstructionPrintPageProps {
@@ -169,13 +176,20 @@ function sanitizeRichHtml(value: string): string {
   });
 }
 
-function renderInstructionContent(value: string) {
+function renderInstructionContent(
+  value: string,
+  mediaUrlRuntime?: MediaUrlRuntimeContext,
+) {
   if (looksLikeHtml(value)) {
     const sanitized = sanitizeRichHtml(value);
+    const normalizedMarkup = rewriteLoopbackMediaUrlsInHtml(
+      normalizeVideoMarkupForPlayback(sanitized),
+      mediaUrlRuntime,
+    );
     return (
       <div
         className="prose prose-slate max-w-none dark:prose-invert"
-        dangerouslySetInnerHTML={{ __html: normalizeVideoMarkupForPlayback(sanitized) }}
+        dangerouslySetInnerHTML={{ __html: normalizedMarkup }}
       />
     );
   }
@@ -294,7 +308,10 @@ function extractPrintMediaFromBody(value: string) {
   return results;
 }
 
-function normalizeInstructionMediaForPrint(media: InstructionPrintMediaRow[] | null | undefined) {
+function normalizeInstructionMediaForPrint(
+  media: InstructionPrintMediaRow[] | null | undefined,
+  mediaUrlRuntime?: MediaUrlRuntimeContext,
+) {
   if (!media || media.length === 0) {
     return [] as PrintMediaItem[];
   }
@@ -303,7 +320,7 @@ function normalizeInstructionMediaForPrint(media: InstructionPrintMediaRow[] | n
     .sort((first, second) => first.sort_order - second.sort_order)
     .map((mediaItem) => ({
       type: mediaItem.media_type,
-      src: mediaItem.public_url.trim(),
+      src: resolveAccessibleMediaUrl(mediaItem.public_url, mediaUrlRuntime),
       caption: mediaItem.caption?.trim() || null,
     }))
     .filter((mediaItem) => mediaItem.src.length > 0);
@@ -329,6 +346,8 @@ export default async function InstructionPrintPage({
   searchParams,
 }: InstructionPrintPageProps) {
   const { id } = await params;
+  const requestHeaders = await headers();
+  const mediaUrlRuntime = getMediaUrlRuntimeFromHeaders(requestHeaders);
   const resolvedSearchParams = await searchParams;
   const autoPrintEnabled =
     resolvedSearchParams.autoprint === "1" ||
@@ -406,8 +425,13 @@ export default async function InstructionPrintPage({
   const toolNames = Array.from(toolNamesByKey.values()).sort((first, second) =>
     first.localeCompare(second),
   );
-  const printBodyMedia = extractPrintMediaFromBody(instruction.body_markdown);
-  const printInstructionMedia = normalizeInstructionMediaForPrint(instruction.instruction_media);
+  const printBodyMedia = extractPrintMediaFromBody(
+    rewriteLoopbackMediaUrlsInHtml(instruction.body_markdown, mediaUrlRuntime),
+  );
+  const printInstructionMedia = normalizeInstructionMediaForPrint(
+    instruction.instruction_media,
+    mediaUrlRuntime,
+  );
   const printMedia = mergePrintMediaGroups(printBodyMedia, printInstructionMedia);
 
   return (
@@ -558,8 +582,8 @@ export default async function InstructionPrintPage({
             Work Instructions
           </h2>
           <div className="print-work-instructions-body rounded-xl border border-slate-300/70 bg-white p-4 dark:border-slate-700 dark:bg-slate-950">
-            {renderInstructionContent(instruction.body_markdown)}
-          </div>
+                {renderInstructionContent(instruction.body_markdown, mediaUrlRuntime)}
+              </div>
         </section>
 
         <section

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -33,6 +34,12 @@ import {
 } from "@/components/instructions/instruction-updates-panel";
 import { LocalDateTime } from "@/components/ui/local-date-time";
 import { requireAuthenticatedUser } from "@/lib/auth";
+import {
+  type MediaUrlRuntimeContext,
+  getMediaUrlRuntimeFromHeaders,
+  resolveAccessibleMediaUrl,
+  rewriteLoopbackMediaUrlsInHtml,
+} from "@/lib/media-url";
 import { canEditInstructions, isSystemAdmin } from "@/lib/roles";
 import type { InstructionMedia } from "@/lib/types";
 import { inferVideoMimeType, normalizeVideoMarkupForPlayback } from "@/lib/video";
@@ -413,6 +420,7 @@ function normalizeForkRootWorkItem(
 
 function normalizeMergePreviewMediaRows(
   rows: MergePreviewMediaRow[] | InstructionMedia[] | null | undefined,
+  mediaUrlRuntime?: MediaUrlRuntimeContext,
 ) {
   if (!rows || rows.length === 0) {
     return [] as Array<{
@@ -425,7 +433,7 @@ function normalizeMergePreviewMediaRows(
 
   return rows
     .map((row) => {
-      const source = row.public_url?.trim() ?? "";
+      const source = resolveAccessibleMediaUrl(row.public_url, mediaUrlRuntime);
       if (!source) {
         return null;
       }
@@ -454,17 +462,24 @@ function revisionHistoryRowSortValue(row: InstructionRevisionHistoryRow) {
   return Number.isFinite(updatedAtValue) ? updatedAtValue : 0;
 }
 
-function renderInstructionContent(value: string) {
+function renderInstructionContent(
+  value: string,
+  mediaUrlRuntime?: MediaUrlRuntimeContext,
+) {
   if (!value.trim()) {
     return null;
   }
 
   if (looksLikeHtml(value)) {
     const sanitizedMarkup = sanitizeRichHtml(value);
+    const normalizedMarkup = rewriteLoopbackMediaUrlsInHtml(
+      normalizeVideoMarkupForPlayback(sanitizedMarkup),
+      mediaUrlRuntime,
+    );
     return (
       <div
         className="prose-markdown"
-        dangerouslySetInnerHTML={{ __html: normalizeVideoMarkupForPlayback(sanitizedMarkup) }}
+        dangerouslySetInnerHTML={{ __html: normalizedMarkup }}
       />
     );
   }
@@ -589,12 +604,15 @@ function extractPrintMediaFromBody(value: string) {
   return results;
 }
 
-function normalizeInstructionMediaForPrint(media: InstructionMedia[]) {
+function normalizeInstructionMediaForPrint(
+  media: InstructionMedia[],
+  mediaUrlRuntime?: MediaUrlRuntimeContext,
+) {
   return [...media]
     .sort((first, second) => first.sort_order - second.sort_order)
     .map((mediaItem) => ({
       type: mediaItem.media_type,
-      src: mediaItem.public_url.trim(),
+      src: resolveAccessibleMediaUrl(mediaItem.public_url, mediaUrlRuntime),
       caption: mediaItem.caption?.trim() || null,
     }))
     .filter((mediaItem) => mediaItem.src.length > 0);
@@ -617,6 +635,7 @@ function mergePrintMediaGroups(...groups: PrintMediaItem[][]) {
 
 function normalizeInstructionUpdateSourcePayload(
   value: unknown,
+  mediaUrlRuntime?: MediaUrlRuntimeContext,
 ): InstructionUpdateSourcePayload | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -640,7 +659,10 @@ function normalizeInstructionUpdateSourcePayload(
 
         const mediaEntry = entry as Record<string, unknown>;
         const type = mediaEntry.type === "video" ? "video" : mediaEntry.type === "image" ? "image" : null;
-        const src = typeof mediaEntry.src === "string" ? mediaEntry.src.trim() : "";
+        const src =
+          typeof mediaEntry.src === "string"
+            ? resolveAccessibleMediaUrl(mediaEntry.src, mediaUrlRuntime)
+            : "";
 
         if (!type || !src) {
           return null;
@@ -707,6 +729,8 @@ function normalizeInstructionUpdateSourcePayload(
 
 export default async function InstructionDetailsPage({ params }: InstructionPageProps) {
   const { id } = await params;
+  const requestHeaders = await headers();
+  const mediaUrlRuntime = getMediaUrlRuntimeFromHeaders(requestHeaders);
   const { supabase, profile } = await requireAuthenticatedUser();
 
   const { data, error } = await supabase
@@ -775,9 +799,19 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
 
   const forkFamilyRows = (forkFamilyData ?? []) as ForkFamilyRow[];
   const forkRootLookup = (forkRootLookupData ?? null) as ForkRootLookupRow | null;
+  const instructionMedia = instruction.instruction_media.map((mediaItem) => ({
+    ...mediaItem,
+    public_url: resolveAccessibleMediaUrl(mediaItem.public_url, mediaUrlRuntime),
+  }));
   const forkRootWorkItem = normalizeForkRootWorkItem(forkRootLookup?.work_items ?? null);
-  const forkRootMedia = normalizeMergePreviewMediaRows(forkRootLookup?.instruction_media ?? null);
-  const forkInstructionMedia = normalizeMergePreviewMediaRows(instruction.instruction_media);
+  const forkRootMedia = normalizeMergePreviewMediaRows(
+    forkRootLookup?.instruction_media ?? null,
+    mediaUrlRuntime,
+  );
+  const forkInstructionMedia = normalizeMergePreviewMediaRows(
+    instructionMedia,
+    mediaUrlRuntime,
+  );
   const forkRootDepartmentName = getDepartmentName(forkRootWorkItem?.departments);
   const forkCount = forkFamilyRows.length;
 
@@ -943,7 +977,10 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
               : `Revision ${changeEvent.revision ?? instruction.revision} updated.`),
           occurredAt: changeEvent.occurred_at,
           actorName: userMap.get(changeEvent.actor_user_id) ?? "Unknown",
-          sourcePayload: normalizeInstructionUpdateSourcePayload(changeEvent.source_payload),
+          sourcePayload: normalizeInstructionUpdateSourcePayload(
+            changeEvent.source_payload,
+            mediaUrlRuntime,
+          ),
         }))
       : (() => {
           const fallbackEvents: InstructionUpdateEvent[] = [
@@ -1163,8 +1200,13 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const printToolNames = Array.from(printToolNamesByKey.values()).sort((first, second) =>
     first.localeCompare(second),
   );
-  const printBodyMedia = extractPrintMediaFromBody(instruction.body_markdown);
-  const printInstructionMedia = normalizeInstructionMediaForPrint(instruction.instruction_media);
+  const printBodyMedia = extractPrintMediaFromBody(
+    rewriteLoopbackMediaUrlsInHtml(instruction.body_markdown, mediaUrlRuntime),
+  );
+  const printInstructionMedia = normalizeInstructionMediaForPrint(
+    instructionMedia,
+    mediaUrlRuntime,
+  );
   const printMedia = mergePrintMediaGroups(printBodyMedia, printInstructionMedia);
 
   return (
@@ -1286,7 +1328,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
         <section className="mt-6 grid gap-2">
           <h2 className="text-xl font-bold text-slate-900">Work Instructions</h2>
           <div className="print-work-instructions-body rounded-xl border border-slate-300 bg-white p-4">
-            {renderInstructionContent(instruction.body_markdown)}
+            {renderInstructionContent(instruction.body_markdown, mediaUrlRuntime)}
           </div>
         </section>
 
@@ -1541,15 +1583,15 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
           <h2 className="text-xl font-bold">Work Instructions</h2>
           <div className="screen-work-instructions-body min-w-0 max-w-full">
             <InstructionBodyLightbox>
-              {renderInstructionContent(instruction.body_markdown)}
+              {renderInstructionContent(instruction.body_markdown, mediaUrlRuntime)}
             </InstructionBodyLightbox>
           </div>
         </section>
 
-        {instruction.instruction_media.length > 0 ? (
+        {instructionMedia.length > 0 ? (
           <section className="grid min-w-0 gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
             <h2 className="text-xl font-bold">Media</h2>
-            <InstructionMediaSection media={instruction.instruction_media} />
+            <InstructionMediaSection media={instructionMedia} />
           </section>
         ) : null}
 
