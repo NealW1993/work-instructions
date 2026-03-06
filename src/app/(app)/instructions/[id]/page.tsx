@@ -1579,39 +1579,49 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
               ) : null}
 
               {forkFamilyRows.length > 0 ? (
-                forkFamilyRows.map((forkRow) => (
-                  <Link
-                    key={forkRow.id}
-                    href={`/instructions/${forkRow.id}`}
-                    className="grid gap-1 rounded-xl border border-cyan-500/35 bg-cyan-500/10 px-3 py-2 transition hover:bg-cyan-500/15"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                        Fork {forkRow.fork_number ?? "?"}
+                forkFamilyRows.map((forkRow) => {
+                  const isCurrentFork = forkRow.id === instruction.id;
+                  const forkStatusLabel = forkRow.merged_into_root_at
+                    ? "Merged"
+                    : isCurrentFork
+                      ? "Currently Open"
+                      : "Open Branch";
+                  const forkStatusClassName = forkRow.merged_into_root_at
+                    ? "border-emerald-500/45 bg-emerald-500/15 text-emerald-800 dark:text-emerald-200"
+                    : isCurrentFork
+                      ? "border-amber-500/45 bg-amber-500/15 text-amber-800 dark:text-amber-200"
+                      : "border-sky-500/45 bg-sky-500/15 text-sky-800 dark:text-sky-200";
+
+                  return (
+                    <Link
+                      key={forkRow.id}
+                      href={`/instructions/${forkRow.id}`}
+                      className="grid gap-1 rounded-xl border border-cyan-500/35 bg-cyan-500/10 px-3 py-2 transition hover:bg-cyan-500/15"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                          Fork {forkRow.fork_number ?? "?"}
+                        </p>
+                        <span
+                          className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${forkStatusClassName}`}
+                        >
+                          {forkStatusLabel}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 dark:text-slate-300">
+                        Created <LocalDateTime value={forkRow.created_at} mode="dateTime" />
+                        {forkRow.merged_into_root_at ? (
+                          <>
+                            {" "}
+                            | Last merged{" "}
+                            <LocalDateTime value={forkRow.merged_into_root_at} mode="dateTime" />
+                          </>
+                        ) : null}
+                        {forkRow.is_archived ? " | Archived" : ""}
                       </p>
-                      <span
-                        className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                          forkRow.merged_into_root_at
-                            ? "border-emerald-500/45 bg-emerald-500/15 text-emerald-800 dark:text-emerald-200"
-                            : "border-amber-500/45 bg-amber-500/15 text-amber-800 dark:text-amber-200"
-                        }`}
-                      >
-                        {forkRow.merged_into_root_at ? "Merged" : "Currently Open"}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-600 dark:text-slate-300">
-                      Created <LocalDateTime value={forkRow.created_at} mode="dateTime" />
-                      {forkRow.merged_into_root_at ? (
-                        <>
-                          {" "}
-                          | Last merged{" "}
-                          <LocalDateTime value={forkRow.merged_into_root_at} mode="dateTime" />
-                        </>
-                      ) : null}
-                      {forkRow.is_archived ? " | Archived" : ""}
-                    </p>
-                  </Link>
-                ))
+                    </Link>
+                  );
+                })
               ) : (
                 <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
                   No fork branches have been created yet.

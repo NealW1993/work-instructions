@@ -4877,6 +4877,7 @@ export function DashboardClient({
   function renderWidgetHeaderControls(
     widgetId: DashboardWidgetId,
     widgetSize: DashboardWidgetSize,
+    inlineCompactControls = false,
   ) {
     if (widgetId === "finder") {
       const departmentToggleLabel = departmentInsightExpanded
@@ -4887,7 +4888,9 @@ export function DashboardClient({
         <div
           className={cn(
             "items-center",
-            widgetSize === "compact" ? "flex w-full justify-end" : "flex justify-end",
+            widgetSize === "compact" && !inlineCompactControls
+              ? "flex w-full justify-end"
+              : "flex justify-end",
           )}
         >
           <button
@@ -6253,7 +6256,13 @@ export function DashboardClient({
             const isDragging = draggedWidgetId === widget.id;
             const isDragOverTarget =
               dragOverWidgetId === widget.id && draggedWidgetId !== widget.id;
-            const widgetHeaderControls = renderWidgetHeaderControls(widget.id, widget.size);
+            const useInlineCompactHeaderControls =
+              widget.id === "finder" && widget.size === "compact" && !customizeOpen;
+            const widgetHeaderControls = renderWidgetHeaderControls(
+              widget.id,
+              widget.size,
+              useInlineCompactHeaderControls,
+            );
             const sizeControl = customizeOpen ? (
               <label
                 className={cn(
@@ -6312,14 +6321,20 @@ export function DashboardClient({
 
                 <div
                   className={cn(
-                    widget.size === "compact" ? "mb-2 flex flex-col gap-2" : "mb-3 flex flex-col gap-2.5",
-                    customizeOpen ? "pr-10" : "",
                     widget.size === "compact"
-                      ? "items-start"
-                      : "md:flex-row md:items-start md:justify-between",
+                      ? useInlineCompactHeaderControls
+                        ? "mb-2 flex items-start justify-between gap-2"
+                        : "mb-2 flex flex-col items-start gap-2"
+                      : "mb-3 flex flex-col gap-2.5 md:flex-row md:items-start md:justify-between",
+                    customizeOpen ? "pr-10" : "",
                   )}
                 >
-                  <div className="flex min-w-0 items-start gap-2">
+                  <div
+                    className={cn(
+                      "flex min-w-0 items-start gap-2",
+                      useInlineCompactHeaderControls ? "flex-1" : "",
+                    )}
+                  >
                     {customizeOpen ? (
                       <button
                         type="button"
@@ -6386,7 +6401,11 @@ export function DashboardClient({
                   <div
                     className={cn(
                       "flex flex-wrap items-center",
-                      widget.size === "compact" ? "w-full gap-2" : "gap-2",
+                      widget.size === "compact"
+                        ? useInlineCompactHeaderControls
+                          ? "shrink-0 justify-end gap-2"
+                          : "w-full gap-2"
+                        : "gap-2",
                     )}
                   >
                     {widgetHeaderControls}
