@@ -220,7 +220,7 @@ export function PrintInstructionButton({
       {open ? (
         <div
           role="menu"
-          className="mt-2 grid w-full gap-1 rounded-xl border border-slate-300 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-950 sm:absolute sm:right-0 sm:z-40 sm:mt-1 sm:min-w-48 sm:w-max"
+          className="mt-2 grid w-full gap-1 rounded-xl border border-slate-300 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-950 sm:absolute sm:left-0 sm:z-40 sm:mt-1 sm:min-w-48 sm:w-max"
         >
           <button
             type="button"
