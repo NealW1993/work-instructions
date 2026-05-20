@@ -20,6 +20,7 @@ import {
 interface RecommendationRequestBody {
   prompt?: unknown;
   dmaicPhase?: unknown;
+  dmaicEnabled?: unknown;
   processArea?: unknown;
 }
 
@@ -101,7 +102,8 @@ function normalizeOpenAIRecommendation(
     parsed.formulaTool === "capability" ||
     parsed.formulaTool === "dpmo" ||
     parsed.formulaTool === "takt_time" ||
-    parsed.formulaTool === "control_limits"
+    parsed.formulaTool === "control_limits" ||
+    parsed.formulaTool === "oee"
       ? parsed.formulaTool
       : fallback.formulaTool ?? "none";
   const metricRows =
@@ -143,13 +145,14 @@ function normalizeOpenAIRecommendation(
 function buildSystemPrompt() {
   return [
     "You recommend one process documentation diagram or Six Sigma chart type.",
-    "Pick the chart that best fits the user's DMAIC phase and intent.",
+    "Pick the chart that best fits the user's selected method and intent.",
     "For Define, prefer SIPOC, DMAIC Project Charter, CTQ Tree, or high-level Process Map.",
     "For Measure, prefer data collection views, Run Chart, Control Chart, Histogram, Pareto, or Value Stream Map.",
     "For Analyze, prefer Fishbone, Pareto, Scatter Plot, FMEA, or detailed Flowchart.",
     "For Improve, prefer Solution Selection Matrix, future-state Flowchart, Swimlane, or Value Stream Map.",
     "For Control, prefer Control Plan or Control Chart.",
     "If the user asks for Cp, Cpk, process capability, tolerance, LSL, USL, or specification limits, choose histogram or control_chart and set formulaTool to capability.",
+    "If the user asks for OEE or overall equipment effectiveness, choose control_chart or run_chart and set formulaTool to oee.",
     "When capability is requested, infer specLower, specUpper, and target only if they are clearly stated. Otherwise return null.",
     "For metricRows, return rows as 'label,value,secondary value'. For capability data, use sample labels and the measurement value as the second field.",
     "Return only JSON that matches the schema. Do not include markdown.",
@@ -159,6 +162,7 @@ function buildSystemPrompt() {
 function buildUserPrompt(input: {
   prompt: string;
   dmaicPhase: DmaicPhase;
+  dmaicEnabled: boolean;
   processArea: string;
 }) {
   const diagramOptions = DIAGRAM_DEFINITIONS.map(
@@ -167,7 +171,8 @@ function buildUserPrompt(input: {
   ).join("\n");
 
   return [
-    `DMAIC phase: ${input.dmaicPhase}`,
+    `Improvement method: ${input.dmaicEnabled ? "DMAIC" : "General process documentation"}`,
+    `DMAIC phase: ${input.dmaicEnabled ? input.dmaicPhase : "Not enabled"}`,
     `Process area: ${input.processArea || "Not specified"}`,
     `User request: ${input.prompt}`,
     "",
@@ -202,6 +207,7 @@ async function recordRecommendationUsage(input: {
       dmaicPhase: input.recommendation.dmaicPhase,
       formulaTool: input.recommendation.formulaTool ?? "none",
       usesCapability: input.recommendation.formulaTool === "capability",
+      usesOee: input.recommendation.formulaTool === "oee",
       confidence: input.recommendation.confidence,
       warning: input.warning ?? null,
     },
@@ -218,6 +224,7 @@ export async function POST(request: NextRequest) {
   const requestBody = (await request.json().catch(() => ({}))) as RecommendationRequestBody;
   const prompt = normalizeString(requestBody.prompt, 2000);
   const processArea = normalizeString(requestBody.processArea, 200);
+  const dmaicEnabled = requestBody.dmaicEnabled !== false;
   const dmaicPhase: DmaicPhase = isDmaicPhase(requestBody.dmaicPhase)
     ? requestBody.dmaicPhase
     : "define";
@@ -233,6 +240,7 @@ export async function POST(request: NextRequest) {
     prompt,
     processArea,
     dmaicPhase,
+    dmaicEnabled,
   });
 
   if (!serverEnv.OPENAI_API_KEY) {
@@ -269,7 +277,7 @@ export async function POST(request: NextRequest) {
           },
           {
             role: "user",
-            content: buildUserPrompt({ prompt, processArea, dmaicPhase }),
+            content: buildUserPrompt({ prompt, processArea, dmaicPhase, dmaicEnabled }),
           },
         ],
         response_format: {
@@ -310,7 +318,7 @@ export async function POST(request: NextRequest) {
                 },
                 formulaTool: {
                   type: "string",
-                  enum: ["none", "capability", "dpmo", "takt_time", "control_limits"],
+                  enum: ["none", "capability", "dpmo", "takt_time", "control_limits", "oee"],
                 },
                 metricRows: {
                   type: "array",

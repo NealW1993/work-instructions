@@ -46,7 +46,7 @@ export interface DiagramRecommendation {
   starterItems: string[];
   keyFields: string[];
   setupSteps: string[];
-  formulaTool?: "none" | "capability" | "dpmo" | "takt_time" | "control_limits";
+  formulaTool?: "none" | "capability" | "dpmo" | "takt_time" | "control_limits" | "oee";
   metricRows?: string[];
   specLower?: number | null;
   specUpper?: number | null;
@@ -317,6 +317,7 @@ function textIncludesAny(text: string, terms: string[]) {
 export function recommendDiagramByRules(input: {
   prompt: string;
   dmaicPhase?: DmaicPhase | null;
+  dmaicEnabled?: boolean;
   processArea?: string;
 }): DiagramRecommendation {
   const prompt = `${input.prompt} ${input.processArea ?? ""}`.toLowerCase();
@@ -325,7 +326,14 @@ export function recommendDiagramByRules(input: {
   let formulaTool: DiagramRecommendation["formulaTool"] = "none";
   let reasonSuffix = "";
 
-  if (
+  if (textIncludesAny(prompt, ["oee", "overall equipment effectiveness", "availability", "performance", "quality"])) {
+    diagramType = textIncludesAny(prompt, ["trend", "over time", "shift", "daily", "weekly"])
+      ? "run_chart"
+      : "control_chart";
+    formulaTool = "oee";
+    reasonSuffix =
+      " It also needs an OEE layer using Availability, Performance, and Quality.";
+  } else if (
     textIncludesAny(prompt, [
       "cpk",
       "cp ",
@@ -345,6 +353,18 @@ export function recommendDiagramByRules(input: {
     formulaTool = "capability";
     reasonSuffix =
       " It also needs a capability calculation layer for Cp, Cpu, Cpl, and Cpk.";
+  } else if (input.dmaicEnabled === false) {
+    diagramType = textIncludesAny(prompt, ["handoff", "department", "role", "responsibility"])
+      ? "swimlane"
+      : textIncludesAny(prompt, ["defect", "top", "frequency", "largest"])
+        ? "pareto"
+        : textIncludesAny(prompt, ["risk", "failure", "prevent"])
+          ? "fmea"
+          : textIncludesAny(prompt, ["trend", "time", "monitor"])
+            ? "run_chart"
+            : textIncludesAny(prompt, ["decision", "approve", "branch"])
+              ? "flowchart"
+              : "process_map";
   } else if (phase === "define") {
     diagramType = textIncludesAny(prompt, ["customer", "supplier", "input", "output", "scope"])
       ? "sipoc"
@@ -390,8 +410,14 @@ export function recommendDiagramByRules(input: {
     diagramType,
     dmaicPhase: phase,
     confidence: 78,
-    reason: `${definition.label} fits the ${phaseOption.label} phase because ${definition.whenToUse.toLowerCase()}${reasonSuffix}`,
-    suggestedTitle: `${phaseOption.label} - ${definition.shortLabel}`,
+    reason:
+      input.dmaicEnabled === false
+        ? `${definition.label} fits this request because ${definition.whenToUse.toLowerCase()}${reasonSuffix}`
+        : `${definition.label} fits the ${phaseOption.label} phase because ${definition.whenToUse.toLowerCase()}${reasonSuffix}`,
+    suggestedTitle:
+      input.dmaicEnabled === false
+        ? `${definition.shortLabel} Draft`
+        : `${phaseOption.label} - ${definition.shortLabel}`,
     starterItems: definition.starterItems,
     keyFields: definition.keyFields,
     setupSteps: [

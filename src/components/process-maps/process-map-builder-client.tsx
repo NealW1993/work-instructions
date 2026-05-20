@@ -4,12 +4,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   BarChart3,
-  Calculator,
   CheckCircle2,
   Copy,
   FileDown,
   Download,
   FileText,
+  Gauge,
   GitBranch,
   Layers,
   LineChart,
@@ -17,6 +17,7 @@ import {
   Network,
   Palette,
   Printer,
+  RefreshCw,
   Save,
   Sigma,
   SlidersHorizontal,
@@ -74,6 +75,30 @@ interface CapabilityStats {
   sigmaLevel: number | null;
   estimatedYield: number | null;
   estimatedPpm: number | null;
+}
+
+interface OeeStats {
+  availability: number | null;
+  performance: number | null;
+  quality: number | null;
+  oee: number | null;
+}
+
+interface DpmoStats {
+  dpmo: number | null;
+  yieldPercent: number | null;
+}
+
+interface TaktStats {
+  taktMinutes: number | null;
+  taktSeconds: number | null;
+}
+
+interface ControlLimitStats {
+  centerline: number | null;
+  sigma: number | null;
+  ucl: number | null;
+  lcl: number | null;
 }
 
 interface LayerSettings {
@@ -300,6 +325,108 @@ function calculateCapability(
     sigmaLevel: cpk === null ? null : Math.max(0, cpk * 3),
     estimatedYield,
     estimatedPpm,
+  };
+}
+
+function parsePositiveNumber(value: string) {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function calculateOee(input: {
+  plannedProductionMinutes: string;
+  runTimeMinutes: string;
+  idealCycleSeconds: string;
+  totalCount: string;
+  goodCount: string;
+}): OeeStats {
+  const plannedProductionMinutes = parsePositiveNumber(input.plannedProductionMinutes);
+  const runTimeMinutes = parsePositiveNumber(input.runTimeMinutes);
+  const idealCycleSeconds = parsePositiveNumber(input.idealCycleSeconds);
+  const totalCount = parsePositiveNumber(input.totalCount);
+  const goodCount = parsePositiveNumber(input.goodCount);
+
+  const availability =
+    plannedProductionMinutes && runTimeMinutes
+      ? Math.min(1, runTimeMinutes / plannedProductionMinutes)
+      : null;
+  const performance =
+    runTimeMinutes && idealCycleSeconds && totalCount
+      ? Math.min(1, (idealCycleSeconds * totalCount) / (runTimeMinutes * 60))
+      : null;
+  const quality = totalCount && goodCount ? Math.min(1, goodCount / totalCount) : null;
+  const oee =
+    availability !== null && performance !== null && quality !== null
+      ? availability * performance * quality
+      : null;
+
+  return {
+    availability,
+    performance,
+    quality,
+    oee,
+  };
+}
+
+function calculateDpmo(input: {
+  defects: string;
+  units: string;
+  opportunities: string;
+}): DpmoStats {
+  const defects = parsePositiveNumber(input.defects);
+  const units = parsePositiveNumber(input.units);
+  const opportunities = parsePositiveNumber(input.opportunities);
+
+  if (!defects || !units || !opportunities) {
+    return {
+      dpmo: null,
+      yieldPercent: null,
+    };
+  }
+
+  const dpmo = (defects / (units * opportunities)) * 1_000_000;
+  return {
+    dpmo,
+    yieldPercent: Math.max(0, 100 - dpmo / 10_000),
+  };
+}
+
+function calculateTakt(input: {
+  availableMinutes: string;
+  demand: string;
+}): TaktStats {
+  const availableMinutes = parsePositiveNumber(input.availableMinutes);
+  const demand = parsePositiveNumber(input.demand);
+  const taktMinutes = availableMinutes && demand ? availableMinutes / demand : null;
+
+  return {
+    taktMinutes,
+    taktSeconds: taktMinutes === null ? null : taktMinutes * 60,
+  };
+}
+
+function calculateControlLimits(metrics: MetricPoint[]): ControlLimitStats {
+  const values = metrics.map((metric) => metric.value).filter(Number.isFinite);
+  if (values.length < 2) {
+    return {
+      centerline: values[0] ?? null,
+      sigma: null,
+      ucl: null,
+      lcl: null,
+    };
+  }
+
+  const centerline = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const variance =
+    values.reduce((sum, value) => sum + (value - centerline) ** 2, 0) /
+    Math.max(1, values.length - 1);
+  const sigma = Math.sqrt(variance);
+
+  return {
+    centerline,
+    sigma,
+    ucl: centerline + 3 * sigma,
+    lcl: centerline - 3 * sigma,
   };
 }
 
@@ -621,6 +748,43 @@ function buildCapabilitySvg(
   return svgShell(width, height, body);
 }
 
+function buildOeeSvg(title: string, stats: OeeStats) {
+  const width = 960;
+  const height = 380;
+  const metricRows = [
+    { label: "Availability", value: stats.availability, color: "#0f766e" },
+    { label: "Performance", value: stats.performance, color: "#0284c7" },
+    { label: "Quality", value: stats.quality, color: "#f59e0b" },
+    { label: "OEE", value: stats.oee, color: "#8b5cf6" },
+  ];
+  let body = svgText(width / 2, 38, title, { size: 20, color: "#111827" });
+  body += `<rect x="74" y="82" width="812" height="220" rx="12" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"></rect>`;
+
+  metricRows.forEach((metric, index) => {
+    const x = 116 + index * 196;
+    const percent = metric.value === null ? 0 : Math.max(0, Math.min(100, metric.value * 100));
+    const barHeight = 146 * (percent / 100);
+    const barY = 250 - barHeight;
+
+    body += `<rect x="${x}" y="104" width="112" height="146" rx="8" fill="#e2e8f0"></rect>`;
+    body += `<rect x="${x}" y="${barY}" width="112" height="${barHeight}" rx="8" fill="${metric.color}" fill-opacity="0.86"></rect>`;
+    body += svgText(x + 56, 276, metric.label, { size: 12, color: "#0f172a" });
+    body += svgText(x + 56, barY - 10, metric.value === null ? "N/A" : `${percent.toFixed(1)}%`, {
+      size: 13,
+      color: metric.color,
+    });
+  });
+
+  body += svgText(
+    width / 2,
+    334,
+    "OEE = Availability x Performance x Quality",
+    { size: 13, color: "#475569" },
+  );
+
+  return svgShell(width, height, body);
+}
+
 function buildLineSvg(title: string, metrics: MetricPoint[], control: boolean) {
   const width = 960;
   const height = 380;
@@ -853,6 +1017,7 @@ function buildHtmlTable(headers: string[], rows: string[][]) {
 function buildControlledDocumentHtml(input: {
   title: string;
   diagramType: DiagramType;
+  dmaicEnabled: boolean;
   dmaicPhase: DmaicPhase;
   prompt: string;
   processArea: string;
@@ -866,6 +1031,10 @@ function buildControlledDocumentHtml(input: {
   specUpper: string;
   targetValue: string;
   capabilityStats: CapabilityStats | null;
+  oeeStats: OeeStats;
+  dpmoStats: DpmoStats;
+  taktStats: TaktStats;
+  controlLimitStats: ControlLimitStats;
 }) {
   const definition = getDiagramDefinition(input.diagramType);
   const phase = getDmaicPhaseOption(input.dmaicPhase);
@@ -883,9 +1052,11 @@ function buildControlledDocumentHtml(input: {
 
   return [
     `<h1>${escapeHtml(input.title)}</h1>`,
-    `<p><strong>Diagram type:</strong> ${escapeHtml(definition.label)}<br><strong>DMAIC phase:</strong> ${escapeHtml(
-      phase.label,
-    )}<br><strong>Process area:</strong> ${escapeHtml(input.processArea || "Unassigned")}</p>`,
+    `<p><strong>Diagram type:</strong> ${escapeHtml(definition.label)}<br><strong>Method:</strong> ${
+      input.dmaicEnabled
+        ? `DMAIC - ${escapeHtml(phase.label)}`
+        : "General process documentation"
+    }<br><strong>Process area:</strong> ${escapeHtml(input.processArea || "Unassigned")}</p>`,
     `<h2>Purpose</h2>`,
     `<p>${escapeHtml(input.prompt)}</p>`,
     `<h2>Diagram</h2>`,
@@ -919,6 +1090,55 @@ function buildControlledDocumentHtml(input: {
           ),
           `<p>Cp = (USL - LSL) / (6 * sigma). Cpu = (USL - mean) / (3 * sigma). Cpl = (mean - LSL) / (3 * sigma). Cpk = min(Cpu, Cpl).</p>`,
         ].join("")
+      : input.formulaTool === "oee"
+        ? [
+            `<h2>OEE Analysis</h2>`,
+            buildHtmlTable(
+              ["Metric", "Value"],
+              [
+                ["Availability", `${formatNumber((input.oeeStats.availability ?? 0) * 100, 2)}%`],
+                ["Performance", `${formatNumber((input.oeeStats.performance ?? 0) * 100, 2)}%`],
+                ["Quality", `${formatNumber((input.oeeStats.quality ?? 0) * 100, 2)}%`],
+                ["OEE", `${formatNumber((input.oeeStats.oee ?? 0) * 100, 2)}%`],
+              ],
+            ),
+            `<p>OEE = Availability x Performance x Quality.</p>`,
+          ].join("")
+        : input.formulaTool === "dpmo"
+          ? [
+              `<h2>DPMO Analysis</h2>`,
+              buildHtmlTable(
+                ["Metric", "Value"],
+                [
+                  ["DPMO", formatNumber(input.dpmoStats.dpmo, 0)],
+                  ["Estimated Yield", `${formatNumber(input.dpmoStats.yieldPercent, 2)}%`],
+                ],
+              ),
+            ].join("")
+          : input.formulaTool === "takt_time"
+            ? [
+                `<h2>Takt Time</h2>`,
+                buildHtmlTable(
+                  ["Metric", "Value"],
+                  [
+                    ["Minutes / Unit", formatNumber(input.taktStats.taktMinutes, 3)],
+                    ["Seconds / Unit", formatNumber(input.taktStats.taktSeconds, 1)],
+                  ],
+                ),
+              ].join("")
+            : input.formulaTool === "control_limits"
+              ? [
+                  `<h2>Control Limits</h2>`,
+                  buildHtmlTable(
+                    ["Metric", "Value"],
+                    [
+                      ["Centerline", formatNumber(input.controlLimitStats.centerline)],
+                      ["Sample Sigma", formatNumber(input.controlLimitStats.sigma)],
+                      ["UCL", formatNumber(input.controlLimitStats.ucl)],
+                      ["LCL", formatNumber(input.controlLimitStats.lcl)],
+                    ],
+                  ),
+                ].join("")
       : "",
     `<h2>Control Notes</h2>`,
     `<p>Verify this draft with the process owner. Approval, effective date, revision history, and audit trail are controlled in the Process Documentation workflow.</p>`,
@@ -944,6 +1164,72 @@ function ChartIcon({ diagramType }: { diagramType: DiagramType }) {
   return <Workflow size={16} />;
 }
 
+function FormulaResultSummary({
+  formulaTool,
+  capabilityStats,
+  oeeStats,
+  dpmoStats,
+  taktStats,
+  controlLimitStats,
+}: {
+  formulaTool: FormulaTool;
+  capabilityStats: CapabilityStats | null;
+  oeeStats: OeeStats;
+  dpmoStats: DpmoStats;
+  taktStats: TaktStats;
+  controlLimitStats: ControlLimitStats;
+}) {
+  const rows =
+    formulaTool === "capability"
+      ? [
+          ["Cp", formatNumber(capabilityStats?.cp)],
+          ["Cpk", formatNumber(capabilityStats?.cpk)],
+          ["Mean", formatNumber(capabilityStats?.mean)],
+          ["PPM", formatNumber(capabilityStats?.estimatedPpm, 0)],
+        ]
+      : formulaTool === "oee"
+        ? [
+            ["Availability", `${formatNumber((oeeStats.availability ?? 0) * 100, 2)}%`],
+            ["Performance", `${formatNumber((oeeStats.performance ?? 0) * 100, 2)}%`],
+            ["Quality", `${formatNumber((oeeStats.quality ?? 0) * 100, 2)}%`],
+            ["OEE", `${formatNumber((oeeStats.oee ?? 0) * 100, 2)}%`],
+          ]
+        : formulaTool === "dpmo"
+          ? [
+              ["DPMO", formatNumber(dpmoStats.dpmo, 0)],
+              ["Yield", `${formatNumber(dpmoStats.yieldPercent, 2)}%`],
+            ]
+          : formulaTool === "takt_time"
+            ? [
+                ["Minutes / Unit", formatNumber(taktStats.taktMinutes, 3)],
+                ["Seconds / Unit", formatNumber(taktStats.taktSeconds, 1)],
+              ]
+            : formulaTool === "control_limits"
+              ? [
+                  ["Centerline", formatNumber(controlLimitStats.centerline)],
+                  ["Sigma", formatNumber(controlLimitStats.sigma)],
+                  ["UCL", formatNumber(controlLimitStats.ucl)],
+                  ["LCL", formatNumber(controlLimitStats.lcl)],
+                ]
+              : [["No formula", "Chart data only"]];
+
+  return (
+    <dl className="grid grid-cols-2 gap-2">
+      {rows.map(([label, value]) => (
+        <div
+          key={label}
+          className="min-w-0 rounded-md border border-slate-300/70 bg-white/75 p-2 dark:border-slate-700 dark:bg-slate-900/60"
+        >
+          <dt className="truncate text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+            {label}
+          </dt>
+          <dd className="truncate font-bold text-slate-900 dark:text-slate-100">{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 export function ProcessMapBuilderClient({
   canEdit,
   departments,
@@ -952,6 +1238,7 @@ export function ProcessMapBuilderClient({
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [title, setTitle] = useState("Define - SIPOC Draft");
   const [diagramType, setDiagramType] = useState<DiagramType>("sipoc");
+  const [dmaicEnabled, setDmaicEnabled] = useState(true);
   const [dmaicPhase, setDmaicPhase] = useState<DmaicPhase>("define");
   const [departmentId, setDepartmentId] = useState("");
   const [processArea, setProcessArea] = useState("");
@@ -966,8 +1253,20 @@ export function ProcessMapBuilderClient({
   const [specLower, setSpecLower] = useState("");
   const [specUpper, setSpecUpper] = useState("");
   const [targetValue, setTargetValue] = useState("");
+  const [dpmoDefects, setDpmoDefects] = useState("7");
+  const [dpmoUnits, setDpmoUnits] = useState("100");
+  const [dpmoOpportunities, setDpmoOpportunities] = useState("3");
+  const [taktAvailableMinutes, setTaktAvailableMinutes] = useState("420");
+  const [taktDemand, setTaktDemand] = useState("210");
+  const [oeePlannedMinutes, setOeePlannedMinutes] = useState("480");
+  const [oeeRunMinutes, setOeeRunMinutes] = useState("420");
+  const [oeeIdealCycleSeconds, setOeeIdealCycleSeconds] = useState("45");
+  const [oeeTotalCount, setOeeTotalCount] = useState("520");
+  const [oeeGoodCount, setOeeGoodCount] = useState("498");
   const [layerSettings, setLayerSettings] = useState<LayerSettings>(DEFAULT_LAYER_SETTINGS);
   const [diagramStyle, setDiagramStyle] = useState<DiagramStyle>(DEFAULT_DIAGRAM_STYLE);
+  const [previewRevision, setPreviewRevision] = useState(1);
+  const [lastPreviewRefreshAt, setLastPreviewRefreshAt] = useState<string | null>(null);
   const [recommendation, setRecommendation] = useState<DiagramRecommendation | null>(null);
   const [recommendBusy, setRecommendBusy] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
@@ -989,6 +1288,23 @@ export function ProcessMapBuilderClient({
     normalizedSpecLower,
     normalizedSpecUpper,
   );
+  const oeeStats = calculateOee({
+    plannedProductionMinutes: oeePlannedMinutes,
+    runTimeMinutes: oeeRunMinutes,
+    idealCycleSeconds: oeeIdealCycleSeconds,
+    totalCount: oeeTotalCount,
+    goodCount: oeeGoodCount,
+  });
+  const dpmoStats = calculateDpmo({
+    defects: dpmoDefects,
+    units: dpmoUnits,
+    opportunities: dpmoOpportunities,
+  });
+  const taktStats = calculateTakt({
+    availableMinutes: taktAvailableMinutes,
+    demand: taktDemand,
+  });
+  const controlLimitStats = calculateControlLimits(metrics);
   const rawSvg =
     formulaTool === "capability" && (diagramType === "histogram" || diagramType === "control_chart")
       ? buildCapabilitySvg(
@@ -999,6 +1315,8 @@ export function ProcessMapBuilderClient({
           normalizedTarget,
           capabilityStats,
         )
+      : formulaTool === "oee"
+        ? buildOeeSvg(layerSettings.showTitle ? title : "", oeeStats)
       : buildDiagramSvg({
           diagramType,
           title: layerSettings.showTitle ? title : "",
@@ -1014,7 +1332,11 @@ export function ProcessMapBuilderClient({
     setItemsText(nextDefinition.starterItems.join("\n"));
     setRecommendation(null);
     if (!title.trim() || title === "Define - SIPOC Draft") {
-      setTitle(`${getDmaicPhaseOption(dmaicPhase).label} - ${nextDefinition.shortLabel} Draft`);
+      setTitle(
+        dmaicEnabled
+          ? `${getDmaicPhaseOption(dmaicPhase).label} - ${nextDefinition.shortLabel} Draft`
+          : `${nextDefinition.shortLabel} Draft`,
+      );
     }
   }
 
@@ -1038,6 +1360,7 @@ export function ProcessMapBuilderClient({
       processArea,
       formulaTool,
       usesCapability: formulaTool === "capability",
+      usesOee: formulaTool === "oee",
       itemCount: items.length,
       metricCount: metrics.length,
       capabilityCount: capabilityValues.length,
@@ -1045,6 +1368,10 @@ export function ProcessMapBuilderClient({
       cpk: capabilityStats?.cpk ?? null,
       pp: capabilityStats?.pp ?? null,
       ppk: capabilityStats?.ppk ?? null,
+      oee: oeeStats.oee,
+      availability: oeeStats.availability,
+      performance: oeeStats.performance,
+      quality: oeeStats.quality,
     };
   }
 
@@ -1059,7 +1386,7 @@ export function ProcessMapBuilderClient({
         },
         body: JSON.stringify({
           action,
-          mode: formulaTool === "capability" ? "capability" : "manual",
+          mode: formulaTool === "none" ? "manual" : formulaTool,
           metadata: buildUsageMetadata(),
         }),
       });
@@ -1083,7 +1410,8 @@ export function ProcessMapBuilderClient({
         },
         body: JSON.stringify({
           prompt,
-          dmaicPhase,
+          dmaicPhase: dmaicEnabled ? dmaicPhase : null,
+          dmaicEnabled,
           processArea,
         }),
       });
@@ -1095,8 +1423,14 @@ export function ProcessMapBuilderClient({
 
       setRecommendation(payload);
       setDiagramType(payload.diagramType);
-      setDmaicPhase(payload.dmaicPhase);
-      setTitle(payload.suggestedTitle);
+      if (dmaicEnabled) {
+        setDmaicPhase(payload.dmaicPhase);
+      }
+      setTitle(
+        dmaicEnabled
+          ? payload.suggestedTitle
+          : payload.suggestedTitle.replace(/^(Define|Measure|Analyze|Improve|Control)\s+-\s+/i, ""),
+      );
       setItemsText(payload.starterItems.join("\n"));
       setFormulaTool(payload.formulaTool ?? "none");
       if (payload.metricRows?.length) {
@@ -1122,7 +1456,7 @@ export function ProcessMapBuilderClient({
       setMessage(
         payload.warning ??
           (payload.mode === "ai"
-            ? "OpenAI recommended a chart for this DMAIC context."
+            ? "OpenAI recommended a chart for this context."
             : "Rules-based chart recommendation applied."),
       );
     } catch (caughtError) {
@@ -1165,6 +1499,44 @@ export function ProcessMapBuilderClient({
             ["cpl", formatNumber(capabilityStats?.cpl)],
             ["cpk", formatNumber(capabilityStats?.cpk)],
           ]
+        : formulaTool === "oee"
+          ? [
+              ["metric", "value"],
+              ["planned_production_minutes", oeePlannedMinutes],
+              ["run_time_minutes", oeeRunMinutes],
+              ["ideal_cycle_seconds", oeeIdealCycleSeconds],
+              ["total_count", oeeTotalCount],
+              ["good_count", oeeGoodCount],
+              ["availability_percent", formatNumber((oeeStats.availability ?? 0) * 100, 2)],
+              ["performance_percent", formatNumber((oeeStats.performance ?? 0) * 100, 2)],
+              ["quality_percent", formatNumber((oeeStats.quality ?? 0) * 100, 2)],
+              ["oee_percent", formatNumber((oeeStats.oee ?? 0) * 100, 2)],
+            ]
+        : formulaTool === "dpmo"
+          ? [
+              ["metric", "value"],
+              ["defects", dpmoDefects],
+              ["units", dpmoUnits],
+              ["opportunities_per_unit", dpmoOpportunities],
+              ["dpmo", formatNumber(dpmoStats.dpmo, 0)],
+              ["yield_percent", formatNumber(dpmoStats.yieldPercent, 2)],
+            ]
+        : formulaTool === "takt_time"
+          ? [
+              ["metric", "value"],
+              ["available_minutes", taktAvailableMinutes],
+              ["customer_demand", taktDemand],
+              ["takt_minutes_per_unit", formatNumber(taktStats.taktMinutes, 3)],
+              ["takt_seconds_per_unit", formatNumber(taktStats.taktSeconds, 1)],
+            ]
+        : formulaTool === "control_limits"
+          ? [
+              ["metric", "value"],
+              ["centerline", formatNumber(controlLimitStats.centerline)],
+              ["sample_sigma", formatNumber(controlLimitStats.sigma)],
+              ["ucl", formatNumber(controlLimitStats.ucl)],
+              ["lcl", formatNumber(controlLimitStats.lcl)],
+            ]
         : [
             ["label", "value", "secondary_value"],
             ...metrics.map((metric) => [
@@ -1195,7 +1567,7 @@ export function ProcessMapBuilderClient({
   }
 
   function buildPrintableReportHtml() {
-    const capabilityTable =
+    const formulaTable =
       formulaTool === "capability"
         ? buildHtmlTable(
             ["Metric", "Value"],
@@ -1214,6 +1586,42 @@ export function ProcessMapBuilderClient({
               ["Estimated PPM", formatNumber(capabilityStats?.estimatedPpm, 0)],
             ],
           )
+        : formulaTool === "oee"
+          ? buildHtmlTable(
+              ["Metric", "Value"],
+              [
+                ["Availability", `${formatNumber((oeeStats.availability ?? 0) * 100, 2)}%`],
+                ["Performance", `${formatNumber((oeeStats.performance ?? 0) * 100, 2)}%`],
+                ["Quality", `${formatNumber((oeeStats.quality ?? 0) * 100, 2)}%`],
+                ["OEE", `${formatNumber((oeeStats.oee ?? 0) * 100, 2)}%`],
+              ],
+            )
+          : formulaTool === "dpmo"
+            ? buildHtmlTable(
+                ["Metric", "Value"],
+                [
+                  ["DPMO", formatNumber(dpmoStats.dpmo, 0)],
+                  ["Estimated Yield", `${formatNumber(dpmoStats.yieldPercent, 2)}%`],
+                ],
+              )
+            : formulaTool === "takt_time"
+              ? buildHtmlTable(
+                  ["Metric", "Value"],
+                  [
+                    ["Takt Minutes / Unit", formatNumber(taktStats.taktMinutes, 3)],
+                    ["Takt Seconds / Unit", formatNumber(taktStats.taktSeconds, 1)],
+                  ],
+                )
+              : formulaTool === "control_limits"
+                ? buildHtmlTable(
+                    ["Metric", "Value"],
+                    [
+                      ["Centerline", formatNumber(controlLimitStats.centerline)],
+                      ["Sample Sigma", formatNumber(controlLimitStats.sigma)],
+                      ["UCL", formatNumber(controlLimitStats.ucl)],
+                      ["LCL", formatNumber(controlLimitStats.lcl)],
+                    ],
+                  )
         : "";
     const dataTable = buildHtmlTable(
       formulaTool === "capability" ? ["#", "Measurement"] : ["Label", "Value", "Secondary Value"],
@@ -1241,20 +1649,20 @@ export function ProcessMapBuilderClient({
 </head>
 <body>
   <h1>${escapeHtml(title)}</h1>
-  <div class="meta">Diagram: ${escapeHtml(definition.label)} | DMAIC: ${escapeHtml(
-    phase.label,
-  )} | Process area: ${escapeHtml(processArea || "Unassigned")}</div>
+  <div class="meta">Diagram: ${escapeHtml(definition.label)} | ${
+    dmaicEnabled ? `DMAIC: ${escapeHtml(phase.label)}` : "Method: General process documentation"
+  } | Process area: ${escapeHtml(processArea || "Unassigned")}</div>
   <h2>Purpose</h2>
   <p>${escapeHtml(prompt)}</p>
   <h2>Diagram</h2>
   <div class="diagram">${
     TABLE_DIAGRAM_TYPES.has(diagramType) ? buildTableDiagramHtml(diagramType, items, metrics) : svg
   }</div>
-  ${capabilityTable ? `<h2>Capability Analysis</h2>${capabilityTable}` : ""}
+  ${formulaTable ? `<h2>Analysis Formula</h2>${formulaTable}` : ""}
   <h2>Data</h2>
   ${dataTable}
   <h2>Formulas</h2>
-  <p>Cp = (USL - LSL) / (6 * sigma). Cpu = (USL - mean) / (3 * sigma). Cpl = (mean - LSL) / (3 * sigma). Cpk = min(Cpu, Cpl).</p>
+  <p>Cp = (USL - LSL) / (6 * sigma). Cpk = min(Cpu, Cpl). OEE = Availability x Performance x Quality. DPMO = defects / (units x opportunities) x 1,000,000. Takt time = available production time / customer demand.</p>
 </body>
 </html>`;
   }
@@ -1300,11 +1708,17 @@ export function ProcessMapBuilderClient({
     setDiagramStyle((current) => ({ ...current, [key]: value }));
   }
 
+  function refreshPreview() {
+    setPreviewRevision((current) => current + 1);
+    setLastPreviewRefreshAt(new Date().toLocaleTimeString());
+    setMessage("Chart preview refreshed with the current data and formula settings.");
+  }
+
   async function copyOutline() {
     const outline = [
       title,
       `Diagram: ${definition.label}`,
-      `DMAIC: ${phase.label}`,
+      dmaicEnabled ? `DMAIC: ${phase.label}` : "Method: General process documentation",
       `When to use: ${definition.whenToUse}`,
       "",
       "Items:",
@@ -1328,6 +1742,7 @@ export function ProcessMapBuilderClient({
       const bodyHtml = buildControlledDocumentHtml({
         title,
         diagramType,
+        dmaicEnabled,
         dmaicPhase,
         prompt,
         processArea,
@@ -1341,6 +1756,10 @@ export function ProcessMapBuilderClient({
         specUpper,
         targetValue,
         capabilityStats,
+        oeeStats,
+        dpmoStats,
+        taktStats,
+        controlLimitStats,
       });
 
       const response = await fetch("/api/process-documents", {
@@ -1415,9 +1834,9 @@ export function ProcessMapBuilderClient({
             Chart and Process Map Builder
           </h1>
           <p className="max-w-3xl text-sm text-slate-600 dark:text-slate-300">
-            Build process maps, flow charts, and Six Sigma charts. Use OpenAI to recommend the
-            best diagram, formula layer, and setup data for a DMAIC phase, including Cp/Cpk
-            capability analysis from plain-language requests.
+            Build process maps, flow charts, and quality charts. Turn DMAIC on when the work is a
+            Six Sigma project, or keep it general for everyday process documentation. Formula
+            layers include Cp/Cpk, OEE, DPMO, takt time, and control limits.
           </p>
         </div>
         <Link
@@ -1440,33 +1859,68 @@ export function ProcessMapBuilderClient({
         </p>
       ) : null}
 
-      <div className="grid gap-5 xl:grid-cols-[25rem_minmax(0,1fr)]">
-        <aside className="grid gap-4 rounded-xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
-          <div className="grid gap-3">
+      <div className="grid gap-5 xl:grid-cols-[minmax(20rem,25rem)_minmax(0,1fr)]">
+        <aside className="grid min-w-0 content-start gap-4 rounded-xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
+          <div className="grid min-w-0 gap-3">
+            <div className="grid gap-2 rounded-lg border border-slate-300/70 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/50">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-bold text-slate-900 dark:text-slate-100">Method</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Use DMAIC only for Six Sigma work.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={dmaicEnabled}
+                  onClick={() => setDmaicEnabled((current) => !current)}
+                  className={cn(
+                    "inline-flex shrink-0 items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold transition",
+                    dmaicEnabled
+                      ? "border-cyan-500/45 bg-cyan-500/15 text-cyan-800 dark:text-cyan-100"
+                      : "border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "h-2.5 w-2.5 rounded-full",
+                      dmaicEnabled ? "bg-cyan-600" : "bg-slate-400",
+                    )}
+                  />
+                  {dmaicEnabled ? "DMAIC On" : "General"}
+                </button>
+              </div>
+            </div>
+
             <label className="grid gap-1 text-sm">
               <span className="font-semibold">Title</span>
               <input
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
               />
             </label>
 
-            <label className="grid gap-1 text-sm">
-              <span className="font-semibold">DMAIC Phase</span>
-              <select
-                value={dmaicPhase}
-                onChange={(event) => setDmaicPhase(event.target.value as DmaicPhase)}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-              >
-                {DMAIC_PHASE_OPTIONS.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <span className="text-xs text-slate-500 dark:text-slate-400">{phase.purpose}</span>
-            </label>
+            {dmaicEnabled ? (
+              <label className="grid gap-1 text-sm">
+                <span className="font-semibold">DMAIC Phase</span>
+                <select
+                  value={dmaicPhase}
+                  onChange={(event) => setDmaicPhase(event.target.value as DmaicPhase)}
+                  className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                >
+                  {DMAIC_PHASE_OPTIONS.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  {phase.purpose}
+                </span>
+              </label>
+            ) : null}
 
             <label className="grid gap-1 text-sm">
               <span className="font-semibold">Process Area</span>
@@ -1474,7 +1928,7 @@ export function ProcessMapBuilderClient({
                 value={processArea}
                 onChange={(event) => setProcessArea(event.target.value)}
                 placeholder="EDM setup, order entry, inspection..."
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
               />
             </label>
 
@@ -1483,7 +1937,7 @@ export function ProcessMapBuilderClient({
               <select
                 value={departmentId}
                 onChange={(event) => setDepartmentId(event.target.value)}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
               >
                 <option value="">Unassigned</option>
                 {departments.map((department) => (
@@ -1500,7 +1954,7 @@ export function ProcessMapBuilderClient({
                 value={prompt}
                 onChange={(event) => setPrompt(event.target.value)}
                 rows={5}
-                className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                className="min-w-0 resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
               />
             </label>
 
@@ -1534,20 +1988,25 @@ export function ProcessMapBuilderClient({
             </section>
           ) : null}
 
-          <section className="grid gap-3 rounded-lg border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/45">
+          <section className="grid min-w-0 gap-3 overflow-hidden rounded-lg border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/45">
             <div className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-slate-100">
               <Sigma size={16} />
               Analysis Formulas
             </div>
-            <label className="grid gap-1 text-sm">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Pick a formula layer, enter the required inputs, then use Refresh Chart to update the
+              preview intentionally.
+            </p>
+            <label className="grid min-w-0 gap-1 text-sm">
               <span className="font-semibold">Formula Tool</span>
               <select
                 value={formulaTool}
                 onChange={(event) => setFormulaTool(event.target.value as FormulaTool)}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
               >
                 <option value="none">None</option>
                 <option value="capability">Cp / Cpk Capability</option>
+                <option value="oee">OEE</option>
                 <option value="control_limits">Control Limits</option>
                 <option value="dpmo">DPMO / Yield</option>
                 <option value="takt_time">Takt Time</option>
@@ -1555,53 +2014,135 @@ export function ProcessMapBuilderClient({
             </label>
 
             {formulaTool === "capability" ? (
-              <div className="grid gap-3">
-                <div className="grid grid-cols-3 gap-2">
-                  <label className="grid gap-1 text-xs">
+              <div className="grid min-w-0 gap-3">
+                <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
+                  <label className="grid min-w-0 gap-1 text-xs">
                     <span className="font-semibold">LSL</span>
                     <input
                       value={specLower}
                       onChange={(event) => setSpecLower(event.target.value)}
-                      className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                      className="min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
                     />
                   </label>
-                  <label className="grid gap-1 text-xs">
+                  <label className="grid min-w-0 gap-1 text-xs">
                     <span className="font-semibold">Target</span>
                     <input
                       value={targetValue}
                       onChange={(event) => setTargetValue(event.target.value)}
-                      className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                      className="min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
                     />
                   </label>
-                  <label className="grid gap-1 text-xs">
+                  <label className="grid min-w-0 gap-1 text-xs">
                     <span className="font-semibold">USL</span>
                     <input
                       value={specUpper}
                       onChange={(event) => setSpecUpper(event.target.value)}
-                      className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                      className="min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
                     />
                   </label>
                 </div>
-                <label className="grid gap-1 text-xs">
+                <label className="grid min-w-0 gap-1 text-xs">
                   <span className="font-semibold">Measurement Data</span>
                   <textarea
                     value={capabilityDataText}
                     onChange={(event) => setCapabilityDataText(event.target.value)}
                     rows={6}
                     placeholder="Paste measurements separated by spaces, commas, or new lines"
-                    className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                    className="min-w-0 resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
                   />
                 </label>
               </div>
             ) : null}
 
-            <div className="grid gap-1 rounded-lg border border-slate-300/70 bg-slate-50 p-3 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300">
-              <div className="font-bold text-slate-900 dark:text-slate-100">Common DMAIC formulas</div>
-              <p>Cp = (USL - LSL) / (6 * sigma)</p>
-              <p>Cpk = min((USL - mean) / (3 * sigma), (mean - LSL) / (3 * sigma))</p>
-              <p>DPMO = defects / (units * opportunities) * 1,000,000</p>
-              <p>Takt time = available production time / customer demand</p>
-              <p>Control limits = centerline +/- 3 * sigma</p>
+            {formulaTool === "oee" ? (
+              <div className="grid min-w-0 gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {[
+                    ["Planned Minutes", oeePlannedMinutes, setOeePlannedMinutes],
+                    ["Run Time Minutes", oeeRunMinutes, setOeeRunMinutes],
+                    ["Ideal Cycle Seconds", oeeIdealCycleSeconds, setOeeIdealCycleSeconds],
+                    ["Total Count", oeeTotalCount, setOeeTotalCount],
+                    ["Good Count", oeeGoodCount, setOeeGoodCount],
+                  ].map(([label, value, setter]) => (
+                    <label key={label as string} className="grid min-w-0 gap-1 text-xs">
+                      <span className="font-semibold">{label as string}</span>
+                      <input
+                        value={value as string}
+                        onChange={(event) =>
+                          (setter as (nextValue: string) => void)(event.target.value)
+                        }
+                        className="min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {formulaTool === "dpmo" ? (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                {[
+                  ["Defects", dpmoDefects, setDpmoDefects],
+                  ["Units", dpmoUnits, setDpmoUnits],
+                  ["Opp./Unit", dpmoOpportunities, setDpmoOpportunities],
+                ].map(([label, value, setter]) => (
+                  <label key={label as string} className="grid min-w-0 gap-1 text-xs">
+                    <span className="font-semibold">{label as string}</span>
+                    <input
+                      value={value as string}
+                      onChange={(event) =>
+                        (setter as (nextValue: string) => void)(event.target.value)
+                      }
+                      className="min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                    />
+                  </label>
+                ))}
+              </div>
+            ) : null}
+
+            {formulaTool === "takt_time" ? (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {[
+                  ["Available Minutes", taktAvailableMinutes, setTaktAvailableMinutes],
+                  ["Customer Demand", taktDemand, setTaktDemand],
+                ].map(([label, value, setter]) => (
+                  <label key={label as string} className="grid min-w-0 gap-1 text-xs">
+                    <span className="font-semibold">{label as string}</span>
+                    <input
+                      value={value as string}
+                      onChange={(event) =>
+                        (setter as (nextValue: string) => void)(event.target.value)
+                      }
+                      className="min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                    />
+                  </label>
+                ))}
+              </div>
+            ) : null}
+
+            <div className="grid gap-2 rounded-lg border border-slate-300/70 bg-slate-50 p-3 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300">
+              <div className="font-bold text-slate-900 dark:text-slate-100">Formula Results</div>
+              <FormulaResultSummary
+                formulaTool={formulaTool}
+                capabilityStats={capabilityStats}
+                oeeStats={oeeStats}
+                dpmoStats={dpmoStats}
+                taktStats={taktStats}
+                controlLimitStats={controlLimitStats}
+              />
+              <button
+                type="button"
+                onClick={refreshPreview}
+                className="mt-1 inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
+              >
+                <RefreshCw size={14} />
+                Refresh Chart
+              </button>
+              {lastPreviewRefreshAt ? (
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Last refresh: {lastPreviewRefreshAt}
+                </p>
+              ) : null}
             </div>
           </section>
         </aside>
@@ -1618,6 +2159,14 @@ export function ProcessMapBuilderClient({
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={refreshPreview}
+                  className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
+                >
+                  <RefreshCw size={14} />
+                  Refresh
+                </button>
                 <button
                   type="button"
                   onClick={() => void copyOutline()}
@@ -1689,7 +2238,12 @@ export function ProcessMapBuilderClient({
                     {entry.shortLabel}
                   </span>
                   <span className="text-xs text-slate-500 dark:text-slate-400">
-                    {entry.category} | {entry.dmaicPhases.map((phaseId) => getDmaicPhaseOption(phaseId).label).join(", ")}
+                    {entry.category}
+                    {dmaicEnabled
+                      ? ` | ${entry.dmaicPhases
+                          .map((phaseId) => getDmaicPhaseOption(phaseId).label)
+                          .join(", ")}`
+                      : ""}
                   </span>
                 </button>
               ))}
@@ -1777,27 +2331,50 @@ export function ProcessMapBuilderClient({
                   value={itemsText}
                   onChange={(event) => setItemsText(event.target.value)}
                   rows={8}
-                  className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                  className="min-w-0 resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
                 />
               </label>
               <div className="grid gap-3">
                 <label className="grid gap-1 text-sm">
-                  <span className="font-semibold">Swimlanes</span>
+                  <span className="flex items-center justify-between gap-2 font-semibold">
+                    Swimlanes
+                    {diagramType !== "swimlane" ? (
+                      <button
+                        type="button"
+                        onClick={() => applyDiagramType("swimlane")}
+                        className="rounded-md border border-slate-300 px-2 py-0.5 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900"
+                      >
+                        Show lanes
+                      </button>
+                    ) : null}
+                  </span>
                   <textarea
                     value={lanesText}
                     onChange={(event) => setLanesText(event.target.value)}
                     rows={3}
-                    className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                    className="min-w-0 resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
                   />
+                  <span className="text-xs text-slate-500 dark:text-slate-400">
+                    Lanes are drawn when Diagram Type is Swimlane.
+                  </span>
                 </label>
                 <label className="grid gap-1 text-sm">
-                  <span className="font-semibold">Chart Data</span>
+                  <span className="flex items-center justify-between gap-2 font-semibold">
+                    Chart Data
+                    <button
+                      type="button"
+                      onClick={refreshPreview}
+                      className="rounded-md border border-slate-300 px-2 py-0.5 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900"
+                    >
+                      Apply data
+                    </button>
+                  </span>
                   <textarea
                     value={metricsText}
                     onChange={(event) => setMetricsText(event.target.value)}
                     rows={4}
                     placeholder="Label, value, secondary value"
-                    className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                    className="min-w-0 resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
                   />
                 </label>
               </div>
@@ -1826,6 +2403,7 @@ export function ProcessMapBuilderClient({
                   buildTableRows(diagramType, items, metrics)
                 ) : (
                   <div
+                    key={previewRevision}
                     className="h-full min-h-[22rem] w-full"
                     dangerouslySetInnerHTML={{ __html: svg }}
                   />
@@ -1849,35 +2427,30 @@ export function ProcessMapBuilderClient({
                     ))}
                   </ul>
                 </div>
-                {layerSettings.showFormulaLayer && formulaTool === "capability" ? (
+                {layerSettings.showFormulaLayer && formulaTool !== "none" ? (
                   <div className="grid gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-3">
                     <h3 className="inline-flex items-center gap-2 font-bold text-slate-900 dark:text-slate-100">
-                      <Calculator size={15} />
-                      Capability
+                      <Gauge size={15} />
+                      Analysis
                     </h3>
-                    <dl className="grid grid-cols-2 gap-2 text-xs">
-                      {[
-                        ["N", String(capabilityStats?.n ?? 0)],
-                        ["Mean", formatNumber(capabilityStats?.mean)],
-                        ["Std Dev", formatNumber(capabilityStats?.sampleStdDev)],
-                        ["Cp", formatNumber(capabilityStats?.cp)],
-                        ["Cpu", formatNumber(capabilityStats?.cpu)],
-                        ["Cpl", formatNumber(capabilityStats?.cpl)],
-                        ["Cpk", formatNumber(capabilityStats?.cpk)],
-                        ["PPM", formatNumber(capabilityStats?.estimatedPpm, 0)],
-                      ].map(([label, value]) => (
-                        <div key={label} className="rounded border border-slate-300/70 bg-white/70 p-2 dark:border-slate-700 dark:bg-slate-950/60">
-                          <dt className="font-semibold text-slate-500 dark:text-slate-400">
-                            {label}
-                          </dt>
-                          <dd className="font-bold text-slate-900 dark:text-slate-100">
-                            {value}
-                          </dd>
-                        </div>
-                      ))}
-                    </dl>
+                    <FormulaResultSummary
+                      formulaTool={formulaTool}
+                      capabilityStats={capabilityStats}
+                      oeeStats={oeeStats}
+                      dpmoStats={dpmoStats}
+                      taktStats={taktStats}
+                      controlLimitStats={controlLimitStats}
+                    />
                     <p className="text-xs text-slate-600 dark:text-slate-300">
-                      Cp = (USL - LSL) / (6 * sigma). Cpk = min(Cpu, Cpl).
+                      {formulaTool === "oee"
+                        ? "OEE = Availability x Performance x Quality."
+                        : formulaTool === "capability"
+                          ? "Cp = (USL - LSL) / (6 * sigma). Cpk = min(Cpu, Cpl)."
+                          : formulaTool === "control_limits"
+                            ? "Control limits use the chart data values and +/- 3 sigma."
+                            : formulaTool === "dpmo"
+                              ? "DPMO = defects / (units x opportunities) x 1,000,000."
+                              : "Takt time = available production time / customer demand."}
                     </p>
                   </div>
                 ) : null}

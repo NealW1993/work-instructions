@@ -164,6 +164,8 @@ interface ProcessDocumentFormState {
   relatedInstructionIds: string[];
   isoClauseRefs: string[];
   bodyHtml: string;
+  documentHeader: string;
+  documentFooter: string;
   changeSummary: string;
   sourceType: ProcessDocumentSourceType;
   templateId: string | null;
@@ -196,6 +198,8 @@ const EMPTY_FORM: ProcessDocumentFormState = {
   relatedInstructionIds: [],
   isoClauseRefs: ["4.4 QMS processes", "7.5 Documented information"],
   bodyHtml: "",
+  documentHeader: "",
+  documentFooter: "",
   changeSummary: "",
   sourceType: "manual",
   templateId: null,
@@ -316,6 +320,37 @@ function createBlankDocumentNumber(count: number) {
   return `QMS-${String(count + 1).padStart(3, "0")}`;
 }
 
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function buildDocumentChrome(kind: "header" | "footer", text: string) {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const label = kind === "header" ? "Document Header" : "Document Footer";
+  const borderClass = kind === "header" ? "border-bottom:1px solid #cbd5e1;" : "border-top:1px solid #cbd5e1;";
+
+  return `<section data-document-${kind}="true" style="${borderClass}margin:${kind === "header" ? "0 0 16px" : "16px 0 0"};padding:${kind === "header" ? "0 0 10px" : "10px 0 0"};color:#475569;font-size:12px;"><strong>${label}:</strong> ${escapeHtml(trimmed).replace(/\n/g, "<br />")}</section>`;
+}
+
+function composeDocumentBodyHtml(form: ProcessDocumentFormState) {
+  return [
+    buildDocumentChrome("header", form.documentHeader),
+    form.bodyHtml,
+    buildDocumentChrome("footer", form.documentFooter),
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 export function ProcessDocumentsClient({
   canEdit,
   isSystemAdmin,
@@ -336,9 +371,9 @@ export function ProcessDocumentsClient({
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(
     initialDocumentId && documents.some((document) => document.id === initialDocumentId)
       ? initialDocumentId
-      : documents[0]?.id ?? null,
+      : null,
   );
-  const [creating, setCreating] = useState(documents.length === 0 && canEdit);
+  const [creating, setCreating] = useState(false);
   const [form, setForm] = useState<ProcessDocumentFormState>(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
@@ -461,6 +496,42 @@ export function ProcessDocumentsClient({
     });
   }, [documents, query]);
 
+  const documentDashboardStats = useMemo(() => {
+    const statusCounts = {
+      draft: 0,
+      in_review: 0,
+      approved: 0,
+      obsolete: 0,
+    } satisfies Record<ProcessDocumentStatus, number>;
+    let overdueReviews = 0;
+    let dueSoonReviews = 0;
+
+    for (const document of documents) {
+      statusCounts[document.status] += 1;
+      const reviewLabel = getReviewStatus(document).label;
+      if (reviewLabel.startsWith("Overdue")) {
+        overdueReviews += 1;
+      } else if (reviewLabel.startsWith("Due in")) {
+        dueSoonReviews += 1;
+      }
+    }
+
+    return {
+      total: documents.length,
+      statusCounts,
+      overdueReviews,
+      dueSoonReviews,
+      importedRevisions: revisions.filter((revision) => revision.source_type === "import").length,
+      templatedRevisions: revisions.filter((revision) => revision.source_type === "template").length,
+      recentDocuments: [...documents]
+        .sort(
+          (a, b) =>
+            normalizeDateTimestamp(b.updated_at) - normalizeDateTimestamp(a.updated_at),
+        )
+        .slice(0, 5),
+    };
+  }, [documents, revisions]);
+
   useEffect(() => {
     setImportReport(null);
 
@@ -493,6 +564,8 @@ export function ProcessDocumentsClient({
       relatedInstructionIds: selectedDocument.related_instruction_ids ?? [],
       isoClauseRefs: selectedDocument.iso_clause_refs ?? [],
       bodyHtml: selectedRevision?.body_html ?? "",
+      documentHeader: "",
+      documentFooter: "",
       changeSummary: "",
       sourceType: "manual",
       templateId: null,
@@ -531,6 +604,7 @@ export function ProcessDocumentsClient({
       const payload = {
         ...form,
         status: nextStatus,
+        bodyHtml: composeDocumentBodyHtml(form),
         departmentId: form.departmentId || null,
         ownerUserId: form.ownerUserId || currentUserId,
       };
@@ -574,6 +648,15 @@ export function ProcessDocumentsClient({
   }
 
   function applyTemplate(templateId: string) {
+    if (!templateId) {
+      setForm((current) => ({
+        ...current,
+        sourceType: "manual",
+        templateId: null,
+      }));
+      return;
+    }
+
     const template = templates.find((entry) => entry.id === templateId);
     if (!template) {
       return;
@@ -590,6 +673,26 @@ export function ProcessDocumentsClient({
       importedFileType: null,
       importedFileSize: null,
     }));
+  }
+
+  function startNewDocument() {
+    setCreating(true);
+    setSelectedDocumentId(null);
+    setImportReport(null);
+    setMessage(null);
+    setError(null);
+    router.replace("/process-documents", { scroll: false });
+  }
+
+  function selectDocument(documentId: string) {
+    setCreating(false);
+    setSelectedDocumentId(documentId);
+    setImportReport(null);
+    setMessage(null);
+    setError(null);
+    router.replace(`/process-documents?doc=${documentId}`, {
+      scroll: false,
+    });
   }
 
   async function handleImportFile(event: ChangeEvent<HTMLInputElement>) {
@@ -703,13 +806,7 @@ export function ProcessDocumentsClient({
         {canEdit ? (
           <button
             type="button"
-            onClick={() => {
-              setCreating(true);
-              setSelectedDocumentId(null);
-              setImportReport(null);
-              setMessage(null);
-              setError(null);
-            }}
+            onClick={startNewDocument}
             className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-4 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
           >
             <FilePlus2 size={16} />
@@ -744,16 +841,7 @@ export function ProcessDocumentsClient({
                 <button
                   key={document.id}
                   type="button"
-                  onClick={() => {
-                    setCreating(false);
-                    setSelectedDocumentId(document.id);
-                    setImportReport(null);
-                    setMessage(null);
-                    setError(null);
-                    router.replace(`/process-documents?doc=${document.id}`, {
-                      scroll: false,
-                    });
-                  }}
+                  onClick={() => selectDocument(document.id)}
                   className={cn(
                     "grid gap-1 rounded-lg border p-3 text-left transition hover:bg-cyan-500/10",
                     selectedDocument?.id === document.id && !creating
@@ -995,13 +1083,8 @@ export function ProcessDocumentsClient({
 
                 <div className="flex flex-wrap gap-2">
                   <select
-                    value=""
-                    onChange={(event) => {
-                      if (event.target.value) {
-                        applyTemplate(event.target.value);
-                        event.target.value = "";
-                      }
-                    }}
+                    value={form.templateId ?? ""}
+                    onChange={(event) => applyTemplate(event.target.value)}
                     className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
                     aria-label="Apply template"
                   >
@@ -1194,6 +1277,40 @@ export function ProcessDocumentsClient({
                 </label>
               </div>
 
+              <section className="grid gap-3 rounded-lg border border-slate-300/70 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-900/45">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                    Header and Footer
+                  </h3>
+                  <p className="text-xs text-slate-600 dark:text-slate-300">
+                    Add controlled-document context that will be included with saved revisions,
+                    imported files, template documents, printouts, and exports.
+                  </p>
+                </div>
+                <div className="grid gap-3 lg:grid-cols-2">
+                  <label className="grid gap-1 text-sm">
+                    <span className="font-semibold">Header</span>
+                    <textarea
+                      value={form.documentHeader}
+                      onChange={(event) => updateForm("documentHeader", event.target.value)}
+                      rows={2}
+                      placeholder="Company, document owner, site, confidentiality, or release note"
+                      className="min-w-0 resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm">
+                    <span className="font-semibold">Footer</span>
+                    <textarea
+                      value={form.documentFooter}
+                      onChange={(event) => updateForm("documentFooter", event.target.value)}
+                      rows={2}
+                      placeholder="Retention rule, approval note, printed-copy warning, or revision reminder"
+                      className="min-w-0 resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                    />
+                  </label>
+                </div>
+              </section>
+
               <RichTextEditor
                 label="Document Body"
                 value={form.bodyHtml}
@@ -1383,15 +1500,154 @@ export function ProcessDocumentsClient({
                 </div>
               </section>
             </div>
-          ) : (
-            <section className="grid gap-2 rounded-xl border border-slate-300/70 bg-white/85 p-5 text-sm text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-950/75 dark:text-slate-300">
-              <FileText size={24} />
-              <p>Select or create a controlled document.</p>
-              <Link href="/dashboard" className="font-semibold text-cyan-700 dark:text-cyan-300">
-                Return to dashboard
-              </Link>
+          ) : !showEditor ? (
+            <section className="grid gap-4 rounded-xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-cyan-500/40 bg-cyan-500/15 text-cyan-700 dark:text-cyan-200">
+                    <ShieldCheck size={20} />
+                  </span>
+                  <div>
+                    <h2 className="text-xl font-extrabold text-slate-950 dark:text-slate-50">
+                      Document Control Dashboard
+                    </h2>
+                    <p className="text-sm text-slate-600 dark:text-slate-300">
+                      Review controlled documents, approval status, template usage, imports, and
+                      ISO review timing before opening a record.
+                    </p>
+                  </div>
+                </div>
+                {canEdit ? (
+                  <button
+                    type="button"
+                    onClick={startNewDocument}
+                    className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
+                  >
+                    <FilePlus2 size={15} />
+                    New Document
+                  </button>
+                ) : null}
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                {[
+                  ["Controlled", documentDashboardStats.total],
+                  ["In Review", documentDashboardStats.statusCounts.in_review],
+                  ["Approved", documentDashboardStats.statusCounts.approved],
+                  ["Review Alerts", documentDashboardStats.overdueReviews + documentDashboardStats.dueSoonReviews],
+                  ["Imports", documentDashboardStats.importedRevisions],
+                ].map(([label, value]) => (
+                  <div
+                    key={label}
+                    className="rounded-lg border border-slate-300/70 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-900/50"
+                  >
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                      {label}
+                    </p>
+                    <p className="text-2xl font-extrabold text-slate-950 dark:text-slate-50">
+                      {value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+                <section className="grid gap-3 rounded-lg border border-slate-300/70 p-3 dark:border-slate-700">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-base font-extrabold text-slate-950 dark:text-slate-50">
+                      Recently Updated
+                    </h3>
+                    <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                      {documentDashboardStats.templatedRevisions} template revision
+                      {documentDashboardStats.templatedRevisions === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  {documentDashboardStats.recentDocuments.length > 0 ? (
+                    <div className="grid gap-2">
+                      {documentDashboardStats.recentDocuments.map((document) => (
+                        <button
+                          key={document.id}
+                          type="button"
+                          onClick={() => selectDocument(document.id)}
+                          className="grid gap-1 rounded-lg border border-slate-300/70 bg-white/70 p-3 text-left transition hover:border-cyan-500/45 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/45"
+                        >
+                          <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+                            <p className="font-bold text-slate-950 dark:text-slate-50">
+                              {document.document_number} | {document.title || "Untitled"}
+                            </p>
+                            <span
+                              className={cn(
+                                "rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                                statusTone(document.status),
+                              )}
+                            >
+                              {getProcessDocumentStatusLabel(document.status)}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            Rev {document.current_revision} |{" "}
+                            {getProcessDocumentTypeLabel(document.document_type)} | Updated{" "}
+                            <LocalDateTime value={document.updated_at} mode="date" />
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="grid gap-2 rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                      <FileText size={22} />
+                      <p>No controlled documents are available yet.</p>
+                    </div>
+                  )}
+                </section>
+
+                <section className="grid content-start gap-3 rounded-lg border border-slate-300/70 p-3 text-sm dark:border-slate-700">
+                  <h3 className="text-base font-extrabold text-slate-950 dark:text-slate-50">
+                    ISO Readiness
+                  </h3>
+                  <div className="grid gap-2">
+                    <div className="flex items-start gap-2 rounded-lg bg-slate-50 p-3 dark:bg-slate-900/50">
+                      <CalendarClock size={16} className="mt-0.5 shrink-0 text-amber-600" />
+                      <p>
+                        {documentDashboardStats.overdueReviews} overdue review
+                        {documentDashboardStats.overdueReviews === 1 ? "" : "s"} and{" "}
+                        {documentDashboardStats.dueSoonReviews} review
+                        {documentDashboardStats.dueSoonReviews === 1 ? "" : "s"} due within 30
+                        days.
+                      </p>
+                    </div>
+                    <div className="flex items-start gap-2 rounded-lg bg-slate-50 p-3 dark:bg-slate-900/50">
+                      <ClipboardList size={16} className="mt-0.5 shrink-0 text-cyan-700" />
+                      <p>
+                        Use templates for standard procedure, work instruction, form, quality
+                        record, and process-map structure before submitting for approval.
+                      </p>
+                    </div>
+                    <div className="flex items-start gap-2 rounded-lg bg-slate-50 p-3 dark:bg-slate-900/50">
+                      <Upload size={16} className="mt-0.5 shrink-0 text-emerald-700" />
+                      <p>
+                        Imported documents are preserved as controlled revisions with source
+                        metadata, change summaries, and approval evidence.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Link
+                      href="/process-maps"
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+                    >
+                      Process Maps
+                    </Link>
+                    <Link
+                      href="/dashboard"
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+                    >
+                      Dashboard
+                    </Link>
+                  </div>
+                </section>
+              </div>
             </section>
-          )}
+          ) : null}
         </main>
       </div>
     </div>
