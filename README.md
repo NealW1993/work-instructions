@@ -99,8 +99,24 @@ Recommended:
 - `SYSTEM_ADMIN_EMAIL=you@company.com` for automatic first system-admin bootstrap
 - `SMTP_HOST=mailpit` and `SMTP_PORT=1025` for local email testing in Docker
 - `NEXT_PUBLIC_POSTHOG_KEY` if analytics is desired
-- `OPENAI_API_KEY` to enable AI instruction enhancement in the editor
+- `OPENAI_API_KEY` to enable AI instruction enhancement and dashboard document suggestions
 - `OPENAI_ENHANCE_MODEL=gpt-4.1-mini` (optional override)
+- `OPENAI_SEARCH_MODEL=gpt-4.1-mini` (optional search ranking override; defaults to `OPENAI_ENHANCE_MODEL`)
+- `OPENAI_DIAGRAM_MODEL=gpt-4.1-mini` (optional process map/chart recommendation override)
+
+## Process documentation controls
+
+The `/process-documents` area is the controlled-document workspace for ISO-style QMS documentation.
+
+- Create process maps, procedures, work instructions, quality records, and controlled forms from built-in templates.
+- Import `.docx`, `.html`, `.htm`, `.txt`, and `.md` files into sanitized rich text while keeping source-file metadata on the revision.
+- Route documents through Draft, In Review, Approved, and Obsolete states. Approval stamps the approver, effective date, and next review date.
+- Each controlled revision requires a change summary, stores approval evidence, and writes append-only audit events.
+- Work instructions and process documents are retained through archive/obsolete states; permanent deletion is blocked for audit evidence.
+- Dashboard search uses `OPENAI_API_KEY` when configured and the system-admin Dashboard AI Search setting is enabled; otherwise it still searches all work instructions and process documents with deterministic controlled-text ranking.
+- `/process-maps` provides process maps, flowcharts, SIPOC, CTQ trees, fishbone, Pareto, histograms, run/control/scatter charts, FMEA, control plans, and solution matrices with OpenAI or rules-based chart recommendations by DMAIC phase. The builder includes editable layers, print/export actions, CSV/SVG/report downloads, and Six Sigma formulas such as Cp, Cpu, Cpl, Cpk, DPMO, takt time, and control limits.
+- Admin KPI panels include per-user AI/tool usage, token counts, dashboard search counts, chart exports, Cp/Cpk use, imports, templates, and controlled-document activity.
+- System-admin exports include process documents, revisions, audit events, document search events, and AI/tool usage events for audit packages.
 
 ## 2) Start local Supabase backend in Docker (recommended for local)
 
@@ -135,7 +151,7 @@ Run SQL in Supabase SQL Editor:
 
 What this migration creates:
 
-- Tables: `profiles`, `user_security`, `departments`, `work_items`, `work_instructions`, `instruction_media`, `password_reset_tokens`
+- Tables: `profiles`, `user_security`, `departments`, `work_items`, `work_instructions`, `instruction_media`, `password_reset_tokens`, `process_documents`, `process_document_revisions`, `process_document_audit_events`, `document_search_events`, `system_settings`, `ai_usage_events`
 - Enum roles and media types
 - Triggers for profile creation from `auth.users`
 - PIN helpers: `set_my_pin`, `set_user_pin`, `verify_pin_login`

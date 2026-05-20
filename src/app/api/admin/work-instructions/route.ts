@@ -267,29 +267,11 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const deleteInstructionIds = instructionRows
-    .filter((row) => row.is_archived)
-    .map((row) => row.id);
-  const skippedNotArchivedIds = instructionRows
-    .filter((row) => !row.is_archived)
-    .map((row) => row.id);
-
-  if (deleteInstructionIds.length > 0) {
-    const { error: deleteError } = await supabaseAdmin
-      .from("work_instructions")
-      .delete()
-      .in("id", deleteInstructionIds);
-
-    if (deleteError) {
-      return NextResponse.json({ error: deleteError.message }, { status: 500 });
-    }
-  }
-
-  return NextResponse.json({
-    success: true,
-    action,
-    deleteInstructionIds,
-    skippedNotArchivedIds,
-    missingInstructionIds,
-  });
+  return NextResponse.json(
+    {
+      error:
+        "Permanent deletion is disabled for ISO document-control retention. Archive instructions instead.",
+    },
+    { status: 409 },
+  );
 }

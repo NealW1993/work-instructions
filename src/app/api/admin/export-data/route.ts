@@ -166,6 +166,84 @@ async function fetchDatasetRows(datasetId: ExportDatasetId) {
       return normalizeExportRows((data ?? []) as Array<Record<string, unknown>>);
     }
 
+    case "process_documents": {
+      const { data, error } = await supabaseAdmin
+        .from("process_documents")
+        .select(
+          "id, document_number, title, document_type, status, department_id, owner_user_id, process_name, process_scope, process_inputs, process_outputs, process_risks, process_controls, related_instruction_ids, iso_clause_refs, current_revision, effective_at, next_review_at, approved_by, approved_at, obsoleted_by, obsoleted_at, created_by, updated_by, created_at, updated_at",
+        )
+        .order("updated_at", { ascending: false })
+        .range(0, 9999);
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      return normalizeExportRows((data ?? []) as Array<Record<string, unknown>>);
+    }
+
+    case "process_document_revisions": {
+      const { data, error } = await supabaseAdmin
+        .from("process_document_revisions")
+        .select(
+          "id, document_id, revision, title, body_html, change_summary, source_type, template_id, imported_file_name, imported_file_type, imported_file_size, prepared_by, approved_by, approved_at, created_at",
+        )
+        .order("created_at", { ascending: false })
+        .range(0, 19999);
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      return normalizeExportRows((data ?? []) as Array<Record<string, unknown>>);
+    }
+
+    case "process_document_audit_events": {
+      const { data, error } = await supabaseAdmin
+        .from("process_document_audit_events")
+        .select(
+          "id, document_id, revision_id, actor_user_id, event_type, detail, from_status, to_status, occurred_at, source_payload, created_at",
+        )
+        .order("occurred_at", { ascending: false })
+        .range(0, 19999);
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      return normalizeExportRows((data ?? []) as Array<Record<string, unknown>>);
+    }
+
+    case "document_search_events": {
+      const { data, error } = await supabaseAdmin
+        .from("document_search_events")
+        .select("id, actor_user_id, query, mode, result_count, created_at")
+        .order("created_at", { ascending: false })
+        .range(0, 19999);
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      return normalizeExportRows((data ?? []) as Array<Record<string, unknown>>);
+    }
+
+    case "ai_usage_events": {
+      const { data, error } = await supabaseAdmin
+        .from("ai_usage_events")
+        .select(
+          "id, actor_user_id, feature, action, mode, subject_type, subject_id, token_input, token_output, token_total, model, metadata, created_at",
+        )
+        .order("created_at", { ascending: false })
+        .range(0, 19999);
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      return normalizeExportRows((data ?? []) as Array<Record<string, unknown>>);
+    }
+
     case "suggested_tools": {
       const { data, error } = await supabaseAdmin
         .from("suggested_tools")

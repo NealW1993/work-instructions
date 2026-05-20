@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import sanitizeHtml from "sanitize-html";
 
 import { getRequestProfile } from "@/lib/api-auth";
+import {
+  normalizeOpenAiTokenUsage,
+  recordAiUsageEvent,
+  type OpenAiTokenUsage,
+} from "@/lib/ai-usage";
 import { serverEnv } from "@/lib/env.server";
 import { canEditInstructions } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -28,6 +33,7 @@ interface OpenAICompletionResponse {
       content?: string | null;
     };
   }>;
+  usage?: OpenAiTokenUsage;
   error?: {
     message?: string;
   };
@@ -35,6 +41,7 @@ interface OpenAICompletionResponse {
 
 interface EnhancementInsertRow {
   id: string;
+  generated_at: string;
 }
 
 const MAX_INPUT_CHARACTERS = 80_000;
@@ -389,7 +396,7 @@ export async function POST(request: NextRequest) {
             : null,
         outcome: "generated",
       })
-      .select("id")
+      .select("id, generated_at")
       .single();
 
     const typedInsertedEnhancement = insertedEnhancement as EnhancementInsertRow | null;
@@ -404,6 +411,33 @@ export async function POST(request: NextRequest) {
         { status: 500 },
       );
     }
+
+    const tokenUsage = normalizeOpenAiTokenUsage(openAiPayload.usage);
+
+    await recordAiUsageEvent({
+      actorUserId: requester.id,
+      feature: "instruction_enhancement",
+      action: "generated",
+      mode,
+      subjectType: "work_instruction",
+      subjectId: instructionId,
+      model: serverEnv.OPENAI_ENHANCE_MODEL,
+      tokenInput: tokenUsage.tokenInput,
+      tokenOutput: tokenUsage.tokenOutput,
+      tokenTotal: tokenUsage.tokenTotal,
+      metadata: {
+        enhancementId: typedInsertedEnhancement.id,
+        sourceInstructionId,
+        partId: requestBody.partId?.trim() ?? "",
+        itemTitle: requestBody.itemTitle?.trim() ?? "",
+        departmentName: requestBody.departmentName?.trim() ?? "",
+        revision:
+          typeof requestBody.revision === "number" && Number.isInteger(requestBody.revision)
+            ? requestBody.revision
+            : null,
+      },
+      createdAt: typedInsertedEnhancement.generated_at,
+    });
 
     return NextResponse.json({
       originalContent: sanitizedOriginalContent,

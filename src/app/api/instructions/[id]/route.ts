@@ -143,30 +143,13 @@ export async function DELETE(
   }
 
   if (permanentDelete) {
-    if (!instruction.is_archived) {
-      return NextResponse.json(
-        { error: "Only archived instructions can be permanently deleted." },
-        { status: 400 },
-      );
-    }
-
-    const { error: permanentDeleteError } = await supabaseAdmin
-      .from("work_instructions")
-      .delete()
-      .eq("id", id);
-
-    if (permanentDeleteError) {
-      return NextResponse.json(
-        { error: permanentDeleteError.message },
-        { status: 500 },
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      deleted: true,
-      permanent: true,
-    });
+    return NextResponse.json(
+      {
+        error:
+          "Permanent deletion is disabled for ISO document-control retention. Archive the instruction instead.",
+      },
+      { status: 409 },
+    );
   }
 
   if (instruction.is_archived) {

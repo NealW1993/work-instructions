@@ -6,6 +6,7 @@ import { KpiActivitySection } from "@/components/admin/kpi-activity-section";
 import { KpiInsightsPanel } from "@/components/admin/kpi-insights-panel";
 import { KpiSummaryCards, type KpiSummaryCardConfig } from "@/components/admin/kpi-summary-cards";
 import { ReviewCoverageKpiPanel } from "@/components/admin/review-coverage-kpi-panel";
+import { SystemUsageKpiPanel } from "@/components/admin/system-usage-kpi-panel";
 import { InstructionBackButton } from "@/components/instructions/instruction-back-button";
 import { requireAuthenticatedUser } from "@/lib/auth";
 import { canViewKpis, isSystemAdmin } from "@/lib/roles";
@@ -481,6 +482,7 @@ export default async function SystemKpisPage() {
 
       <KpiInsightsPanel />
       <ReviewCoverageKpiPanel />
+      <SystemUsageKpiPanel isSystemAdmin={isSystemAdmin(profile.role)} />
       <AiEnhancementKpiPanel />
       <ForkMergeKpiPanel />
 

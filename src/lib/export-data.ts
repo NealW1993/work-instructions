@@ -25,6 +25,31 @@ export const EXPORT_DATASET_OPTIONS = [
     description: "Review status, calibration dates, and flags.",
   },
   {
+    id: "process_documents",
+    label: "Process Documents",
+    description: "Controlled QMS documents, owners, statuses, and review dates.",
+  },
+  {
+    id: "process_document_revisions",
+    label: "Process Document Revisions",
+    description: "Controlled document revision bodies and approval evidence.",
+  },
+  {
+    id: "process_document_audit_events",
+    label: "Process Document Audit Events",
+    description: "Append-only process document audit trail.",
+  },
+  {
+    id: "document_search_events",
+    label: "Document Search Events",
+    description: "Dashboard search activity, ranking mode, and result counts.",
+  },
+  {
+    id: "ai_usage_events",
+    label: "AI and Tool Usage Events",
+    description: "Token usage, dashboard search, chart, Cp/Cpk, document, import, and template activity.",
+  },
+  {
     id: "suggested_tools",
     label: "Suggested Tools",
     description: "Tool library with category and subcategory assignments.",

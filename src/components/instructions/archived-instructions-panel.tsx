@@ -48,19 +48,10 @@ interface RestoreConflictModalState {
   conflict: RestoreConflictPayload;
 }
 
-interface DeleteConfirmationModalState {
-  instructionIds: string[];
-  instructionLabels: string[];
-}
-
 interface RestoreResponsePayload {
   error?: string;
   conflict?: RestoreConflictPayload;
   swappedOutInstructionIds?: string[];
-}
-
-interface DeleteResponsePayload {
-  error?: string;
 }
 
 function getPartIdLabel(workItem: ArchivedInstructionWorkItemSummary) {
@@ -85,14 +76,6 @@ function ArchivedCardHeading({ workItem }: { workItem: ArchivedInstructionWorkIt
   );
 }
 
-function getInstructionLabel(instruction: ArchivedInstructionListItem) {
-  const forkLabel =
-    instruction.fork_number && instruction.fork_number > 0
-      ? ` | Fork ${instruction.fork_number}`
-      : "";
-  return `${getPartIdLabel(instruction.workItem)} | ${instruction.workItem.department_name} | Revision ${instruction.revision}${forkLabel}`;
-}
-
 function normalizeSearchValue(instruction: ArchivedInstructionListItem) {
   return [
     instruction.workItem.department_name,
@@ -105,10 +88,6 @@ function normalizeSearchValue(instruction: ArchivedInstructionListItem) {
   ]
     .join(" ")
     .toLowerCase();
-}
-
-function formatInstructionCount(value: number) {
-  return `${value} instruction${value === 1 ? "" : "s"}`;
 }
 
 export function ArchivedInstructionsPanel({
@@ -124,13 +103,11 @@ export function ArchivedInstructionsPanel({
   const [selectedInstructionIds, setSelectedInstructionIds] = useState<string[]>([]);
 
   const [busyInstructionId, setBusyInstructionId] = useState<string | null>(null);
-  const [busyDeleteInstructionIds, setBusyDeleteInstructionIds] = useState<string[]>([]);
 
   const [confirmInstruction, setConfirmInstruction] =
     useState<ArchivedInstructionListItem | null>(null);
   const [restoreConflictModal, setRestoreConflictModal] =
     useState<RestoreConflictModalState | null>(null);
-  const [deleteModal, setDeleteModal] = useState<DeleteConfirmationModalState | null>(null);
 
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -191,8 +168,7 @@ export function ArchivedInstructionsPanel({
   const allFilteredSelected =
     filteredInstructions.length > 0 &&
     filteredInstructions.every((instruction) => selectedInstructionIdSet.has(instruction.id));
-  const deleteInProgress = busyDeleteInstructionIds.length > 0;
-  const anyActionBusy = Boolean(busyInstructionId) || deleteInProgress;
+  const anyActionBusy = Boolean(busyInstructionId);
 
   function toggleInstructionSelection(instructionId: string) {
     setSelectedInstructionIds((current) => {
@@ -222,24 +198,6 @@ export function ArchivedInstructionsPanel({
       }
 
       return [...currentSet];
-    });
-  }
-
-  function openDeleteModal(instructionIds: string[]) {
-    const uniqueIds = Array.from(new Set(instructionIds));
-    if (uniqueIds.length === 0) {
-      return;
-    }
-
-    const instructionById = new Map(instructions.map((instruction) => [instruction.id, instruction]));
-    const instructionLabels = uniqueIds
-      .map((id) => instructionById.get(id))
-      .filter((instruction): instruction is ArchivedInstructionListItem => instruction !== undefined)
-      .map(getInstructionLabel);
-
-    setDeleteModal({
-      instructionIds: uniqueIds,
-      instructionLabels,
     });
   }
 
@@ -304,65 +262,6 @@ export function ArchivedInstructionsPanel({
       setError(normalizedMessage);
     } finally {
       setBusyInstructionId(null);
-    }
-  }
-
-  async function handlePermanentDelete(instructionIds: string[]) {
-    const uniqueIds = Array.from(new Set(instructionIds));
-    if (uniqueIds.length === 0) {
-      return;
-    }
-
-    setBusyDeleteInstructionIds(uniqueIds);
-    setError(null);
-    setMessage(null);
-
-    try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session?.access_token) {
-        throw new Error("Missing session token. Please sign in again.");
-      }
-
-      for (const instructionId of uniqueIds) {
-        const response = await fetch(`/api/instructions/${instructionId}`, {
-          method: "DELETE",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({
-            permanent: true,
-          }),
-        });
-
-        const payload = (await response.json().catch(() => ({}))) as DeleteResponsePayload;
-        if (!response.ok) {
-          throw new Error(payload.error ?? "Unable to permanently delete instruction.");
-        }
-      }
-
-      const removedInstructionIdSet = new Set(uniqueIds);
-
-      setInstructions((current) =>
-        current.filter((instruction) => !removedInstructionIdSet.has(instruction.id)),
-      );
-      setSelectedInstructionIds((current) =>
-        current.filter((instructionId) => !removedInstructionIdSet.has(instructionId)),
-      );
-      setDeleteModal(null);
-      setMessage(`Permanently deleted ${formatInstructionCount(uniqueIds.length)}.`);
-      router.refresh();
-    } catch (caughtError) {
-      const normalizedMessage =
-        caughtError instanceof Error
-          ? caughtError.message
-          : "Unable to permanently delete instruction.";
-      setError(normalizedMessage);
-    } finally {
-      setBusyDeleteInstructionIds([]);
     }
   }
 
@@ -443,12 +342,12 @@ export function ArchivedInstructionsPanel({
 
         <button
           type="button"
-          disabled={selectedCount === 0 || anyActionBusy}
-          onClick={() => openDeleteModal(selectedInstructionIds)}
-          className="inline-flex items-center gap-2 rounded-xl border border-rose-500/45 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-800 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-60 dark:text-rose-200"
+          disabled
+          title="Permanent deletion is disabled for ISO document-control retention."
+          className="inline-flex cursor-not-allowed items-center gap-2 rounded-xl border border-slate-400/45 bg-slate-500/10 px-3 py-1.5 text-xs font-semibold text-slate-600 opacity-70 dark:text-slate-300"
         >
           <Trash2 size={14} />
-          Delete Selected Permanently
+          Retention Locked
         </button>
       </section>
 
@@ -463,7 +362,6 @@ export function ArchivedInstructionsPanel({
           {filteredInstructions.map((instruction) => {
             const checked = selectedInstructionIdSet.has(instruction.id);
             const restoringThisInstruction = busyInstructionId === instruction.id;
-            const deletingThisInstruction = busyDeleteInstructionIds.includes(instruction.id);
 
             return (
               <article
@@ -538,16 +436,12 @@ export function ArchivedInstructionsPanel({
                   </button>
                   <button
                     type="button"
-                    disabled={anyActionBusy}
-                    onClick={() => openDeleteModal([instruction.id])}
-                    className="inline-flex items-center gap-2 rounded-xl border border-rose-500/45 bg-rose-500/10 px-3 py-2 text-sm font-semibold text-rose-800 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-60 dark:text-rose-200"
+                    disabled
+                    title="Permanent deletion is disabled for ISO document-control retention."
+                    className="inline-flex cursor-not-allowed items-center gap-2 rounded-xl border border-slate-400/45 bg-slate-500/10 px-3 py-2 text-sm font-semibold text-slate-600 opacity-70 dark:text-slate-300"
                   >
-                    {deletingThisInstruction ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <Trash2 size={14} />
-                    )}
-                    Delete Permanently
+                    <Trash2 size={14} />
+                    Retention Locked
                   </button>
                 </div>
               </article>
@@ -662,61 +556,6 @@ export function ArchivedInstructionsPanel({
                       <ArchiveRestore size={14} />
                     )}
                     Swap and Restore
-                  </button>
-                </div>
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
-
-      {deleteModal && portalReady
-        ? createPortal(
-            <div className="app-modal-shell fixed inset-0 z-[122] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm">
-              <div className="grid w-full max-w-xl gap-4 rounded-2xl border border-rose-500/45 bg-slate-950/95 p-5 shadow-2xl">
-                <div className="grid gap-2">
-                  <h3 className="text-lg font-bold text-slate-100">
-                    Permanently delete archived instruction
-                    {deleteModal.instructionIds.length === 1 ? "" : "s"}?
-                  </h3>
-                  <p className="text-sm text-slate-300">
-                    This action cannot be undone. Deleted instructions cannot be restored.
-                  </p>
-                  <div className="grid gap-1 rounded-xl border border-rose-500/25 bg-rose-500/10 p-3">
-                    {deleteModal.instructionLabels.slice(0, 4).map((label, index) => (
-                      <p key={`${label}-${index}`} className="text-xs text-rose-100">
-                        {label}
-                      </p>
-                    ))}
-                    {deleteModal.instructionLabels.length > 4 ? (
-                      <p className="text-xs font-semibold text-rose-200">
-                        +{deleteModal.instructionLabels.length - 4} more
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap justify-end gap-2">
-                  <button
-                    type="button"
-                    disabled={deleteInProgress}
-                    onClick={() => setDeleteModal(null)}
-                    className="rounded-xl border border-slate-600 bg-slate-900/70 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    disabled={deleteInProgress}
-                    onClick={() => void handlePermanentDelete(deleteModal.instructionIds)}
-                    className="inline-flex items-center gap-2 rounded-xl border border-rose-500/50 bg-rose-500/20 px-4 py-2 text-sm font-semibold text-rose-100 transition hover:bg-rose-500/30 disabled:cursor-not-allowed disabled:opacity-70"
-                  >
-                    {deleteInProgress ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <Trash2 size={14} />
-                    )}
-                    Delete Permanently
                   </button>
                 </div>
               </div>

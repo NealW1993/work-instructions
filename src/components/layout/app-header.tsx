@@ -5,9 +5,11 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   BookmarkPlus,
+  ChartNetwork,
   Download,
   CircleAlert,
   ChevronDown,
+  ClipboardList,
   LayoutGrid,
   Redo2,
   RefreshCw,
@@ -199,6 +201,8 @@ export function AppHeader({ profile }: { profile: Profile }) {
   const canCreateInstructions = canEditInstructions(profile.role);
   const canViewArchivedInstructions = isSystemAdmin(profile.role);
   const isDashboardActive = isActivePath(pathname, "/dashboard");
+  const isProcessDocumentsActive = isActivePath(pathname, "/process-documents");
+  const isProcessMapsActive = isActivePath(pathname, "/process-maps");
   const isNewInstructionActive = isActivePath(pathname, "/instructions/new");
   const isArchivedInstructionActive = isActivePath(pathname, "/instructions/archived");
   const instructionControlActive = isNewInstructionActive || isArchivedInstructionActive;
@@ -1265,6 +1269,48 @@ export function AppHeader({ profile }: { profile: Profile }) {
     );
   };
 
+  const renderProcessDocumentsControl = (mobile: boolean) => (
+    <Link
+      href="/process-documents"
+      onClick={() => {
+        closeDashboardMenu();
+        closeStudioMenu();
+        closeInstructionMenu();
+      }}
+      className={cn(
+        "inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-semibold transition",
+        mobile ? "max-w-full" : "",
+        isProcessDocumentsActive
+          ? "border-cyan-700 bg-cyan-600 text-white shadow-sm dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900"
+          : "border-slate-300/70 bg-white/80 text-slate-700 hover:border-slate-400 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-800",
+      )}
+    >
+      <ClipboardList size={14} />
+      Process Docs
+    </Link>
+  );
+
+  const renderProcessMapsControl = (mobile: boolean) => (
+    <Link
+      href="/process-maps"
+      onClick={() => {
+        closeDashboardMenu();
+        closeStudioMenu();
+        closeInstructionMenu();
+      }}
+      className={cn(
+        "inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-semibold transition",
+        mobile ? "max-w-full" : "",
+        isProcessMapsActive
+          ? "border-cyan-700 bg-cyan-600 text-white shadow-sm dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900"
+          : "border-slate-300/70 bg-white/80 text-slate-700 hover:border-slate-400 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-800",
+      )}
+    >
+      <ChartNetwork size={14} />
+      Process Maps
+    </Link>
+  );
+
   const renderInstructionControl = (mobile: boolean) => {
     if (!canCreateInstructions) {
       return null;
@@ -1428,6 +1474,8 @@ export function AppHeader({ profile }: { profile: Profile }) {
           <nav className="hidden items-center gap-3 md:flex">
             {renderDashboardStudioControl(false)}
             {renderDashboardControl(false)}
+            {renderProcessDocumentsControl(false)}
+            {renderProcessMapsControl(false)}
             {renderInstructionControl(false)}
           </nav>
           <UserAccountMenu profile={profile} />
@@ -1436,6 +1484,8 @@ export function AppHeader({ profile }: { profile: Profile }) {
         <nav className="relative mt-2 flex flex-wrap items-center justify-center gap-2 md:hidden">
           {renderDashboardStudioControl(true)}
           {renderDashboardControl(true)}
+          {renderProcessDocumentsControl(true)}
+          {renderProcessMapsControl(true)}
           {renderInstructionControl(true)}
         </nav>
       </div>

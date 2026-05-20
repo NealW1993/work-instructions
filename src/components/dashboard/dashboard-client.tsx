@@ -6,9 +6,12 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
+  FileText,
   GripVertical,
   Info,
+  Loader2,
   Search,
+  Sparkles,
   TriangleAlert,
   ThumbsUp,
   X,
@@ -128,6 +131,17 @@ interface DashboardDepartmentOption {
   id: string;
   name: string;
   color_hex: string | null;
+}
+
+interface DashboardAiSearchResult {
+  id: string;
+  type: "instruction" | "process_document";
+  title: string;
+  subtitle: string;
+  href: string;
+  score: number;
+  reason: string;
+  snippet: string;
 }
 
 export interface DashboardSystemHistoryEventData {
@@ -2327,6 +2341,8 @@ export function DashboardClient({
   const newestListRef = useRef<HTMLDivElement | null>(null);
   const systemHistoryListRef = useRef<HTMLDivElement | null>(null);
   const recentUpdatesListRef = useRef<HTMLDivElement | null>(null);
+  const aiSearchRequestIdRef = useRef(0);
+  const aiSearchLastQueryKeyRef = useRef("");
   const [query, setQuery] = useState(initialQuery);
   const [selectedDepartmentId, setSelectedDepartmentId] = useState("all");
   const [departmentInsightExpanded, setDepartmentInsightExpanded] = useState(false);
@@ -2386,6 +2402,11 @@ export function DashboardClient({
   const [likeCelebrationOpen, setLikeCelebrationOpen] = useState(
     (activeLikeCelebration?.newLikesCount ?? 0) > 0,
   );
+  const [aiSearchResults, setAiSearchResults] = useState<DashboardAiSearchResult[]>([]);
+  const [aiSearchMode, setAiSearchMode] = useState<"ai" | "lexical" | null>(null);
+  const [aiSearchBusy, setAiSearchBusy] = useState(false);
+  const [aiSearchError, setAiSearchError] = useState<string | null>(null);
+  const [aiSearchWarning, setAiSearchWarning] = useState<string | null>(null);
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
   const getKpiWidgetTimeRange = (widgetId: string): KpiTimeRangeDays =>
@@ -3291,6 +3312,113 @@ export function DashboardClient({
       : departmentInsights.find((entry) => entry.id === selectedDepartmentId)?.name ??
         "Unknown Department";
 
+  const runAiSearch = useCallback(async (options: { force?: boolean } = {}) => {
+    const normalizedSearchQuery = query.trim();
+    if (normalizedSearchQuery.length < 2) {
+      setAiSearchError(
+        options.force ? "Enter at least two characters for AI search." : null,
+      );
+      setAiSearchResults([]);
+      setAiSearchMode(null);
+      setAiSearchWarning(null);
+      aiSearchLastQueryKeyRef.current = "";
+      return;
+    }
+
+    const queryKey = `${normalizedSearchQuery.toLocaleLowerCase()}::${selectedDepartmentId}`;
+    if (!options.force && aiSearchLastQueryKeyRef.current === queryKey) {
+      return;
+    }
+    aiSearchLastQueryKeyRef.current = queryKey;
+    const requestId = aiSearchRequestIdRef.current + 1;
+    aiSearchRequestIdRef.current = requestId;
+
+    setAiSearchBusy(true);
+    setAiSearchError(null);
+    setAiSearchWarning(null);
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        throw new Error("Missing session token. Please sign in again.");
+      }
+
+      const response = await fetch("/api/search/ai", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          query: normalizedSearchQuery,
+          departmentId: selectedDepartmentId,
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        mode?: "ai" | "lexical";
+        openAiConfigured?: boolean;
+        warning?: string | null;
+        results?: DashboardAiSearchResult[];
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "AI search failed.");
+      }
+
+      if (aiSearchRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      setAiSearchResults(Array.isArray(payload.results) ? payload.results : []);
+      setAiSearchMode(payload.mode ?? null);
+      setAiSearchWarning(
+        payload.warning ??
+          (payload.openAiConfigured === false
+            ? "OPENAI_API_KEY is not configured, so results are ranked by controlled-document text."
+            : null),
+      );
+    } catch (caughtError) {
+      if (aiSearchRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      setAiSearchResults([]);
+      setAiSearchMode(null);
+      setAiSearchError(
+        caughtError instanceof Error ? caughtError.message : "AI search failed.",
+      );
+    } finally {
+      if (aiSearchRequestIdRef.current === requestId) {
+        setAiSearchBusy(false);
+      }
+    }
+  }, [query, selectedDepartmentId, supabase]);
+
+  useEffect(() => {
+    const normalizedSearchQuery = query.trim();
+
+    if (normalizedSearchQuery.length < 3) {
+      aiSearchLastQueryKeyRef.current = "";
+      setAiSearchResults([]);
+      setAiSearchMode(null);
+      setAiSearchWarning(null);
+      if (normalizedSearchQuery.length === 0) {
+        setAiSearchError(null);
+      }
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void runAiSearch();
+    }, 750);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [query, runAiSearch, selectedDepartmentId]);
+
   const departmentFilteredItems = useMemo(() => {
     if (selectedDepartmentId === "all") {
       return items;
@@ -3857,6 +3985,17 @@ export function DashboardClient({
       }
     })();
   }, [activeLikeCelebration?.latestNewLikeAt, activeLikeCelebration?.newLikesCount, supabase]);
+
+  useEffect(() => {
+    if (query.trim().length > 0) {
+      return;
+    }
+
+    setAiSearchResults([]);
+    setAiSearchError(null);
+    setAiSearchWarning(null);
+    setAiSearchMode(null);
+  }, [query]);
 
   const authoredDrilldownEntries = useMemo<ImpactDrilldownEntry[]>(() => {
     return [...myInstructionEntries]
@@ -5000,7 +5139,88 @@ export function DashboardClient({
                 ) : null}
               </div>
             </label>
+
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => void runAiSearch({ force: true })}
+                disabled={aiSearchBusy || query.trim().length < 2}
+                className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-1.5 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-55 dark:text-cyan-100"
+              >
+                {aiSearchBusy ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Sparkles size={14} />
+                )}
+                AI Search
+              </button>
+              {aiSearchMode ? (
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  {aiSearchMode === "ai" ? "OpenAI ranked" : "Controlled text ranked"}
+                </span>
+              ) : null}
+            </div>
           </div>
+
+          {aiSearchError || aiSearchWarning || aiSearchResults.length > 0 ? (
+            <div className="grid gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-3">
+              <div className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-slate-100">
+                <Sparkles size={15} className="text-cyan-700 dark:text-cyan-200" />
+                Suggested documents
+              </div>
+              {aiSearchError ? (
+                <p className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-700 dark:text-rose-200">
+                  {aiSearchError}
+                </p>
+              ) : null}
+              {aiSearchWarning ? (
+                <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+                  {aiSearchWarning}
+                </p>
+              ) : null}
+              {aiSearchResults.length > 0 ? (
+                <div className="grid gap-2">
+                  {aiSearchResults.map((result) => (
+                    <Link
+                      key={`${result.type}:${result.id}`}
+                      href={result.href}
+                      onClick={
+                        result.type === "instruction" ? persistInstructionReturnState : undefined
+                      }
+                      className="grid gap-1 rounded-lg border border-slate-300/70 bg-white/75 p-3 transition hover:bg-white dark:border-slate-700 dark:bg-slate-950/70 dark:hover:bg-slate-900"
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-cyan-500/40 bg-cyan-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-800 dark:text-cyan-200">
+                          {result.type === "process_document" ? (
+                            <FileText size={10} />
+                          ) : (
+                            <Search size={10} />
+                          )}
+                          {result.type === "process_document" ? "Process Doc" : "Instruction"}
+                        </span>
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                          Score {Math.round(result.score)}
+                        </span>
+                      </div>
+                      <p className="font-bold text-slate-900 dark:text-slate-100">
+                        {result.title}
+                      </p>
+                      <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                        {result.subtitle}
+                      </p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        {result.reason}
+                      </p>
+                    </Link>
+                  ))}
+                </div>
+              ) : !aiSearchError ? (
+                <p className="text-sm text-slate-600 dark:text-slate-300">
+                  No related documents found.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
 
           <div
             id="finder-department-insight-slider"
