@@ -50,6 +50,11 @@ interface InstructionLookupRow {
   fork_root_instruction_id: string | null;
   fork_number: number | null;
   body_markdown: string;
+  iso_clause_refs: string[] | null;
+  process_scope: string | null;
+  acceptance_criteria: string | null;
+  verification_records: string | null;
+  risk_controls: string | null;
   revision: number;
   is_archived: boolean;
   merged_into_root_at: string | null;
@@ -497,7 +502,7 @@ export async function POST(
   const { data: forkInstructionData, error: forkInstructionError } = await supabaseAdmin
     .from("work_instructions")
     .select(
-      "id, work_item_id, fork_root_instruction_id, fork_number, body_markdown, revision, is_archived, merged_into_root_at, merge_count, work_items(id, department_id, part_id, item_title, departments(name))",
+      "id, work_item_id, fork_root_instruction_id, fork_number, body_markdown, iso_clause_refs, process_scope, acceptance_criteria, verification_records, risk_controls, revision, is_archived, merged_into_root_at, merge_count, work_items(id, department_id, part_id, item_title, departments(name))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -541,7 +546,7 @@ export async function POST(
   const { data: rootInstructionData, error: rootInstructionError } = await supabaseAdmin
     .from("work_instructions")
     .select(
-      "id, work_item_id, fork_root_instruction_id, fork_number, body_markdown, revision, is_archived, merged_into_root_at, merge_count, work_items(id, department_id, part_id, item_title, departments(name))",
+      "id, work_item_id, fork_root_instruction_id, fork_number, body_markdown, iso_clause_refs, process_scope, acceptance_criteria, verification_records, risk_controls, revision, is_archived, merged_into_root_at, merge_count, work_items(id, department_id, part_id, item_title, departments(name))",
     )
     .eq("id", forkInstruction.fork_root_instruction_id)
     .maybeSingle();
@@ -729,6 +734,11 @@ export async function POST(
     last_change_summary: string;
     work_item_id?: string;
     body_markdown?: string;
+    iso_clause_refs?: string[];
+    process_scope?: string;
+    acceptance_criteria?: string;
+    verification_records?: string;
+    risk_controls?: string;
     revision?: number;
   } = {
     updated_by: requester.id,
@@ -740,6 +750,11 @@ export async function POST(
   }
   if (mergedFields.body) {
     rootUpdatePayload.body_markdown = forkInstruction.body_markdown;
+    rootUpdatePayload.iso_clause_refs = forkInstruction.iso_clause_refs ?? [];
+    rootUpdatePayload.process_scope = forkInstruction.process_scope ?? "";
+    rootUpdatePayload.acceptance_criteria = forkInstruction.acceptance_criteria ?? "";
+    rootUpdatePayload.verification_records = forkInstruction.verification_records ?? "";
+    rootUpdatePayload.risk_controls = forkInstruction.risk_controls ?? "";
   }
   if (mergedFields.revision) {
     rootUpdatePayload.revision = Math.max(1, forkInstruction.revision);

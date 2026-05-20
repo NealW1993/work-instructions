@@ -4,14 +4,26 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
+  Bell,
+  BookOpen,
   CalendarClock,
   CheckCircle2,
   ClipboardList,
+  Copy,
+  Download,
   FilePlus2,
   FileText,
+  Folder,
+  ImagePlus,
+  Link2,
+  List,
   Loader2,
+  MoreVertical,
+  Plus,
   Search,
   ShieldCheck,
+  Sparkles,
+  Type,
   Upload,
   UserRound,
 } from "lucide-react";
@@ -70,6 +82,8 @@ export interface ProcessDocumentListItem {
   owner_name: string | null;
   updated_by_name: string | null;
   approved_by_name: string | null;
+  document_cover_image_data_url: string;
+  document_cover_image_name: string;
 }
 
 export interface ProcessDocumentRevisionItem {
@@ -164,6 +178,8 @@ interface ProcessDocumentFormState {
   relatedInstructionIds: string[];
   isoClauseRefs: string[];
   bodyHtml: string;
+  documentCoverImageDataUrl: string;
+  documentCoverImageName: string;
   documentHeader: string;
   documentFooter: string;
   changeSummary: string;
@@ -182,6 +198,19 @@ interface ImportReport {
   warnings: string[];
 }
 
+interface PageExplainResponse {
+  explanation?: string;
+  error?: string;
+}
+
+type TemplateStudioPreset =
+  | "procedure"
+  | "form"
+  | "quality_record"
+  | "process_map";
+
+type EditorBlockType = "h1" | "h2" | "checklist" | "callout" | "control-table";
+
 const EMPTY_FORM: ProcessDocumentFormState = {
   documentNumber: "",
   title: "",
@@ -198,6 +227,8 @@ const EMPTY_FORM: ProcessDocumentFormState = {
   relatedInstructionIds: [],
   isoClauseRefs: ["4.4 QMS processes", "7.5 Documented information"],
   bodyHtml: "",
+  documentCoverImageDataUrl: "",
+  documentCoverImageName: "",
   documentHeader: "",
   documentFooter: "",
   changeSummary: "",
@@ -207,6 +238,12 @@ const EMPTY_FORM: ProcessDocumentFormState = {
   importedFileType: null,
   importedFileSize: null,
 };
+
+const PROCESS_DOCUMENT_AUTHORING_TYPE_OPTIONS = PROCESS_DOCUMENT_TYPE_OPTIONS.filter(
+  (option) => option.id !== "work_instruction",
+);
+
+const MAX_COVER_IMAGE_BYTES = 350_000;
 
 function statusTone(status: ProcessDocumentStatus) {
   switch (status) {
@@ -316,6 +353,18 @@ function extractVisibleText(html: string) {
     .trim();
 }
 
+function extractHeadingOutline(html: string) {
+  const matches = Array.from(html.matchAll(/<h([1-4])[^>]*>([\s\S]*?)<\/h\1>/gi));
+
+  return matches
+    .map((match, index) => ({
+      id: `doc-heading-${index}`,
+      level: Number(match[1]),
+      text: extractVisibleText(match[2] ?? ""),
+    }))
+    .filter((heading) => heading.text.length > 0);
+}
+
 function createBlankDocumentNumber(count: number) {
   return `QMS-${String(count + 1).padStart(3, "0")}`;
 }
@@ -341,8 +390,26 @@ function buildDocumentChrome(kind: "header" | "footer", text: string) {
   return `<section data-document-${kind}="true" style="${borderClass}margin:${kind === "header" ? "0 0 16px" : "16px 0 0"};padding:${kind === "header" ? "0 0 10px" : "10px 0 0"};color:#475569;font-size:12px;"><strong>${label}:</strong> ${escapeHtml(trimmed).replace(/\n/g, "<br />")}</section>`;
 }
 
+function buildDocumentCoverImage(imageSrc: string) {
+  const trimmed = imageSrc.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  return `<figure data-document-cover="true" style="margin:0 0 24px;overflow:hidden;border-radius:14px;border:1px solid #cbd5e1;"><img src="${escapeHtml(trimmed)}" alt="Document cover image" style="display:block;width:100%;max-height:260px;object-fit:cover;" /></figure>`;
+}
+
+function stripDocumentBuilderChrome(html: string) {
+  return html
+    .replace(/<figure\b[^>]*data-document-cover=["']true["'][\s\S]*?<\/figure>/gi, "")
+    .replace(/<section\b[^>]*data-document-header=["']true["'][\s\S]*?<\/section>/gi, "")
+    .replace(/<section\b[^>]*data-document-footer=["']true["'][\s\S]*?<\/section>/gi, "")
+    .trim();
+}
+
 function composeDocumentBodyHtml(form: ProcessDocumentFormState) {
   return [
+    buildDocumentCoverImage(form.documentCoverImageDataUrl),
     buildDocumentChrome("header", form.documentHeader),
     form.bodyHtml,
     buildDocumentChrome("footer", form.documentFooter),
@@ -367,7 +434,11 @@ export function ProcessDocumentsClient({
   const router = useRouter();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const coverImageInputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
+  const [selectedChannelId, setSelectedChannelId] = useState("all");
+  const [followUpdates, setFollowUpdates] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(
     initialDocumentId && documents.some((document) => document.id === initialDocumentId)
       ? initialDocumentId
@@ -380,6 +451,11 @@ export function ProcessDocumentsClient({
   const [importReport, setImportReport] = useState<ImportReport | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pageExplainBusy, setPageExplainBusy] = useState(false);
+  const [pageExplanation, setPageExplanation] = useState("");
+  const [pageExplainError, setPageExplainError] = useState<string | null>(null);
+  const [instructionSearchQuery, setInstructionSearchQuery] = useState("");
+  const [instructionAiSearchEnabled, setInstructionAiSearchEnabled] = useState(false);
 
   const revisionsByDocumentId = useMemo(() => {
     const map = new Map<string, ProcessDocumentRevisionItem[]>();
@@ -471,13 +547,143 @@ export function ProcessDocumentsClient({
     return issues;
   }, [creating, form]);
 
-  const filteredDocuments = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) {
-      return documents;
+  const primaryChannels = useMemo(
+    () => [
+      {
+        id: "all",
+        label: "All controlled docs",
+        count: documents.length,
+      },
+      {
+        id: "owned",
+        label: "My documents",
+        count: documents.filter((document) => document.owner_user_id === currentUserId).length,
+      },
+      {
+        id: "review",
+        label: "Needs review",
+        count: documents.filter((document) => document.status === "in_review").length,
+      },
+    ],
+    [currentUserId, documents],
+  );
+
+  const typeChannels = useMemo(
+    () =>
+      PROCESS_DOCUMENT_AUTHORING_TYPE_OPTIONS.map((option) => ({
+        id: `type:${option.id}`,
+        label: option.label,
+        count: documents.filter((document) => document.document_type === option.id).length,
+      })).filter((channel) => channel.count > 0),
+    [documents],
+  );
+
+  const departmentChannels = useMemo(
+    () =>
+      departments
+        .map((department) => ({
+          id: `department:${department.id}`,
+          label: department.name,
+          count: documents.filter((document) => document.department_id === department.id).length,
+        }))
+        .filter((channel) => channel.count > 0),
+    [departments, documents],
+  );
+
+  const authoringTemplates = useMemo(
+    () => templates.filter((template) => template.document_type !== "work_instruction"),
+    [templates],
+  );
+
+  const relatedInstructionOptions = useMemo(() => {
+    const selectedIds = new Set(form.relatedInstructionIds);
+    const typedQuery = instructionSearchQuery.trim().toLowerCase();
+    const aiContext = [
+      form.title,
+      form.documentNumber,
+      form.processName,
+      form.processScope,
+      form.processInputs,
+      form.processOutputs,
+      form.processControls,
+      ...form.isoClauseRefs,
+    ]
+      .join(" ")
+      .toLowerCase();
+    const queryTokens = (typedQuery || (instructionAiSearchEnabled ? aiContext : ""))
+      .split(/[^a-z0-9]+/i)
+      .map((token) => token.trim())
+      .filter((token) => token.length > 1);
+
+    if (!typedQuery && !instructionAiSearchEnabled) {
+      return instructions.filter((instruction) => selectedIds.has(instruction.id)).slice(0, 20);
     }
 
-    return documents.filter((document) => {
+    return instructions
+      .map((instruction) => {
+        const haystack = [
+          instruction.part_id,
+          instruction.department_name,
+          instruction.item_title,
+          `rev ${instruction.revision}`,
+        ]
+          .join(" ")
+          .toLowerCase();
+        const directMatch = typedQuery.length > 0 && haystack.includes(typedQuery);
+        const tokenScore = queryTokens.reduce(
+          (score, token) => score + (haystack.includes(token) ? 1 : 0),
+          0,
+        );
+        const score = (selectedIds.has(instruction.id) ? 100 : 0) + (directMatch ? 50 : 0) + tokenScore;
+        return { instruction, score };
+      })
+      .filter((entry) => entry.score > 0)
+      .sort((first, second) => second.score - first.score)
+      .slice(0, 14)
+      .map((entry) => entry.instruction);
+  }, [
+    form.documentNumber,
+    form.isoClauseRefs,
+    form.processControls,
+    form.processInputs,
+    form.processName,
+    form.processOutputs,
+    form.processScope,
+    form.relatedInstructionIds,
+    form.title,
+    instructionAiSearchEnabled,
+    instructionSearchQuery,
+    instructions,
+  ]);
+
+  const filteredDocuments = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+
+    const channelDocuments = documents.filter((document) => {
+      if (selectedChannelId === "owned") {
+        return document.owner_user_id === currentUserId;
+      }
+
+      if (selectedChannelId === "review") {
+        return document.status === "in_review";
+      }
+
+      if (selectedChannelId.startsWith("type:")) {
+        return document.document_type === selectedChannelId.replace("type:", "");
+      }
+
+      if (selectedChannelId.startsWith("department:")) {
+        return document.department_id === selectedChannelId.replace("department:", "");
+      }
+
+      return true;
+    });
+
+    if (!normalizedQuery) {
+      return channelDocuments;
+    }
+
+    return channelDocuments.filter((document) => {
       const haystack = [
         document.document_number,
         document.title,
@@ -494,7 +700,7 @@ export function ProcessDocumentsClient({
 
       return haystack.includes(normalizedQuery);
     });
-  }, [documents, query]);
+  }, [currentUserId, documents, query, selectedChannelId]);
 
   const documentDashboardStats = useMemo(() => {
     const statusCounts = {
@@ -563,7 +769,9 @@ export function ProcessDocumentsClient({
       processControls: selectedDocument.process_controls,
       relatedInstructionIds: selectedDocument.related_instruction_ids ?? [],
       isoClauseRefs: selectedDocument.iso_clause_refs ?? [],
-      bodyHtml: selectedRevision?.body_html ?? "",
+      bodyHtml: stripDocumentBuilderChrome(selectedRevision?.body_html ?? ""),
+      documentCoverImageDataUrl: selectedDocument.document_cover_image_data_url ?? "",
+      documentCoverImageName: selectedDocument.document_cover_image_name ?? "",
       documentHeader: "",
       documentFooter: "",
       changeSummary: "",
@@ -592,6 +800,57 @@ export function ProcessDocumentsClient({
     }
 
     return session.access_token;
+  }
+
+  async function explainProcessDocumentsPage() {
+    setPageExplainBusy(true);
+    setPageExplainError(null);
+
+    try {
+      const token = await getAccessToken();
+      const selectedInstructions = instructions
+        .filter((instruction) => form.relatedInstructionIds.includes(instruction.id))
+        .map(
+          (instruction) =>
+            `${instruction.part_id} ${instruction.item_title} Rev ${instruction.revision}`,
+        );
+      const context = [
+        `Document: ${form.documentNumber || selectedDocument?.document_number || "New document"}`,
+        `Title: ${form.title || selectedDocument?.title || "Untitled"}`,
+        `Type: ${getProcessDocumentTypeLabel(form.documentType)}`,
+        `Status: ${getProcessDocumentStatusLabel(form.status)}`,
+        `Process name: ${form.processName || "Not specified"}`,
+        `Scope: ${form.processScope || "Not specified"}`,
+        `Controls: ${form.processControls || "Not specified"}`,
+        `ISO clauses: ${form.isoClauseRefs.join("; ") || "None selected"}`,
+        `Related work instructions: ${selectedInstructions.join("; ") || "None selected"}`,
+        `Visible body text: ${extractVisibleText(form.bodyHtml || (selectedRevision?.body_html ?? "")).slice(0, 1800)}`,
+      ].join("\n");
+      const response = await fetch("/api/page-explain", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          pageType: "process_document",
+          context,
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as PageExplainResponse;
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to explain this page.");
+      }
+
+      setPageExplanation(payload.explanation ?? "");
+    } catch (caughtError) {
+      setPageExplainError(
+        caughtError instanceof Error ? caughtError.message : "Unable to explain this page.",
+      );
+    } finally {
+      setPageExplainBusy(false);
+    }
   }
 
   async function saveDocument(nextStatus: ProcessDocumentStatus) {
@@ -657,8 +916,9 @@ export function ProcessDocumentsClient({
       return;
     }
 
-    const template = templates.find((entry) => entry.id === templateId);
+    const template = authoringTemplates.find((entry) => entry.id === templateId);
     if (!template) {
+      setError("Work instructions are created from the Work Instruction page.");
       return;
     }
 
@@ -767,6 +1027,57 @@ export function ProcessDocumentsClient({
     }
   }
 
+  async function handleCoverImageFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    event.target.value = "";
+
+    if (!file) {
+      return;
+    }
+
+    if (!file.type.startsWith("image/")) {
+      setError("Choose an image file for the controlled document cover.");
+      return;
+    }
+
+    if (file.size > MAX_COVER_IMAGE_BYTES) {
+      setError(
+        `Cover image is too large. Choose an image under ${formatFileSize(
+          MAX_COVER_IMAGE_BYTES,
+        )}.`,
+      );
+      return;
+    }
+
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.addEventListener("load", () => {
+          if (typeof reader.result === "string") {
+            resolve(reader.result);
+          } else {
+            reject(new Error("Unable to read the selected image."));
+          }
+        });
+        reader.addEventListener("error", () => {
+          reject(new Error("Unable to read the selected image."));
+        });
+        reader.readAsDataURL(file);
+      });
+
+      updateForm("documentCoverImageDataUrl", dataUrl);
+      updateForm("documentCoverImageName", file.name);
+      setError(null);
+      setMessage("Cover image added.");
+    } catch (caughtError) {
+      setError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Unable to read the selected cover image.",
+      );
+    }
+  }
+
   function toggleClause(clause: string) {
     setForm((current) => {
       const active = current.isoClauseRefs.includes(clause);
@@ -779,21 +1090,121 @@ export function ProcessDocumentsClient({
     });
   }
 
-  function handleRelatedInstructionChange(event: ChangeEvent<HTMLSelectElement>) {
-    const nextIds = Array.from(event.currentTarget.selectedOptions).map(
-      (option) => option.value,
-    );
-    updateForm("relatedInstructionIds", nextIds);
+  function toggleRelatedInstruction(instructionId: string) {
+    setForm((current) => {
+      const selected = current.relatedInstructionIds.includes(instructionId);
+      return {
+        ...current,
+        relatedInstructionIds: selected
+          ? current.relatedInstructionIds.filter((id) => id !== instructionId)
+          : [...current.relatedInstructionIds, instructionId],
+      };
+    });
+  }
+
+  function appendEditorBlock(blockType: EditorBlockType) {
+    const snippets = {
+      h1: "<h1>New controlled section</h1><p>Describe the purpose, scope, or expected outcome.</p>",
+      h2: "<h2>Process detail</h2><p>Add the controlled requirement, method, or responsibility.</p>",
+      checklist:
+        "<h2>Verification checklist</h2><ul><li>Confirm the current revision is in use.</li><li>Record objective evidence.</li><li>Escalate exceptions to the process owner.</li></ul>",
+      callout:
+        '<blockquote><p><strong>Controlled note:</strong> Add a warning, quality requirement, or audit-sensitive instruction here.</p></blockquote>',
+      "control-table":
+        "<h2>Control table</h2><table><thead><tr><th>Control</th><th>Owner</th><th>Evidence</th><th>Frequency</th></tr></thead><tbody><tr><td>Process check</td><td>Owner</td><td>Record</td><td>Per use</td></tr></tbody></table>",
+    } satisfies Record<EditorBlockType, string>;
+
+    setForm((current) => ({
+      ...current,
+      bodyHtml: [current.bodyHtml, snippets[blockType]].filter(Boolean).join("\n"),
+    }));
+  }
+
+  function applyTemplateStudioPreset(preset: TemplateStudioPreset) {
+    const titles = {
+      procedure: "Standard Procedure",
+      form: "Controlled Form",
+      quality_record: "Quality Record",
+      process_map: "Process Map",
+    } satisfies Record<TemplateStudioPreset, string>;
+    const templateTitle = form.title.trim() || titles[preset];
+    const bodyHtml = {
+      procedure: `<h1>${escapeHtml(templateTitle)}</h1><p>Define the controlled process, responsibilities, and acceptance criteria.</p><h2>Purpose</h2><p>State why this procedure exists.</p><h2>Scope</h2><p>Define the departments, products, and records covered.</p><h2>Responsibilities</h2><table><thead><tr><th>Role</th><th>Responsibility</th></tr></thead><tbody><tr><td>Process owner</td><td>Maintains the procedure and review cadence.</td></tr><tr><td>Quality</td><td>Verifies compliance evidence.</td></tr></tbody></table><h2>Procedure</h2><ol><li>Start with the controlled input.</li><li>Perform the process step.</li><li>Record objective evidence.</li></ol><h2>Records</h2><p>List required records, retention, and storage location.</p>`,
+      form: `<h1>${escapeHtml(templateTitle)}</h1><p>Controlled form for repeatable data collection.</p><h2>Form fields</h2><table><thead><tr><th>Field</th><th>Required</th><th>Instructions</th></tr></thead><tbody><tr><td>Date</td><td>Yes</td><td>Enter completion date.</td></tr><tr><td>Reviewed by</td><td>Yes</td><td>Record reviewer name.</td></tr></tbody></table><h2>Submission</h2><p>Define where the completed form is stored.</p>`,
+      quality_record: `<h1>${escapeHtml(templateTitle)}</h1><p>Quality record template with traceability and retention details.</p><h2>Record identity</h2><table><thead><tr><th>Record field</th><th>Value</th></tr></thead><tbody><tr><td>Lot / job</td><td></td></tr><tr><td>Process</td><td></td></tr><tr><td>Reviewer</td><td></td></tr></tbody></table><h2>Objective evidence</h2><p>Attach or reference the evidence that proves the requirement was met.</p><h2>Retention</h2><p>Define retention period, storage location, and disposal rule.</p>`,
+      process_map: `<h1>${escapeHtml(templateTitle)}</h1><p>Controlled process map summary.</p><h2>Inputs</h2><p>List trigger events, materials, data, and customer requirements.</p><h2>Process flow</h2><ol><li>Start event</li><li>Core process step</li><li>Decision or inspection</li><li>Controlled output</li></ol><h2>Outputs and customers</h2><p>Define the receiving process, records, and acceptance criteria.</p><h2>Measures</h2><table><thead><tr><th>Metric</th><th>Target</th><th>Owner</th></tr></thead><tbody><tr><td>Quality</td><td></td><td></td></tr></tbody></table>`,
+    } satisfies Record<TemplateStudioPreset, string>;
+
+    setImportReport(null);
+    setForm((current) => ({
+      ...current,
+      title: current.title || templateTitle,
+      documentType: preset,
+      bodyHtml: bodyHtml[preset],
+      sourceType: "template",
+      templateId: null,
+      importedFileName: null,
+      importedFileType: null,
+      importedFileSize: null,
+      isoClauseRefs: Array.from(
+        new Set([...current.isoClauseRefs, "4.4 QMS processes", "7.5 Documented information"]),
+      ),
+    }));
+  }
+
+  async function copyTextToClipboard(value: string, successMessage: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setMessage(successMessage);
+      setError(null);
+      setActionsOpen(false);
+    } catch {
+      setError("Unable to copy to clipboard from this browser session.");
+    }
+  }
+
+  function exportCurrentDocumentHtml() {
+    const editing = Boolean(canEdit && (creating || selectedDocument));
+    const html = editing ? composeDocumentBodyHtml(form) : selectedRevision?.body_html ?? "";
+    const documentTitle =
+      form.title.trim() || selectedDocument?.title || selectedRevision?.title || "controlled-document";
+    const fileName = `${documentTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "controlled-document"}.html`;
+    const blob = new Blob([`<!doctype html><html><body>${html}</body></html>`], {
+      type: "text/html;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = fileName;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setActionsOpen(false);
   }
 
   const canApprove = canEdit;
   const canApproveCurrentForm = canApprove && approvalReadinessIssues.length === 0;
   const canObsolete = isSystemAdmin && Boolean(selectedDocument);
-  const showEditor = canEdit && (creating || selectedDocument);
+  const showEditor = Boolean(canEdit && (creating || selectedDocument));
+  const activeDocumentHtml = showEditor ? form.bodyHtml : selectedRevision?.body_html ?? "";
+  const documentOutline = useMemo(
+    () => extractHeadingOutline(activeDocumentHtml),
+    [activeDocumentHtml],
+  );
+  const selectedChannelLabel =
+    [...primaryChannels, ...typeChannels, ...departmentChannels].find(
+      (channel) => channel.id === selectedChannelId,
+    )?.label ?? "All controlled docs";
+  const executiveStats = [
+    ["Controlled", documentDashboardStats.total],
+    ["Approved", documentDashboardStats.statusCounts.approved],
+    ["In Review", documentDashboardStats.statusCounts.in_review],
+    ["Review Alerts", documentDashboardStats.overdueReviews + documentDashboardStats.dueSoonReviews],
+  ];
 
   return (
     <div className="mx-auto grid w-full max-w-7xl gap-5 px-4 py-6 md:px-8">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="overflow-hidden rounded-3xl border border-white/60 bg-gradient-to-br from-white via-cyan-50/80 to-slate-100 p-5 shadow-xl shadow-slate-200/70 backdrop-blur dark:border-white/10 dark:from-slate-950 dark:via-slate-900 dark:to-cyan-950/40 dark:shadow-black/20">
+        <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-extrabold tracking-tight text-slate-950 dark:text-slate-50">
             Process Documentation
@@ -803,20 +1214,92 @@ export function ProcessDocumentsClient({
           </p>
         </div>
 
-        {canEdit ? (
+        <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={startNewDocument}
-            className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-4 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
+            onClick={() => void explainProcessDocumentsPage()}
+            disabled={pageExplainBusy}
+            className="inline-flex items-center gap-2 rounded-xl border border-fuchsia-500/35 bg-fuchsia-500/10 px-4 py-2 text-sm font-semibold text-fuchsia-800 transition hover:bg-fuchsia-500/20 disabled:cursor-not-allowed disabled:opacity-60 dark:text-fuchsia-100"
           >
-            <FilePlus2 size={16} />
-            New Controlled Document
+            {pageExplainBusy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+            AI explain page
           </button>
-        ) : null}
+          {canEdit ? (
+            <button
+              type="button"
+              onClick={startNewDocument}
+              className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-4 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
+            >
+              <FilePlus2 size={16} />
+              New Controlled Document
+            </button>
+          ) : null}
+        </div>
+        </div>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(280px,0.35fr)_minmax(0,1fr)]">
-        <aside className="grid h-fit gap-3 rounded-xl border border-slate-300/70 bg-white/85 p-3 shadow-sm dark:border-slate-700 dark:bg-slate-950/75">
+      {pageExplainError ? (
+        <p className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-800 dark:text-rose-200">
+          {pageExplainError}
+        </p>
+      ) : null}
+      {pageExplanation ? (
+        <section className="rounded-2xl border border-fuchsia-500/25 bg-fuchsia-500/10 p-4 text-sm text-slate-700 shadow-sm dark:text-slate-200">
+          <div className="mb-2 flex items-center gap-2 font-extrabold text-slate-950 dark:text-slate-50">
+            <Sparkles size={16} className="text-fuchsia-700 dark:text-fuchsia-200" />
+            Simple explanation
+          </div>
+          <p>{pageExplanation}</p>
+        </section>
+      ) : null}
+
+      <section className="grid gap-3 rounded-2xl border border-white/50 bg-white/80 p-4 shadow-lg shadow-slate-200/60 backdrop-blur dark:border-white/10 dark:bg-slate-950/65 dark:shadow-black/20 md:grid-cols-[1fr_auto]">
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {executiveStats.map(([label, value]) => (
+            <div key={label} className="min-w-0 border-l-2 border-cyan-500/45 pl-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                {label}
+              </p>
+              <p className="truncate text-sm font-extrabold text-slate-950 dark:text-slate-50">
+                {value}
+              </p>
+            </div>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 md:justify-end">
+          <button
+            type="button"
+            onClick={() => {
+              document.getElementById("process-document-search")?.focus();
+            }}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-900"
+          >
+            <Search size={14} />
+            Find
+          </button>
+          {canEdit ? (
+            <button
+              type="button"
+              onClick={startNewDocument}
+              className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
+            >
+              <FilePlus2 size={14} />
+              New
+            </button>
+          ) : null}
+        </div>
+      </section>
+
+      <div className="grid gap-5 xl:grid-cols-[18rem_minmax(0,1fr)] 2xl:grid-cols-[18rem_minmax(0,1fr)_18rem]">
+        <aside id="doc-library" className="grid h-fit scroll-mt-24 gap-4 rounded-2xl border border-slate-300/70 bg-white/85 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/75 xl:sticky xl:top-24">
+          <div className="grid gap-1">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Workspace
+            </p>
+            <h2 className="text-base font-extrabold text-slate-950 dark:text-slate-50">
+              Controlled Documents
+            </h2>
+          </div>
           <label className="relative block">
             <span className="sr-only">Search controlled documents</span>
             <Search
@@ -824,14 +1307,115 @@ export function ProcessDocumentsClient({
               className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
             />
             <input
+              id="process-document-search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search documents"
               className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
             />
           </label>
+          {canEdit ? (
+            <button
+              type="button"
+              onClick={startNewDocument}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
+            >
+              <FilePlus2 size={15} />
+              New document
+            </button>
+          ) : null}
 
-          <div className="grid max-h-[72vh] gap-2 overflow-y-auto pr-1">
+          <div className="grid gap-3 border-t border-slate-200 pt-3 dark:border-slate-800">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Channels
+              </p>
+              <Folder size={14} className="text-slate-400" />
+            </div>
+            <div className="grid gap-1">
+              {primaryChannels.map((channel) => (
+                <button
+                  key={channel.id}
+                  type="button"
+                  onClick={() => setSelectedChannelId(channel.id)}
+                  className={cn(
+                    "flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-sm font-semibold transition",
+                    selectedChannelId === channel.id
+                      ? "bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
+                      : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900",
+                  )}
+                >
+                  <span className="truncate">{channel.label}</span>
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+                    {channel.count}
+                  </span>
+                </button>
+              ))}
+            </div>
+            {typeChannels.length > 0 ? (
+              <div className="grid gap-1">
+                <p className="px-2 pt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                  Document Types
+                </p>
+                {typeChannels.map((channel) => (
+                  <button
+                    key={channel.id}
+                    type="button"
+                    onClick={() => setSelectedChannelId(channel.id)}
+                    className={cn(
+                      "flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-sm font-semibold transition",
+                      selectedChannelId === channel.id
+                        ? "bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
+                        : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900",
+                    )}
+                  >
+                    <span className="truncate">{channel.label}</span>
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+                      {channel.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {departmentChannels.length > 0 ? (
+              <div className="grid gap-1">
+                <p className="px-2 pt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                  Departments
+                </p>
+                {departmentChannels.map((channel) => (
+                  <button
+                    key={channel.id}
+                    type="button"
+                    onClick={() => setSelectedChannelId(channel.id)}
+                    className={cn(
+                      "flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-sm font-semibold transition",
+                      selectedChannelId === channel.id
+                        ? "bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
+                        : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900",
+                    )}
+                  >
+                    <span className="truncate">{channel.label}</span>
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+                      {channel.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="grid gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                {selectedChannelLabel}
+              </p>
+              <span className="text-[11px] font-semibold text-slate-400">
+                {filteredDocuments.length}
+              </span>
+            </div>
+          </div>
+
+          <div className="grid max-h-[44vh] gap-2 overflow-y-auto pr-1">
             {filteredDocuments.length === 0 ? (
               <p className="rounded-lg border border-slate-300/70 bg-slate-50 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
                 No controlled documents found.
@@ -873,6 +1457,20 @@ export function ProcessDocumentsClient({
               ))
             )}
           </div>
+          <div className="grid gap-1 border-t border-slate-200 pt-3 text-sm dark:border-slate-800">
+            <Link
+              href="/process-maps"
+              className="rounded-lg px-2 py-1.5 font-semibold text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900"
+            >
+              Process Maps
+            </Link>
+            <Link
+              href="/dashboard"
+              className="rounded-lg px-2 py-1.5 font-semibold text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900"
+            >
+              Dashboard
+            </Link>
+          </div>
         </aside>
 
         <main className="grid min-w-0 gap-4">
@@ -888,7 +1486,7 @@ export function ProcessDocumentsClient({
           ) : null}
 
           {selectedDocument ? (
-            <section className="grid gap-3 rounded-xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
+            <section id="doc-dashboard" className="grid scroll-mt-24 gap-3 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-cyan-500/40 bg-cyan-500/15 text-cyan-700 dark:text-cyan-200">
@@ -1035,7 +1633,7 @@ export function ProcessDocumentsClient({
           ) : null}
 
           {!showEditor && selectedDocument && selectedRevision ? (
-            <section className="grid gap-4 rounded-xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
+            <section id="doc-editor" className="grid scroll-mt-24 gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
@@ -1063,7 +1661,7 @@ export function ProcessDocumentsClient({
           ) : null}
 
           {showEditor ? (
-            <section className="grid gap-4 rounded-xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
+            <section id="doc-editor" className="grid scroll-mt-24 gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-cyan-500/40 bg-cyan-500/15 text-cyan-700 dark:text-cyan-200">
@@ -1089,7 +1687,7 @@ export function ProcessDocumentsClient({
                     aria-label="Apply template"
                   >
                     <option value="">Apply template</option>
-                    {templates.map((template) => (
+                    {authoringTemplates.map((template) => (
                       <option key={template.id} value={template.id}>
                         {template.name}
                       </option>
@@ -1143,7 +1741,12 @@ export function ProcessDocumentsClient({
                     }
                     className="rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
                   >
-                    {PROCESS_DOCUMENT_TYPE_OPTIONS.map((option) => (
+                    {form.documentType === "work_instruction" ? (
+                      <option value="work_instruction" disabled>
+                        Work Instruction - use Work Instruction page
+                      </option>
+                    ) : null}
+                    {PROCESS_DOCUMENT_AUTHORING_TYPE_OPTIONS.map((option) => (
                       <option key={option.id} value={option.id}>
                         {option.label}
                       </option>
@@ -1191,6 +1794,19 @@ export function ProcessDocumentsClient({
                     className="rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
                   />
                 </label>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-sm text-slate-700 dark:text-slate-200">
+                <span className="inline-flex items-center gap-2">
+                  <FileText size={15} className="text-cyan-700 dark:text-cyan-200" />
+                  Work instructions are authored from the dedicated Work Instruction page and can be linked here as controlled references.
+                </span>
+                <Link
+                  href="/instructions/new"
+                  className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/35 bg-white px-3 py-1.5 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-50 dark:bg-slate-950 dark:text-cyan-100 dark:hover:bg-slate-900"
+                >
+                  Open Work Instruction
+                </Link>
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">
@@ -1259,23 +1875,225 @@ export function ProcessDocumentsClient({
                   </div>
                 </fieldset>
 
-                <label className="grid gap-1 text-sm">
-                  <span className="font-semibold">Related Work Instructions</span>
-                  <select
-                    multiple
-                    value={form.relatedInstructionIds}
-                    onChange={handleRelatedInstructionChange}
-                    className="min-h-44 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                  >
-                    {instructions.map((instruction) => (
-                      <option key={instruction.id} value={instruction.id}>
-                        {instruction.part_id} | {instruction.department_name} |{" "}
-                        {instruction.item_title} | Rev {instruction.revision}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <section className="grid gap-2 rounded-lg border border-slate-300/70 p-3 text-sm dark:border-slate-700">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-semibold">Related Work Instructions</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={instructionAiSearchEnabled}
+                      onClick={() => setInstructionAiSearchEnabled((current) => !current)}
+                      className={cn(
+                        "inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition",
+                        instructionAiSearchEnabled
+                          ? "border-fuchsia-500/40 bg-fuchsia-500/15 text-fuchsia-800 dark:text-fuchsia-100"
+                          : "border-slate-300 bg-white text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300",
+                      )}
+                    >
+                      <Sparkles size={12} />
+                      AI search
+                    </button>
+                  </div>
+                  <label className="relative block">
+                    <span className="sr-only">Search related work instructions</span>
+                    <Search
+                      size={15}
+                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                    />
+                    <input
+                      value={instructionSearchQuery}
+                      onChange={(event) => setInstructionSearchQuery(event.target.value)}
+                      placeholder={
+                        instructionAiSearchEnabled
+                          ? "AI search from this document context..."
+                          : "Search part, title, or department..."
+                      }
+                      className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                    />
+                  </label>
+                  {form.relatedInstructionIds.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {instructions
+                        .filter((instruction) => form.relatedInstructionIds.includes(instruction.id))
+                        .map((instruction) => (
+                          <button
+                            key={instruction.id}
+                            type="button"
+                            onClick={() => toggleRelatedInstruction(instruction.id)}
+                            className="rounded-full border border-cyan-500/35 bg-cyan-500/10 px-2.5 py-1 text-[11px] font-semibold text-cyan-900 transition hover:bg-cyan-500/20 dark:text-cyan-100"
+                          >
+                            {instruction.part_id} | Rev {instruction.revision} x
+                          </button>
+                        ))}
+                    </div>
+                  ) : null}
+                  <div className="grid max-h-56 gap-2 overflow-y-auto pr-1">
+                    {relatedInstructionOptions.length === 0 ? (
+                      <p className="rounded-lg border border-slate-300/70 bg-slate-50 p-3 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-400">
+                        {instructionSearchQuery || instructionAiSearchEnabled
+                          ? "No matching work instructions found."
+                          : "Search to find and link work instructions."}
+                      </p>
+                    ) : (
+                      relatedInstructionOptions.map((instruction) => (
+                        <label
+                          key={instruction.id}
+                          className="flex cursor-pointer items-start gap-2 rounded-lg border border-slate-300/70 bg-white/75 p-2 transition hover:border-cyan-400 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-950/60"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={form.relatedInstructionIds.includes(instruction.id)}
+                            onChange={() => toggleRelatedInstruction(instruction.id)}
+                            className="mt-1 h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
+                          />
+                          <span className="grid min-w-0 gap-0.5">
+                            <span className="truncate text-xs font-bold text-slate-900 dark:text-slate-100">
+                              {instruction.part_id} | {instruction.item_title}
+                            </span>
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                              {instruction.department_name} | Rev {instruction.revision}
+                            </span>
+                          </span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </section>
               </div>
+
+              <section className="grid gap-4 rounded-xl border border-slate-300/70 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-900/45">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="inline-flex items-center gap-2 text-sm font-extrabold text-slate-950 dark:text-slate-50">
+                      <Sparkles size={16} className="text-cyan-700 dark:text-cyan-200" />
+                      Template Builder
+                    </div>
+                    <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                      Build a controlled document layout with a cover image, standard ISO
+                      sections, and rich text blocks.
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-cyan-500/35 bg-cyan-500/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-cyan-800 dark:text-cyan-100">
+                    Slite-style workspace
+                  </span>
+                </div>
+
+                <div className="grid gap-3 lg:grid-cols-[0.85fr_1.15fr]">
+                  <div className="grid gap-2 text-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-semibold">Cover image</span>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => coverImageInputRef.current?.click()}
+                          className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+                        >
+                          <ImagePlus size={14} />
+                          Choose image
+                        </button>
+                        {form.documentCoverImageDataUrl ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setForm((current) => ({
+                                ...current,
+                                documentCoverImageDataUrl: "",
+                                documentCoverImageName: "",
+                              }))
+                            }
+                            className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200"
+                          >
+                            Remove
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                    <input
+                      ref={coverImageInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(event) => void handleCoverImageFile(event)}
+                    />
+                    <div className="grid min-h-32 place-items-center overflow-hidden rounded-xl border border-dashed border-slate-300 bg-white/70 text-slate-500 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-400">
+                      {form.documentCoverImageDataUrl.trim() ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={form.documentCoverImageDataUrl}
+                          alt="Document cover preview"
+                          className="h-32 w-full object-cover"
+                        />
+                      ) : (
+                        <span className="inline-flex items-center gap-2 text-xs font-semibold">
+                          <ImagePlus size={16} />
+                          Add cover image
+                        </span>
+                      )}
+                    </div>
+                    {form.documentCoverImageName ? (
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        Stored with this document: {form.documentCoverImageName}
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div className="grid gap-3">
+                    <div className="grid gap-2">
+                      <p className="text-sm font-semibold">Preset layouts</p>
+                      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                        {(
+                          [
+                            ["procedure", "Procedure"],
+                            ["form", "Form"],
+                            ["quality_record", "Quality Record"],
+                            ["process_map", "Process Map"],
+                          ] as const
+                        ).map(([preset, label]) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => applyTemplateStudioPreset(preset)}
+                            className={cn(
+                              "inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition",
+                              form.documentType === preset
+                                ? "border-cyan-500/45 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
+                                : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900",
+                            )}
+                          >
+                            <FileText size={14} />
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <p className="text-sm font-semibold">Text blocks</p>
+                      <div className="flex flex-wrap gap-2">
+                        {(
+                          [
+                            ["h1", "H1"],
+                            ["h2", "H2"],
+                            ["checklist", "Checklist"],
+                            ["callout", "Callout"],
+                            ["control-table", "Control Table"],
+                          ] as const
+                        ).map(([blockType, label]) => (
+                          <button
+                            key={blockType}
+                            type="button"
+                            onClick={() => appendEditorBlock(blockType)}
+                            className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+                          >
+                            <Type size={14} />
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
 
               <section className="grid gap-3 rounded-lg border border-slate-300/70 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-900/45">
                 <div>
@@ -1435,8 +2253,8 @@ export function ProcessDocumentsClient({
           ) : null}
 
           {selectedDocument ? (
-            <div className="grid gap-4 xl:grid-cols-2">
-              <section className="grid gap-3 rounded-xl border border-slate-300/70 bg-white/85 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/75">
+            <div id="doc-history" className="grid scroll-mt-24 gap-4 xl:grid-cols-2">
+              <section className="grid gap-3 rounded-2xl border border-slate-300/70 bg-white/85 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/75">
                 <h3 className="text-lg font-extrabold text-slate-950 dark:text-slate-50">
                   Revision History
                 </h3>
@@ -1468,7 +2286,7 @@ export function ProcessDocumentsClient({
                 </div>
               </section>
 
-              <section className="grid gap-3 rounded-xl border border-slate-300/70 bg-white/85 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/75">
+              <section className="grid gap-3 rounded-2xl border border-slate-300/70 bg-white/85 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/75">
                 <h3 className="text-lg font-extrabold text-slate-950 dark:text-slate-50">
                   Audit Trail
                 </h3>
@@ -1501,27 +2319,26 @@ export function ProcessDocumentsClient({
               </section>
             </div>
           ) : !showEditor ? (
-            <section className="grid gap-4 rounded-xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
+            <section id="doc-dashboard" className="grid scroll-mt-24 gap-6 rounded-2xl border border-slate-300/70 bg-white/90 p-6 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="flex items-start gap-3">
-                  <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-cyan-500/40 bg-cyan-500/15 text-cyan-700 dark:text-cyan-200">
-                    <ShieldCheck size={20} />
-                  </span>
-                  <div>
-                    <h2 className="text-xl font-extrabold text-slate-950 dark:text-slate-50">
-                      Document Control Dashboard
-                    </h2>
-                    <p className="text-sm text-slate-600 dark:text-slate-300">
-                      Review controlled documents, approval status, template usage, imports, and
-                      ISO review timing before opening a record.
-                    </p>
-                  </div>
+                <div>
+                  <p className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Controlled Document Storage
+                  </p>
+                  <h2 className="mt-2 max-w-3xl text-3xl font-extrabold tracking-tight text-slate-950 dark:text-slate-50 md:text-4xl">
+                    Process documentation workspace
+                  </h2>
+                  <p className="mt-3 max-w-2xl text-sm text-slate-600 dark:text-slate-300">
+                    Use the library on the left to open controlled documents. Create new
+                    procedures, work instructions, forms, and process maps with approval evidence
+                    and revision history.
+                  </p>
                 </div>
                 {canEdit ? (
                   <button
                     type="button"
                     onClick={startNewDocument}
-                    className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
+                    className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-4 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
                   >
                     <FilePlus2 size={15} />
                     New Document
@@ -1529,30 +2346,8 @@ export function ProcessDocumentsClient({
                 ) : null}
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                {[
-                  ["Controlled", documentDashboardStats.total],
-                  ["In Review", documentDashboardStats.statusCounts.in_review],
-                  ["Approved", documentDashboardStats.statusCounts.approved],
-                  ["Review Alerts", documentDashboardStats.overdueReviews + documentDashboardStats.dueSoonReviews],
-                  ["Imports", documentDashboardStats.importedRevisions],
-                ].map(([label, value]) => (
-                  <div
-                    key={label}
-                    className="rounded-lg border border-slate-300/70 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-900/50"
-                  >
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                      {label}
-                    </p>
-                    <p className="text-2xl font-extrabold text-slate-950 dark:text-slate-50">
-                      {value}
-                    </p>
-                  </div>
-                ))}
-              </div>
-
               <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-                <section className="grid gap-3 rounded-lg border border-slate-300/70 p-3 dark:border-slate-700">
+                <section className="grid gap-3 rounded-xl border border-slate-300/70 p-4 dark:border-slate-700">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h3 className="text-base font-extrabold text-slate-950 dark:text-slate-50">
                       Recently Updated
@@ -1594,13 +2389,12 @@ export function ProcessDocumentsClient({
                     </div>
                   ) : (
                     <div className="grid gap-2 rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300">
-                      <FileText size={22} />
                       <p>No controlled documents are available yet.</p>
                     </div>
                   )}
                 </section>
 
-                <section className="grid content-start gap-3 rounded-lg border border-slate-300/70 p-3 text-sm dark:border-slate-700">
+                <section className="grid content-start gap-3 rounded-xl border border-slate-300/70 p-4 text-sm dark:border-slate-700">
                   <h3 className="text-base font-extrabold text-slate-950 dark:text-slate-50">
                     ISO Readiness
                   </h3>
@@ -1649,6 +2443,183 @@ export function ProcessDocumentsClient({
             </section>
           ) : null}
         </main>
+
+        <aside className="hidden h-fit gap-4 2xl:sticky 2xl:top-24 2xl:grid">
+          <section className="grid gap-3 rounded-2xl border border-slate-300/70 bg-white/85 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/75">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <BookOpen size={16} className="text-slate-500" />
+                <h2 className="text-sm font-extrabold text-slate-950 dark:text-slate-50">
+                  Table of Contents
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActionsOpen((current) => !current)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-900"
+                aria-label="Open document options"
+              >
+                <MoreVertical size={16} />
+              </button>
+            </div>
+
+            {actionsOpen ? (
+              <div className="grid gap-1 rounded-xl border border-slate-300 bg-white p-2 text-sm shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                <button
+                  type="button"
+                  onClick={() =>
+                    void copyTextToClipboard(
+                      selectedDocument
+                        ? `${window.location.origin}/process-documents?doc=${selectedDocument.id}`
+                        : window.location.href,
+                      "Document link copied.",
+                    )
+                  }
+                  className="inline-flex items-center gap-2 rounded-lg px-2 py-2 text-left font-semibold text-slate-700 transition hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  <Link2 size={15} />
+                  Copy link
+                </button>
+                <button
+                  type="button"
+                  disabled={!selectedDocument}
+                  onClick={() =>
+                    selectedDocument
+                      ? void copyTextToClipboard(selectedDocument.id, "Document ID copied.")
+                      : undefined
+                  }
+                  className="inline-flex items-center gap-2 rounded-lg px-2 py-2 text-left font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  <Copy size={15} />
+                  Copy doc id
+                </button>
+                <button
+                  type="button"
+                  onClick={exportCurrentDocumentHtml}
+                  className="inline-flex items-center gap-2 rounded-lg px-2 py-2 text-left font-semibold text-slate-700 transition hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  <Download size={15} />
+                  Export HTML
+                </button>
+              </div>
+            ) : null}
+
+            {selectedReviewStatus ? (
+              <span
+                className={cn(
+                  "inline-flex w-fit items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold uppercase tracking-wide",
+                  selectedReviewStatus.tone,
+                )}
+              >
+                <CheckCircle2 size={13} />
+                {selectedReviewStatus.label}
+              </span>
+            ) : (
+              <span className="inline-flex w-fit rounded-full border border-slate-300 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                Workspace
+              </span>
+            )}
+
+            {documentOutline.length > 0 ? (
+              <nav className="grid gap-1">
+                {documentOutline.map((heading) => (
+                  <button
+                    key={heading.id}
+                    type="button"
+                    onClick={() =>
+                      document.getElementById("doc-editor")?.scrollIntoView({
+                        behavior: "smooth",
+                        block: "start",
+                      })
+                    }
+                    className={cn(
+                      "truncate rounded-lg py-1.5 text-left text-sm text-slate-600 transition hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-slate-50",
+                      heading.level === 1 && "px-2 font-bold",
+                      heading.level === 2 && "pl-5 pr-2",
+                      heading.level >= 3 && "pl-8 pr-2 text-xs",
+                    )}
+                    title={heading.text}
+                  >
+                    {heading.text}
+                  </button>
+                ))}
+              </nav>
+            ) : (
+              <div className="grid gap-2 rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                <List size={22} />
+                <p>Add H1, H2, H3, or H4 headings to generate a table of contents.</p>
+              </div>
+            )}
+          </section>
+
+          <section className="grid gap-2 rounded-2xl border border-slate-300/70 bg-white/85 p-4 text-sm shadow-sm dark:border-slate-700 dark:bg-slate-950/75">
+            <h2 className="text-sm font-extrabold text-slate-950 dark:text-slate-50">
+              Document Options
+            </h2>
+            <button
+              type="button"
+              onClick={() => setFollowUpdates((current) => !current)}
+              className="flex items-center justify-between gap-3 rounded-lg px-2 py-2 font-semibold text-slate-700 transition hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900"
+            >
+              <span className="inline-flex items-center gap-2">
+                <Bell size={15} />
+                Follow updates
+              </span>
+              <span
+                className={cn(
+                  "h-5 w-9 rounded-full border p-0.5 transition",
+                  followUpdates
+                    ? "border-cyan-500 bg-cyan-500/30"
+                    : "border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-800",
+                )}
+              >
+                <span
+                  className={cn(
+                    "block h-3.5 w-3.5 rounded-full bg-white shadow transition",
+                    followUpdates && "translate-x-4",
+                  )}
+                />
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => document.getElementById("doc-history")?.scrollIntoView({ behavior: "smooth" })}
+              className="inline-flex items-center gap-2 rounded-lg px-2 py-2 font-semibold text-slate-700 transition hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900"
+            >
+              <CalendarClock size={15} />
+              History
+            </button>
+            <button
+              type="button"
+              onClick={() => document.getElementById("doc-library")?.scrollIntoView({ behavior: "smooth" })}
+              className="inline-flex items-center gap-2 rounded-lg px-2 py-2 font-semibold text-slate-700 transition hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900"
+            >
+              <Search size={15} />
+              Search library
+            </button>
+          </section>
+
+          <section className="grid gap-2 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-4 text-sm text-cyan-950 shadow-sm dark:text-cyan-100">
+            <div className="inline-flex items-center gap-2 font-extrabold">
+              <Sparkles size={16} />
+              Template Builder
+            </div>
+            <p className="text-xs text-cyan-900/80 dark:text-cyan-100/75">
+              Use the editor controls for cover image, preset layouts, headings, callouts,
+              checklists, and control tables.
+            </p>
+            {canEdit ? (
+              <button
+                type="button"
+                onClick={creating || selectedDocument ? undefined : startNewDocument}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/40 bg-white/70 px-3 py-2 text-xs font-semibold text-cyan-900 transition hover:bg-white dark:bg-slate-950/60 dark:text-cyan-100 dark:hover:bg-slate-900"
+              >
+                <Plus size={14} />
+                {showEditor ? "Builder Active" : "Start Template"}
+              </button>
+            ) : null}
+          </section>
+        </aside>
       </div>
     </div>
   );

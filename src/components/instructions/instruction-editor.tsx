@@ -13,6 +13,7 @@ import { createPortal } from "react-dom";
 
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { registerArchivedInstructionRedirect } from "@/components/instructions/instruction-archived-redirect-state";
+import { ISO_9001_CLAUSE_OPTIONS } from "@/lib/process-documents";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { cn, escapeLikeQuery } from "@/lib/utils";
 
@@ -33,6 +34,11 @@ interface InstructionEditorProps {
     revision: number;
     suggestedToolIds?: string[];
     uncommonTools?: string;
+    isoClauseRefs?: string[];
+    processScope?: string;
+    acceptanceCriteria?: string;
+    verificationRecords?: string;
+    riskControls?: string;
   };
 }
 
@@ -64,6 +70,11 @@ interface EditorSnapshot {
   revision: number;
   selectedToolIds: string[];
   uncommonTools: string;
+  isoClauseRefs: string[];
+  processScope: string;
+  acceptanceCriteria: string;
+  verificationRecords: string;
+  riskControls: string;
 }
 
 interface SuggestedToolOption {
@@ -161,6 +172,12 @@ const DEFAULT_FIELD_ERRORS: FieldErrors = {
   revision: false,
   body: false,
 };
+
+const DEFAULT_INSTRUCTION_ISO_CLAUSES = [
+  "7.5 Documented information",
+  "8.5 Production and service provision",
+  "8.6 Release of products and services",
+];
 
 const HISTORY_GUARD_STATE_KEY = "__instructionEditorUnsavedGuard";
 
@@ -343,6 +360,19 @@ function normalizeSnapshotValue(value: string) {
   return value.trim();
 }
 
+function normalizeInstructionIsoClauseRefs(value: string[] | null | undefined) {
+  const allowed = new Set<string>(ISO_9001_CLAUSE_OPTIONS);
+  return Array.from(
+    new Set((value ?? []).map((entry) => entry.trim()).filter((entry) => allowed.has(entry))),
+  );
+}
+
+function normalizeInstructionIsoClauseRefsOrDefault(value: string[] | null | undefined) {
+  const normalized = normalizeInstructionIsoClauseRefs(value);
+
+  return normalized.length > 0 ? normalized : DEFAULT_INSTRUCTION_ISO_CLAUSES;
+}
+
 function parseToolNameList(value: string) {
   const parsed = value
     .split(",")
@@ -408,6 +438,11 @@ function buildSnapshot(data: {
   revision: number;
   selectedToolIds: string[];
   uncommonTools: string;
+  isoClauseRefs: string[];
+  processScope: string;
+  acceptanceCriteria: string;
+  verificationRecords: string;
+  riskControls: string;
 }): EditorSnapshot {
   const normalizedToolIds = Array.from(
     new Set(data.selectedToolIds.map((value) => value.trim()).filter(Boolean)),
@@ -421,6 +456,13 @@ function buildSnapshot(data: {
     revision: data.revision,
     selectedToolIds: normalizedToolIds,
     uncommonTools: normalizeSnapshotValue(data.uncommonTools),
+    isoClauseRefs: normalizeInstructionIsoClauseRefs(data.isoClauseRefs).sort((first, second) =>
+      first.localeCompare(second),
+    ),
+    processScope: normalizeSnapshotValue(data.processScope),
+    acceptanceCriteria: normalizeSnapshotValue(data.acceptanceCriteria),
+    verificationRecords: normalizeSnapshotValue(data.verificationRecords),
+    riskControls: normalizeSnapshotValue(data.riskControls),
   };
 }
 
@@ -755,6 +797,12 @@ function snapshotsAreEqual(a: EditorSnapshot, b: EditorSnapshot) {
     a.bodyMarkdown === b.bodyMarkdown &&
     a.revision === b.revision &&
     a.uncommonTools === b.uncommonTools &&
+    a.processScope === b.processScope &&
+    a.acceptanceCriteria === b.acceptanceCriteria &&
+    a.verificationRecords === b.verificationRecords &&
+    a.riskControls === b.riskControls &&
+    a.isoClauseRefs.length === b.isoClauseRefs.length &&
+    a.isoClauseRefs.every((value, index) => value === b.isoClauseRefs[index]) &&
     a.selectedToolIds.length === b.selectedToolIds.length &&
     a.selectedToolIds.every((value, index) => value === b.selectedToolIds[index])
   );
@@ -826,6 +874,17 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     normalizeEditorContent(initialData?.bodyMarkdown ?? ""),
   );
   const [revision, setRevision] = useState(initialData?.revision ?? 1);
+  const [isoClauseRefs, setIsoClauseRefs] = useState<string[]>(() =>
+    normalizeInstructionIsoClauseRefsOrDefault(initialData?.isoClauseRefs),
+  );
+  const [processScope, setProcessScope] = useState(initialData?.processScope ?? "");
+  const [acceptanceCriteria, setAcceptanceCriteria] = useState(
+    initialData?.acceptanceCriteria ?? "",
+  );
+  const [verificationRecords, setVerificationRecords] = useState(
+    initialData?.verificationRecords ?? "",
+  );
+  const [riskControls, setRiskControls] = useState(initialData?.riskControls ?? "");
   const [suggestedTools, setSuggestedTools] = useState<SuggestedToolOption[]>([]);
   const [selectedToolIds, setSelectedToolIds] = useState<string[]>(
     initialData?.suggestedToolIds ?? [],
@@ -889,6 +948,11 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         revision: initialData?.revision ?? 1,
         selectedToolIds: initialData?.suggestedToolIds ?? [],
         uncommonTools: serializeToolNameList(parseToolNameList(initialData?.uncommonTools ?? "")),
+        isoClauseRefs: normalizeInstructionIsoClauseRefsOrDefault(initialData?.isoClauseRefs),
+        processScope: initialData?.processScope ?? "",
+        acceptanceCriteria: initialData?.acceptanceCriteria ?? "",
+        verificationRecords: initialData?.verificationRecords ?? "",
+        riskControls: initialData?.riskControls ?? "",
       }),
     [initialData],
   );
@@ -903,8 +967,26 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         revision,
         selectedToolIds,
         uncommonTools: serializeToolNameList(uncommonToolList),
+        isoClauseRefs,
+        processScope,
+        acceptanceCriteria,
+        verificationRecords,
+        riskControls,
       }),
-    [bodyMarkdown, departmentId, itemTitle, partId, revision, selectedToolIds, uncommonToolList],
+    [
+      acceptanceCriteria,
+      bodyMarkdown,
+      departmentId,
+      isoClauseRefs,
+      itemTitle,
+      partId,
+      processScope,
+      revision,
+      riskControls,
+      selectedToolIds,
+      uncommonToolList,
+      verificationRecords,
+    ],
   );
   const hasPendingCommonToolChanges = useMemo(
     () => Object.keys(pendingCommonToolChanges).length > 0,
@@ -912,12 +994,19 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   );
 
   const createModeHasMeaningfulChanges = useMemo(() => {
+    const hasIsoContextChanges =
+      currentSnapshot.isoClauseRefs.join("\n") !== initialSnapshot.isoClauseRefs.join("\n") ||
+      currentSnapshot.processScope.length > 0 ||
+      currentSnapshot.acceptanceCriteria.length > 0 ||
+      currentSnapshot.verificationRecords.length > 0 ||
+      currentSnapshot.riskControls.length > 0;
     const hasContentChanges =
       currentSnapshot.partId.length > 0 ||
       currentSnapshot.itemTitle.length > 0 ||
       currentSnapshot.revision !== initialSnapshot.revision ||
       currentSnapshot.selectedToolIds.length > 0 ||
       currentSnapshot.uncommonTools.length > 0 ||
+      hasIsoContextChanges ||
       uncommonToolsInput.trim().length > 0 ||
       hasPendingCommonToolChanges ||
       richTextToPlain(currentSnapshot.bodyMarkdown).length > 0;
@@ -930,8 +1019,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   }, [
     currentSnapshot,
     departmentTouched,
-    initialSnapshot.departmentId,
-    initialSnapshot.revision,
+    initialSnapshot,
     hasPendingCommonToolChanges,
     uncommonToolsInput,
   ]);
@@ -954,6 +1042,16 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   );
 
   const selectedToolSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
+
+  function toggleIsoClauseRef(clause: string) {
+    setIsoClauseRefs((current) => {
+      const active = current.includes(clause);
+      return active
+        ? current.filter((entry) => entry !== clause)
+        : [...current, clause];
+    });
+  }
+
   const commonToolOptions = useMemo(
     () =>
       suggestedTools
@@ -1981,6 +2079,11 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           itemTitle: itemTitle.trim(),
           departmentName: selectedDepartmentName,
           revision,
+          isoClauseRefs,
+          processScope: processScope.trim(),
+          acceptanceCriteria: acceptanceCriteria.trim(),
+          verificationRecords: verificationRecords.trim(),
+          riskControls: riskControls.trim(),
           instructionId: initialData?.instructionId ?? null,
           sourceInstructionId: initialData?.sourceInstructionId ?? null,
           mode,
@@ -2356,6 +2459,11 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           body_markdown: string;
           notes_markdown: string;
           uncommon_tools: string;
+          iso_clause_refs: string[];
+          process_scope: string;
+          acceptance_criteria: string;
+          verification_records: string;
+          risk_controls: string;
           revision: number;
           last_change_summary: string;
           created_by: string;
@@ -2372,6 +2480,11 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           body_markdown: bodyMarkdown,
           notes_markdown: "",
           uncommon_tools: serializeToolNameList(uncommonToolList),
+          iso_clause_refs: isoClauseRefs,
+          process_scope: processScope.trim(),
+          acceptance_criteria: acceptanceCriteria.trim(),
+          verification_records: verificationRecords.trim(),
+          risk_controls: riskControls.trim(),
           revision,
           last_change_summary: changeSummary,
           created_by: user.id,
@@ -2466,6 +2579,11 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           body_markdown: string;
           notes_markdown: string;
           uncommon_tools: string;
+          iso_clause_refs: string[];
+          process_scope: string;
+          acceptance_criteria: string;
+          verification_records: string;
+          risk_controls: string;
           revision: number;
           last_change_summary: string;
           updated_by: string;
@@ -2477,6 +2595,11 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           body_markdown: bodyMarkdown,
           notes_markdown: "",
           uncommon_tools: serializeToolNameList(uncommonToolList),
+          iso_clause_refs: isoClauseRefs,
+          process_scope: processScope.trim(),
+          acceptance_criteria: acceptanceCriteria.trim(),
+          verification_records: verificationRecords.trim(),
+          risk_controls: riskControls.trim(),
           revision,
           last_change_summary: changeSummary,
           updated_by: user.id,
@@ -2826,6 +2949,73 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
             />
           </label>
         </div>
+
+        <section className="grid gap-3 rounded-2xl border border-slate-300/70 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-900/50">
+          <div>
+            <h2 className="text-base font-extrabold text-slate-900 dark:text-slate-100">
+              ISO / Control Context
+            </h2>
+            <p className="text-xs text-slate-600 dark:text-slate-300">
+              Capture the audit-sensitive scope, acceptance criteria, records, and reaction controls for this instruction.
+            </p>
+          </div>
+
+          <fieldset className="grid gap-2">
+            <legend className="text-sm font-semibold">ISO 9001 Clauses</legend>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {ISO_9001_CLAUSE_OPTIONS.map((clause) => (
+                <label key={clause} className="flex items-start gap-2 text-xs text-slate-700 dark:text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={isoClauseRefs.includes(clause)}
+                    onChange={() => toggleIsoClauseRef(clause)}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
+                  />
+                  <span>{clause}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="grid gap-1.5 text-sm">
+              <span className="font-semibold">Process scope / applicability</span>
+              <textarea
+                value={processScope}
+                onChange={(event) => setProcessScope(event.target.value)}
+                rows={3}
+                className="resize-y rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+              />
+            </label>
+            <label className="grid gap-1.5 text-sm">
+              <span className="font-semibold">Acceptance criteria</span>
+              <textarea
+                value={acceptanceCriteria}
+                onChange={(event) => setAcceptanceCriteria(event.target.value)}
+                rows={3}
+                className="resize-y rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+              />
+            </label>
+            <label className="grid gap-1.5 text-sm">
+              <span className="font-semibold">Verification records</span>
+              <textarea
+                value={verificationRecords}
+                onChange={(event) => setVerificationRecords(event.target.value)}
+                rows={3}
+                className="resize-y rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+              />
+            </label>
+            <label className="grid gap-1.5 text-sm">
+              <span className="font-semibold">Risks, controls, and reaction plan</span>
+              <textarea
+                value={riskControls}
+                onChange={(event) => setRiskControls(event.target.value)}
+                rows={3}
+                className="resize-y rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+              />
+            </label>
+          </div>
+        </section>
 
         <RichTextEditor
           label="Work Instructions"

@@ -237,29 +237,39 @@ export function SystemUsageKpiPanel({ isSystemAdmin }: SystemUsageKpiPanelProps)
 
         <div className="flex flex-wrap items-center gap-2">
           {isSystemAdmin ? (
-            <button
-              type="button"
-              role="switch"
-              aria-checked={dashboardAiSearchEnabled === true}
-              disabled={settingBusy || dashboardAiSearchEnabled === null}
-              onClick={() => {
-                void updateDashboardAiSearchSetting(!dashboardAiSearchEnabled);
-              }}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-55",
-                dashboardAiSearchEnabled
-                  ? "border-emerald-500/45 bg-emerald-500/15 text-emerald-800 hover:bg-emerald-500/25 dark:text-emerald-200"
-                  : "border-slate-300/70 bg-white/80 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-900",
-              )}
-            >
-              <span
+            <div className="flex items-center gap-3 rounded-xl border border-slate-300/70 bg-white/80 px-3 py-2 shadow-sm dark:border-slate-700 dark:bg-slate-950/70">
+              <div className="grid gap-0.5">
+                <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                  Dashboard AI Search
+                </span>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Off keeps all-document text ranking active.
+                </span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={dashboardAiSearchEnabled === true}
+                disabled={settingBusy || dashboardAiSearchEnabled === null}
+                onClick={() => {
+                  void updateDashboardAiSearchSetting(!dashboardAiSearchEnabled);
+                }}
                 className={cn(
-                  "h-2.5 w-2.5 rounded-full",
-                  dashboardAiSearchEnabled ? "bg-emerald-500" : "bg-slate-400",
+                  "inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-55",
+                  dashboardAiSearchEnabled
+                    ? "border-emerald-500/45 bg-emerald-500/15 text-emerald-800 hover:bg-emerald-500/25 dark:text-emerald-200"
+                    : "border-slate-300/70 bg-white/80 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-900",
                 )}
-              />
-              {settingBusy ? "Saving..." : dashboardAiSearchStatus}
-            </button>
+              >
+                <span
+                  className={cn(
+                    "h-2.5 w-2.5 rounded-full",
+                    dashboardAiSearchEnabled ? "bg-emerald-500" : "bg-slate-400",
+                  )}
+                />
+                {settingBusy ? "Saving..." : dashboardAiSearchStatus}
+              </button>
+            </div>
           ) : null}
 
           <button

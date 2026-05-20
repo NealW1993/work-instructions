@@ -38,6 +38,8 @@ interface ProcessDocumentRow {
   process_controls: string | null;
   related_instruction_ids: string[] | null;
   iso_clause_refs: string[] | null;
+  document_cover_image_data_url: string | null;
+  document_cover_image_name: string | null;
   current_revision: number;
   effective_at: string | null;
   next_review_at: string | null;
@@ -226,6 +228,8 @@ export default async function ProcessDocumentsPage({
         process_controls: document.process_controls ?? "",
         related_instruction_ids: document.related_instruction_ids ?? [],
         iso_clause_refs: document.iso_clause_refs ?? [],
+        document_cover_image_data_url: document.document_cover_image_data_url ?? "",
+        document_cover_image_name: document.document_cover_image_name ?? "",
         current_revision: document.current_revision,
         effective_at: document.effective_at,
         next_review_at: document.next_review_at,

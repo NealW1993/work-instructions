@@ -34,6 +34,11 @@ interface InstructionPrintRecord {
   revision: number;
   body_markdown: string;
   uncommon_tools: string;
+  iso_clause_refs: string[] | null;
+  process_scope: string | null;
+  acceptance_criteria: string | null;
+  verification_records: string | null;
+  risk_controls: string | null;
   instruction_media: InstructionPrintMediaRow[] | null;
   work_items:
     | {
@@ -365,7 +370,7 @@ export default async function InstructionPrintPage({
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, revision, body_markdown, uncommon_tools, instruction_media(public_url, media_type, caption, sort_order), work_items(part_id, item_title, departments(name))",
+      "id, revision, body_markdown, uncommon_tools, iso_clause_refs, process_scope, acceptance_criteria, verification_records, risk_controls, instruction_media(public_url, media_type, caption, sort_order), work_items(part_id, item_title, departments(name))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -425,6 +430,16 @@ export default async function InstructionPrintPage({
   const toolNames = Array.from(toolNamesByKey.values()).sort((first, second) =>
     first.localeCompare(second),
   );
+  const isoContextRows = [
+    {
+      label: "ISO 9001 Clauses",
+      value: (instruction.iso_clause_refs ?? []).join(", "),
+    },
+    { label: "Scope", value: instruction.process_scope ?? "" },
+    { label: "Acceptance Criteria", value: instruction.acceptance_criteria ?? "" },
+    { label: "Verification Records", value: instruction.verification_records ?? "" },
+    { label: "Risks / Controls", value: instruction.risk_controls ?? "" },
+  ].filter((entry) => entry.value.trim().length > 0);
   const printBodyMedia = extractPrintMediaFromBody(
     rewriteLoopbackMediaUrlsInHtml(instruction.body_markdown, mediaUrlRuntime),
   );
@@ -576,6 +591,22 @@ export default async function InstructionPrintPage({
             </ul>
           )}
         </section>
+
+        {isoContextRows.length > 0 ? (
+          <section className="mt-5 grid gap-2">
+            <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">
+              ISO / Control Context
+            </h2>
+            <dl className="grid gap-2 text-sm text-slate-800 dark:text-slate-200">
+              {isoContextRows.map((entry) => (
+                <div key={entry.label}>
+                  <dt className="font-bold">{entry.label}</dt>
+                  <dd className="whitespace-pre-wrap">{entry.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        ) : null}
 
         <section className="mt-6 grid gap-2">
           <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">

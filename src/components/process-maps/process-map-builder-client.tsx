@@ -9,7 +9,6 @@ import {
   FileDown,
   Download,
   FileText,
-  Gauge,
   GitBranch,
   Layers,
   LineChart,
@@ -19,14 +18,22 @@ import {
   Printer,
   RefreshCw,
   Save,
-  Sigma,
-  SlidersHorizontal,
   Sparkles,
   Table2,
   Target,
+  Trash2,
   Workflow,
+  X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import {
+  type MouseEvent as ReactMouseEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type RefObject,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   DIAGRAM_DEFINITIONS,
@@ -119,9 +126,30 @@ interface DiagramStyle {
   backgroundColor: string;
 }
 
+type DrawingMode = "select" | "process" | "decision" | "terminator" | "connector";
+
+interface CustomFlowNode {
+  id: string;
+  type: Exclude<DrawingMode, "select" | "connector">;
+  label: string;
+  x: number;
+  y: number;
+}
+
+interface CustomFlowLink {
+  id: string;
+  from: string;
+  to: string;
+}
+
 type RecommendationPayload = DiagramRecommendation & {
   error?: string;
 };
+
+interface PageExplainResponse {
+  explanation?: string;
+  error?: string;
+}
 
 const TABLE_DIAGRAM_TYPES = new Set<DiagramType>([
   "sipoc",
@@ -133,6 +161,19 @@ const TABLE_DIAGRAM_TYPES = new Set<DiagramType>([
 
 const BAR_DIAGRAM_TYPES = new Set<DiagramType>(["pareto", "histogram"]);
 const LINE_DIAGRAM_TYPES = new Set<DiagramType>(["run_chart", "control_chart"]);
+const CHART_DATA_DIAGRAM_TYPES = new Set<DiagramType>([
+  "pareto",
+  "histogram",
+  "run_chart",
+  "control_chart",
+  "scatter_plot",
+]);
+const CUSTOM_FLOW_DIAGRAM_TYPES = new Set<DiagramType>([
+  "process_map",
+  "flowchart",
+  "swimlane",
+  "value_stream_map",
+]);
 
 const DEFAULT_METRIC_ROWS = [
   "Defect A,42,12",
@@ -174,7 +215,7 @@ const DEFAULT_DIAGRAM_STYLE: DiagramStyle = {
 };
 
 const DEFAULT_PROMPT =
-  "We are in Define and need to understand the process boundary, customers, inputs, outputs, and major process steps before writing the controlled work instruction.";
+  "Document the process boundary, inputs, outputs, owners, decisions, and major process steps for controlled process documentation.";
 
 function escapeHtml(value: string) {
   return value
@@ -457,6 +498,37 @@ function svgShell(width: number, height: number, body: string) {
 </svg>`;
 }
 
+function formatAxisNumber(value: number) {
+  if (!Number.isFinite(value)) {
+    return "0";
+  }
+
+  if (Math.abs(value) >= 1000) {
+    return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  }
+
+  if (Math.abs(value) >= 100) {
+    return value.toFixed(0);
+  }
+
+  if (Math.abs(value) >= 10) {
+    return Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1);
+  }
+
+  return Number.isInteger(value) ? value.toFixed(0) : value.toFixed(2);
+}
+
+function getAxisTicks(minValue: number, maxValue: number, tickCount = 5) {
+  const safeMin = Number.isFinite(minValue) ? minValue : 0;
+  const safeMax = Number.isFinite(maxValue) ? maxValue : 1;
+  const low = Math.min(safeMin, safeMax);
+  const high = Math.max(safeMin, safeMax);
+  const range = Math.max(1, high - low);
+  const step = range / Math.max(1, tickCount - 1);
+
+  return Array.from({ length: tickCount }, (_, index) => low + step * index);
+}
+
 function applySvgTheme(svg: string, style: DiagramStyle, layerSettings: LayerSettings) {
   let themedSvg = svg
     .replaceAll("#0f766e", style.primaryColor)
@@ -608,31 +680,46 @@ function buildCtqSvg(title: string, items: string[]) {
 
 function buildBarSvg(title: string, metrics: MetricPoint[], pareto: boolean) {
   const width = 960;
-  const height = 380;
+  const height = 420;
   const chartTop = 82;
-  const chartLeft = 84;
-  const chartWidth = 780;
-  const chartHeight = 230;
+  const chartLeft = 94;
+  const chartWidth = 760;
+  const chartHeight = 248;
   const maxValue = Math.max(...metrics.map((metric) => metric.value), 1);
-  const barWidth = chartWidth / Math.max(metrics.length, 1) - 20;
+  const barSlotWidth = chartWidth / Math.max(metrics.length, 1);
+  const barWidth = Math.max(18, Math.min(82, barSlotWidth - 22));
   let cumulative = 0;
   const total = metrics.reduce((sum, metric) => sum + metric.value, 0) || 1;
   let body = svgText(width / 2, 38, title, { size: 20, color: "#111827" });
+  body += svgText(chartLeft, 64, pareto ? "Y: Count / impact" : "Y: Value", {
+    anchor: "start",
+    size: 11,
+    color: "#475569",
+  });
   body += `<line x1="${chartLeft}" y1="${chartTop + chartHeight}" x2="${
     chartLeft + chartWidth
   }" y2="${chartTop + chartHeight}" stroke="#334155" stroke-width="2"></line>`;
   body += `<line x1="${chartLeft}" y1="${chartTop}" x2="${chartLeft}" y2="${
     chartTop + chartHeight
   }" stroke="#334155" stroke-width="2"></line>`;
+  getAxisTicks(0, maxValue, 5).forEach((tick) => {
+    const y = chartTop + chartHeight - (tick / maxValue) * chartHeight;
+    body += `<line x1="${chartLeft}" y1="${y}" x2="${chartLeft + chartWidth}" y2="${y}" stroke="#cbd5e1" stroke-width="1" stroke-opacity="0.55"></line>`;
+    body += svgText(chartLeft - 10, y + 4, formatAxisNumber(tick), {
+      anchor: "end",
+      size: 10,
+      color: "#475569",
+    });
+  });
 
   metrics.forEach((metric, index) => {
-    const x = chartLeft + 18 + index * (barWidth + 20);
+    const x = chartLeft + index * barSlotWidth + (barSlotWidth - barWidth) / 2;
     const barHeight = (metric.value / maxValue) * (chartHeight - 18);
     const y = chartTop + chartHeight - barHeight;
     cumulative += metric.value;
     body += `<rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" rx="5" fill="${
       pareto ? "#0ea5e9" : "#14b8a6"
-    }"></rect>`;
+    }"><title>${escapeHtml(`${metric.label}: Y value ${metric.value}`)}</title></rect>`;
     body += svgText(x + barWidth / 2, y - 8, String(Math.round(metric.value)), {
       size: 11,
       color: "#0f172a",
@@ -645,17 +732,26 @@ function buildBarSvg(title: string, metrics: MetricPoint[], pareto: boolean) {
     if (pareto) {
       const pointX = x + barWidth / 2;
       const pointY = chartTop + chartHeight - (cumulative / total) * (chartHeight - 18);
-      body += `<circle cx="${pointX}" cy="${pointY}" r="4" fill="#f59e0b"></circle>`;
+      const cumulativePercent = (cumulative / total) * 100;
+      body += `<circle cx="${pointX}" cy="${pointY}" r="4" fill="#f59e0b"><title>${escapeHtml(
+        `${metric.label}: cumulative ${cumulativePercent.toFixed(1)}%`,
+      )}</title></circle>`;
       if (index > 0) {
         const previousCumulative = metrics
           .slice(0, index)
           .reduce((sum, previousMetric) => sum + previousMetric.value, 0);
-        const previousX = chartLeft + 18 + (index - 1) * (barWidth + 20) + barWidth / 2;
+        const previousX =
+          chartLeft + (index - 1) * barSlotWidth + (barSlotWidth - barWidth) / 2 + barWidth / 2;
         const previousY =
           chartTop + chartHeight - (previousCumulative / total) * (chartHeight - 18);
         body += `<line x1="${previousX}" y1="${previousY}" x2="${pointX}" y2="${pointY}" stroke="#f59e0b" stroke-width="3"></line>`;
       }
     }
+  });
+
+  body += svgText(chartLeft + chartWidth / 2, height - 24, "X: Category / date label", {
+    size: 12,
+    color: "#475569",
   });
 
   return svgShell(width, height, body);
@@ -787,42 +883,63 @@ function buildOeeSvg(title: string, stats: OeeStats) {
 
 function buildLineSvg(title: string, metrics: MetricPoint[], control: boolean) {
   const width = 960;
-  const height = 380;
+  const height = 420;
   const chartTop = 78;
-  const chartLeft = 82;
-  const chartWidth = 790;
-  const chartHeight = 230;
+  const chartLeft = 94;
+  const chartWidth = 760;
+  const chartHeight = 248;
   const values = metrics.map((metric) => metric.value);
-  const maxValue = Math.max(...values, 1);
-  const minValue = Math.min(...values, 0);
-  const range = Math.max(1, maxValue - minValue);
   const center = values.reduce((sum, value) => sum + value, 0) / Math.max(values.length, 1);
+  const variance =
+    values.reduce((sum, value) => sum + (value - center) ** 2, 0) /
+    Math.max(1, values.length - 1);
+  const sigma = Math.sqrt(variance);
+  const ucl = center + 3 * sigma;
+  const lcl = center - 3 * sigma;
+  const maxValue = Math.max(...values, control ? ucl : -Infinity, 1);
+  const minValue = Math.min(...values, control ? lcl : Infinity, 0);
+  const range = Math.max(1, maxValue - minValue);
   const pointFor = (metric: MetricPoint, index: number) => {
     const x = chartLeft + (chartWidth / Math.max(1, metrics.length - 1)) * index;
     const y = chartTop + chartHeight - ((metric.value - minValue) / range) * chartHeight;
     return { x, y };
   };
+  const yFor = (value: number) => chartTop + chartHeight - ((value - minValue) / range) * chartHeight;
   let body = svgText(width / 2, 38, title, { size: 20, color: "#111827" });
   body += `<rect x="${chartLeft}" y="${chartTop}" width="${chartWidth}" height="${chartHeight}" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"></rect>`;
+  body += svgText(chartLeft, 62, "Y: Process value", {
+    anchor: "start",
+    size: 11,
+    color: "#475569",
+  });
+  getAxisTicks(minValue, maxValue, 5).forEach((tick) => {
+    const y = yFor(tick);
+    body += `<line x1="${chartLeft}" y1="${y}" x2="${chartLeft + chartWidth}" y2="${y}" stroke="#cbd5e1" stroke-width="1" stroke-opacity="0.55"></line>`;
+    body += svgText(chartLeft - 10, y + 4, formatAxisNumber(tick), {
+      anchor: "end",
+      size: 10,
+      color: "#475569",
+    });
+  });
 
   if (control) {
-    const centerY = chartTop + chartHeight - ((center - minValue) / range) * chartHeight;
-    const uclY = chartTop + Math.max(16, chartHeight * 0.18);
-    const lclY = chartTop + Math.min(chartHeight - 16, chartHeight * 0.82);
+    const centerY = yFor(center);
+    const uclY = yFor(ucl);
+    const lclY = yFor(lcl);
     body += `<line x1="${chartLeft}" y1="${uclY}" x2="${chartLeft + chartWidth}" y2="${uclY}" stroke="#dc2626" stroke-width="2" stroke-dasharray="8 6"></line>`;
     body += `<line x1="${chartLeft}" y1="${centerY}" x2="${chartLeft + chartWidth}" y2="${centerY}" stroke="#0f766e" stroke-width="2" stroke-dasharray="7 5"></line>`;
     body += `<line x1="${chartLeft}" y1="${lclY}" x2="${chartLeft + chartWidth}" y2="${lclY}" stroke="#dc2626" stroke-width="2" stroke-dasharray="8 6"></line>`;
-    body += svgText(chartLeft + chartWidth + 14, uclY + 4, "UCL", {
+    body += svgText(chartLeft + chartWidth + 14, uclY + 4, `UCL ${formatAxisNumber(ucl)}`, {
       anchor: "start",
       size: 11,
       color: "#991b1b",
     });
-    body += svgText(chartLeft + chartWidth + 14, centerY + 4, "CL", {
+    body += svgText(chartLeft + chartWidth + 14, centerY + 4, `CL ${formatAxisNumber(center)}`, {
       anchor: "start",
       size: 11,
       color: "#0f766e",
     });
-    body += svgText(chartLeft + chartWidth + 14, lclY + 4, "LCL", {
+    body += svgText(chartLeft + chartWidth + 14, lclY + 4, `LCL ${formatAxisNumber(lcl)}`, {
       anchor: "start",
       size: 11,
       color: "#991b1b",
@@ -835,11 +952,22 @@ function buildLineSvg(title: string, metrics: MetricPoint[], control: boolean) {
       const previous = points[index - 1];
       body += `<line x1="${previous.x}" y1="${previous.y}" x2="${point.x}" y2="${point.y}" stroke="#0284c7" stroke-width="3"></line>`;
     }
-    body += `<circle cx="${point.x}" cy="${point.y}" r="5" fill="#0284c7"></circle>`;
+    body += `<circle cx="${point.x}" cy="${point.y}" r="5" fill="#0284c7"><title>${escapeHtml(
+      `${metrics[index]?.label ?? `Point ${index + 1}`}: Y value ${metrics[index]?.value ?? ""}`,
+    )}</title></circle>`;
+    body += svgText(point.x, point.y - 12, formatAxisNumber(metrics[index]?.value ?? 0), {
+      size: 10,
+      color: "#0f172a",
+    });
     body += svgText(point.x, chartTop + chartHeight + 24, metrics[index]?.label ?? "", {
       size: 10,
       color: "#475569",
     });
+  });
+
+  body += svgText(chartLeft + chartWidth / 2, height - 24, "X: Time / sample / date", {
+    size: 12,
+    color: "#475569",
   });
 
   return svgShell(width, height, body);
@@ -847,23 +975,49 @@ function buildLineSvg(title: string, metrics: MetricPoint[], control: boolean) {
 
 function buildScatterSvg(title: string, metrics: MetricPoint[]) {
   const width = 960;
-  const height = 380;
+  const height = 420;
   const chartTop = 78;
-  const chartLeft = 82;
-  const chartWidth = 790;
-  const chartHeight = 230;
+  const chartLeft = 94;
+  const chartWidth = 760;
+  const chartHeight = 248;
   const maxX = Math.max(...metrics.map((metric) => metric.value), 1);
   const maxY = Math.max(...metrics.map((metric) => metric.value2), 1);
   let body = svgText(width / 2, 38, title, { size: 20, color: "#111827" });
   body += `<rect x="${chartLeft}" y="${chartTop}" width="${chartWidth}" height="${chartHeight}" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"></rect>`;
+  getAxisTicks(0, maxY, 5).forEach((tick) => {
+    const y = chartTop + chartHeight - (tick / maxY) * chartHeight;
+    body += `<line x1="${chartLeft}" y1="${y}" x2="${chartLeft + chartWidth}" y2="${y}" stroke="#cbd5e1" stroke-width="1" stroke-opacity="0.55"></line>`;
+    body += svgText(chartLeft - 10, y + 4, formatAxisNumber(tick), {
+      anchor: "end",
+      size: 10,
+      color: "#475569",
+    });
+  });
+  getAxisTicks(0, maxX, 5).forEach((tick) => {
+    const x = chartLeft + (tick / maxX) * chartWidth;
+    body += `<line x1="${x}" y1="${chartTop}" x2="${x}" y2="${chartTop + chartHeight}" stroke="#cbd5e1" stroke-width="1" stroke-opacity="0.35"></line>`;
+    body += svgText(x, chartTop + chartHeight + 22, formatAxisNumber(tick), {
+      size: 10,
+      color: "#475569",
+    });
+  });
   metrics.forEach((metric) => {
     const x = chartLeft + (metric.value / maxX) * chartWidth;
     const y = chartTop + chartHeight - (metric.value2 / maxY) * chartHeight;
-    body += `<circle cx="${x}" cy="${y}" r="7" fill="#8b5cf6" fill-opacity="0.86"></circle>`;
+    body += `<circle cx="${x}" cy="${y}" r="7" fill="#8b5cf6" fill-opacity="0.86"><title>${escapeHtml(
+      `${metric.label}: X ${metric.value}, Y ${metric.value2}`,
+    )}</title></circle>`;
     body += svgText(x, y - 12, metric.label, { size: 10, color: "#475569" });
   });
-  body += svgText(chartLeft + chartWidth / 2, 350, "X factor", { size: 12, color: "#475569" });
-  body += svgText(32, 205, "Y outcome", { size: 12, color: "#475569" });
+  body += svgText(chartLeft + chartWidth / 2, height - 24, "X: Factor value", {
+    size: 12,
+    color: "#475569",
+  });
+  body += svgText(chartLeft, 62, "Y: Outcome value", {
+    anchor: "start",
+    size: 11,
+    color: "#475569",
+  });
   return svgShell(width, height, body);
 }
 
@@ -898,17 +1052,50 @@ function buildDiagramSvg(input: {
   }
 }
 
-function buildTableRows(diagramType: DiagramType, items: string[], metrics: MetricPoint[]) {
+function buildEditableCell(input: {
+  value: string;
+  placeholder: string;
+  ariaLabel: string;
+  editable?: boolean;
+  onChange?: (value: string) => void;
+}) {
+  if (!input.editable || !input.onChange) {
+    return input.value || input.placeholder;
+  }
+
+  return (
+    <textarea
+      aria-label={input.ariaLabel}
+      value={input.value}
+      placeholder={input.placeholder}
+      onChange={(event) => input.onChange?.(event.target.value)}
+      onClick={(event) => event.stopPropagation()}
+      rows={2}
+      className="min-h-10 w-full resize-y rounded-md border border-transparent bg-white/75 px-2 py-1 text-sm outline-none transition placeholder:text-slate-400 hover:border-cyan-300 focus:border-cyan-500 focus:bg-white dark:bg-slate-950/70 dark:placeholder:text-slate-500"
+    />
+  );
+}
+
+function buildTableRows(
+  diagramType: DiagramType,
+  items: string[],
+  metrics: MetricPoint[],
+  options: {
+    editable?: boolean;
+    onItemChange?: (index: number, value: string) => void;
+    onMetricChange?: (index: number, field: "label" | "value" | "value2", value: string) => void;
+  } = {},
+) {
   if (diagramType === "sipoc") {
     const headers = ["Suppliers", "Inputs", "Process", "Outputs", "Customers"];
     return (
-      <table className="w-full table-fixed border-collapse text-sm">
+      <table className="w-full table-fixed border-collapse text-sm leading-relaxed">
         <thead>
           <tr>
             {headers.map((header) => (
               <th
                 key={header}
-                className="border border-slate-300 bg-slate-100 px-2 py-2 text-left dark:border-slate-700 dark:bg-slate-900"
+                className="border border-slate-300 bg-slate-100 px-4 py-3 text-left dark:border-slate-700 dark:bg-slate-900"
               >
                 {header}
               </th>
@@ -918,14 +1105,23 @@ function buildTableRows(diagramType: DiagramType, items: string[], metrics: Metr
         <tbody>
           {Array.from({ length: 4 }, (_, rowIndex) => (
             <tr key={rowIndex}>
-              {headers.map((header, columnIndex) => (
-                <td
-                  key={header}
-                  className="border border-slate-300 px-2 py-2 align-top dark:border-slate-700"
-                >
-                  {items[rowIndex + columnIndex] ?? `${header} ${rowIndex + 1}`}
-                </td>
-              ))}
+              {headers.map((header, columnIndex) => {
+                const itemIndex = rowIndex + columnIndex;
+                return (
+                  <td
+                    key={header}
+                    className="min-w-0 break-words border border-slate-300 px-3 py-3 align-top dark:border-slate-700"
+                  >
+                    {buildEditableCell({
+                      value: items[itemIndex] ?? "",
+                      placeholder: `${header} ${rowIndex + 1}`,
+                      ariaLabel: `${header} row ${rowIndex + 1}`,
+                      editable: options.editable,
+                      onChange: (value) => options.onItemChange?.(itemIndex, value),
+                    })}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
@@ -943,13 +1139,13 @@ function buildTableRows(diagramType: DiagramType, items: string[], metrics: Metr
           : ["Field", "Detail"];
 
   return (
-    <table className="w-full border-collapse text-sm">
+    <table className="w-full table-fixed border-collapse text-sm leading-relaxed">
       <thead>
         <tr>
           {headers.map((header) => (
             <th
               key={header}
-              className="border border-slate-300 bg-slate-100 px-2 py-2 text-left dark:border-slate-700 dark:bg-slate-900"
+              className="border border-slate-300 bg-slate-100 px-4 py-3 text-left dark:border-slate-700 dark:bg-slate-900"
             >
               {header}
             </th>
@@ -962,11 +1158,23 @@ function buildTableRows(diagramType: DiagramType, items: string[], metrics: Metr
             {headers.map((header, columnIndex) => (
               <td
                 key={header}
-                className="border border-slate-300 px-2 py-2 align-top dark:border-slate-700"
+                className="min-w-0 break-words border border-slate-300 px-3 py-3 align-top dark:border-slate-700"
               >
                 {columnIndex === 0
-                  ? metric.label
-                  : items[rowIndex + columnIndex] ?? `${header} ${rowIndex + 1}`}
+                  ? buildEditableCell({
+                      value: metric.label,
+                      placeholder: `${header} ${rowIndex + 1}`,
+                      ariaLabel: `${header} row ${rowIndex + 1}`,
+                      editable: options.editable,
+                      onChange: (value) => options.onMetricChange?.(rowIndex, "label", value),
+                    })
+                  : buildEditableCell({
+                      value: items[rowIndex + columnIndex] ?? "",
+                      placeholder: `${header} ${rowIndex + 1}`,
+                      ariaLabel: `${header} row ${rowIndex + 1}`,
+                      editable: options.editable,
+                      onChange: (value) => options.onItemChange?.(rowIndex + columnIndex, value),
+                    })}
               </td>
             ))}
           </tr>
@@ -1164,87 +1372,27 @@ function ChartIcon({ diagramType }: { diagramType: DiagramType }) {
   return <Workflow size={16} />;
 }
 
-function FormulaResultSummary({
-  formulaTool,
-  capabilityStats,
-  oeeStats,
-  dpmoStats,
-  taktStats,
-  controlLimitStats,
-}: {
-  formulaTool: FormulaTool;
-  capabilityStats: CapabilityStats | null;
-  oeeStats: OeeStats;
-  dpmoStats: DpmoStats;
-  taktStats: TaktStats;
-  controlLimitStats: ControlLimitStats;
-}) {
-  const rows =
-    formulaTool === "capability"
-      ? [
-          ["Cp", formatNumber(capabilityStats?.cp)],
-          ["Cpk", formatNumber(capabilityStats?.cpk)],
-          ["Mean", formatNumber(capabilityStats?.mean)],
-          ["PPM", formatNumber(capabilityStats?.estimatedPpm, 0)],
-        ]
-      : formulaTool === "oee"
-        ? [
-            ["Availability", `${formatNumber((oeeStats.availability ?? 0) * 100, 2)}%`],
-            ["Performance", `${formatNumber((oeeStats.performance ?? 0) * 100, 2)}%`],
-            ["Quality", `${formatNumber((oeeStats.quality ?? 0) * 100, 2)}%`],
-            ["OEE", `${formatNumber((oeeStats.oee ?? 0) * 100, 2)}%`],
-          ]
-        : formulaTool === "dpmo"
-          ? [
-              ["DPMO", formatNumber(dpmoStats.dpmo, 0)],
-              ["Yield", `${formatNumber(dpmoStats.yieldPercent, 2)}%`],
-            ]
-          : formulaTool === "takt_time"
-            ? [
-                ["Minutes / Unit", formatNumber(taktStats.taktMinutes, 3)],
-                ["Seconds / Unit", formatNumber(taktStats.taktSeconds, 1)],
-              ]
-            : formulaTool === "control_limits"
-              ? [
-                  ["Centerline", formatNumber(controlLimitStats.centerline)],
-                  ["Sigma", formatNumber(controlLimitStats.sigma)],
-                  ["UCL", formatNumber(controlLimitStats.ucl)],
-                  ["LCL", formatNumber(controlLimitStats.lcl)],
-                ]
-              : [["No formula", "Chart data only"]];
-
-  return (
-    <dl className="grid grid-cols-2 gap-2">
-      {rows.map(([label, value]) => (
-        <div
-          key={label}
-          className="min-w-0 rounded-md border border-slate-300/70 bg-white/75 p-2 dark:border-slate-700 dark:bg-slate-900/60"
-        >
-          <dt className="truncate text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-            {label}
-          </dt>
-          <dd className="truncate font-bold text-slate-900 dark:text-slate-100">{value}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
-
 export function ProcessMapBuilderClient({
   canEdit,
   departments,
 }: ProcessMapBuilderClientProps) {
   const router = useRouter();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
-  const [title, setTitle] = useState("Define - SIPOC Draft");
-  const [diagramType, setDiagramType] = useState<DiagramType>("sipoc");
-  const [dmaicEnabled, setDmaicEnabled] = useState(true);
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
+  const processAreaInputRef = useRef<HTMLInputElement | null>(null);
+  const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const itemsTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const lanesTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const metricsTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [title, setTitle] = useState("Process Map Draft");
+  const [diagramType, setDiagramType] = useState<DiagramType>("process_map");
+  const [dmaicEnabled, setDmaicEnabled] = useState(false);
   const [dmaicPhase, setDmaicPhase] = useState<DmaicPhase>("define");
   const [departmentId, setDepartmentId] = useState("");
   const [processArea, setProcessArea] = useState("");
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [itemsText, setItemsText] = useState(
-    getDiagramDefinition("sipoc").starterItems.join("\n"),
+    getDiagramDefinition("process_map").starterItems.join("\n"),
   );
   const [lanesText, setLanesText] = useState("Operations\nQuality\nSupervisor");
   const [metricsText, setMetricsText] = useState(DEFAULT_METRIC_ROWS);
@@ -1253,26 +1401,49 @@ export function ProcessMapBuilderClient({
   const [specLower, setSpecLower] = useState("");
   const [specUpper, setSpecUpper] = useState("");
   const [targetValue, setTargetValue] = useState("");
-  const [dpmoDefects, setDpmoDefects] = useState("7");
-  const [dpmoUnits, setDpmoUnits] = useState("100");
-  const [dpmoOpportunities, setDpmoOpportunities] = useState("3");
-  const [taktAvailableMinutes, setTaktAvailableMinutes] = useState("420");
-  const [taktDemand, setTaktDemand] = useState("210");
-  const [oeePlannedMinutes, setOeePlannedMinutes] = useState("480");
-  const [oeeRunMinutes, setOeeRunMinutes] = useState("420");
-  const [oeeIdealCycleSeconds, setOeeIdealCycleSeconds] = useState("45");
-  const [oeeTotalCount, setOeeTotalCount] = useState("520");
-  const [oeeGoodCount, setOeeGoodCount] = useState("498");
+  const [dpmoDefects] = useState("7");
+  const [dpmoUnits] = useState("100");
+  const [dpmoOpportunities] = useState("3");
+  const [taktAvailableMinutes] = useState("420");
+  const [taktDemand] = useState("210");
+  const [oeePlannedMinutes] = useState("480");
+  const [oeeRunMinutes] = useState("420");
+  const [oeeIdealCycleSeconds] = useState("45");
+  const [oeeTotalCount] = useState("520");
+  const [oeeGoodCount] = useState("498");
   const [layerSettings, setLayerSettings] = useState<LayerSettings>(DEFAULT_LAYER_SETTINGS);
   const [diagramStyle, setDiagramStyle] = useState<DiagramStyle>(DEFAULT_DIAGRAM_STYLE);
   const [previewRevision, setPreviewRevision] = useState(1);
-  const [lastPreviewRefreshAt, setLastPreviewRefreshAt] = useState<string | null>(null);
   const [recommendation, setRecommendation] = useState<DiagramRecommendation | null>(null);
   const [recommendBusy, setRecommendBusy] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
+  const [chartModalOpen, setChartModalOpen] = useState(false);
+  const [pageExplainBusy, setPageExplainBusy] = useState(false);
+  const [pageExplanation, setPageExplanation] = useState("");
+  const [pageExplainError, setPageExplainError] = useState<string | null>(null);
+  const [drawingMode, setDrawingMode] = useState<DrawingMode>("select");
+  const [customFlowNodes, setCustomFlowNodes] = useState<CustomFlowNode[]>([
+    { id: "start", type: "terminator", label: "Start", x: 110, y: 120 },
+    { id: "step-1", type: "process", label: "Process step", x: 310, y: 120 },
+    { id: "decision-1", type: "decision", label: "Decision", x: 520, y: 120 },
+  ]);
+  const [customFlowLinks, setCustomFlowLinks] = useState<CustomFlowLink[]>([
+    { id: "start-step-1", from: "start", to: "step-1" },
+    { id: "step-1-decision-1", from: "step-1", to: "decision-1" },
+  ]);
+  const [selectedCustomNodeId, setSelectedCustomNodeId] = useState<string | null>("step-1");
+  const [pendingConnectorNodeId, setPendingConnectorNodeId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const customFlowDragRef = useRef<{
+    nodeId: string;
+    pointerId: number;
+    offsetX: number;
+    offsetY: number;
+    moved: boolean;
+  } | null>(null);
+  const customFlowSuppressClickRef = useRef(false);
 
   const definition = getDiagramDefinition(diagramType);
   const phase = getDmaicPhaseOption(dmaicPhase);
@@ -1325,19 +1496,325 @@ export function ProcessMapBuilderClient({
           metrics,
         });
   const svg = applySvgTheme(rawSvg, diagramStyle, layerSettings);
+  const selectedCustomNode =
+    customFlowNodes.find((node) => node.id === selectedCustomNodeId) ?? null;
+
+  function focusEditorField(
+    ref: RefObject<HTMLInputElement | HTMLTextAreaElement | null>,
+    selectContent = true,
+  ) {
+    const element = ref.current;
+    if (!element) {
+      return;
+    }
+
+    element.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => {
+      element.focus();
+      if (selectContent) {
+        element.select();
+      }
+    }, 120);
+  }
+
+  function updateSourceLine(
+    currentText: string,
+    index: number,
+    value: string,
+    fallbackRows: string[],
+  ) {
+    const rows = currentText.split(/\r?\n/);
+    const targetLength = Math.max(index + 1, rows.length, fallbackRows.length);
+    while (rows.length < targetLength) {
+      rows.push(fallbackRows[rows.length] ?? "");
+    }
+    rows[index] = value;
+    return rows.join("\n");
+  }
+
+  function updateItemLine(index: number, value: string) {
+    setItemsText((current) => updateSourceLine(current, index, value, definition.starterItems));
+  }
+
+  function updateMetricLine(
+    index: number,
+    field: "label" | "value" | "value2",
+    value: string,
+  ) {
+    setMetricsText((current) => {
+      const rows = current.split(/\r?\n/);
+      const targetLength = Math.max(index + 1, rows.length, DEFAULT_METRIC_ROWS.split("\n").length);
+      while (rows.length < targetLength) {
+        rows.push(DEFAULT_METRIC_ROWS.split("\n")[rows.length] ?? "");
+      }
+      const parts = (rows[index] ?? "").split(",");
+      const normalizedParts = [parts[0] ?? "", parts[1] ?? "", parts[2] ?? ""];
+      const nextValue = field === "label" ? value.replaceAll(",", " ") : value;
+      const partIndex = field === "label" ? 0 : field === "value" ? 1 : 2;
+      normalizedParts[partIndex] = nextValue;
+      rows[index] = normalizedParts.join(",");
+      return rows.join("\n");
+    });
+  }
+
+  function updateCapabilityLine(index: number, value: string) {
+    setCapabilityDataText((current) =>
+      updateSourceLine(current, index, value, DEFAULT_CAPABILITY_DATA.split("\n")),
+    );
+  }
+
+  function focusPrimaryPreviewSource() {
+    if (TABLE_DIAGRAM_TYPES.has(diagramType) || CUSTOM_FLOW_DIAGRAM_TYPES.has(diagramType)) {
+      focusEditorField(itemsTextareaRef);
+      return;
+    }
+
+    if (CHART_DATA_DIAGRAM_TYPES.has(diagramType)) {
+      focusEditorField(metricsTextareaRef);
+      return;
+    }
+
+    focusEditorField(itemsTextareaRef);
+  }
 
   function applyDiagramType(nextDiagramType: DiagramType) {
     const nextDefinition = getDiagramDefinition(nextDiagramType);
     setDiagramType(nextDiagramType);
     setItemsText(nextDefinition.starterItems.join("\n"));
     setRecommendation(null);
-    if (!title.trim() || title === "Define - SIPOC Draft") {
+    if (!title.trim() || title === "Process Map Draft") {
       setTitle(
         dmaicEnabled
           ? `${getDmaicPhaseOption(dmaicPhase).label} - ${nextDefinition.shortLabel} Draft`
           : `${nextDefinition.shortLabel} Draft`,
       );
     }
+  }
+
+  function addCustomFlowNode(type: CustomFlowNode["type"], x: number, y: number) {
+    const id = `${type}-${Date.now()}-${Math.round(x)}-${Math.round(y)}`;
+    const nextNode: CustomFlowNode = {
+      id,
+      type,
+      label:
+        type === "decision"
+          ? "Decision"
+          : type === "terminator"
+            ? "Start / End"
+            : "Process step",
+      x: Math.max(70, Math.min(850, x)),
+      y: Math.max(45, Math.min(315, y)),
+    };
+    setCustomFlowNodes((current) => [...current, nextNode]);
+    setSelectedCustomNodeId(id);
+  }
+
+  function getCustomFlowPoint(
+    event: Pick<ReactPointerEvent<SVGElement>, "clientX" | "clientY">,
+    svgElement: SVGSVGElement,
+  ) {
+    const bounds = svgElement.getBoundingClientRect();
+    return {
+      x: ((event.clientX - bounds.left) / bounds.width) * 960,
+      y: ((event.clientY - bounds.top) / bounds.height) * 360,
+    };
+  }
+
+  function updateCustomFlowNodePosition(nodeId: string, x: number, y: number) {
+    setCustomFlowNodes((current) =>
+      current.map((node) =>
+        node.id === nodeId
+          ? {
+              ...node,
+              x: Math.max(70, Math.min(890, x)),
+              y: Math.max(45, Math.min(315, y)),
+            }
+          : node,
+      ),
+    );
+  }
+
+  function moveCustomFlowNode(nodeId: string, deltaX: number, deltaY: number) {
+    setCustomFlowNodes((current) =>
+      current.map((node) =>
+        node.id === nodeId
+          ? {
+              ...node,
+              x: Math.max(70, Math.min(890, node.x + deltaX)),
+              y: Math.max(45, Math.min(315, node.y + deltaY)),
+            }
+          : node,
+      ),
+    );
+  }
+
+  function handleDrawingBoardClick(event: ReactMouseEvent<SVGSVGElement>) {
+    if (drawingMode === "select" || drawingMode === "connector") {
+      return;
+    }
+
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const x = ((event.clientX - bounds.left) / bounds.width) * 960;
+    const y = ((event.clientY - bounds.top) / bounds.height) * 360;
+    addCustomFlowNode(drawingMode, x, y);
+  }
+
+  function handleCustomNodePointerDown(
+    node: CustomFlowNode,
+    event: ReactPointerEvent<SVGGElement>,
+  ) {
+    if (drawingMode !== "select" || event.button !== 0) {
+      return;
+    }
+
+    const svgElement = event.currentTarget.ownerSVGElement;
+    if (!svgElement) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const point = getCustomFlowPoint(event, svgElement);
+    customFlowDragRef.current = {
+      nodeId: node.id,
+      pointerId: event.pointerId,
+      offsetX: point.x - node.x,
+      offsetY: point.y - node.y,
+      moved: false,
+    };
+    setSelectedCustomNodeId(node.id);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleCustomNodePointerMove(event: ReactPointerEvent<SVGGElement>) {
+    const dragState = customFlowDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const svgElement = event.currentTarget.ownerSVGElement;
+    if (!svgElement) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const point = getCustomFlowPoint(event, svgElement);
+    dragState.moved = true;
+    updateCustomFlowNodePosition(
+      dragState.nodeId,
+      point.x - dragState.offsetX,
+      point.y - dragState.offsetY,
+    );
+  }
+
+  function finishCustomNodeDrag(event: ReactPointerEvent<SVGGElement>) {
+    const dragState = customFlowDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    customFlowSuppressClickRef.current = dragState.moved;
+    customFlowDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function handleCustomNodeClick(nodeId: string) {
+    if (customFlowSuppressClickRef.current) {
+      customFlowSuppressClickRef.current = false;
+      return;
+    }
+
+    setSelectedCustomNodeId(nodeId);
+
+    if (drawingMode !== "connector") {
+      return;
+    }
+
+    if (!pendingConnectorNodeId) {
+      setPendingConnectorNodeId(nodeId);
+      return;
+    }
+
+    if (pendingConnectorNodeId !== nodeId) {
+      const id = `${pendingConnectorNodeId}-${nodeId}`;
+      setCustomFlowLinks((current) =>
+        current.some((link) => link.id === id)
+          ? current
+          : [...current, { id, from: pendingConnectorNodeId, to: nodeId }],
+      );
+    }
+    setPendingConnectorNodeId(null);
+  }
+
+  function updateSelectedCustomNodeLabel(label: string) {
+    if (!selectedCustomNodeId) {
+      return;
+    }
+    setCustomFlowNodes((current) =>
+      current.map((node) => (node.id === selectedCustomNodeId ? { ...node, label } : node)),
+    );
+  }
+
+  function handleCustomNodeKeyDown(
+    node: CustomFlowNode,
+    event: ReactKeyboardEvent<SVGGElement>,
+  ) {
+    const step = event.shiftKey ? 36 : 18;
+    const keyMovement: Record<string, [number, number]> = {
+      ArrowUp: [0, -step],
+      ArrowDown: [0, step],
+      ArrowLeft: [-step, 0],
+      ArrowRight: [step, 0],
+    };
+    const movement = keyMovement[event.key];
+
+    if (movement) {
+      event.preventDefault();
+      setSelectedCustomNodeId(node.id);
+      moveCustomFlowNode(node.id, movement[0], movement[1]);
+      return;
+    }
+
+    if (event.key === "Delete" || event.key === "Backspace") {
+      event.preventDefault();
+      setSelectedCustomNodeId(node.id);
+      setCustomFlowNodes((current) => current.filter((entry) => entry.id !== node.id));
+      setCustomFlowLinks((current) =>
+        current.filter((link) => link.from !== node.id && link.to !== node.id),
+      );
+      setPendingConnectorNodeId((current) => (current === node.id ? null : current));
+    }
+  }
+
+  function deleteSelectedCustomNode() {
+    if (!selectedCustomNodeId) {
+      return;
+    }
+    setCustomFlowNodes((current) =>
+      current.filter((node) => node.id !== selectedCustomNodeId),
+    );
+    setCustomFlowLinks((current) =>
+      current.filter(
+        (link) => link.from !== selectedCustomNodeId && link.to !== selectedCustomNodeId,
+      ),
+    );
+    setSelectedCustomNodeId(null);
+    setPendingConnectorNodeId(null);
+  }
+
+  function applyCustomFlowToSteps() {
+    if (customFlowNodes.length === 0) {
+      return;
+    }
+    setDiagramType("flowchart");
+    setItemsText(customFlowNodes.map((node) => node.label).join("\n"));
+    setMessage("Custom sketch copied into the flowchart steps.");
+    setChartModalOpen(true);
   }
 
   async function getAccessToken() {
@@ -1350,6 +1827,49 @@ export function ProcessMapBuilderClient({
     }
 
     return session.access_token;
+  }
+
+  async function explainProcessMapPage() {
+    setPageExplainBusy(true);
+    setPageExplainError(null);
+
+    try {
+      const token = await getAccessToken();
+      const context = [
+        `Title: ${title || "Untitled"}`,
+        `Method: ${dmaicEnabled ? `DMAIC ${phase.label}` : "General"}`,
+        `Diagram: ${definition.label}`,
+        `Process area: ${processArea || "Not specified"}`,
+        `Prompt: ${prompt}`,
+        `Steps or fields: ${items.join("; ")}`,
+        `Chart data: ${metrics.map((metric) => `${metric.label}=${metric.value}/${metric.value2}`).join("; ")}`,
+        recommendation ? `Recommendation: ${recommendation.reason}` : "Recommendation: none yet",
+      ].join("\n");
+      const response = await fetch("/api/page-explain", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          pageType: "process_map",
+          context,
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as PageExplainResponse;
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to explain this page.");
+      }
+
+      setPageExplanation(payload.explanation ?? "");
+    } catch (caughtError) {
+      setPageExplainError(
+        caughtError instanceof Error ? caughtError.message : "Unable to explain this page.",
+      );
+    } finally {
+      setPageExplainBusy(false);
+    }
   }
 
   function buildUsageMetadata() {
@@ -1432,7 +1952,7 @@ export function ProcessMapBuilderClient({
           : payload.suggestedTitle.replace(/^(Define|Measure|Analyze|Improve|Control)\s+-\s+/i, ""),
       );
       setItemsText(payload.starterItems.join("\n"));
-      setFormulaTool(payload.formulaTool ?? "none");
+      setFormulaTool("none");
       if (payload.metricRows?.length) {
         setMetricsText(payload.metricRows.join("\n"));
         if ((payload.formulaTool ?? "none") === "capability") {
@@ -1459,6 +1979,8 @@ export function ProcessMapBuilderClient({
             ? "OpenAI recommended a chart for this context."
             : "Rules-based chart recommendation applied."),
       );
+      setPreviewRevision((current) => current + 1);
+      setChartModalOpen(true);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unable to recommend a chart.");
     } finally {
@@ -1710,8 +2232,8 @@ export function ProcessMapBuilderClient({
 
   function refreshPreview() {
     setPreviewRevision((current) => current + 1);
-    setLastPreviewRefreshAt(new Date().toLocaleTimeString());
-    setMessage("Chart preview refreshed with the current data and formula settings.");
+    setMessage("Chart preview refreshed with the current data.");
+    setChartModalOpen(true);
   }
 
   async function copyOutline() {
@@ -1822,9 +2344,17 @@ export function ProcessMapBuilderClient({
     }
   }
 
+  const executiveStats = [
+    ["Method", dmaicEnabled ? `DMAIC ${phase.label}` : "General"],
+    ["Diagram", definition.shortLabel],
+    ["X/Y Data Rows", String(metrics.length)],
+    ["Flow Sketch", CUSTOM_FLOW_DIAGRAM_TYPES.has(diagramType) ? "Available" : "Hidden"],
+  ];
+
   return (
     <div className="grid gap-5">
-      <header className="flex flex-wrap items-start justify-between gap-3">
+      <header className="overflow-hidden rounded-3xl border border-white/60 bg-gradient-to-br from-white via-cyan-50/80 to-slate-100 p-5 shadow-xl shadow-slate-200/70 backdrop-blur dark:border-white/10 dark:from-slate-950 dark:via-slate-900 dark:to-cyan-950/40 dark:shadow-black/20">
+        <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="grid gap-1">
           <p className="inline-flex w-fit items-center gap-2 rounded-full border border-cyan-500/35 bg-cyan-500/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-cyan-800 dark:text-cyan-200">
             <Target size={13} />
@@ -1835,17 +2365,28 @@ export function ProcessMapBuilderClient({
           </h1>
           <p className="max-w-3xl text-sm text-slate-600 dark:text-slate-300">
             Build process maps, flow charts, and quality charts. Turn DMAIC on when the work is a
-            Six Sigma project, or keep it general for everyday process documentation. Formula
-            layers include Cp/Cpk, OEE, DPMO, takt time, and control limits.
+            Six Sigma project, or keep it general for everyday process documentation.
           </p>
         </div>
-        <Link
-          href="/process-documents"
-          className="inline-flex items-center gap-2 rounded-xl border border-slate-300/80 bg-white/85 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-900"
-        >
-          <FileText size={16} />
-          Process Docs
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void explainProcessMapPage()}
+            disabled={pageExplainBusy}
+            className="inline-flex items-center gap-2 rounded-xl border border-fuchsia-500/35 bg-fuchsia-500/10 px-4 py-2 text-sm font-semibold text-fuchsia-800 transition hover:bg-fuchsia-500/20 disabled:cursor-not-allowed disabled:opacity-60 dark:text-fuchsia-100"
+          >
+            {pageExplainBusy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+            AI explain page
+          </button>
+          <Link
+            href="/process-documents"
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-300/80 bg-white/85 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-900"
+          >
+            <FileText size={16} />
+            Process Docs
+          </Link>
+        </div>
+        </div>
       </header>
 
       {message ? (
@@ -1858,9 +2399,93 @@ export function ProcessMapBuilderClient({
           {error}
         </p>
       ) : null}
+      {pageExplainError ? (
+        <p className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-800 dark:text-rose-200">
+          {pageExplainError}
+        </p>
+      ) : null}
+      {pageExplanation ? (
+        <section className="rounded-2xl border border-fuchsia-500/25 bg-fuchsia-500/10 p-4 text-sm text-slate-700 shadow-sm dark:text-slate-200">
+          <div className="mb-2 flex items-center gap-2 font-extrabold text-slate-950 dark:text-slate-50">
+            <Sparkles size={16} className="text-fuchsia-700 dark:text-fuchsia-200" />
+            Simple explanation
+          </div>
+          <p>{pageExplanation}</p>
+        </section>
+      ) : null}
+
+      <section className="grid gap-3 rounded-2xl border border-white/50 bg-white/80 p-4 shadow-lg shadow-slate-200/60 backdrop-blur dark:border-white/10 dark:bg-slate-950/65 dark:shadow-black/20">
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {executiveStats.map(([label, value]) => (
+            <div key={label} className="min-w-0 border-l-2 border-cyan-500/45 pl-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                {label}
+              </p>
+              <p className="truncate text-sm font-extrabold text-slate-950 dark:text-slate-50">
+                {value}
+              </p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="grid gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80 lg:grid-cols-[minmax(0,1fr)_18rem]">
+        <div className="grid gap-3">
+          <label className="grid gap-2 text-sm">
+            <span className="font-bold text-slate-900 dark:text-slate-100">
+              Describe the process or problem
+            </span>
+            <textarea
+              ref={promptTextareaRef}
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              rows={5}
+              className="min-w-0 resize-y rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+            />
+          </label>
+
+          {recommendation ? (
+            <section className="grid gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-3 text-sm">
+              <div className="flex flex-wrap items-center gap-2 font-bold text-slate-900 dark:text-slate-100">
+                <ChartIcon diagramType={recommendation.diagramType} />
+                {getDiagramDefinition(recommendation.diagramType).label}
+                <span className="rounded-full border border-cyan-500/40 px-2 py-0.5 text-[10px] uppercase tracking-wide text-cyan-800 dark:text-cyan-200">
+                  {recommendation.mode === "ai" ? "OpenAI" : "Rules"} |{" "}
+                  {recommendation.confidence}%
+                </span>
+              </div>
+              <p className="text-slate-700 dark:text-slate-300">{recommendation.reason}</p>
+              <ul className="grid gap-1 text-xs text-slate-600 dark:text-slate-400">
+                {recommendation.setupSteps.map((step) => (
+                  <li key={step}>- {step}</li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+        </div>
+        <div className="grid content-start gap-3">
+          <button
+            type="button"
+            onClick={() => void recommendChart()}
+            disabled={recommendBusy || prompt.trim().length < 8}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-4 py-3 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-100"
+          >
+            {recommendBusy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+            Recommend chart
+          </button>
+          <button
+            type="button"
+            onClick={refreshPreview}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+          >
+            <RefreshCw size={16} />
+            Generate preview
+          </button>
+        </div>
+      </section>
 
       <div className="grid gap-5 xl:grid-cols-[minmax(20rem,25rem)_minmax(0,1fr)]">
-        <aside className="grid min-w-0 content-start gap-4 rounded-xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
+        <aside id="map-setup" className="grid min-w-0 scroll-mt-24 content-start gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
           <div className="grid min-w-0 gap-3">
             <div className="grid gap-2 rounded-lg border border-slate-300/70 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/50">
               <div className="flex items-center justify-between gap-3">
@@ -1896,6 +2521,7 @@ export function ProcessMapBuilderClient({
             <label className="grid gap-1 text-sm">
               <span className="font-semibold">Title</span>
               <input
+                ref={titleInputRef}
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
                 className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
@@ -1925,6 +2551,7 @@ export function ProcessMapBuilderClient({
             <label className="grid gap-1 text-sm">
               <span className="font-semibold">Process Area</span>
               <input
+                ref={processAreaInputRef}
                 value={processArea}
                 onChange={(event) => setProcessArea(event.target.value)}
                 placeholder="EDM setup, order entry, inspection..."
@@ -1948,207 +2575,28 @@ export function ProcessMapBuilderClient({
               </select>
             </label>
 
-            <label className="grid gap-1 text-sm">
-              <span className="font-semibold">User Input for Recommendation</span>
-              <textarea
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                rows={5}
-                className="min-w-0 resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-              />
-            </label>
-
-            <button
-              type="button"
-              onClick={() => void recommendChart()}
-              disabled={recommendBusy || prompt.trim().length < 8}
-              className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-4 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-100"
-            >
-              {recommendBusy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-              Recommend Chart
-            </button>
           </div>
-
-          {recommendation ? (
-            <section className="grid gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-3 text-sm">
-              <div className="flex flex-wrap items-center gap-2 font-bold text-slate-900 dark:text-slate-100">
-                <ChartIcon diagramType={recommendation.diagramType} />
-                {getDiagramDefinition(recommendation.diagramType).label}
-                <span className="rounded-full border border-cyan-500/40 px-2 py-0.5 text-[10px] uppercase tracking-wide text-cyan-800 dark:text-cyan-200">
-                  {recommendation.mode === "ai" ? "OpenAI" : "Rules"} |{" "}
-                  {recommendation.confidence}%
-                </span>
-              </div>
-              <p className="text-slate-700 dark:text-slate-300">{recommendation.reason}</p>
-              <ul className="grid gap-1 text-xs text-slate-600 dark:text-slate-400">
-                {recommendation.setupSteps.map((step) => (
-                  <li key={step}>- {step}</li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
-
-          <section className="grid min-w-0 gap-3 overflow-hidden rounded-lg border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/45">
-            <div className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-slate-100">
-              <Sigma size={16} />
-              Analysis Formulas
+          <section className="grid min-w-0 gap-3 overflow-hidden rounded-lg border border-slate-300/70 bg-white/70 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/45">
+            <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-slate-100">
+              <Target size={16} />
+              Formula Tools
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Pick a formula layer, enter the required inputs, then use Refresh Chart to update the
-              preview intentionally.
+              OEE, Cp/Cpk, DPMO, takt time, and control-limit calculators now live on their own
+              page so chart setup stays focused on diagrams and data.
             </p>
-            <label className="grid min-w-0 gap-1 text-sm">
-              <span className="font-semibold">Formula Tool</span>
-              <select
-                value={formulaTool}
-                onChange={(event) => setFormulaTool(event.target.value as FormulaTool)}
-                className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-              >
-                <option value="none">None</option>
-                <option value="capability">Cp / Cpk Capability</option>
-                <option value="oee">OEE</option>
-                <option value="control_limits">Control Limits</option>
-                <option value="dpmo">DPMO / Yield</option>
-                <option value="takt_time">Takt Time</option>
-              </select>
-            </label>
-
-            {formulaTool === "capability" ? (
-              <div className="grid min-w-0 gap-3">
-                <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
-                  <label className="grid min-w-0 gap-1 text-xs">
-                    <span className="font-semibold">LSL</span>
-                    <input
-                      value={specLower}
-                      onChange={(event) => setSpecLower(event.target.value)}
-                      className="min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                    />
-                  </label>
-                  <label className="grid min-w-0 gap-1 text-xs">
-                    <span className="font-semibold">Target</span>
-                    <input
-                      value={targetValue}
-                      onChange={(event) => setTargetValue(event.target.value)}
-                      className="min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                    />
-                  </label>
-                  <label className="grid min-w-0 gap-1 text-xs">
-                    <span className="font-semibold">USL</span>
-                    <input
-                      value={specUpper}
-                      onChange={(event) => setSpecUpper(event.target.value)}
-                      className="min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                    />
-                  </label>
-                </div>
-                <label className="grid min-w-0 gap-1 text-xs">
-                  <span className="font-semibold">Measurement Data</span>
-                  <textarea
-                    value={capabilityDataText}
-                    onChange={(event) => setCapabilityDataText(event.target.value)}
-                    rows={6}
-                    placeholder="Paste measurements separated by spaces, commas, or new lines"
-                    className="min-w-0 resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                  />
-                </label>
-              </div>
-            ) : null}
-
-            {formulaTool === "oee" ? (
-              <div className="grid min-w-0 gap-2">
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {[
-                    ["Planned Minutes", oeePlannedMinutes, setOeePlannedMinutes],
-                    ["Run Time Minutes", oeeRunMinutes, setOeeRunMinutes],
-                    ["Ideal Cycle Seconds", oeeIdealCycleSeconds, setOeeIdealCycleSeconds],
-                    ["Total Count", oeeTotalCount, setOeeTotalCount],
-                    ["Good Count", oeeGoodCount, setOeeGoodCount],
-                  ].map(([label, value, setter]) => (
-                    <label key={label as string} className="grid min-w-0 gap-1 text-xs">
-                      <span className="font-semibold">{label as string}</span>
-                      <input
-                        value={value as string}
-                        onChange={(event) =>
-                          (setter as (nextValue: string) => void)(event.target.value)
-                        }
-                        className="min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                      />
-                    </label>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            {formulaTool === "dpmo" ? (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                {[
-                  ["Defects", dpmoDefects, setDpmoDefects],
-                  ["Units", dpmoUnits, setDpmoUnits],
-                  ["Opp./Unit", dpmoOpportunities, setDpmoOpportunities],
-                ].map(([label, value, setter]) => (
-                  <label key={label as string} className="grid min-w-0 gap-1 text-xs">
-                    <span className="font-semibold">{label as string}</span>
-                    <input
-                      value={value as string}
-                      onChange={(event) =>
-                        (setter as (nextValue: string) => void)(event.target.value)
-                      }
-                      className="min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                    />
-                  </label>
-                ))}
-              </div>
-            ) : null}
-
-            {formulaTool === "takt_time" ? (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {[
-                  ["Available Minutes", taktAvailableMinutes, setTaktAvailableMinutes],
-                  ["Customer Demand", taktDemand, setTaktDemand],
-                ].map(([label, value, setter]) => (
-                  <label key={label as string} className="grid min-w-0 gap-1 text-xs">
-                    <span className="font-semibold">{label as string}</span>
-                    <input
-                      value={value as string}
-                      onChange={(event) =>
-                        (setter as (nextValue: string) => void)(event.target.value)
-                      }
-                      className="min-w-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                    />
-                  </label>
-                ))}
-              </div>
-            ) : null}
-
-            <div className="grid gap-2 rounded-lg border border-slate-300/70 bg-slate-50 p-3 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300">
-              <div className="font-bold text-slate-900 dark:text-slate-100">Formula Results</div>
-              <FormulaResultSummary
-                formulaTool={formulaTool}
-                capabilityStats={capabilityStats}
-                oeeStats={oeeStats}
-                dpmoStats={dpmoStats}
-                taktStats={taktStats}
-                controlLimitStats={controlLimitStats}
-              />
-              <button
-                type="button"
-                onClick={refreshPreview}
-                className="mt-1 inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
-              >
-                <RefreshCw size={14} />
-                Refresh Chart
-              </button>
-              {lastPreviewRefreshAt ? (
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Last refresh: {lastPreviewRefreshAt}
-                </p>
-              ) : null}
-            </div>
+            <Link
+              href="/process-maps/formulas"
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
+            >
+              <Target size={14} />
+              Open formulas
+            </Link>
           </section>
         </aside>
 
         <main className="grid gap-4">
-          <section className="grid gap-3 rounded-xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
+          <section id="map-diagrams" className="grid scroll-mt-24 gap-3 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-extrabold text-slate-950 dark:text-slate-50">
@@ -2250,33 +2698,31 @@ export function ProcessMapBuilderClient({
             </div>
           </section>
 
-          <section className="grid gap-4 rounded-xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
+          <section id="map-layers" className="grid scroll-mt-24 gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="inline-flex items-center gap-2 text-lg font-extrabold text-slate-950 dark:text-slate-50">
                   <Layers size={18} />
-                  Editable Layers
+                  Output Options
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Turn output layers on or off and style the visual before printing or saving.
+                  Choose what appears on the generated chart and adjust the chart colors.
                 </p>
-              </div>
-              <div className="inline-flex items-center gap-2 rounded-lg border border-slate-300/70 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300">
-                <SlidersHorizontal size={14} />
-                Layer controls
               </div>
             </div>
 
-            <div className="grid gap-3 lg:grid-cols-[1fr_18rem]">
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-4 lg:grid-cols-[1fr_18rem]">
+              <div className="grid gap-2">
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Visible in output
+                </p>
                 {[
-                  ["showTitle", "Title"],
-                  ["showDataLayer", "Data"],
-                  ["showFormulaLayer", "Formulas"],
-                  ["showControlLimits", "Limits"],
-                  ["showGrid", "Grid"],
+                  ["showTitle", "Chart title"],
+                  ["showDataLayer", "Data values"],
+                  ["showControlLimits", "Control limits"],
+                  ["showGrid", "Grid lines"],
                   ["showLegend", "Legend"],
-                  ["showIsoNotes", "ISO Notes"],
+                  ["showIsoNotes", "ISO note"],
                 ].map(([key, label]) => (
                   <label
                     key={key}
@@ -2295,10 +2741,10 @@ export function ProcessMapBuilderClient({
                 ))}
               </div>
 
-              <div className="grid gap-2 rounded-lg border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/45">
+              <div className="grid content-start gap-3 rounded-lg border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/45">
                 <div className="inline-flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-slate-100">
                   <Palette size={16} />
-                  Style
+                  Colors
                 </div>
                 {[
                   ["primaryColor", "Primary"],
@@ -2323,11 +2769,191 @@ export function ProcessMapBuilderClient({
             </div>
           </section>
 
-          <section className="grid gap-4 rounded-xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
+          {CUSTOM_FLOW_DIAGRAM_TYPES.has(diagramType) ? (
+          <section className="grid gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-extrabold text-slate-950 dark:text-slate-50">
+                  Custom Flow Sketch
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Click the board to place shapes. Use connector mode to draw arrows between
+                  shapes, then copy the sketch labels into the flowchart steps.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  ["select", "Select"],
+                  ["process", "Process"],
+                  ["decision", "Decision"],
+                  ["terminator", "Start/End"],
+                  ["connector", "Arrow"],
+                ].map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => {
+                      setDrawingMode(mode as DrawingMode);
+                      if (mode !== "connector") {
+                        setPendingConnectorNodeId(null);
+                      }
+                    }}
+                    className={cn(
+                      "rounded-lg border px-3 py-1.5 text-xs font-semibold transition",
+                      drawingMode === mode
+                        ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-800 dark:text-cyan-100"
+                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_16rem]">
+              <div className="overflow-hidden rounded-xl border border-slate-300/70 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/60">
+                <svg
+                  viewBox="0 0 960 360"
+                  className="h-[22rem] w-full cursor-crosshair"
+                  role="img"
+                  aria-label="Custom process flow sketch board"
+                  onClick={handleDrawingBoardClick}
+                >
+                  <defs>
+                    <marker
+                      id="custom-flow-arrow"
+                      markerWidth="10"
+                      markerHeight="10"
+                      refX="8"
+                      refY="3"
+                      orient="auto"
+                      markerUnits="strokeWidth"
+                    >
+                      <path d="M0,0 L0,6 L9,3 z" fill="#0f766e" />
+                    </marker>
+                    <pattern id="custom-grid" width="24" height="24" patternUnits="userSpaceOnUse">
+                      <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#cbd5e1" strokeWidth="0.7" />
+                    </pattern>
+                  </defs>
+                  <rect width="960" height="360" fill="url(#custom-grid)" />
+                  {customFlowLinks.map((link) => {
+                    const from = customFlowNodes.find((node) => node.id === link.from);
+                    const to = customFlowNodes.find((node) => node.id === link.to);
+                    if (!from || !to) {
+                      return null;
+                    }
+                    return (
+                      <line
+                        key={link.id}
+                        x1={from.x + 56}
+                        y1={from.y}
+                        x2={to.x - 56}
+                        y2={to.y}
+                        stroke="#0f766e"
+                        strokeWidth="3"
+                        markerEnd="url(#custom-flow-arrow)"
+                      />
+                    );
+                  })}
+                  {customFlowNodes.map((node) => {
+                    const isSelected = node.id === selectedCustomNodeId;
+                    const isPending = node.id === pendingConnectorNodeId;
+                    return (
+                      <g
+                        key={node.id}
+                        role="button"
+                        tabIndex={0}
+                        onPointerDown={(event) => handleCustomNodePointerDown(node, event)}
+                        onPointerMove={handleCustomNodePointerMove}
+                        onPointerUp={finishCustomNodeDrag}
+                        onPointerCancel={finishCustomNodeDrag}
+                        onKeyDown={(event) => handleCustomNodeKeyDown(node, event)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleCustomNodeClick(node.id);
+                        }}
+                        className={drawingMode === "select" ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}
+                      >
+                        {node.type === "decision" ? (
+                          <polygon
+                            points={`${node.x},${node.y - 44} ${node.x + 70},${node.y} ${node.x},${node.y + 44} ${node.x - 70},${node.y}`}
+                            fill={isSelected ? "#ccfbf1" : "#fff7ed"}
+                            stroke={isPending ? "#f59e0b" : "#0f766e"}
+                            strokeWidth={isSelected || isPending ? 4 : 2}
+                          />
+                        ) : (
+                          <rect
+                            x={node.x - 72}
+                            y={node.y - 32}
+                            width="144"
+                            height="64"
+                            rx={node.type === "terminator" ? 28 : 10}
+                            fill={isSelected ? "#ccfbf1" : "#ffffff"}
+                            stroke={isPending ? "#f59e0b" : "#0f766e"}
+                            strokeWidth={isSelected || isPending ? 4 : 2}
+                          />
+                        )}
+                        <foreignObject x={node.x - 56} y={node.y - 22} width="112" height="44">
+                          <div className="flex h-full items-center justify-center text-center text-xs font-bold leading-tight text-slate-900">
+                            {node.label}
+                          </div>
+                        </foreignObject>
+                      </g>
+                    );
+                  })}
+                </svg>
+              </div>
+
+              <aside className="grid content-start gap-3 rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/45">
+                <div>
+                  <p className="font-bold text-slate-900 dark:text-slate-100">Selected shape</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {selectedCustomNode
+                      ? `${selectedCustomNode.type}. Drag on the board or use arrow keys to move it.`
+                      : "None selected"}
+                  </p>
+                </div>
+                <label className="grid gap-1 text-xs">
+                  <span className="font-semibold">Label</span>
+                  <input
+                    value={selectedCustomNode?.label ?? ""}
+                    onChange={(event) => updateSelectedCustomNodeLabel(event.target.value)}
+                    disabled={!selectedCustomNode}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950"
+                  />
+                </label>
+                <p className="rounded-lg border border-slate-300/70 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300">
+                  Select a shape, then drag it. Keyboard users can tab to a shape and use arrow
+                  keys; hold Shift for a larger move.
+                </p>
+                <button
+                  type="button"
+                  onClick={applyCustomFlowToSteps}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
+                >
+                  Use as flowchart
+                </button>
+                <button
+                  type="button"
+                  onClick={deleteSelectedCustomNode}
+                  disabled={!selectedCustomNode}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-50 dark:text-rose-200"
+                >
+                  <Trash2 size={14} />
+                  Delete shape
+                </button>
+              </aside>
+            </div>
+          </section>
+          ) : null}
+
+          <section id="map-data" className="grid scroll-mt-24 gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
             <div className="grid gap-3 lg:grid-cols-[1fr_0.8fr]">
               <label className="grid gap-1 text-sm">
                 <span className="font-semibold">Steps, Categories, or Fields</span>
                 <textarea
+                  ref={itemsTextareaRef}
                   value={itemsText}
                   onChange={(event) => setItemsText(event.target.value)}
                   rows={8}
@@ -2349,6 +2975,7 @@ export function ProcessMapBuilderClient({
                     ) : null}
                   </span>
                   <textarea
+                    ref={lanesTextareaRef}
                     value={lanesText}
                     onChange={(event) => setLanesText(event.target.value)}
                     rows={3}
@@ -2360,28 +2987,34 @@ export function ProcessMapBuilderClient({
                 </label>
                 <label className="grid gap-1 text-sm">
                   <span className="flex items-center justify-between gap-2 font-semibold">
-                    Chart Data
+                    Chart Data (X / Y)
                     <button
                       type="button"
                       onClick={refreshPreview}
                       className="rounded-md border border-slate-300 px-2 py-0.5 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900"
                     >
-                      Apply data
+                      Update chart
                     </button>
                   </span>
                   <textarea
+                    ref={metricsTextareaRef}
                     value={metricsText}
                     onChange={(event) => setMetricsText(event.target.value)}
                     rows={4}
-                    placeholder="Label, value, secondary value"
+                    placeholder="X label/date, Y value, optional secondary Y"
                     className="min-w-0 resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
                   />
+                  <span className="text-xs text-slate-500 dark:text-slate-400">
+                    One row per point. Example: 2026-05-20,42,12. The first value is the X-axis
+                    label/date; the second is the Y-axis value; the third is used as secondary Y
+                    data for scatter charts.
+                  </span>
                 </label>
               </div>
             </div>
           </section>
 
-          <section className="grid gap-4 rounded-xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
+          <section id="map-preview" className="grid scroll-mt-24 gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 className="text-lg font-extrabold text-slate-950 dark:text-slate-50">
@@ -2395,22 +3028,90 @@ export function ProcessMapBuilderClient({
                 <ChartIcon diagramType={diagramType} />
                 {definition.category}
               </span>
+              <button
+                type="button"
+                onClick={() => setChartModalOpen(true)}
+                className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
+              >
+                Open large preview
+              </button>
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
-              <div className="min-h-[22rem] overflow-hidden rounded-lg border border-slate-300/70 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+            <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_18rem]">
+              <div className="min-h-[28rem] overflow-auto rounded-xl border border-slate-300/70 bg-slate-50 p-6 dark:border-slate-700 dark:bg-slate-900/60">
                 {TABLE_DIAGRAM_TYPES.has(diagramType) ? (
-                  buildTableRows(diagramType, items, metrics)
+                  buildTableRows(diagramType, items, metrics, {
+                    editable: true,
+                    onItemChange: updateItemLine,
+                    onMetricChange: updateMetricLine,
+                  })
                 ) : (
                   <div
                     key={previewRevision}
-                    className="h-full min-h-[22rem] w-full"
+                    className="h-full min-h-[28rem] w-full"
+                    role="button"
+                    tabIndex={0}
+                    aria-label="Edit the source text or chart data for this preview"
+                    title="Click to edit the source text or chart data"
+                    onClick={focusPrimaryPreviewSource}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        focusPrimaryPreviewSource();
+                      }
+                    }}
                     dangerouslySetInnerHTML={{ __html: svg }}
                   />
                 )}
               </div>
 
               <aside className="grid content-start gap-3 rounded-lg border border-slate-300/70 bg-white/70 p-3 text-sm dark:border-slate-700 dark:bg-slate-950/60">
+                <div>
+                  <h3 className="font-bold text-slate-900 dark:text-slate-100">Edit source</h3>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => focusEditorField(titleInputRef)}
+                      className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-semibold transition hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-900"
+                    >
+                      Title
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => focusEditorField(processAreaInputRef)}
+                      className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-semibold transition hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-900"
+                    >
+                      Area
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => focusEditorField(itemsTextareaRef)}
+                      className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-semibold transition hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-900"
+                    >
+                      Text
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => focusEditorField(metricsTextareaRef)}
+                      className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-semibold transition hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-900"
+                    >
+                      Data
+                    </button>
+                    {diagramType === "swimlane" ? (
+                      <button
+                        type="button"
+                        onClick={() => focusEditorField(lanesTextareaRef)}
+                        className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-semibold transition hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-900"
+                      >
+                        Lanes
+                      </button>
+                    ) : null}
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                    Table cells are editable in place. Click chart previews to jump to the source
+                    text or X/Y data.
+                  </p>
+                </div>
                 <div>
                   <h3 className="font-bold text-slate-900 dark:text-slate-100">When to use</h3>
                   <p className="text-slate-600 dark:text-slate-300">{definition.whenToUse}</p>
@@ -2427,38 +3128,172 @@ export function ProcessMapBuilderClient({
                     ))}
                   </ul>
                 </div>
-                {layerSettings.showFormulaLayer && formulaTool !== "none" ? (
-                  <div className="grid gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-3">
-                    <h3 className="inline-flex items-center gap-2 font-bold text-slate-900 dark:text-slate-100">
-                      <Gauge size={15} />
-                      Analysis
-                    </h3>
-                    <FormulaResultSummary
-                      formulaTool={formulaTool}
-                      capabilityStats={capabilityStats}
-                      oeeStats={oeeStats}
-                      dpmoStats={dpmoStats}
-                      taktStats={taktStats}
-                      controlLimitStats={controlLimitStats}
-                    />
-                    <p className="text-xs text-slate-600 dark:text-slate-300">
-                      {formulaTool === "oee"
-                        ? "OEE = Availability x Performance x Quality."
-                        : formulaTool === "capability"
-                          ? "Cp = (USL - LSL) / (6 * sigma). Cpk = min(Cpu, Cpl)."
-                          : formulaTool === "control_limits"
-                            ? "Control limits use the chart data values and +/- 3 sigma."
-                            : formulaTool === "dpmo"
-                              ? "DPMO = defects / (units x opportunities) x 1,000,000."
-                              : "Takt time = available production time / customer demand."}
-                    </p>
-                  </div>
-                ) : null}
               </aside>
             </div>
           </section>
         </main>
       </div>
+
+      {chartModalOpen ? (
+        <div
+          className="fixed inset-0 flex items-start justify-center overflow-hidden bg-slate-950/75 p-3 pt-4 backdrop-blur-sm sm:p-5"
+          style={{ zIndex: 2147483647 }}
+        >
+          <section className="grid max-h-[calc(100dvh-2rem)] w-full max-w-[96rem] grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-2xl border border-white/20 bg-white shadow-2xl dark:bg-slate-950">
+            <header className="z-10 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950 sm:px-5">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Generated chart preview
+                </p>
+                <h2 className="text-xl font-extrabold text-slate-950 dark:text-slate-50">
+                  {title || definition.label}
+                </h2>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={downloadSvg}
+                  title="Download this chart as an SVG image"
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+                >
+                  <Download size={14} />
+                  SVG
+                </button>
+                <button
+                  type="button"
+                  onClick={downloadDataCsv}
+                  title="Download the current X/Y chart data as CSV"
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+                >
+                  <FileDown size={14} />
+                  CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChartModalOpen(false)}
+                  title="Close expanded chart preview"
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+                >
+                  <X size={14} />
+                  Close
+                </button>
+              </div>
+            </header>
+
+            <div className="grid min-h-0 gap-4 overflow-y-auto overflow-x-hidden p-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
+              <div className="min-h-[min(64dvh,42rem)] overflow-y-auto overflow-x-hidden rounded-xl border border-slate-300/70 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/60 sm:p-4">
+                {TABLE_DIAGRAM_TYPES.has(diagramType) ? (
+                  buildTableRows(diagramType, items, metrics, {
+                    editable: true,
+                    onItemChange: updateItemLine,
+                    onMetricChange: updateMetricLine,
+                  })
+                ) : (
+                  <div
+                    key={`modal-${previewRevision}`}
+                    className="h-full min-h-[min(64dvh,42rem)] w-full [&>svg]:h-full [&>svg]:w-full"
+                    dangerouslySetInnerHTML={{ __html: svg }}
+                  />
+                )}
+              </div>
+
+              <aside className="grid content-start gap-4">
+                <section className="rounded-xl border border-slate-300/70 bg-white/80 p-4 text-sm dark:border-slate-700 dark:bg-slate-900/50">
+                  <h3 className="font-extrabold text-slate-950 dark:text-slate-50">
+                    Data and Analysis
+                  </h3>
+                  <dl className="mt-3 grid gap-2">
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-slate-500 dark:text-slate-400">Diagram</dt>
+                      <dd className="font-bold">{definition.label}</dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-slate-500 dark:text-slate-400">Method</dt>
+                      <dd className="font-bold">{dmaicEnabled ? `DMAIC ${phase.label}` : "General"}</dd>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-slate-500 dark:text-slate-400">Rows</dt>
+                      <dd className="font-bold">
+                        {formulaTool === "capability" ? capabilityValues.length : metrics.length}
+                      </dd>
+                    </div>
+                  </dl>
+                </section>
+
+                <section className="rounded-xl border border-slate-300/70 bg-white/80 p-4 text-sm dark:border-slate-700 dark:bg-slate-900/50">
+                  <h3 className="font-extrabold text-slate-950 dark:text-slate-50">Chart data</h3>
+                  <div className="mt-2 max-h-72 overflow-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-t border-slate-200 text-left text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                          <th className="py-2 pr-2 font-semibold">X label/date</th>
+                          <th className="py-2 text-right font-semibold">Y value</th>
+                          <th className="py-2 pl-2 text-right font-semibold">Secondary Y</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(formulaTool === "capability"
+                          ? capabilityValues.map((value, index) => ({
+                              label: `Measurement ${index + 1}`,
+                              value,
+                              value2: "",
+                            }))
+                          : metrics
+                        ).map((metric, index) => (
+                          <tr
+                            key={`${metric.label}-${index}`}
+                            title={`X: ${metric.label}; Y: ${metric.value}; secondary Y: ${metric.value2}`}
+                            className="border-t border-slate-200 dark:border-slate-800"
+                          >
+                            <td className="py-2 pr-2 font-semibold">
+                              <input
+                                aria-label={`X label or date row ${index + 1}`}
+                                value={metric.label}
+                                onChange={(event) =>
+                                  formulaTool === "capability"
+                                    ? undefined
+                                    : updateMetricLine(index, "label", event.target.value)
+                                }
+                                disabled={formulaTool === "capability"}
+                                className="w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-xs font-semibold outline-none transition hover:border-cyan-300 focus:border-cyan-500 focus:bg-white disabled:text-slate-500 dark:focus:bg-slate-950"
+                              />
+                            </td>
+                            <td className="py-2 text-right">
+                              <input
+                                aria-label={`Y value row ${index + 1}`}
+                                value={String(metric.value)}
+                                onChange={(event) =>
+                                  formulaTool === "capability"
+                                    ? updateCapabilityLine(index, event.target.value)
+                                    : updateMetricLine(index, "value", event.target.value)
+                                }
+                                className="w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-right text-xs outline-none transition hover:border-cyan-300 focus:border-cyan-500 focus:bg-white dark:focus:bg-slate-950"
+                              />
+                            </td>
+                            <td className="py-2 pl-2 text-right text-slate-500">
+                              <input
+                                aria-label={`Secondary Y value row ${index + 1}`}
+                                value={String(metric.value2)}
+                                onChange={(event) =>
+                                  formulaTool === "capability"
+                                    ? undefined
+                                    : updateMetricLine(index, "value2", event.target.value)
+                                }
+                                disabled={formulaTool === "capability"}
+                                className="w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-right text-xs outline-none transition hover:border-cyan-300 focus:border-cyan-500 focus:bg-white disabled:text-slate-400 dark:focus:bg-slate-950"
+                              />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </aside>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -99,7 +99,7 @@ async function fetchDatasetRows(datasetId: ExportDatasetId) {
       const { data, error } = await supabaseAdmin
         .from("work_instructions")
         .select(
-          "id, work_item_id, fork_root_instruction_id, fork_number, merged_into_root_at, merge_count, is_archived, body_markdown, uncommon_tools, ai_assisted, ai_assisted_at, last_change_summary, revision, created_at, updated_at, created_by, updated_by",
+          "id, work_item_id, fork_root_instruction_id, fork_number, merged_into_root_at, merge_count, is_archived, body_markdown, uncommon_tools, iso_clause_refs, process_scope, acceptance_criteria, verification_records, risk_controls, ai_assisted, ai_assisted_at, last_change_summary, revision, created_at, updated_at, created_by, updated_by",
         )
         .order("updated_at", { ascending: false })
         .range(0, 9999);

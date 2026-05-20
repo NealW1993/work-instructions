@@ -33,6 +33,8 @@ interface ProcessDocumentRequestBody {
   isoClauseRefs?: unknown;
   relatedInstructionIds?: unknown;
   bodyHtml?: unknown;
+  documentCoverImageDataUrl?: unknown;
+  documentCoverImageName?: unknown;
   changeSummary?: unknown;
   sourceType?: unknown;
   templateId?: unknown;
@@ -52,6 +54,7 @@ interface InsertedRevisionRow {
 }
 
 const DEFAULT_NEXT_REVIEW_DAYS = 365;
+const MAX_COVER_IMAGE_DATA_URL_LENGTH = 500_000;
 
 function normalizeString(value: unknown, maxLength = 5000) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
@@ -94,6 +97,17 @@ function normalizeImportedFileSize(value: unknown) {
   }
 
   return Math.round(value);
+}
+
+function normalizeCoverImageDataUrl(value: unknown) {
+  const normalized = normalizeString(value, MAX_COVER_IMAGE_DATA_URL_LENGTH);
+  if (!normalized) {
+    return "";
+  }
+
+  return /^data:image\/(png|jpe?g|webp|gif);base64,[a-z0-9+/=\s]+$/i.test(normalized)
+    ? normalized
+    : "";
 }
 
 function nextReviewDate(now: Date) {
@@ -162,10 +176,12 @@ export async function POST(request: NextRequest) {
   const documentNumber = normalizeString(requestBody.documentNumber, 80);
   const title = normalizeString(requestBody.title, 180);
   const documentType: ProcessDocumentType = isProcessDocumentType(requestBody.documentType)
-    ? requestBody.documentType
+    ? requestBody.documentType === "work_instruction"
+      ? "procedure"
+      : requestBody.documentType
     : "procedure";
   const requestedStatus = normalizeRequestedStatus(requestBody.status, requester.role);
-  const bodyHtml = sanitizeRichHtml(normalizeString(requestBody.bodyHtml, 250_000)).trim();
+  const bodyHtml = sanitizeRichHtml(normalizeString(requestBody.bodyHtml, 900_000)).trim();
   const changeSummary =
     normalizeString(requestBody.changeSummary, 500) || "Initial controlled document revision.";
   const sourceType = normalizeSourceType(requestBody.sourceType);
@@ -175,6 +191,12 @@ export async function POST(request: NextRequest) {
   const processScope = normalizeString(requestBody.processScope, 4000);
   const processControls = normalizeString(requestBody.processControls, 4000);
   const isoClauseRefs = normalizeIsoClauseRefs(requestBody.isoClauseRefs);
+  const documentCoverImageDataUrl = normalizeCoverImageDataUrl(
+    requestBody.documentCoverImageDataUrl,
+  );
+  const documentCoverImageName = documentCoverImageDataUrl
+    ? normalizeString(requestBody.documentCoverImageName, 260)
+    : "";
   const importedFileName =
     sourceType === "import" ? normalizeString(requestBody.importedFileName, 260) : null;
   const importedFileType =
@@ -246,6 +268,8 @@ export async function POST(request: NextRequest) {
       process_controls: processControls,
       related_instruction_ids: normalizeUuidArray(requestBody.relatedInstructionIds),
       iso_clause_refs: isoClauseRefs,
+      document_cover_image_data_url: documentCoverImageDataUrl,
+      document_cover_image_name: documentCoverImageName,
       current_revision: 1,
       created_by: requester.id,
       updated_by: requester.id,

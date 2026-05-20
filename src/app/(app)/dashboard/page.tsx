@@ -5,10 +5,16 @@ import type {
   DashboardLikeCelebrationData,
   DashboardLikedInstructionCardData,
   DashboardPinnedInstructionCardData,
+  DashboardProcessDocumentData,
   DashboardSystemHistoryEventData,
   DashboardWorkItemData,
 } from "@/components/dashboard/dashboard-client";
 import { requireAuthenticatedUser } from "@/lib/auth";
+import {
+  type ProcessDocumentStatus,
+  type ProcessDocumentType,
+  getProcessDocumentTypeLabel,
+} from "@/lib/process-documents";
 import { canEditInstructions, isSystemAdmin } from "@/lib/roles";
 
 interface DashboardPageProps {
@@ -105,6 +111,25 @@ interface DashboardInstructionReviewStatusRow {
   last_calibrated_at: string;
   flagged_at: string | null;
   updated_at: string;
+}
+
+interface DashboardProcessDocumentRow {
+  id: string;
+  document_number: string;
+  title: string;
+  document_type: ProcessDocumentType;
+  status: ProcessDocumentStatus;
+  department_id: string | null;
+  process_name: string | null;
+  process_scope: string | null;
+  process_inputs: string | null;
+  process_outputs: string | null;
+  process_risks: string | null;
+  process_controls: string | null;
+  iso_clause_refs: string[] | null;
+  current_revision: number;
+  updated_at: string;
+  departments: DashboardDepartmentRelation | DashboardDepartmentRelation[] | null;
 }
 
 interface DashboardReviewStateSourcePayload {
@@ -441,6 +466,14 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     .order("sort_order", { ascending: true })
     .order("name", { ascending: true });
 
+  const processDocumentsRequest = supabase
+    .from("process_documents")
+    .select(
+      "id, document_number, title, document_type, status, department_id, process_name, process_scope, process_inputs, process_outputs, process_risks, process_controls, iso_clause_refs, current_revision, updated_at, departments(name, color_hex)",
+    )
+    .order("updated_at", { ascending: false })
+    .limit(200);
+
   const reviewSettingsRequest = supabase
     .from("instruction_review_settings")
     .select("review_window_days")
@@ -455,6 +488,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     { data: historyInstructionsData },
     { data: historyEventsData },
     { data: departmentsData },
+    { data: processDocumentsData },
     { data: reviewSettingsData, error: reviewSettingsError },
   ] = await Promise.all([
     runDashboardQuery(
@@ -486,6 +520,10 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       "Departments query timed out.",
     ),
     runDashboardQuery(
+      processDocumentsRequest,
+      "Process documents query timed out.",
+    ),
+    runDashboardQuery(
       reviewSettingsRequest,
       "Review settings query timed out.",
     ),
@@ -498,6 +536,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const rawHistoryInstructions = (historyInstructionsData ?? []) as DashboardInstructionRow[];
   const rawHistoryEvents =
     (historyEventsData ?? []) as DashboardInstructionChangeEventRow[];
+  const rawProcessDocuments = (processDocumentsData ?? []) as DashboardProcessDocumentRow[];
   const instructionReviewWindowDays =
     !reviewSettingsError
       ? normalizeReviewWindowDays(reviewSettingsData?.review_window_days) ??
@@ -908,6 +947,27 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     return bTimestamp - aTimestamp;
   });
 
+  const processDocuments: DashboardProcessDocumentData[] = rawProcessDocuments.map(
+    (document) => ({
+      id: document.id,
+      document_number: document.document_number,
+      title: document.title,
+      type_label: getProcessDocumentTypeLabel(document.document_type),
+      status: document.status,
+      department_id: document.department_id,
+      department_name: normalizeDepartmentName(document.departments),
+      process_name: document.process_name ?? "",
+      process_scope: document.process_scope ?? "",
+      process_inputs: document.process_inputs ?? "",
+      process_outputs: document.process_outputs ?? "",
+      process_risks: document.process_risks ?? "",
+      process_controls: document.process_controls ?? "",
+      iso_clause_refs: document.iso_clause_refs ?? [],
+      current_revision: document.current_revision,
+      updated_at: document.updated_at,
+    }),
+  );
+
   const seenLikesAtTimestamp = toTimestamp(profile.authored_likes_seen_at ?? null);
   const newLikeRows =
     seenLikesAtTimestamp === null
@@ -996,6 +1056,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       likeCelebration={likeCelebration}
       newestInstructions={newestInstructions}
       items={items}
+      processDocuments={processDocuments}
       systemHistoryEvents={systemHistoryEvents.slice(0, 240)}
       currentUserId={profile.id}
       initialDashboardLayout={profile.dashboard_layout ?? null}

@@ -60,6 +60,11 @@ interface InstructionRecord {
   is_archived: boolean;
   body_markdown: string;
   uncommon_tools: string;
+  iso_clause_refs: string[] | null;
+  process_scope: string | null;
+  acceptance_criteria: string | null;
+  verification_records: string | null;
+  risk_controls: string | null;
   ai_assisted: boolean;
   ai_assisted_at: string | null;
   last_change_summary: string | null;
@@ -736,7 +741,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, work_item_id, fork_root_instruction_id, fork_number, merged_into_root_at, merge_count, is_archived, body_markdown, uncommon_tools, ai_assisted, ai_assisted_at, last_change_summary, revision, created_at, updated_at, created_by, updated_by, work_items(id, department_id, part_id, item_title, departments(name)), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
+      "id, work_item_id, fork_root_instruction_id, fork_number, merged_into_root_at, merge_count, is_archived, body_markdown, uncommon_tools, iso_clause_refs, process_scope, acceptance_criteria, verification_records, risk_controls, ai_assisted, ai_assisted_at, last_change_summary, revision, created_at, updated_at, created_by, updated_by, work_items(id, department_id, part_id, item_title, departments(name)), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -1200,6 +1205,16 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const printToolNames = Array.from(printToolNamesByKey.values()).sort((first, second) =>
     first.localeCompare(second),
   );
+  const isoContextRows = [
+    {
+      label: "ISO 9001 Clauses",
+      value: (instruction.iso_clause_refs ?? []).join(", "),
+    },
+    { label: "Scope", value: instruction.process_scope ?? "" },
+    { label: "Acceptance Criteria", value: instruction.acceptance_criteria ?? "" },
+    { label: "Verification Records", value: instruction.verification_records ?? "" },
+    { label: "Risks / Controls", value: instruction.risk_controls ?? "" },
+  ].filter((entry) => entry.value.trim().length > 0);
   const printBodyMedia = extractPrintMediaFromBody(
     rewriteLoopbackMediaUrlsInHtml(instruction.body_markdown, mediaUrlRuntime),
   );
@@ -1324,6 +1339,20 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
             </ul>
           )}
         </section>
+
+        {isoContextRows.length > 0 ? (
+          <section className="mt-6 grid gap-2">
+            <h2 className="text-xl font-bold text-slate-900">ISO / Control Context</h2>
+            <dl className="grid gap-2 text-sm text-slate-800">
+              {isoContextRows.map((entry) => (
+                <div key={entry.label}>
+                  <dt className="font-bold">{entry.label}</dt>
+                  <dd className="whitespace-pre-wrap">{entry.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        ) : null}
 
         <section className="mt-6 grid gap-2">
           <h2 className="text-xl font-bold text-slate-900">Work Instructions</h2>
@@ -1578,6 +1607,24 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
           </div>
         </div>
         </header>
+
+        {isoContextRows.length > 0 ? (
+          <section className="grid min-w-0 gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+            <h2 className="text-xl font-bold">ISO / Control Context</h2>
+            <dl className="grid gap-3 md:grid-cols-2">
+              {isoContextRows.map((entry) => (
+                <div key={entry.label} className="rounded-2xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-950/50">
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    {entry.label}
+                  </dt>
+                  <dd className="mt-1 whitespace-pre-wrap text-sm text-slate-800 dark:text-slate-100">
+                    {entry.value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        ) : null}
 
         <section className="grid min-w-0 gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
           <h2 className="text-xl font-bold">Work Instructions</h2>

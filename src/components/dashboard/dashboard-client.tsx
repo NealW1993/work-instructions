@@ -9,9 +9,7 @@ import {
   FileText,
   GripVertical,
   Info,
-  Loader2,
   Search,
-  Sparkles,
   TriangleAlert,
   ThumbsUp,
   X,
@@ -133,15 +131,33 @@ interface DashboardDepartmentOption {
   color_hex: string | null;
 }
 
-interface DashboardAiSearchResult {
+export interface DashboardProcessDocumentData {
   id: string;
-  type: "instruction" | "process_document";
+  document_number: string;
+  title: string;
+  type_label: string;
+  status: string;
+  department_id: string | null;
+  department_name: string | null;
+  process_name: string;
+  process_scope: string;
+  process_inputs: string;
+  process_outputs: string;
+  process_risks: string;
+  process_controls: string;
+  iso_clause_refs: string[];
+  current_revision: number;
+  updated_at: string;
+}
+
+interface DashboardSmartSuggestion {
+  id: string;
+  type: "instruction" | "process_document" | "event";
   title: string;
   subtitle: string;
   href: string;
   score: number;
   reason: string;
-  snippet: string;
 }
 
 export interface DashboardSystemHistoryEventData {
@@ -207,6 +223,7 @@ interface DashboardClientProps {
   likeCelebration: DashboardLikeCelebrationData | null;
   newestInstructions: DashboardInstructionCardData[];
   items: DashboardWorkItemData[];
+  processDocuments: DashboardProcessDocumentData[];
   systemHistoryEvents: DashboardSystemHistoryEventData[];
   departmentOptions: DashboardDepartmentOption[];
   currentUserId: string;
@@ -643,6 +660,27 @@ function systemHistoryMatchesQuery(
     `${formatDateForSearch(event.occurred_at)}`;
 
   return haystack.toLowerCase().includes(normalizedQuery);
+}
+
+function scoreSmartTextMatch(normalizedQuery: string, fields: Array<string | null | undefined>) {
+  if (!normalizedQuery) {
+    return 0;
+  }
+
+  const queryTerms = normalizedQuery.split(/\s+/).filter(Boolean);
+  const haystack = fields.filter(Boolean).join(" ").toLowerCase();
+  if (!haystack) {
+    return 0;
+  }
+
+  let score = haystack.includes(normalizedQuery) ? 35 : 0;
+  for (const term of queryTerms) {
+    if (haystack.includes(term)) {
+      score += 12;
+    }
+  }
+
+  return score;
 }
 
 function getPartIdLabel(workItem: DashboardWorkItemSummary) {
@@ -2280,6 +2318,7 @@ export function DashboardClient({
   likeCelebration,
   newestInstructions,
   items,
+  processDocuments,
   systemHistoryEvents,
   departmentOptions,
   currentUserId,
@@ -2341,8 +2380,6 @@ export function DashboardClient({
   const newestListRef = useRef<HTMLDivElement | null>(null);
   const systemHistoryListRef = useRef<HTMLDivElement | null>(null);
   const recentUpdatesListRef = useRef<HTMLDivElement | null>(null);
-  const aiSearchRequestIdRef = useRef(0);
-  const aiSearchLastQueryKeyRef = useRef("");
   const [query, setQuery] = useState(initialQuery);
   const [selectedDepartmentId, setSelectedDepartmentId] = useState("all");
   const [departmentInsightExpanded, setDepartmentInsightExpanded] = useState(false);
@@ -2402,11 +2439,6 @@ export function DashboardClient({
   const [likeCelebrationOpen, setLikeCelebrationOpen] = useState(
     (activeLikeCelebration?.newLikesCount ?? 0) > 0,
   );
-  const [aiSearchResults, setAiSearchResults] = useState<DashboardAiSearchResult[]>([]);
-  const [aiSearchMode, setAiSearchMode] = useState<"ai" | "lexical" | null>(null);
-  const [aiSearchBusy, setAiSearchBusy] = useState(false);
-  const [aiSearchError, setAiSearchError] = useState<string | null>(null);
-  const [aiSearchWarning, setAiSearchWarning] = useState<string | null>(null);
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
   const getKpiWidgetTimeRange = (widgetId: string): KpiTimeRangeDays =>
@@ -3312,113 +3344,6 @@ export function DashboardClient({
       : departmentInsights.find((entry) => entry.id === selectedDepartmentId)?.name ??
         "Unknown Department";
 
-  const runAiSearch = useCallback(async (options: { force?: boolean } = {}) => {
-    const normalizedSearchQuery = query.trim();
-    if (normalizedSearchQuery.length < 2) {
-      setAiSearchError(
-        options.force ? "Enter at least two characters for AI search." : null,
-      );
-      setAiSearchResults([]);
-      setAiSearchMode(null);
-      setAiSearchWarning(null);
-      aiSearchLastQueryKeyRef.current = "";
-      return;
-    }
-
-    const queryKey = `${normalizedSearchQuery.toLocaleLowerCase()}::${selectedDepartmentId}`;
-    if (!options.force && aiSearchLastQueryKeyRef.current === queryKey) {
-      return;
-    }
-    aiSearchLastQueryKeyRef.current = queryKey;
-    const requestId = aiSearchRequestIdRef.current + 1;
-    aiSearchRequestIdRef.current = requestId;
-
-    setAiSearchBusy(true);
-    setAiSearchError(null);
-    setAiSearchWarning(null);
-
-    try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session?.access_token) {
-        throw new Error("Missing session token. Please sign in again.");
-      }
-
-      const response = await fetch("/api/search/ai", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          query: normalizedSearchQuery,
-          departmentId: selectedDepartmentId,
-        }),
-      });
-      const payload = (await response.json().catch(() => ({}))) as {
-        mode?: "ai" | "lexical";
-        openAiConfigured?: boolean;
-        warning?: string | null;
-        results?: DashboardAiSearchResult[];
-        error?: string;
-      };
-
-      if (!response.ok) {
-        throw new Error(payload.error ?? "AI search failed.");
-      }
-
-      if (aiSearchRequestIdRef.current !== requestId) {
-        return;
-      }
-
-      setAiSearchResults(Array.isArray(payload.results) ? payload.results : []);
-      setAiSearchMode(payload.mode ?? null);
-      setAiSearchWarning(
-        payload.warning ??
-          (payload.openAiConfigured === false
-            ? "OPENAI_API_KEY is not configured, so results are ranked by controlled-document text."
-            : null),
-      );
-    } catch (caughtError) {
-      if (aiSearchRequestIdRef.current !== requestId) {
-        return;
-      }
-
-      setAiSearchResults([]);
-      setAiSearchMode(null);
-      setAiSearchError(
-        caughtError instanceof Error ? caughtError.message : "AI search failed.",
-      );
-    } finally {
-      if (aiSearchRequestIdRef.current === requestId) {
-        setAiSearchBusy(false);
-      }
-    }
-  }, [query, selectedDepartmentId, supabase]);
-
-  useEffect(() => {
-    const normalizedSearchQuery = query.trim();
-
-    if (normalizedSearchQuery.length < 3) {
-      aiSearchLastQueryKeyRef.current = "";
-      setAiSearchResults([]);
-      setAiSearchMode(null);
-      setAiSearchWarning(null);
-      if (normalizedSearchQuery.length === 0) {
-        setAiSearchError(null);
-      }
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      void runAiSearch();
-    }, 750);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [query, runAiSearch, selectedDepartmentId]);
-
   const departmentFilteredItems = useMemo(() => {
     if (selectedDepartmentId === "all") {
       return items;
@@ -3841,6 +3766,130 @@ export function DashboardClient({
     [items],
   );
 
+  const smartSuggestions = useMemo<DashboardSmartSuggestion[]>(() => {
+    if (!normalizedQuery) {
+      return [];
+    }
+
+    const suggestions: DashboardSmartSuggestion[] = [];
+    for (const entry of flattenedInstructionEntries) {
+      if (
+        selectedDepartmentId !== "all" &&
+        entry.workItem.department_id !== selectedDepartmentId
+      ) {
+        continue;
+      }
+
+      const score = scoreSmartTextMatch(normalizedQuery, [
+        entry.workItem.part_id,
+        entry.workItem.item_title,
+        entry.workItem.department_name,
+        entry.instruction.creator_name,
+        entry.instruction.updater_name,
+        `revision ${entry.instruction.revision}`,
+        formatDateForSearch(entry.instruction.updated_at),
+      ]);
+
+      if (score <= 0) {
+        continue;
+      }
+
+      suggestions.push({
+        id: `instruction:${entry.instruction.id}`,
+        type: "instruction",
+        title: getWorkItemTitle(entry.workItem),
+        subtitle: `${getLabelWithDepartment(entry.workItem)} | Rev ${entry.instruction.revision}`,
+        href: `/instructions/${entry.instruction.id}`,
+        score: score + 10,
+        reason: `Work instruction updated by ${entry.instruction.updater_name}`,
+      });
+    }
+
+    for (const document of processDocuments) {
+      if (
+        selectedDepartmentId !== "all" &&
+        document.department_id !== selectedDepartmentId
+      ) {
+        continue;
+      }
+
+      const score = scoreSmartTextMatch(normalizedQuery, [
+        document.document_number,
+        document.title,
+        document.type_label,
+        document.status,
+        document.department_name,
+        document.process_name,
+        document.process_scope,
+        document.process_inputs,
+        document.process_outputs,
+        document.process_risks,
+        document.process_controls,
+        ...document.iso_clause_refs,
+        formatDateForSearch(document.updated_at),
+      ]);
+
+      if (score <= 0) {
+        continue;
+      }
+
+      suggestions.push({
+        id: `process_document:${document.id}`,
+        type: "process_document",
+        title: document.title || document.document_number,
+        subtitle: `${document.document_number} | ${document.type_label} | Rev ${document.current_revision}`,
+        href: `/process-documents?doc=${document.id}`,
+        score: score + 8,
+        reason: document.department_name
+          ? `Controlled document in ${document.department_name}`
+          : "Controlled process document",
+      });
+    }
+
+    for (const event of systemHistoryEvents.slice(0, 80)) {
+      if (
+        selectedDepartmentId !== "all" &&
+        event.workItem.department_id !== selectedDepartmentId
+      ) {
+        continue;
+      }
+
+      const score = scoreSmartTextMatch(normalizedQuery, [
+        event.action_label,
+        event.actor_name,
+        event.detail,
+        event.workItem.part_id,
+        event.workItem.item_title,
+        event.workItem.department_name,
+        formatDateForSearch(event.occurred_at),
+      ]);
+
+      if (score <= 0) {
+        continue;
+      }
+
+      suggestions.push({
+        id: `event:${event.id}`,
+        type: "event",
+        title: event.action_label,
+        subtitle: `${getLabelWithDepartment(event.workItem)} | ${getWorkItemTitle(event.workItem)}`,
+        href: `/instructions/${event.instruction_id}`,
+        score,
+        reason: event.detail,
+      });
+    }
+
+    return suggestions
+      .sort((first, second) => second.score - first.score)
+      .slice(0, 8);
+  }, [
+    flattenedInstructionEntries,
+    normalizedQuery,
+    processDocuments,
+    selectedDepartmentId,
+    systemHistoryEvents,
+  ]);
+
   const reviewQueueEntries = useMemo<ReviewQueueEntry[]>(() => {
     const departmentScoped =
       selectedDepartmentId === "all"
@@ -3985,17 +4034,6 @@ export function DashboardClient({
       }
     })();
   }, [activeLikeCelebration?.latestNewLikeAt, activeLikeCelebration?.newLikesCount, supabase]);
-
-  useEffect(() => {
-    if (query.trim().length > 0) {
-      return;
-    }
-
-    setAiSearchResults([]);
-    setAiSearchError(null);
-    setAiSearchWarning(null);
-    setAiSearchMode(null);
-  }, [query]);
 
   const authoredDrilldownEntries = useMemo<ImpactDrilldownEntry[]>(() => {
     return [...myInstructionEntries]
@@ -5140,49 +5178,19 @@ export function DashboardClient({
               </div>
             </label>
 
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={() => void runAiSearch({ force: true })}
-                disabled={aiSearchBusy || query.trim().length < 2}
-                className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-1.5 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-55 dark:text-cyan-100"
-              >
-                {aiSearchBusy ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  <Sparkles size={14} />
-                )}
-                AI Search
-              </button>
-              {aiSearchMode ? (
-                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  {aiSearchMode === "ai" ? "OpenAI ranked" : "Controlled text ranked"}
-                </span>
-              ) : null}
-            </div>
           </div>
 
-          {aiSearchError || aiSearchWarning || aiSearchResults.length > 0 ? (
+          {isSearching ? (
             <div className="grid gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-3">
               <div className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-slate-100">
-                <Sparkles size={15} className="text-cyan-700 dark:text-cyan-200" />
-                Suggested documents
+                <Search size={15} className="text-cyan-700 dark:text-cyan-200" />
+                Suggested matches
               </div>
-              {aiSearchError ? (
-                <p className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-700 dark:text-rose-200">
-                  {aiSearchError}
-                </p>
-              ) : null}
-              {aiSearchWarning ? (
-                <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
-                  {aiSearchWarning}
-                </p>
-              ) : null}
-              {aiSearchResults.length > 0 ? (
+              {smartSuggestions.length > 0 ? (
                 <div className="grid gap-2">
-                  {aiSearchResults.map((result) => (
+                  {smartSuggestions.map((result) => (
                     <Link
-                      key={`${result.type}:${result.id}`}
+                      key={result.id}
                       href={result.href}
                       onClick={
                         result.type === "instruction" ? persistInstructionReturnState : undefined
@@ -5193,10 +5201,16 @@ export function DashboardClient({
                         <span className="inline-flex items-center gap-1 rounded-full border border-cyan-500/40 bg-cyan-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-800 dark:text-cyan-200">
                           {result.type === "process_document" ? (
                             <FileText size={10} />
+                          ) : result.type === "event" ? (
+                            <Info size={10} />
                           ) : (
                             <Search size={10} />
                           )}
-                          {result.type === "process_document" ? "Process Doc" : "Instruction"}
+                          {result.type === "process_document"
+                            ? "Process Doc"
+                            : result.type === "event"
+                              ? "System Event"
+                              : "Instruction"}
                         </span>
                         <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                           Score {Math.round(result.score)}
@@ -5214,11 +5228,11 @@ export function DashboardClient({
                     </Link>
                   ))}
                 </div>
-              ) : !aiSearchError ? (
+              ) : (
                 <p className="text-sm text-slate-600 dark:text-slate-300">
-                  No related documents found.
+                  No system suggestions matched this text yet.
                 </p>
-              ) : null}
+              )}
             </div>
           ) : null}
 
@@ -5365,8 +5379,8 @@ export function DashboardClient({
             </div>
           ) : (
             <p className="rounded-xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-              Searching in {selectedDepartmentName}. Start typing above to search instructions
-              instantly.
+              Searching in {selectedDepartmentName}. Start typing above to search instructions,
+              controlled process documents, and recent system updates instantly.
             </p>
           )}
         </div>

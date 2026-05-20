@@ -23,6 +23,11 @@ interface EditInstructionRecord {
   is_archived: boolean;
   body_markdown: string;
   uncommon_tools: string;
+  iso_clause_refs: string[] | null;
+  process_scope: string | null;
+  acceptance_criteria: string | null;
+  verification_records: string | null;
+  risk_controls: string | null;
   revision: number;
   fork_root_instruction_id: string | null;
   fork_number: number | null;
@@ -57,7 +62,7 @@ export default async function EditInstructionPage({ params }: EditInstructionPag
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, is_archived, body_markdown, uncommon_tools, revision, fork_root_instruction_id, fork_number, merged_into_root_at, merge_count, work_item_id, work_items(id, department_id, part_id, item_title)",
+      "id, is_archived, body_markdown, uncommon_tools, iso_clause_refs, process_scope, acceptance_criteria, verification_records, risk_controls, revision, fork_root_instruction_id, fork_number, merged_into_root_at, merge_count, work_item_id, work_items(id, department_id, part_id, item_title)",
     )
     .eq("id", id)
     .eq("is_archived", false)
@@ -111,6 +116,11 @@ export default async function EditInstructionPage({ params }: EditInstructionPag
           itemTitle: workItem.item_title,
           bodyMarkdown: instruction.body_markdown,
           uncommonTools: instruction.uncommon_tools,
+          isoClauseRefs: instruction.iso_clause_refs ?? undefined,
+          processScope: instruction.process_scope ?? "",
+          acceptanceCriteria: instruction.acceptance_criteria ?? "",
+          verificationRecords: instruction.verification_records ?? "",
+          riskControls: instruction.risk_controls ?? "",
           revision: instruction.revision,
           suggestedToolIds,
           forkRootInstructionId: instruction.fork_root_instruction_id,

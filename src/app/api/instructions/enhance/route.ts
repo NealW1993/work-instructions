@@ -8,6 +8,7 @@ import {
   type OpenAiTokenUsage,
 } from "@/lib/ai-usage";
 import { serverEnv } from "@/lib/env.server";
+import { ISO_9001_CLAUSE_OPTIONS } from "@/lib/process-documents";
 import { canEditInstructions } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -17,6 +18,11 @@ interface EnhanceInstructionRequestBody {
   itemTitle?: string;
   departmentName?: string;
   revision?: number;
+  isoClauseRefs?: unknown;
+  processScope?: string;
+  acceptanceCriteria?: string;
+  verificationRecords?: string;
+  riskControls?: string;
   instructionId?: string;
   sourceInstructionId?: string;
   mode?: "create" | "edit" | "fork" | string;
@@ -184,6 +190,7 @@ function buildSystemPrompt() {
     "- Output valid HTML only (no markdown fences).",
     "- Use structured formatting: h1/h2 sections, paragraph intros, ordered procedure steps, and bullet lists where useful.",
     "- Keep important facts accurate. Do not invent missing measurements, part numbers, tools, or safety details.",
+    "- Use any provided ISO/control context to preserve scope, acceptance criteria, verification records, and reaction controls without inventing missing criteria.",
     "- Preserve the instruction's intent and sequence while improving clarity and readability.",
     "- Preserve any existing image/video/figure tags when present, and keep them as indented standalone blocks.",
     "- Use only tags that are typical in rich text instruction editors: h1, h2, h3, p, ul, ol, li, blockquote, strong, em, u, s, mark, code, pre, figure, img, video, span, div, br.",
@@ -198,6 +205,11 @@ function buildUserPrompt(params: {
   itemTitle: string;
   departmentName: string;
   revision: number | null;
+  isoClauseRefs: string[];
+  processScope: string;
+  acceptanceCriteria: string;
+  verificationRecords: string;
+  riskControls: string;
   mode: string;
 }) {
   return [
@@ -207,6 +219,11 @@ function buildUserPrompt(params: {
     `Work Item Title: ${params.itemTitle || "Untitled"}`,
     `Department: ${params.departmentName || "Unknown"}`,
     `Revision: ${params.revision ?? "Unknown"}`,
+    `ISO 9001 clauses: ${params.isoClauseRefs.length > 0 ? params.isoClauseRefs.join("; ") : "None provided"}`,
+    `Process scope / applicability: ${params.processScope || "Not provided"}`,
+    `Acceptance criteria: ${params.acceptanceCriteria || "Not provided"}`,
+    `Verification records: ${params.verificationRecords || "Not provided"}`,
+    `Risks, controls, and reaction plan: ${params.riskControls || "Not provided"}`,
     "Source content (may include HTML):",
     params.instructionBody,
   ].join("\n\n");
@@ -231,6 +248,21 @@ function normalizeUuid(value: string | null | undefined): string | null {
   }
 
   return trimmed;
+}
+
+function normalizeIsoClauseRefs(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const allowed = new Set<string>(ISO_9001_CLAUSE_OPTIONS);
+  return Array.from(
+    new Set(
+      value
+        .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+        .filter((entry) => entry.length > 0 && allowed.has(entry)),
+    ),
+  );
 }
 
 function parseEnhancementResult(rawContent: string): EnhanceInstructionResult | null {
@@ -296,6 +328,11 @@ export async function POST(request: NextRequest) {
   }
 
   const normalizedOriginalContent = normalizeEditorContent(instructionBody);
+  const isoClauseRefs = normalizeIsoClauseRefs(requestBody.isoClauseRefs);
+  const processScope = requestBody.processScope?.trim().slice(0, 4000) ?? "";
+  const acceptanceCriteria = requestBody.acceptanceCriteria?.trim().slice(0, 4000) ?? "";
+  const verificationRecords = requestBody.verificationRecords?.trim().slice(0, 4000) ?? "";
+  const riskControls = requestBody.riskControls?.trim().slice(0, 4000) ?? "";
   const userPrompt = buildUserPrompt({
     instructionBody: normalizedOriginalContent,
     partId: requestBody.partId?.trim() ?? "",
@@ -305,6 +342,11 @@ export async function POST(request: NextRequest) {
       typeof requestBody.revision === "number" && Number.isInteger(requestBody.revision)
         ? requestBody.revision
         : null,
+    isoClauseRefs,
+    processScope,
+    acceptanceCriteria,
+    verificationRecords,
+    riskControls,
     mode,
   });
 
@@ -431,6 +473,11 @@ export async function POST(request: NextRequest) {
         partId: requestBody.partId?.trim() ?? "",
         itemTitle: requestBody.itemTitle?.trim() ?? "",
         departmentName: requestBody.departmentName?.trim() ?? "",
+        isoClauseRefs,
+        hasProcessScope: processScope.length > 0,
+        hasAcceptanceCriteria: acceptanceCriteria.length > 0,
+        hasVerificationRecords: verificationRecords.length > 0,
+        hasRiskControls: riskControls.length > 0,
         revision:
           typeof requestBody.revision === "number" && Number.isInteger(requestBody.revision)
             ? requestBody.revision
