@@ -5,7 +5,7 @@ import {
   getDashboardAiSearchEnabled,
   setDashboardAiSearchEnabled,
 } from "@/lib/ai-usage";
-import { isSystemAdmin } from "@/lib/roles";
+import { hasFullAccess } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 interface DashboardAiSearchSettingBody {
@@ -19,9 +19,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  if (!isSystemAdmin(requester.role)) {
+  if (!hasFullAccess(requester.role)) {
     return NextResponse.json(
-      { error: "System admin privileges required." },
+      { error: "Admin privileges required." },
       { status: 403 },
     );
   }
@@ -40,9 +40,9 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  if (!isSystemAdmin(requester.role)) {
+  if (!hasFullAccess(requester.role)) {
     return NextResponse.json(
-      { error: "Only system admins can change Dashboard AI Search." },
+      { error: "Only admins can change Dashboard AI Search." },
       { status: 403 },
     );
   }

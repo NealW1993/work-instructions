@@ -10,7 +10,7 @@ import {
   isProcessDocumentType,
   normalizeIsoClauseRefs,
 } from "@/lib/process-documents";
-import { canEditInstructions } from "@/lib/roles";
+import { canEditInstructions, hasFullAccess } from "@/lib/roles";
 import {
   hasMeaningfulRichText,
   sanitizeRichHtml,
@@ -200,9 +200,9 @@ export async function PATCH(
     sourceType === "import" ? normalizeImportedFileSize(requestBody.importedFileSize) : null;
   const now = new Date();
 
-  if (requestedStatus === "obsolete" && requester.role !== "system_admin") {
+  if (requestedStatus === "obsolete" && !hasFullAccess(requester.role)) {
     return NextResponse.json(
-      { error: "Only system admins can obsolete controlled documents." },
+      { error: "Only admins can obsolete controlled documents." },
       { status: 403 },
     );
   }
@@ -259,9 +259,9 @@ export async function PATCH(
     return NextResponse.json({ error: "Controlled document not found." }, { status: 404 });
   }
 
-  if (existingDocument.status === "obsolete" && requester.role !== "system_admin") {
+  if (existingDocument.status === "obsolete" && !hasFullAccess(requester.role)) {
     return NextResponse.json(
-      { error: "Only system admins can revise obsolete controlled documents." },
+      { error: "Only admins can revise obsolete controlled documents." },
       { status: 403 },
     );
   }

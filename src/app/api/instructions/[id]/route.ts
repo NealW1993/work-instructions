@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
+import { hasFullAccess } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 interface InstructionRecord {
@@ -37,7 +38,7 @@ interface DeleteRequestBody {
   permanent?: boolean;
 }
 
-async function requireSystemAdmin(request: NextRequest) {
+async function requireFullAccess(request: NextRequest) {
   const requester = await getRequestProfile(request);
 
   if (!requester) {
@@ -47,10 +48,10 @@ async function requireSystemAdmin(request: NextRequest) {
     };
   }
 
-  if (requester.role !== "system_admin") {
+  if (!hasFullAccess(requester.role)) {
     return {
       error: NextResponse.json(
-        { error: "Only system admins can archive or restore work instructions." },
+        { error: "Only admins can archive or restore work instructions." },
         { status: 403 },
       ),
       requester,
@@ -70,7 +71,7 @@ async function requireAdminOrSystemAdmin(request: NextRequest) {
     };
   }
 
-  if (requester.role !== "admin" && requester.role !== "system_admin") {
+  if (!hasFullAccess(requester.role)) {
     return {
       error: NextResponse.json(
         { error: "Only admins and system admins can restore work instructions." },
@@ -105,7 +106,7 @@ export async function DELETE(
   request: NextRequest,
   context: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireSystemAdmin(request);
+  const auth = await requireFullAccess(request);
   if (auth.error || !auth.requester) {
     return auth.error;
   }

@@ -1,9 +1,13 @@
 import type { AppRole } from "@/lib/types";
 
-const EDITOR_ROLES: AppRole[] = ["admin", "system_admin"];
+const FULL_ACCESS_ROLES: AppRole[] = ["admin", "system_admin"];
 
 export function canEditInstructions(role: AppRole): boolean {
-  return EDITOR_ROLES.includes(role);
+  return hasFullAccess(role);
+}
+
+export function hasFullAccess(role: AppRole): boolean {
+  return FULL_ACCESS_ROLES.includes(role);
 }
 
 export function isSystemAdmin(role: AppRole): boolean {
@@ -11,7 +15,11 @@ export function isSystemAdmin(role: AppRole): boolean {
 }
 
 export function canViewKpis(role: AppRole): boolean {
-  return role === "admin" || role === "system_admin";
+  return hasFullAccess(role);
+}
+
+export function accessLevelLabel(role: AppRole): string {
+  return hasFullAccess(role) ? "Full Access" : "Read Only";
 }
 
 export function roleLabel(role: AppRole): string {

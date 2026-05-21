@@ -10,7 +10,6 @@ import {
   Download,
   FileText,
   GitBranch,
-  Layers,
   LineChart,
   Loader2,
   Network,
@@ -626,30 +625,81 @@ function buildSwimlaneSvg(title: string, items: string[], lanes: string[]) {
   return svgShell(width, height, body);
 }
 
-function buildFishboneSvg(title: string, items: string[]) {
+function buildCustomFlowSketchSvg(title: string, nodes: CustomFlowNode[], links: CustomFlowLink[]) {
   const width = 960;
-  const height = 390;
+  const boardHeight = 360;
+  const top = title ? 58 : 18;
+  const height = top + boardHeight + 18;
+  let body = title ? svgText(width / 2, 36, title, { size: 20, color: "#111827" }) : "";
+
+  body += `<defs>
+    <pattern id="custom-flow-export-grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#cbd5e1" stroke-width="0.7"></path>
+    </pattern>
+  </defs>`;
+  body += `<rect x="0" y="${top}" width="${width}" height="${boardHeight}" fill="url(#custom-flow-export-grid)" stroke="#cbd5e1" stroke-width="1.5"></rect>`;
+
+  links.forEach((link) => {
+    const from = nodes.find((node) => node.id === link.from);
+    const to = nodes.find((node) => node.id === link.to);
+    if (!from || !to) {
+      return;
+    }
+
+    body += `<line x1="${from.x + 56}" y1="${top + from.y}" x2="${to.x - 56}" y2="${
+      top + to.y
+    }" stroke="#0f766e" stroke-width="3" marker-end="url(#arrowhead)"></line>`;
+  });
+
+  nodes.forEach((node) => {
+    const y = top + node.y;
+    if (node.type === "decision") {
+      body += `<polygon points="${node.x},${y - 44} ${node.x + 70},${y} ${node.x},${
+        y + 44
+      } ${node.x - 70},${y}" fill="#fff7ed" stroke="#0f766e" stroke-width="2"></polygon>`;
+    } else {
+      body += `<rect x="${node.x - 72}" y="${y - 32}" width="144" height="64" rx="${
+        node.type === "terminator" ? 28 : 10
+      }" fill="#ffffff" stroke="#0f766e" stroke-width="2"></rect>`;
+    }
+
+    body += svgText(node.x, y + 4, node.label, { size: 12, color: "#0f172a" });
+  });
+
+  return svgShell(width, height, body);
+}
+
+function buildFishboneSvg(title: string, items: string[]) {
+  const width = 1040;
+  const height = 440;
   const categories = items.slice(0, 6);
+  const spineY = 220;
+  const spineStartX = 120;
+  const spineEndX = 800;
   let body = svgText(width / 2, 38, title, { size: 20, color: "#111827" });
-  body += `<line x1="110" y1="205" x2="760" y2="205" stroke="#0f766e" stroke-width="4" marker-end="url(#arrowhead)"></line>`;
-  body += `<rect x="760" y="168" width="145" height="74" rx="10" fill="#fee2e2" stroke="#dc2626" stroke-width="2"></rect>`;
-  body += svgText(832, 200, "Effect /", { size: 13, color: "#991b1b" });
-  body += svgText(832, 218, "Problem", { size: 13, color: "#991b1b" });
+  body += `<line x1="${spineStartX}" y1="${spineY}" x2="${spineEndX}" y2="${spineY}" stroke="#0f766e" stroke-width="4" marker-end="url(#arrowhead)"></line>`;
+  body += `<rect x="810" y="176" width="155" height="88" rx="12" fill="#fee2e2" stroke="#dc2626" stroke-width="2.5"></rect>`;
+  body += svgText(887, 214, "Effect /", { size: 14, color: "#991b1b" });
+  body += svgText(887, 236, "Problem", { size: 14, color: "#991b1b" });
 
   categories.forEach((category, index) => {
     const top = index % 2 === 0;
-    const x = 160 + Math.floor(index / 2) * 185;
-    const y1 = top ? 110 : 300;
-    const y2 = 205;
-    body += `<line x1="${x}" y1="${y1}" x2="${x + 100}" y2="${y2}" stroke="#334155" stroke-width="2"></line>`;
-    body += svgText(x - 10, y1, category, {
+    const column = Math.floor(index / 2);
+    const spineX = 310 + column * 220;
+    const branchX = spineX - 130;
+    const branchY = top ? 94 : 346;
+    const labelY = top ? branchY - 14 : branchY + 24;
+    const minorY1 = top ? branchY + 40 : branchY - 40;
+    const minorY2 = top ? branchY + 72 : branchY - 72;
+    body += `<line x1="${branchX}" y1="${branchY}" x2="${spineX}" y2="${spineY}" stroke="#334155" stroke-width="2.5"></line>`;
+    body += svgText(branchX - 12, labelY, category, {
       anchor: "start",
-      size: 12,
+      size: 13,
       color: "#0f172a",
     });
-    body += `<line x1="${x + 28}" y1="${top ? y1 + 18 : y1 - 18}" x2="${
-      x + 80
-    }" y2="${top ? y1 + 52 : y1 - 52}" stroke="#94a3b8" stroke-width="1.5"></line>`;
+    body += `<line x1="${branchX + 28}" y1="${minorY1}" x2="${
+      branchX + 92
+    }" y2="${minorY2}" stroke="#94a3b8" stroke-width="1.8"></line>`;
   });
 
   return svgShell(width, height, body);
@@ -1447,6 +1497,7 @@ export function ProcessMapBuilderClient({
 
   const definition = getDiagramDefinition(diagramType);
   const phase = getDmaicPhaseOption(dmaicPhase);
+  const isCustomFlowDiagram = CUSTOM_FLOW_DIAGRAM_TYPES.has(diagramType);
   const items = splitListInput(itemsText, definition.starterItems);
   const lanes = splitListInput(lanesText, ["Operations", "Quality", "Supervisor"]);
   const metrics = parseMetricRows(metricsText, definition.starterItems);
@@ -1477,7 +1528,9 @@ export function ProcessMapBuilderClient({
   });
   const controlLimitStats = calculateControlLimits(metrics);
   const rawSvg =
-    formulaTool === "capability" && (diagramType === "histogram" || diagramType === "control_chart")
+    isCustomFlowDiagram
+      ? buildCustomFlowSketchSvg(layerSettings.showTitle ? title : "", customFlowNodes, customFlowLinks)
+      : formulaTool === "capability" && (diagramType === "histogram" || diagramType === "control_chart")
       ? buildCapabilitySvg(
           layerSettings.showTitle ? title : "",
           capabilityValues,
@@ -2165,7 +2218,8 @@ export function ProcessMapBuilderClient({
     th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; }
     th { background: #f1f5f9; }
     .meta { color: #475569; font-size: 13px; margin-bottom: 18px; }
-    .diagram { border: 1px solid #cbd5e1; padding: 12px; border-radius: 8px; }
+    .diagram { border: 1px solid #cbd5e1; padding: 12px; border-radius: 8px; overflow: hidden; }
+    .diagram svg { display: block; max-width: 100%; height: auto; }
     @media print { body { margin: 18mm; } }
   </style>
 </head>
@@ -2180,11 +2234,9 @@ export function ProcessMapBuilderClient({
   <div class="diagram">${
     TABLE_DIAGRAM_TYPES.has(diagramType) ? buildTableDiagramHtml(diagramType, items, metrics) : svg
   }</div>
-  ${formulaTable ? `<h2>Analysis Formula</h2>${formulaTable}` : ""}
+  ${formulaTable ? `<h2>Calculator Results</h2>${formulaTable}` : ""}
   <h2>Data</h2>
   ${dataTable}
-  <h2>Formulas</h2>
-  <p>Cp = (USL - LSL) / (6 * sigma). Cpk = min(Cpu, Cpl). OEE = Availability x Performance x Quality. DPMO = defects / (units x opportunities) x 1,000,000. Takt time = available production time / customer demand.</p>
 </body>
 </html>`;
   }
@@ -2344,11 +2396,175 @@ export function ProcessMapBuilderClient({
     }
   }
 
+  const workspaceCanvas = isCustomFlowDiagram ? (
+    <div className="grid h-full min-h-[36rem] grid-rows-[auto_minmax(0,1fr)] bg-white dark:bg-slate-950">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/70">
+        <div>
+          <h3 className="text-sm font-extrabold text-slate-950 dark:text-slate-50">
+            Editable Diagram Canvas
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Place, connect, select, and drag shapes in this one workspace.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {[
+            ["select", "Select"],
+            ["process", "Process"],
+            ["decision", "Decision"],
+            ["terminator", "Start/End"],
+            ["connector", "Arrow"],
+          ].map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => {
+                setDrawingMode(mode as DrawingMode);
+                if (mode !== "connector") {
+                  setPendingConnectorNodeId(null);
+                }
+              }}
+              className={cn(
+                "rounded-md border px-2.5 py-1.5 text-xs font-semibold transition",
+                drawingMode === mode
+                  ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-800 dark:text-cyan-100"
+                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <svg
+        viewBox="0 0 960 360"
+        className="h-full min-h-[32rem] w-full cursor-crosshair"
+        role="img"
+        aria-label="Custom process flow sketch board"
+        onClick={handleDrawingBoardClick}
+      >
+        <defs>
+          <marker
+            id="custom-flow-arrow-workspace"
+            markerWidth="10"
+            markerHeight="10"
+            refX="8"
+            refY="3"
+            orient="auto"
+            markerUnits="strokeWidth"
+          >
+            <path d="M0,0 L0,6 L9,3 z" fill={diagramStyle.primaryColor} />
+          </marker>
+          <pattern id="custom-grid-workspace" width="24" height="24" patternUnits="userSpaceOnUse">
+            <path
+              d="M 24 0 L 0 0 0 24"
+              fill="none"
+              stroke={layerSettings.showGrid ? "#cbd5e1" : "transparent"}
+              strokeWidth="0.7"
+            />
+          </pattern>
+        </defs>
+        <rect width="960" height="360" fill={diagramStyle.backgroundColor} />
+        <rect width="960" height="360" fill="url(#custom-grid-workspace)" />
+        {customFlowLinks.map((link) => {
+          const from = customFlowNodes.find((node) => node.id === link.from);
+          const to = customFlowNodes.find((node) => node.id === link.to);
+          if (!from || !to) {
+            return null;
+          }
+          return (
+            <line
+              key={link.id}
+              x1={from.x + 56}
+              y1={from.y}
+              x2={to.x - 56}
+              y2={to.y}
+              stroke={diagramStyle.primaryColor}
+              strokeWidth="3"
+              markerEnd="url(#custom-flow-arrow-workspace)"
+            />
+          );
+        })}
+        {customFlowNodes.map((node) => {
+          const isSelected = node.id === selectedCustomNodeId;
+          const isPending = node.id === pendingConnectorNodeId;
+          return (
+            <g
+              key={node.id}
+              role="button"
+              tabIndex={0}
+              onPointerDown={(event) => handleCustomNodePointerDown(node, event)}
+              onPointerMove={handleCustomNodePointerMove}
+              onPointerUp={finishCustomNodeDrag}
+              onPointerCancel={finishCustomNodeDrag}
+              onKeyDown={(event) => handleCustomNodeKeyDown(node, event)}
+              onClick={(event) => {
+                event.stopPropagation();
+                handleCustomNodeClick(node.id);
+              }}
+              className={drawingMode === "select" ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}
+            >
+              {node.type === "decision" ? (
+                <polygon
+                  points={`${node.x},${node.y - 44} ${node.x + 70},${node.y} ${node.x},${node.y + 44} ${node.x - 70},${node.y}`}
+                  fill={isSelected ? "#ccfbf1" : "#fff7ed"}
+                  stroke={isPending ? diagramStyle.accentColor : diagramStyle.primaryColor}
+                  strokeWidth={isSelected || isPending ? 4 : 2}
+                />
+              ) : (
+                <rect
+                  x={node.x - 72}
+                  y={node.y - 32}
+                  width="144"
+                  height="64"
+                  rx={node.type === "terminator" ? 28 : 10}
+                  fill={isSelected ? "#ccfbf1" : "#ffffff"}
+                  stroke={isPending ? diagramStyle.accentColor : diagramStyle.primaryColor}
+                  strokeWidth={isSelected || isPending ? 4 : 2}
+                />
+              )}
+              <foreignObject x={node.x - 56} y={node.y - 22} width="112" height="44">
+                <div className="flex h-full items-center justify-center text-center text-xs font-bold leading-tight text-slate-900">
+                  {node.label}
+                </div>
+              </foreignObject>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  ) : TABLE_DIAGRAM_TYPES.has(diagramType) ? (
+    <div className="min-h-[36rem] overflow-auto bg-slate-50 p-4 dark:bg-slate-900/60">
+      {buildTableRows(diagramType, items, metrics, {
+        editable: true,
+        onItemChange: updateItemLine,
+        onMetricChange: updateMetricLine,
+      })}
+    </div>
+  ) : (
+    <div
+      key={previewRevision}
+      className="h-full min-h-[36rem] w-full overflow-auto bg-slate-50 p-4 dark:bg-slate-900/60 [&>svg]:h-full [&>svg]:min-h-[32rem] [&>svg]:w-full"
+      role="button"
+      tabIndex={0}
+      aria-label="Edit the source text or chart data for this preview"
+      title="Click to edit the source text or chart data"
+      onClick={focusPrimaryPreviewSource}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          focusPrimaryPreviewSource();
+        }
+      }}
+      dangerouslySetInnerHTML={{ __html: svg }}
+    />
+  );
+
   const executiveStats = [
     ["Method", dmaicEnabled ? `DMAIC ${phase.label}` : "General"],
     ["Diagram", definition.shortLabel],
     ["X/Y Data Rows", String(metrics.length)],
-    ["Flow Sketch", CUSTOM_FLOW_DIAGRAM_TYPES.has(diagramType) ? "Available" : "Hidden"],
+    ["Flow Sketch", isCustomFlowDiagram ? "Editable" : "Not used"],
   ];
 
   return (
@@ -2484,38 +2700,55 @@ export function ProcessMapBuilderClient({
         </div>
       </section>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(20rem,25rem)_minmax(0,1fr)]">
-        <aside id="map-setup" className="grid min-w-0 scroll-mt-24 content-start gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
+      <div className="grid gap-5 xl:grid-cols-[minmax(16rem,20rem)_minmax(0,1fr)]">
+        <aside id="map-setup" className="grid min-w-0 scroll-mt-24 content-start gap-3 rounded-2xl border border-slate-300/70 bg-white/90 p-3 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
           <div className="grid min-w-0 gap-3">
             <div className="grid gap-2 rounded-lg border border-slate-300/70 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/50">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="font-bold text-slate-900 dark:text-slate-100">Method</p>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Use DMAIC only for Six Sigma work.
+                    Use DMAIC for Six Sigma work or General for documentation.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={dmaicEnabled}
-                  onClick={() => setDmaicEnabled((current) => !current)}
-                  className={cn(
-                    "inline-flex shrink-0 items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold transition",
-                    dmaicEnabled
-                      ? "border-cyan-500/45 bg-cyan-500/15 text-cyan-800 dark:text-cyan-100"
-                      : "border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200",
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "h-2.5 w-2.5 rounded-full",
-                      dmaicEnabled ? "bg-cyan-600" : "bg-slate-400",
-                    )}
-                  />
-                  {dmaicEnabled ? "DMAIC On" : "General"}
-                </button>
+                <div className="inline-flex rounded-lg border border-slate-300 bg-white p-1 dark:border-slate-700 dark:bg-slate-950">
+                  {(["general", "dmaic"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setDmaicEnabled(mode === "dmaic")}
+                      className={cn(
+                        "rounded-md px-2.5 py-1 text-xs font-extrabold transition",
+                        (mode === "dmaic") === dmaicEnabled
+                          ? "bg-cyan-500/20 text-cyan-900 dark:text-cyan-100"
+                          : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900",
+                      )}
+                    >
+                      {mode === "dmaic" ? "DMAIC" : "General"}
+                    </button>
+                  ))}
+                </div>
               </div>
+              {dmaicEnabled ? (
+                <div className="grid grid-cols-5 gap-1">
+                  {DMAIC_PHASE_OPTIONS.map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => setDmaicPhase(option.id)}
+                      title={option.purpose}
+                      className={cn(
+                        "rounded-md border px-1.5 py-1 text-[11px] font-bold transition",
+                        option.id === dmaicPhase
+                          ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
+                          : "border-slate-300 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300",
+                      )}
+                    >
+                      {option.label.slice(0, 1)}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </div>
 
             <label className="grid gap-1 text-sm">
@@ -2593,19 +2826,62 @@ export function ProcessMapBuilderClient({
               Open formulas
             </Link>
           </section>
+
+          <section className="grid min-w-0 gap-3 overflow-hidden rounded-lg border border-slate-300/70 bg-white/70 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/45">
+            <div>
+              <h2 className="text-sm font-extrabold text-slate-950 dark:text-slate-50">
+                Diagram Type
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Pick the graph shape before editing the workspace.
+              </p>
+            </div>
+            <div className="grid max-h-[38rem] gap-1.5 overflow-y-auto pr-1">
+              {DIAGRAM_DEFINITIONS.map((entry) => (
+                <button
+                  key={entry.id}
+                  type="button"
+                  onClick={() => applyDiagramType(entry.id)}
+                  className={cn(
+                    "grid gap-0.5 rounded-lg border p-2 text-left transition",
+                    entry.id === diagramType
+                      ? "border-cyan-500/60 bg-cyan-500/15"
+                      : "border-slate-300/70 bg-white/70 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/50 dark:hover:bg-slate-900",
+                  )}
+                >
+                  <span className="inline-flex items-center gap-2 text-xs font-bold text-slate-900 dark:text-slate-100">
+                    <ChartIcon diagramType={entry.id} />
+                    {entry.shortLabel}
+                  </span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {entry.category}
+                    {dmaicEnabled
+                      ? ` | ${entry.dmaicPhases
+                          .map((phaseId) => getDmaicPhaseOption(phaseId).label)
+                          .join(", ")}`
+                      : ""}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
         </aside>
 
         <main className="grid gap-4">
-          <section id="map-diagrams" className="grid scroll-mt-24 gap-3 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+          <section id="map-preview" className="grid scroll-mt-24 gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
+            <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 className="text-lg font-extrabold text-slate-950 dark:text-slate-50">
-                  Diagram Type
+                  Process Map Workspace
                 </h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Select a template or let the recommendation engine choose one.
+                <p className="text-sm text-slate-600 dark:text-slate-300">
+                  {definition.label}: {definition.description}
                 </p>
               </div>
+              <span className="inline-flex items-center gap-2 rounded-full border border-slate-300/70 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                <ChartIcon diagramType={diagramType} />
+                {definition.category}
+              </span>
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -2614,6 +2890,13 @@ export function ProcessMapBuilderClient({
                 >
                   <RefreshCw size={14} />
                   Refresh
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChartModalOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
+                >
+                  Open large preview
                 </button>
                 <button
                   type="button"
@@ -2668,377 +2951,141 @@ export function ProcessMapBuilderClient({
               </div>
             </div>
 
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-              {DIAGRAM_DEFINITIONS.map((entry) => (
-                <button
-                  key={entry.id}
-                  type="button"
-                  onClick={() => applyDiagramType(entry.id)}
-                  className={cn(
-                    "grid gap-1 rounded-lg border p-3 text-left transition",
-                    entry.id === diagramType
-                      ? "border-cyan-500/60 bg-cyan-500/15"
-                      : "border-slate-300/70 bg-white/70 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/50 dark:hover:bg-slate-900",
-                  )}
-                >
-                  <span className="inline-flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-slate-100">
-                    <ChartIcon diagramType={entry.id} />
-                    {entry.shortLabel}
-                  </span>
-                  <span className="text-xs text-slate-500 dark:text-slate-400">
-                    {entry.category}
-                    {dmaicEnabled
-                      ? ` | ${entry.dmaicPhases
-                          .map((phaseId) => getDmaicPhaseOption(phaseId).label)
-                          .join(", ")}`
-                      : ""}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section id="map-layers" className="grid scroll-mt-24 gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="inline-flex items-center gap-2 text-lg font-extrabold text-slate-950 dark:text-slate-50">
-                  <Layers size={18} />
-                  Output Options
-                </h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Choose what appears on the generated chart and adjust the chart colors.
-                </p>
-              </div>
-            </div>
-
-            <div className="grid gap-4 lg:grid-cols-[1fr_18rem]">
-              <div className="grid gap-2">
-                <p className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Visible in output
-                </p>
-                {[
-                  ["showTitle", "Chart title"],
-                  ["showDataLayer", "Data values"],
-                  ["showControlLimits", "Control limits"],
-                  ["showGrid", "Grid lines"],
-                  ["showLegend", "Legend"],
-                  ["showIsoNotes", "ISO note"],
-                ].map(([key, label]) => (
-                  <label
-                    key={key}
-                    className="flex items-center justify-between gap-3 rounded-lg border border-slate-300/70 bg-white/70 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900/45"
-                  >
-                    <span className="font-semibold">{label}</span>
-                    <input
-                      type="checkbox"
-                      checked={layerSettings[key as keyof LayerSettings]}
-                      onChange={(event) =>
-                        updateLayerSetting(key as keyof LayerSettings, event.target.checked)
-                      }
-                      className="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
-                    />
-                  </label>
-                ))}
-              </div>
-
-              <div className="grid content-start gap-3 rounded-lg border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/45">
-                <div className="inline-flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-slate-100">
-                  <Palette size={16} />
-                  Colors
-                </div>
-                {[
-                  ["primaryColor", "Primary"],
-                  ["secondaryColor", "Chart"],
-                  ["accentColor", "Accent"],
-                  ["riskColor", "Limits"],
-                  ["backgroundColor", "Background"],
-                ].map(([key, label]) => (
-                  <label key={key} className="flex items-center justify-between gap-3 text-xs">
-                    <span className="font-semibold">{label}</span>
-                    <input
-                      type="color"
-                      value={diagramStyle[key as keyof DiagramStyle]}
-                      onChange={(event) =>
-                        updateDiagramStyle(key as keyof DiagramStyle, event.target.value)
-                      }
-                      className="h-8 w-12 rounded border border-slate-300 bg-white p-1 dark:border-slate-700 dark:bg-slate-950"
-                    />
-                  </label>
-                ))}
-              </div>
-            </div>
-          </section>
-
-          {CUSTOM_FLOW_DIAGRAM_TYPES.has(diagramType) ? (
-          <section className="grid gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-extrabold text-slate-950 dark:text-slate-50">
-                  Custom Flow Sketch
-                </h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Click the board to place shapes. Use connector mode to draw arrows between
-                  shapes, then copy the sketch labels into the flowchart steps.
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {[
-                  ["select", "Select"],
-                  ["process", "Process"],
-                  ["decision", "Decision"],
-                  ["terminator", "Start/End"],
-                  ["connector", "Arrow"],
-                ].map(([mode, label]) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => {
-                      setDrawingMode(mode as DrawingMode);
-                      if (mode !== "connector") {
-                        setPendingConnectorNodeId(null);
-                      }
-                    }}
-                    className={cn(
-                      "rounded-lg border px-3 py-1.5 text-xs font-semibold transition",
-                      drawingMode === mode
-                        ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-800 dark:text-cyan-100"
-                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900",
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_16rem]">
-              <div className="overflow-hidden rounded-xl border border-slate-300/70 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/60">
-                <svg
-                  viewBox="0 0 960 360"
-                  className="h-[22rem] w-full cursor-crosshair"
-                  role="img"
-                  aria-label="Custom process flow sketch board"
-                  onClick={handleDrawingBoardClick}
-                >
-                  <defs>
-                    <marker
-                      id="custom-flow-arrow"
-                      markerWidth="10"
-                      markerHeight="10"
-                      refX="8"
-                      refY="3"
-                      orient="auto"
-                      markerUnits="strokeWidth"
-                    >
-                      <path d="M0,0 L0,6 L9,3 z" fill="#0f766e" />
-                    </marker>
-                    <pattern id="custom-grid" width="24" height="24" patternUnits="userSpaceOnUse">
-                      <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#cbd5e1" strokeWidth="0.7" />
-                    </pattern>
-                  </defs>
-                  <rect width="960" height="360" fill="url(#custom-grid)" />
-                  {customFlowLinks.map((link) => {
-                    const from = customFlowNodes.find((node) => node.id === link.from);
-                    const to = customFlowNodes.find((node) => node.id === link.to);
-                    if (!from || !to) {
-                      return null;
-                    }
-                    return (
-                      <line
-                        key={link.id}
-                        x1={from.x + 56}
-                        y1={from.y}
-                        x2={to.x - 56}
-                        y2={to.y}
-                        stroke="#0f766e"
-                        strokeWidth="3"
-                        markerEnd="url(#custom-flow-arrow)"
-                      />
-                    );
-                  })}
-                  {customFlowNodes.map((node) => {
-                    const isSelected = node.id === selectedCustomNodeId;
-                    const isPending = node.id === pendingConnectorNodeId;
-                    return (
-                      <g
-                        key={node.id}
-                        role="button"
-                        tabIndex={0}
-                        onPointerDown={(event) => handleCustomNodePointerDown(node, event)}
-                        onPointerMove={handleCustomNodePointerMove}
-                        onPointerUp={finishCustomNodeDrag}
-                        onPointerCancel={finishCustomNodeDrag}
-                        onKeyDown={(event) => handleCustomNodeKeyDown(node, event)}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleCustomNodeClick(node.id);
-                        }}
-                        className={drawingMode === "select" ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}
+            <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
+              <div className="min-h-[36rem] overflow-hidden rounded-xl border border-slate-300/70 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/60">
+                {workspaceCanvas}
+                {false && CUSTOM_FLOW_DIAGRAM_TYPES.has(diagramType) ? (
+                  <div className="grid gap-3 rounded-xl border border-cyan-500/25 bg-slate-50 p-3 dark:border-cyan-500/20 dark:bg-slate-900/60">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="text-sm font-extrabold text-slate-950 dark:text-slate-50">
+                        Custom Flow Sketch
+                      </h3>
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          ["select", "Select"],
+                          ["process", "Process"],
+                          ["decision", "Decision"],
+                          ["terminator", "Start/End"],
+                          ["connector", "Arrow"],
+                        ].map(([mode, label]) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => {
+                              setDrawingMode(mode as DrawingMode);
+                              if (mode !== "connector") {
+                                setPendingConnectorNodeId(null);
+                              }
+                            }}
+                            className={cn(
+                              "rounded-lg border px-3 py-1.5 text-xs font-semibold transition",
+                              drawingMode === mode
+                                ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-800 dark:text-cyan-100"
+                                : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900",
+                            )}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="overflow-hidden rounded-xl border border-slate-300/70 bg-white dark:border-slate-700 dark:bg-slate-950">
+                      <svg
+                        viewBox="0 0 960 360"
+                        className="h-[28rem] w-full cursor-crosshair"
+                        role="img"
+                        aria-label="Custom process flow sketch board"
+                        onClick={handleDrawingBoardClick}
                       >
-                        {node.type === "decision" ? (
-                          <polygon
-                            points={`${node.x},${node.y - 44} ${node.x + 70},${node.y} ${node.x},${node.y + 44} ${node.x - 70},${node.y}`}
-                            fill={isSelected ? "#ccfbf1" : "#fff7ed"}
-                            stroke={isPending ? "#f59e0b" : "#0f766e"}
-                            strokeWidth={isSelected || isPending ? 4 : 2}
-                          />
-                        ) : (
-                          <rect
-                            x={node.x - 72}
-                            y={node.y - 32}
-                            width="144"
-                            height="64"
-                            rx={node.type === "terminator" ? 28 : 10}
-                            fill={isSelected ? "#ccfbf1" : "#ffffff"}
-                            stroke={isPending ? "#f59e0b" : "#0f766e"}
-                            strokeWidth={isSelected || isPending ? 4 : 2}
-                          />
-                        )}
-                        <foreignObject x={node.x - 56} y={node.y - 22} width="112" height="44">
-                          <div className="flex h-full items-center justify-center text-center text-xs font-bold leading-tight text-slate-900">
-                            {node.label}
-                          </div>
-                        </foreignObject>
-                      </g>
-                    );
-                  })}
-                </svg>
-              </div>
+                        <defs>
+                          <marker
+                            id="custom-flow-arrow-workspace"
+                            markerWidth="10"
+                            markerHeight="10"
+                            refX="8"
+                            refY="3"
+                            orient="auto"
+                            markerUnits="strokeWidth"
+                          >
+                            <path d="M0,0 L0,6 L9,3 z" fill="#0f766e" />
+                          </marker>
+                          <pattern id="custom-grid-workspace" width="24" height="24" patternUnits="userSpaceOnUse">
+                            <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#cbd5e1" strokeWidth="0.7" />
+                          </pattern>
+                        </defs>
+                        <rect width="960" height="360" fill="url(#custom-grid-workspace)" />
+                        {customFlowLinks.map((link) => {
+                          const from = customFlowNodes.find((node) => node.id === link.from);
+                          const to = customFlowNodes.find((node) => node.id === link.to);
+                          if (!from || !to) {
+                            return null;
+                          }
+                          return (
+                            <line
+                              key={link.id}
+                              x1={from.x + 56}
+                              y1={from.y}
+                              x2={to.x - 56}
+                              y2={to.y}
+                              stroke="#0f766e"
+                              strokeWidth="3"
+                              markerEnd="url(#custom-flow-arrow-workspace)"
+                            />
+                          );
+                        })}
+                        {customFlowNodes.map((node) => {
+                          const isSelected = node.id === selectedCustomNodeId;
+                          const isPending = node.id === pendingConnectorNodeId;
+                          return (
+                            <g
+                              key={node.id}
+                              role="button"
+                              tabIndex={0}
+                              onPointerDown={(event) => handleCustomNodePointerDown(node, event)}
+                              onPointerMove={handleCustomNodePointerMove}
+                              onPointerUp={finishCustomNodeDrag}
+                              onPointerCancel={finishCustomNodeDrag}
+                              onKeyDown={(event) => handleCustomNodeKeyDown(node, event)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleCustomNodeClick(node.id);
+                              }}
+                              className={drawingMode === "select" ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}
+                            >
+                              {node.type === "decision" ? (
+                                <polygon
+                                  points={`${node.x},${node.y - 44} ${node.x + 70},${node.y} ${node.x},${node.y + 44} ${node.x - 70},${node.y}`}
+                                  fill={isSelected ? "#ccfbf1" : "#fff7ed"}
+                                  stroke={isPending ? "#f59e0b" : "#0f766e"}
+                                  strokeWidth={isSelected || isPending ? 4 : 2}
+                                />
+                              ) : (
+                                <rect
+                                  x={node.x - 72}
+                                  y={node.y - 32}
+                                  width="144"
+                                  height="64"
+                                  rx={node.type === "terminator" ? 28 : 10}
+                                  fill={isSelected ? "#ccfbf1" : "#ffffff"}
+                                  stroke={isPending ? "#f59e0b" : "#0f766e"}
+                                  strokeWidth={isSelected || isPending ? 4 : 2}
+                                />
+                              )}
+                              <foreignObject x={node.x - 56} y={node.y - 22} width="112" height="44">
+                                <div className="flex h-full items-center justify-center text-center text-xs font-bold leading-tight text-slate-900">
+                                  {node.label}
+                                </div>
+                              </foreignObject>
+                            </g>
+                          );
+                        })}
+                      </svg>
+                    </div>
+                  </div>
+                ) : null}
 
-              <aside className="grid content-start gap-3 rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/45">
-                <div>
-                  <p className="font-bold text-slate-900 dark:text-slate-100">Selected shape</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    {selectedCustomNode
-                      ? `${selectedCustomNode.type}. Drag on the board or use arrow keys to move it.`
-                      : "None selected"}
-                  </p>
-                </div>
-                <label className="grid gap-1 text-xs">
-                  <span className="font-semibold">Label</span>
-                  <input
-                    value={selectedCustomNode?.label ?? ""}
-                    onChange={(event) => updateSelectedCustomNodeLabel(event.target.value)}
-                    disabled={!selectedCustomNode}
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950"
-                  />
-                </label>
-                <p className="rounded-lg border border-slate-300/70 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300">
-                  Select a shape, then drag it. Keyboard users can tab to a shape and use arrow
-                  keys; hold Shift for a larger move.
-                </p>
-                <button
-                  type="button"
-                  onClick={applyCustomFlowToSteps}
-                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
-                >
-                  Use as flowchart
-                </button>
-                <button
-                  type="button"
-                  onClick={deleteSelectedCustomNode}
-                  disabled={!selectedCustomNode}
-                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-50 dark:text-rose-200"
-                >
-                  <Trash2 size={14} />
-                  Delete shape
-                </button>
-              </aside>
-            </div>
-          </section>
-          ) : null}
-
-          <section id="map-data" className="grid scroll-mt-24 gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
-            <div className="grid gap-3 lg:grid-cols-[1fr_0.8fr]">
-              <label className="grid gap-1 text-sm">
-                <span className="font-semibold">Steps, Categories, or Fields</span>
-                <textarea
-                  ref={itemsTextareaRef}
-                  value={itemsText}
-                  onChange={(event) => setItemsText(event.target.value)}
-                  rows={8}
-                  className="min-w-0 resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                />
-              </label>
-              <div className="grid gap-3">
-                <label className="grid gap-1 text-sm">
-                  <span className="flex items-center justify-between gap-2 font-semibold">
-                    Swimlanes
-                    {diagramType !== "swimlane" ? (
-                      <button
-                        type="button"
-                        onClick={() => applyDiagramType("swimlane")}
-                        className="rounded-md border border-slate-300 px-2 py-0.5 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900"
-                      >
-                        Show lanes
-                      </button>
-                    ) : null}
-                  </span>
-                  <textarea
-                    ref={lanesTextareaRef}
-                    value={lanesText}
-                    onChange={(event) => setLanesText(event.target.value)}
-                    rows={3}
-                    className="min-w-0 resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                  />
-                  <span className="text-xs text-slate-500 dark:text-slate-400">
-                    Lanes are drawn when Diagram Type is Swimlane.
-                  </span>
-                </label>
-                <label className="grid gap-1 text-sm">
-                  <span className="flex items-center justify-between gap-2 font-semibold">
-                    Chart Data (X / Y)
-                    <button
-                      type="button"
-                      onClick={refreshPreview}
-                      className="rounded-md border border-slate-300 px-2 py-0.5 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900"
-                    >
-                      Update chart
-                    </button>
-                  </span>
-                  <textarea
-                    ref={metricsTextareaRef}
-                    value={metricsText}
-                    onChange={(event) => setMetricsText(event.target.value)}
-                    rows={4}
-                    placeholder="X label/date, Y value, optional secondary Y"
-                    className="min-w-0 resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                  />
-                  <span className="text-xs text-slate-500 dark:text-slate-400">
-                    One row per point. Example: 2026-05-20,42,12. The first value is the X-axis
-                    label/date; the second is the Y-axis value; the third is used as secondary Y
-                    data for scatter charts.
-                  </span>
-                </label>
-              </div>
-            </div>
-          </section>
-
-          <section id="map-preview" className="grid scroll-mt-24 gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-extrabold text-slate-950 dark:text-slate-50">
-                  {definition.label}
-                </h2>
-                <p className="text-sm text-slate-600 dark:text-slate-300">
-                  {definition.description}
-                </p>
-              </div>
-              <span className="inline-flex items-center gap-2 rounded-full border border-slate-300/70 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:border-slate-700 dark:text-slate-300">
-                <ChartIcon diagramType={diagramType} />
-                {definition.category}
-              </span>
-              <button
-                type="button"
-                onClick={() => setChartModalOpen(true)}
-                className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
-              >
-                Open large preview
-              </button>
-            </div>
-
-            <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_18rem]">
-              <div className="min-h-[28rem] overflow-auto rounded-xl border border-slate-300/70 bg-slate-50 p-6 dark:border-slate-700 dark:bg-slate-900/60">
+                {false ? (
+                <div className="min-h-[28rem] overflow-auto rounded-xl border border-slate-300/70 bg-slate-50 p-6 dark:border-slate-700 dark:bg-slate-900/60">
                 {TABLE_DIAGRAM_TYPES.has(diagramType) ? (
                   buildTableRows(diagramType, items, metrics, {
                     editable: true,
@@ -3063,71 +3110,194 @@ export function ProcessMapBuilderClient({
                     dangerouslySetInnerHTML={{ __html: svg }}
                   />
                 )}
+                </div>
+                ) : null}
               </div>
 
-              <aside className="grid content-start gap-3 rounded-lg border border-slate-300/70 bg-white/70 p-3 text-sm dark:border-slate-700 dark:bg-slate-950/60">
-                <div>
-                  <h3 className="font-bold text-slate-900 dark:text-slate-100">Edit source</h3>
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => focusEditorField(titleInputRef)}
-                      className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-semibold transition hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-900"
-                    >
-                      Title
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => focusEditorField(processAreaInputRef)}
-                      className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-semibold transition hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-900"
-                    >
-                      Area
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => focusEditorField(itemsTextareaRef)}
-                      className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-semibold transition hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-900"
-                    >
-                      Text
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => focusEditorField(metricsTextareaRef)}
-                      className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-semibold transition hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-900"
-                    >
-                      Data
-                    </button>
-                    {diagramType === "swimlane" ? (
+              <aside className="grid content-start gap-3 rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm dark:border-slate-700 dark:bg-slate-950/60">
+                {isCustomFlowDiagram ? (
+                  <section className="grid gap-3">
+                    <div>
+                      <h3 className="font-bold text-slate-900 dark:text-slate-100">
+                        Selected shape
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        {selectedCustomNode
+                          ? `${selectedCustomNode.type}. Drag it on the sketch or use arrow keys.`
+                          : "None selected"}
+                      </p>
+                    </div>
+                    <label className="grid gap-1 text-xs">
+                      <span className="font-semibold">Label</span>
+                      <input
+                        value={selectedCustomNode?.label ?? ""}
+                        onChange={(event) => updateSelectedCustomNodeLabel(event.target.value)}
+                        disabled={!selectedCustomNode}
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950"
+                      />
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
                       <button
                         type="button"
-                        onClick={() => focusEditorField(lanesTextareaRef)}
-                        className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-semibold transition hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-900"
+                        onClick={applyCustomFlowToSteps}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
                       >
-                        Lanes
+                        Sync steps
                       </button>
-                    ) : null}
+                      <button
+                        type="button"
+                        onClick={deleteSelectedCustomNode}
+                        disabled={!selectedCustomNode}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-50 dark:text-rose-200"
+                      >
+                        <Trash2 size={14} />
+                        Delete
+                      </button>
+                    </div>
+                  </section>
+                ) : null}
+
+                <details
+                  open={!isCustomFlowDiagram}
+                  className="rounded-lg border border-slate-300/70 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/45"
+                >
+                  <summary className="cursor-pointer text-sm font-bold text-slate-900 dark:text-slate-100">
+                    Source Data
+                  </summary>
+                  <div className="mt-3 grid gap-3">
+                    <label className="grid gap-1 text-sm">
+                      <span className="font-semibold">Steps, Categories, or Fields</span>
+                      <textarea
+                        ref={itemsTextareaRef}
+                        value={itemsText}
+                        onChange={(event) => setItemsText(event.target.value)}
+                        rows={5}
+                        className="min-w-0 resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                      />
+                    </label>
+                    <label className="grid gap-1 text-sm">
+                      <span className="flex items-center justify-between gap-2 font-semibold">
+                        Swimlanes
+                        {diagramType !== "swimlane" ? (
+                          <button
+                            type="button"
+                            onClick={() => applyDiagramType("swimlane")}
+                            className="rounded-md border border-slate-300 px-2 py-0.5 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900"
+                          >
+                            Show lanes
+                          </button>
+                        ) : null}
+                      </span>
+                      <textarea
+                        ref={lanesTextareaRef}
+                        value={lanesText}
+                        onChange={(event) => setLanesText(event.target.value)}
+                        rows={3}
+                        className="min-w-0 resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                      />
+                    </label>
+                    <label className="grid gap-1 text-sm">
+                      <span className="flex items-center justify-between gap-2 font-semibold">
+                        Chart Data (X / Y)
+                        <button
+                          type="button"
+                          onClick={refreshPreview}
+                          className="rounded-md border border-slate-300 px-2 py-0.5 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900"
+                        >
+                          Update
+                        </button>
+                      </span>
+                      <textarea
+                        ref={metricsTextareaRef}
+                        value={metricsText}
+                        onChange={(event) => setMetricsText(event.target.value)}
+                        rows={4}
+                        placeholder="X label/date, Y value, optional secondary Y"
+                        className="min-w-0 resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                      />
+                    </label>
                   </div>
-                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                    Table cells are editable in place. Click chart previews to jump to the source
-                    text or X/Y data.
-                  </p>
-                </div>
-                <div>
-                  <h3 className="font-bold text-slate-900 dark:text-slate-100">When to use</h3>
-                  <p className="text-slate-600 dark:text-slate-300">{definition.whenToUse}</p>
-                </div>
-                <div>
-                  <h3 className="font-bold text-slate-900 dark:text-slate-100">ISO use</h3>
-                  <p className="text-slate-600 dark:text-slate-300">{definition.isoUse}</p>
-                </div>
-                <div>
-                  <h3 className="font-bold text-slate-900 dark:text-slate-100">Key fields</h3>
-                  <ul className="grid gap-1 text-slate-600 dark:text-slate-300">
-                    {definition.keyFields.map((field) => (
-                      <li key={field}>- {field}</li>
+                </details>
+
+                <details
+                  open
+                  className="rounded-lg border border-slate-300/70 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/45"
+                >
+                  <summary className="inline-flex cursor-pointer items-center gap-2 text-sm font-bold text-slate-900 dark:text-slate-100">
+                    <Palette size={16} />
+                    Display Settings
+                  </summary>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    {[
+                      ["showTitle", "Title"],
+                      ["showDataLayer", "Values"],
+                      ["showControlLimits", "Limits"],
+                      ["showGrid", "Grid"],
+                      ["showLegend", "Legend"],
+                      ["showIsoNotes", "ISO"],
+                    ].map(([key, label]) => (
+                      <label
+                        key={key}
+                        className="flex items-center justify-between gap-2 rounded-md border border-slate-300/70 bg-white px-2 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-950"
+                      >
+                        <span className="font-semibold">{label}</span>
+                        <input
+                          type="checkbox"
+                          checked={layerSettings[key as keyof LayerSettings]}
+                          onChange={(event) =>
+                            updateLayerSetting(key as keyof LayerSettings, event.target.checked)
+                          }
+                          className="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
+                        />
+                      </label>
                     ))}
-                  </ul>
-                </div>
+                  </div>
+                  <div className="mt-3 grid grid-cols-5 gap-2">
+                    {[
+                      ["primaryColor", "Primary"],
+                      ["secondaryColor", "Chart"],
+                      ["accentColor", "Accent"],
+                      ["riskColor", "Limits"],
+                      ["backgroundColor", "Background"],
+                    ].map(([key, label]) => (
+                      <label key={key} className="grid gap-1 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                        <span className="truncate">{label}</span>
+                        <input
+                          type="color"
+                          value={diagramStyle[key as keyof DiagramStyle]}
+                          onChange={(event) =>
+                            updateDiagramStyle(key as keyof DiagramStyle, event.target.value)
+                          }
+                          className="h-8 w-full rounded border border-slate-300 bg-white p-1 dark:border-slate-700 dark:bg-slate-950"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </details>
+
+                <details className="rounded-lg border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/35">
+                  <summary className="cursor-pointer text-sm font-bold text-slate-900 dark:text-slate-100">
+                    Guidance
+                  </summary>
+                  <div className="mt-3 grid gap-3 text-sm text-slate-600 dark:text-slate-300">
+                    <div>
+                      <h3 className="font-bold text-slate-900 dark:text-slate-100">When to use</h3>
+                      <p>{definition.whenToUse}</p>
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-slate-900 dark:text-slate-100">ISO use</h3>
+                      <p>{definition.isoUse}</p>
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-slate-900 dark:text-slate-100">Key fields</h3>
+                      <ul className="grid gap-1">
+                        {definition.keyFields.map((field) => (
+                          <li key={field}>- {field}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                </details>
               </aside>
             </div>
           </section>

@@ -14,7 +14,7 @@ import type {
   ProcessDocumentType,
   ProcessDocumentSourceType,
 } from "@/lib/process-documents";
-import { canEditInstructions, isSystemAdmin } from "@/lib/roles";
+import { canEditInstructions, hasFullAccess } from "@/lib/roles";
 
 interface ProcessDocumentsPageProps {
   searchParams: Promise<{
@@ -329,7 +329,7 @@ export default async function ProcessDocumentsPage({
   return (
     <ProcessDocumentsClient
       canEdit={canEdit}
-      isSystemAdmin={isSystemAdmin(profile.role)}
+      isSystemAdmin={hasFullAccess(profile.role)}
       currentUserId={profile.id}
       initialDocumentId={params.doc?.trim() ?? null}
       documents={documents}

@@ -9,7 +9,7 @@ import { ReviewCoverageKpiPanel } from "@/components/admin/review-coverage-kpi-p
 import { SystemUsageKpiPanel } from "@/components/admin/system-usage-kpi-panel";
 import { InstructionBackButton } from "@/components/instructions/instruction-back-button";
 import { requireAuthenticatedUser } from "@/lib/auth";
-import { canViewKpis, isSystemAdmin } from "@/lib/roles";
+import { canViewKpis, hasFullAccess } from "@/lib/roles";
 import { formatElapsedHhMmSs } from "@/lib/session-timer";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { cn } from "@/lib/utils";
@@ -460,7 +460,7 @@ export default async function SystemKpisPage() {
     <section className="grid gap-4">
       <header className="flex flex-wrap items-start gap-3">
         <InstructionBackButton
-          fallbackHref={isSystemAdmin(profile.role) ? "/admin/users" : "/dashboard"}
+          fallbackHref={hasFullAccess(profile.role) ? "/admin/users" : "/dashboard"}
         />
         <div className="grid min-w-0 gap-1">
           <h1 className="text-3xl font-extrabold text-slate-900 dark:text-slate-100">
@@ -482,7 +482,7 @@ export default async function SystemKpisPage() {
 
       <KpiInsightsPanel />
       <ReviewCoverageKpiPanel />
-      <SystemUsageKpiPanel isSystemAdmin={isSystemAdmin(profile.role)} />
+      <SystemUsageKpiPanel isSystemAdmin={hasFullAccess(profile.role)} />
       <AiEnhancementKpiPanel />
       <ForkMergeKpiPanel />
 

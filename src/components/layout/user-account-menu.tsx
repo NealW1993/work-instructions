@@ -18,7 +18,7 @@ import { usePostHog } from "posthog-js/react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { canViewKpis, isSystemAdmin } from "@/lib/roles";
+import { canViewKpis, hasFullAccess } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
   clearSessionStart,
@@ -650,7 +650,7 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
             Account Settings
           </Link>
 
-          {isSystemAdmin(profile.role) ? (
+          {hasFullAccess(profile.role) ? (
             <Link
               href="/admin/users"
               onClick={() => closeMenu()}

@@ -5,7 +5,7 @@ import {
   type ArchivedInstructionListItem,
 } from "@/components/instructions/archived-instructions-panel";
 import { requireAuthenticatedUser } from "@/lib/auth";
-import { isSystemAdmin } from "@/lib/roles";
+import { hasFullAccess } from "@/lib/roles";
 
 interface DepartmentRelation {
   name: string;
@@ -68,7 +68,7 @@ function buildUserNameMap(users: Array<{ id: string; full_name: string }> | null
 export default async function ArchivedInstructionsPage() {
   const { supabase, profile } = await requireAuthenticatedUser();
 
-  if (!isSystemAdmin(profile.role)) {
+  if (!hasFullAccess(profile.role)) {
     redirect("/dashboard");
   }
 

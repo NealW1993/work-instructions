@@ -8,7 +8,7 @@ import {
   isExportDatasetId,
   isExportFormat,
 } from "@/lib/export-data";
-import { isSystemAdmin } from "@/lib/roles";
+import { hasFullAccess } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 interface ExportRequestBody {
@@ -244,6 +244,20 @@ async function fetchDatasetRows(datasetId: ExportDatasetId) {
       return normalizeExportRows((data ?? []) as Array<Record<string, unknown>>);
     }
 
+    case "process_map_formulas": {
+      const { data, error } = await supabaseAdmin
+        .from("process_map_formulas")
+        .select("id, owner_user_id, name, formula_type, payload, created_at, updated_at")
+        .order("updated_at", { ascending: false })
+        .range(0, 9999);
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      return normalizeExportRows((data ?? []) as Array<Record<string, unknown>>);
+    }
+
     case "suggested_tools": {
       const { data, error } = await supabaseAdmin
         .from("suggested_tools")
@@ -314,9 +328,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  if (!isSystemAdmin(profile.role)) {
+  if (!hasFullAccess(profile.role)) {
     return NextResponse.json(
-      { error: "System admin privileges are required to export data." },
+      { error: "Admin privileges are required to export data." },
       { status: 403 },
     );
   }

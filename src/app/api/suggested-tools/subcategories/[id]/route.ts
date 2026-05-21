@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { isSystemAdmin } from "@/lib/roles";
 import { getRequestProfile } from "@/lib/api-auth";
+import { hasFullAccess } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
-async function requireSystemAdmin(request: NextRequest) {
+async function requireFullAccess(request: NextRequest) {
   const profile = await getRequestProfile(request);
 
   if (!profile) {
@@ -14,10 +14,10 @@ async function requireSystemAdmin(request: NextRequest) {
     };
   }
 
-  if (!isSystemAdmin(profile.role)) {
+  if (!hasFullAccess(profile.role)) {
     return {
       error: NextResponse.json(
-        { error: "System admin privileges required." },
+        { error: "Admin privileges required." },
         { status: 403 },
       ),
       profile,
@@ -31,7 +31,7 @@ export async function DELETE(
   request: NextRequest,
   context: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireSystemAdmin(request);
+  const auth = await requireFullAccess(request);
   if (auth.error) {
     return auth.error;
   }

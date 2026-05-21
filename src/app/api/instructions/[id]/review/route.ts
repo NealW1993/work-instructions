@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
+import { hasFullAccess } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 type InstructionReviewStatus = "up_to_date" | "needs_review";
@@ -97,9 +98,9 @@ export async function PATCH(
   const reviewOrigin: InstructionReviewOrigin =
     isInstructionReviewOrigin(body.reviewOrigin) ? body.reviewOrigin : "user";
 
-  if (reviewOrigin === "system" && requester.role !== "system_admin") {
+  if (reviewOrigin === "system" && !hasFullAccess(requester.role)) {
     return NextResponse.json(
-      { error: "Only system admins can mark review events as system generated." },
+      { error: "Only admins can mark review events as system generated." },
       { status: 403 },
     );
   }

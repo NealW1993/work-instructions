@@ -40,7 +40,7 @@ import {
   resolveAccessibleMediaUrl,
   rewriteLoopbackMediaUrlsInHtml,
 } from "@/lib/media-url";
-import { canEditInstructions, isSystemAdmin } from "@/lib/roles";
+import { canEditInstructions, hasFullAccess } from "@/lib/roles";
 import type { InstructionMedia } from "@/lib/types";
 import { inferVideoMimeType, normalizeVideoMarkupForPlayback } from "@/lib/video";
 
@@ -1596,7 +1596,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
                     className="w-full justify-center px-3 py-1.5 text-xs"
                   />
                 ) : null}
-                {isSystemAdmin(profile.role) && !instructionIsArchived ? (
+                {hasFullAccess(profile.role) && !instructionIsArchived ? (
                   <DeleteInstructionButton
                     instructionId={instruction.id}
                     className="w-full justify-center px-3 py-1.5 text-xs"

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
+import { hasFullAccess } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export async function DELETE(
@@ -14,9 +15,9 @@ export async function DELETE(
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  if (requester.role !== "system_admin") {
+  if (!hasFullAccess(requester.role)) {
     return NextResponse.json(
-      { error: "System admin privileges required." },
+      { error: "Admin privileges required." },
       { status: 403 },
     );
   }

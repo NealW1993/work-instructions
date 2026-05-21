@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
+import { hasFullAccess } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 interface UpdateInstructionReviewSettingsBody {
@@ -11,7 +12,7 @@ const MIN_REVIEW_WINDOW_DAYS = 1;
 const MAX_REVIEW_WINDOW_DAYS = 365;
 const DEFAULT_REVIEW_WINDOW_DAYS = 30;
 
-async function requireSystemAdmin(request: NextRequest) {
+async function requireFullAccess(request: NextRequest) {
   const requester = await getRequestProfile(request);
 
   if (!requester) {
@@ -21,10 +22,10 @@ async function requireSystemAdmin(request: NextRequest) {
     };
   }
 
-  if (requester.role !== "system_admin") {
+  if (!hasFullAccess(requester.role)) {
     return {
       error: NextResponse.json(
-        { error: "System admin privileges required." },
+        { error: "Admin privileges required." },
         { status: 403 },
       ),
       requester,
@@ -54,7 +55,7 @@ function normalizeReviewWindowDays(value: unknown) {
 }
 
 export async function GET(request: NextRequest) {
-  const auth = await requireSystemAdmin(request);
+  const auth = await requireFullAccess(request);
   if (auth.error || !auth.requester) {
     return auth.error;
   }
@@ -99,7 +100,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const auth = await requireSystemAdmin(request);
+  const auth = await requireFullAccess(request);
   if (auth.error || !auth.requester) {
     return auth.error;
   }

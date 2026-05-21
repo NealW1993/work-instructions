@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
-import { canEditInstructions, isSystemAdmin } from "@/lib/roles";
+import { canEditInstructions, hasFullAccess } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 interface CreateSuggestedToolBody {
@@ -147,7 +147,7 @@ export async function GET(request: NextRequest) {
   const supabaseAdmin = getSupabaseAdminClient();
   const includeInactive =
     request.nextUrl.searchParams.get("includeInactive") === "true" &&
-    isSystemAdmin(auth.profile.role);
+    hasFullAccess(auth.profile.role);
   let toolsQuery = supabaseAdmin
     .from("suggested_tools")
     .select("id, name, category_id, subcategory_id, sort_order, is_active, created_at, updated_at");
@@ -216,7 +216,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     canCreateTaxonomy: canEditInstructions(auth.profile.role),
-    canManageTaxonomy: isSystemAdmin(auth.profile.role),
+    canManageTaxonomy: hasFullAccess(auth.profile.role),
     categories,
     subcategories,
     tools,

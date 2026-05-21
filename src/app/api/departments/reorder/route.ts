@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
+import { hasFullAccess } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 interface ReorderDepartmentsBody {
   orderedDepartmentIds?: string[];
 }
 
-async function requireSystemAdmin(request: NextRequest) {
+async function requireFullAccess(request: NextRequest) {
   const profile = await getRequestProfile(request);
 
   if (!profile) {
@@ -17,10 +18,10 @@ async function requireSystemAdmin(request: NextRequest) {
     };
   }
 
-  if (profile.role !== "system_admin") {
+  if (!hasFullAccess(profile.role)) {
     return {
       error: NextResponse.json(
-        { error: "System admin privileges required." },
+        { error: "Admin privileges required." },
         { status: 403 },
       ),
       profile,
@@ -31,7 +32,7 @@ async function requireSystemAdmin(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const auth = await requireSystemAdmin(request);
+  const auth = await requireFullAccess(request);
   if (auth.error) {
     return auth.error;
   }

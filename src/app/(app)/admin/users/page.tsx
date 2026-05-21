@@ -6,12 +6,12 @@ import { ExportDataPanel } from "@/components/admin/export-data-panel";
 import { UserAdminPanel } from "@/components/admin/user-admin-panel";
 import { InstructionBackButton } from "@/components/instructions/instruction-back-button";
 import { requireAuthenticatedUser } from "@/lib/auth";
-import { isSystemAdmin } from "@/lib/roles";
+import { hasFullAccess } from "@/lib/roles";
 
 export default async function UserAdminPage() {
   const { profile } = await requireAuthenticatedUser();
 
-  if (!isSystemAdmin(profile.role)) {
+  if (!hasFullAccess(profile.role)) {
     redirect("/dashboard");
   }
 
@@ -37,7 +37,7 @@ export default async function UserAdminPage() {
         <div className="grid gap-1">
           <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Export Data</h2>
           <p className="text-sm text-slate-600 dark:text-slate-300">
-            System admins can export dashboard and instruction data in common formats.
+            Admins can export dashboard and instruction data in common formats.
           </p>
         </div>
         <ExportDataPanel />

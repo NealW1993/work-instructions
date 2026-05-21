@@ -15,7 +15,7 @@ import {
   type ProcessDocumentType,
   getProcessDocumentTypeLabel,
 } from "@/lib/process-documents";
-import { canEditInstructions, isSystemAdmin } from "@/lib/roles";
+import { canEditInstructions, hasFullAccess } from "@/lib/roles";
 
 interface DashboardPageProps {
   searchParams: Promise<{
@@ -1046,7 +1046,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   return (
     <DashboardClient
       canEdit={canEditInstructions(profile.role)}
-      isSystemAdmin={isSystemAdmin(profile.role)}
+      isSystemAdmin={hasFullAccess(profile.role)}
       initialQuery={initialQuery}
       searchError={searchError?.message ?? null}
       newestError={newestError?.message ?? null}

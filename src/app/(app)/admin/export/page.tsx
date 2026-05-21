@@ -1,12 +1,12 @@
 import { redirect } from "next/navigation";
 
 import { requireAuthenticatedUser } from "@/lib/auth";
-import { isSystemAdmin } from "@/lib/roles";
+import { hasFullAccess } from "@/lib/roles";
 
 export default async function ExportDataPage() {
   const { profile } = await requireAuthenticatedUser();
 
-  if (!isSystemAdmin(profile.role)) {
+  if (!hasFullAccess(profile.role)) {
     redirect("/dashboard");
   }
 

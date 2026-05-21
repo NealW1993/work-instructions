@@ -41,7 +41,7 @@ import {
   type DashboardWidgetLayoutItem,
   type DashboardWidgetSize,
 } from "@/lib/dashboard-layout";
-import { canEditInstructions, isSystemAdmin } from "@/lib/roles";
+import { accessLevelLabel, canEditInstructions } from "@/lib/roles";
 import type { Profile } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -199,7 +199,8 @@ export function AppHeader({ profile }: { profile: Profile }) {
   const instructionMenuCloseTimeoutRef = useRef<number | null>(null);
 
   const canCreateInstructions = canEditInstructions(profile.role);
-  const canViewArchivedInstructions = isSystemAdmin(profile.role);
+  const accessLabel = accessLevelLabel(profile.role);
+  const canViewArchivedInstructions = canCreateInstructions;
   const isDashboardActive = isActivePath(pathname, "/dashboard");
   const isProcessDocumentsActive = isActivePath(pathname, "/process-documents");
   const isProcessMapsActive = isActivePath(pathname, "/process-maps");
@@ -1478,6 +1479,16 @@ export function AppHeader({ profile }: { profile: Profile }) {
             {renderProcessMapsControl(false)}
             {renderInstructionControl(false)}
           </nav>
+          <span
+            className={cn(
+              "hidden rounded-full border px-3 py-1 text-xs font-extrabold uppercase tracking-wide md:inline-flex",
+              canCreateInstructions
+                ? "border-emerald-500/35 bg-emerald-500/15 text-emerald-800 dark:text-emerald-100"
+                : "border-amber-500/40 bg-amber-500/15 text-amber-800 dark:text-amber-100",
+            )}
+          >
+            {accessLabel}
+          </span>
           <UserAccountMenu profile={profile} />
         </div>
 
@@ -1487,6 +1498,16 @@ export function AppHeader({ profile }: { profile: Profile }) {
           {renderProcessDocumentsControl(true)}
           {renderProcessMapsControl(true)}
           {renderInstructionControl(true)}
+          <span
+            className={cn(
+              "inline-flex rounded-full border px-3 py-1 text-xs font-extrabold uppercase tracking-wide",
+              canCreateInstructions
+                ? "border-emerald-500/35 bg-emerald-500/15 text-emerald-800 dark:text-emerald-100"
+                : "border-amber-500/40 bg-amber-500/15 text-amber-800 dark:text-amber-100",
+            )}
+          >
+            {accessLabel}
+          </span>
         </nav>
       </div>
     </header>

@@ -50,6 +50,11 @@ export const EXPORT_DATASET_OPTIONS = [
     description: "Token usage, dashboard search, chart, Cp/Cpk, document, import, and template activity.",
   },
   {
+    id: "process_map_formulas",
+    label: "Saved Formula Calculators",
+    description: "Formula calculator snapshots saved from Process Maps.",
+  },
+  {
     id: "suggested_tools",
     label: "Suggested Tools",
     description: "Tool library with category and subcategory assignments.",

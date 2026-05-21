@@ -10,12 +10,13 @@ import {
   isProcessDocumentType,
   normalizeIsoClauseRefs,
 } from "@/lib/process-documents";
-import { canEditInstructions } from "@/lib/roles";
+import { canEditInstructions, hasFullAccess } from "@/lib/roles";
 import {
   hasMeaningfulRichText,
   sanitizeRichHtml,
 } from "@/lib/rich-text.server";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import type { AppRole } from "@/lib/types";
 
 interface ProcessDocumentRequestBody {
   documentNumber?: unknown;
@@ -118,12 +119,12 @@ function nextReviewDate(now: Date) {
 
 function normalizeRequestedStatus(
   value: unknown,
-  requesterRole: string,
+  requesterRole: AppRole,
 ): ProcessDocumentStatus | { error: string } {
   const status: ProcessDocumentStatus = isProcessDocumentStatus(value) ? value : "draft";
 
-  if (status === "obsolete" && requesterRole !== "system_admin") {
-    return { error: "Only system admins can obsolete controlled documents." };
+  if (status === "obsolete" && !hasFullAccess(requesterRole)) {
+    return { error: "Only admins can obsolete controlled documents." };
   }
 
   return status;

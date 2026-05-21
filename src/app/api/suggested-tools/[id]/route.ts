@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
-import { canEditInstructions } from "@/lib/roles";
+import { canEditInstructions, hasFullAccess } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 interface UpdateSuggestedToolBody {
@@ -13,7 +13,7 @@ function normalizeToolName(value: string) {
   return value.trim().replace(/\s+/g, " ");
 }
 
-async function requireSystemAdmin(request: NextRequest) {
+async function requireFullAccess(request: NextRequest) {
   const profile = await getRequestProfile(request);
 
   if (!profile) {
@@ -23,10 +23,10 @@ async function requireSystemAdmin(request: NextRequest) {
     };
   }
 
-  if (profile.role !== "system_admin") {
+  if (!hasFullAccess(profile.role)) {
     return {
       error: NextResponse.json(
-        { error: "System admin privileges required." },
+        { error: "Admin privileges required." },
         { status: 403 },
       ),
       profile,
@@ -76,7 +76,7 @@ export async function PATCH(
 
   const auth =
     hasName
-      ? await requireSystemAdmin(request)
+      ? await requireFullAccess(request)
       : await requireEditor(request);
   if (auth.error || !auth.profile) {
     return auth.error;
@@ -138,7 +138,7 @@ export async function DELETE(
   request: NextRequest,
   context: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireSystemAdmin(request);
+  const auth = await requireFullAccess(request);
   if (auth.error || !auth.profile) {
     return auth.error;
   }

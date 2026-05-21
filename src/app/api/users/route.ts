@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 
 import { getRequestProfile } from "@/lib/api-auth";
+import { hasFullAccess } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { AppRole, Profile } from "@/lib/types";
 import { isValidEmployeeId, normalizeEmployeeId } from "@/lib/utils";
@@ -18,7 +19,7 @@ function validateRole(role: string): role is AppRole {
   return role === "user" || role === "admin" || role === "system_admin";
 }
 
-async function requireSystemAdmin(request: NextRequest) {
+async function requireFullAccess(request: NextRequest) {
   const profile = await getRequestProfile(request);
 
   if (!profile) {
@@ -28,10 +29,10 @@ async function requireSystemAdmin(request: NextRequest) {
     };
   }
 
-  if (profile.role !== "system_admin") {
+  if (!hasFullAccess(profile.role)) {
     return {
       error: NextResponse.json(
-        { error: "System admin privileges required." },
+        { error: "Admin privileges required." },
         { status: 403 },
       ),
       profile,
@@ -43,7 +44,7 @@ async function requireSystemAdmin(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   const supabaseAdmin = getSupabaseAdminClient();
-  const auth = await requireSystemAdmin(request);
+  const auth = await requireFullAccess(request);
 
   if (auth.error) {
     return auth.error;
@@ -63,7 +64,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const supabaseAdmin = getSupabaseAdminClient();
-  const auth = await requireSystemAdmin(request);
+  const auth = await requireFullAccess(request);
 
   if (auth.error) {
     return auth.error;
