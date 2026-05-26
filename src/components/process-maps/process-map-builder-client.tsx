@@ -728,37 +728,49 @@ function buildCustomFlowSketchSvg(title: string, nodes: CustomFlowNode[], links:
   return svgShell(width, height, body);
 }
 
-function buildFishboneSvg(title: string, items: string[]) {
-  const width = 1040;
-  const height = 440;
-  const categories = items.slice(0, 6);
-  const spineY = 220;
+function buildFishboneSvg(
+  title: string,
+  items: string[],
+  options: { effectLabel?: string; causeSlots?: number } = {},
+) {
+  const categories = (items.length > 0 ? items : getDiagramDefinition("fishbone").starterItems).slice(0, 12);
+  const columns = Math.max(1, Math.ceil(categories.length / 2));
+  const width = Math.max(1040, 520 + columns * 220);
+  const height = 460;
+  const causeSlots = clampNumber(Math.round(options.causeSlots ?? 2), 0, 5);
+  const spineY = height / 2;
   const spineStartX = 120;
-  const spineEndX = 800;
+  const firstSpineX = 310;
+  const spineEndX = firstSpineX + (columns - 1) * 220 + 150;
+  const effectLabel = options.effectLabel?.trim() || "Effect / Problem";
+  const effectLines = effectLabel.split(/\s*\/\s*|\r?\n/).filter(Boolean).slice(0, 2);
   let body = svgText(width / 2, 38, title, { size: 20, color: "#111827" });
   body += `<line x1="${spineStartX}" y1="${spineY}" x2="${spineEndX}" y2="${spineY}" stroke="#0f766e" stroke-width="4" marker-end="url(#arrowhead)"></line>`;
-  body += `<rect x="810" y="176" width="155" height="88" rx="12" fill="#fee2e2" stroke="#dc2626" stroke-width="2.5"></rect>`;
-  body += svgText(887, 214, "Effect /", { size: 14, color: "#991b1b" });
-  body += svgText(887, 236, "Problem", { size: 14, color: "#991b1b" });
+  body += `<rect x="${spineEndX + 12}" y="${spineY - 44}" width="165" height="88" rx="12" fill="#fee2e2" stroke="#dc2626" stroke-width="2.5"></rect>`;
+  body += svgText(spineEndX + 94, spineY - 6, effectLines[0] ?? "Effect", { size: 14, color: "#991b1b" });
+  body += svgText(spineEndX + 94, spineY + 18, effectLines[1] ?? "Problem", { size: 14, color: "#991b1b" });
 
   categories.forEach((category, index) => {
     const top = index % 2 === 0;
     const column = Math.floor(index / 2);
-    const spineX = 310 + column * 220;
+    const spineX = firstSpineX + column * 220;
     const branchX = spineX - 130;
-    const branchY = top ? 94 : 346;
+    const branchY = top ? 100 : height - 100;
     const labelY = top ? branchY - 14 : branchY + 24;
-    const minorY1 = top ? branchY + 40 : branchY - 40;
-    const minorY2 = top ? branchY + 72 : branchY - 72;
     body += `<line x1="${branchX}" y1="${branchY}" x2="${spineX}" y2="${spineY}" stroke="#334155" stroke-width="2.5"></line>`;
     body += svgText(branchX - 12, labelY, category, {
       anchor: "start",
       size: 13,
       color: "#0f172a",
     });
-    body += `<line x1="${branchX + 28}" y1="${minorY1}" x2="${
-      branchX + 92
-    }" y2="${minorY2}" stroke="#94a3b8" stroke-width="1.8"></line>`;
+    Array.from({ length: causeSlots }, (_, causeIndex) => {
+      const offset = 38 + causeIndex * 28;
+      const minorY1 = top ? branchY + offset : branchY - offset;
+      const minorY2 = top ? branchY + offset + 28 : branchY - offset - 28;
+      const minorX1 = branchX + 26 + causeIndex * 8;
+      const minorX2 = branchX + 90 + causeIndex * 8;
+      body += `<line x1="${minorX1}" y1="${minorY1}" x2="${minorX2}" y2="${minorY2}" stroke="#94a3b8" stroke-width="1.8"></line>`;
+    });
   });
 
   return svgShell(width, height, body);
@@ -1136,6 +1148,8 @@ function buildDiagramSvg(input: {
   items: string[];
   lanes: string[];
   metrics: MetricPoint[];
+  fishboneEffect?: string;
+  fishboneCauseSlots?: number;
 }) {
   switch (input.diagramType) {
     case "swimlane":
@@ -1143,7 +1157,10 @@ function buildDiagramSvg(input: {
     case "value_stream_map":
       return buildFlowSvg(input.title, input.items, true);
     case "fishbone":
-      return buildFishboneSvg(input.title, input.items);
+      return buildFishboneSvg(input.title, input.items, {
+        effectLabel: input.fishboneEffect,
+        causeSlots: input.fishboneCauseSlots,
+      });
     case "ctq_tree":
       return buildCtqSvg(input.title, input.items);
     case "pareto":
@@ -1197,6 +1214,7 @@ function buildTableRows(
 ) {
   if (diagramType === "sipoc") {
     const headers = ["Suppliers", "Inputs", "Process", "Outputs", "Customers"];
+    const rowCount = Math.max(4, Math.ceil(items.length / headers.length));
     return (
       <table className="w-full table-fixed border-collapse text-sm leading-relaxed">
         <thead>
@@ -1212,10 +1230,10 @@ function buildTableRows(
           </tr>
         </thead>
         <tbody>
-          {Array.from({ length: 4 }, (_, rowIndex) => (
+          {Array.from({ length: rowCount }, (_, rowIndex) => (
             <tr key={rowIndex}>
               {headers.map((header, columnIndex) => {
-                const itemIndex = rowIndex + columnIndex;
+                const itemIndex = rowIndex * headers.length + columnIndex;
                 return (
                   <td
                     key={header}
@@ -1262,30 +1280,33 @@ function buildTableRows(
         </tr>
       </thead>
       <tbody>
-        {metrics.slice(0, 5).map((metric, rowIndex) => (
+        {metrics.map((metric, rowIndex) => (
           <tr key={`${metric.label}-${rowIndex}`}>
-            {headers.map((header, columnIndex) => (
-              <td
-                key={header}
-                className="min-w-0 break-words border border-slate-300 px-3 py-3 align-top dark:border-slate-700"
-              >
-                {columnIndex === 0
-                  ? buildEditableCell({
-                      value: metric.label,
-                      placeholder: `${header} ${rowIndex + 1}`,
-                      ariaLabel: `${header} row ${rowIndex + 1}`,
-                      editable: options.editable,
-                      onChange: (value) => options.onMetricChange?.(rowIndex, "label", value),
-                    })
-                  : buildEditableCell({
-                      value: items[rowIndex + columnIndex] ?? "",
-                      placeholder: `${header} ${rowIndex + 1}`,
-                      ariaLabel: `${header} row ${rowIndex + 1}`,
-                      editable: options.editable,
-                      onChange: (value) => options.onItemChange?.(rowIndex + columnIndex, value),
-                    })}
-              </td>
-            ))}
+            {headers.map((header, columnIndex) => {
+              const itemIndex = rowIndex * Math.max(1, headers.length - 1) + columnIndex - 1;
+              return (
+                <td
+                  key={header}
+                  className="min-w-0 break-words border border-slate-300 px-3 py-3 align-top dark:border-slate-700"
+                >
+                  {columnIndex === 0
+                    ? buildEditableCell({
+                        value: metric.label,
+                        placeholder: `${header} ${rowIndex + 1}`,
+                        ariaLabel: `${header} row ${rowIndex + 1}`,
+                        editable: options.editable,
+                        onChange: (value) => options.onMetricChange?.(rowIndex, "label", value),
+                      })
+                    : buildEditableCell({
+                        value: items[itemIndex] ?? "",
+                        placeholder: `${header} ${rowIndex + 1}`,
+                        ariaLabel: `${header} row ${rowIndex + 1}`,
+                        editable: options.editable,
+                        onChange: (value) => options.onItemChange?.(itemIndex, value),
+                      })}
+                </td>
+              );
+            })}
           </tr>
         ))}
       </tbody>
@@ -1296,8 +1317,12 @@ function buildTableRows(
 function buildTableDiagramHtml(diagramType: DiagramType, items: string[], metrics: MetricPoint[]) {
   if (diagramType === "sipoc") {
     const headers = ["Suppliers", "Inputs", "Process", "Outputs", "Customers"];
-    const rows = Array.from({ length: 4 }, (_, rowIndex) =>
-      headers.map((header, columnIndex) => items[rowIndex + columnIndex] ?? `${header} ${rowIndex + 1}`),
+    const rowCount = Math.max(4, Math.ceil(items.length / headers.length));
+    const rows = Array.from({ length: rowCount }, (_, rowIndex) =>
+      headers.map(
+        (header, columnIndex) =>
+          items[rowIndex * headers.length + columnIndex] ?? `${header} ${rowIndex + 1}`,
+      ),
     );
     return buildHtmlTable(headers, rows);
   }
@@ -1310,9 +1335,12 @@ function buildTableDiagramHtml(diagramType: DiagramType, items: string[], metric
         : diagramType === "solution_matrix"
           ? ["Option", "Impact", "Effort", "Risk", "Score", "Decision"]
           : ["Field", "Detail"];
-  const rows = metrics.slice(0, 5).map((metric, rowIndex) =>
+  const rows = metrics.map((metric, rowIndex) =>
     headers.map((header, columnIndex) =>
-      columnIndex === 0 ? metric.label : items[rowIndex + columnIndex] ?? `${header} ${rowIndex + 1}`,
+      columnIndex === 0
+        ? metric.label
+        : items[rowIndex * Math.max(1, headers.length - 1) + columnIndex - 1] ??
+          `${header} ${rowIndex + 1}`,
     ),
   );
   return buildHtmlTable(headers, rows);
@@ -1489,6 +1517,7 @@ export function ProcessMapBuilderClient({
   const processAreaInputRef = useRef<HTMLInputElement | null>(null);
   const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const itemsTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const lanesTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const metricsTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [title, setTitle] = useState("Process Map Draft");
   const [diagramType, setDiagramType] = useState<DiagramType>("process_map");
@@ -1503,6 +1532,8 @@ export function ProcessMapBuilderClient({
   const [lanesText, setLanesText] = useState("Operations\nQuality\nSupervisor");
   const [metricsText, setMetricsText] = useState(DEFAULT_METRIC_ROWS);
   const [capabilityDataText, setCapabilityDataText] = useState(DEFAULT_CAPABILITY_DATA);
+  const [fishboneEffect, setFishboneEffect] = useState("Effect / Problem");
+  const [fishboneCauseSlots, setFishboneCauseSlots] = useState(2);
   const [formulaTool, setFormulaTool] = useState<FormulaTool>("none");
   const [specLower, setSpecLower] = useState("");
   const [specUpper, setSpecUpper] = useState("");
@@ -1517,8 +1548,8 @@ export function ProcessMapBuilderClient({
   const [oeeIdealCycleSeconds] = useState("45");
   const [oeeTotalCount] = useState("520");
   const [oeeGoodCount] = useState("498");
-  const [layerSettings] = useState<LayerSettings>(DEFAULT_LAYER_SETTINGS);
-  const [diagramStyle] = useState<DiagramStyle>(DEFAULT_DIAGRAM_STYLE);
+  const [layerSettings, setLayerSettings] = useState<LayerSettings>(DEFAULT_LAYER_SETTINGS);
+  const [diagramStyle, setDiagramStyle] = useState<DiagramStyle>(DEFAULT_DIAGRAM_STYLE);
   const [previewRevision, setPreviewRevision] = useState(1);
   const [recommendation, setRecommendation] = useState<DiagramRecommendation | null>(null);
   const [recommendBusy, setRecommendBusy] = useState(false);
@@ -1623,6 +1654,8 @@ export function ProcessMapBuilderClient({
           items,
           lanes,
           metrics,
+          fishboneEffect,
+          fishboneCauseSlots,
         });
   const svg = applySvgTheme(rawSvg, diagramStyle, layerSettings);
   const selectedCustomNode =
@@ -1901,6 +1934,31 @@ export function ProcessMapBuilderClient({
     );
   }
 
+  function updateLayerSetting(key: keyof LayerSettings, value: boolean) {
+    setLayerSettings((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateDiagramStyle(key: keyof DiagramStyle, value: string) {
+    setDiagramStyle((current) => ({ ...current, [key]: value }));
+  }
+
+  function addLane() {
+    setLanesText((current) => {
+      const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
+      rows.push(`Lane ${rows.length + 1}`);
+      return rows.join("\n");
+    });
+    setPreviewRevision((current) => current + 1);
+  }
+
+  function removeLane() {
+    setLanesText((current) => {
+      const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
+      return rows.length <= 1 ? rows.join("\n") : rows.slice(0, -1).join("\n");
+    });
+    setPreviewRevision((current) => current + 1);
+  }
+
   function addChartDataRow() {
     if (formulaTool === "capability") {
       setCapabilityDataText((current) => {
@@ -1909,10 +1967,37 @@ export function ProcessMapBuilderClient({
         rows.push(Number.isFinite(lastValue) ? (lastValue + 0.01).toFixed(2) : "10.00");
         return rows.join("\n");
       });
+    } else if (TABLE_DIAGRAM_TYPES.has(diagramType)) {
+      if (diagramType === "sipoc") {
+        setItemsText((current) => {
+          const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
+          const rowNumber = Math.floor(rows.length / 5) + 1;
+          rows.push(
+            `Supplier ${rowNumber}`,
+            `Input ${rowNumber}`,
+            `Process ${rowNumber}`,
+            `Output ${rowNumber}`,
+            `Customer ${rowNumber}`,
+          );
+          return rows.join("\n");
+        });
+      } else {
+        setMetricsText((current) => {
+          const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
+          rows.push(`Row ${rows.length + 1},0,0`);
+          return rows.join("\n");
+        });
+      }
     } else if (CHART_DATA_DIAGRAM_TYPES.has(diagramType)) {
       setMetricsText((current) => {
         const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
         rows.push(`Point ${rows.length + 1},0,0`);
+        return rows.join("\n");
+      });
+    } else if (diagramType === "fishbone") {
+      setItemsText((current) => {
+        const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
+        rows.push(`Cause group ${rows.length + 1}`);
         return rows.join("\n");
       });
     } else {
@@ -1932,6 +2017,18 @@ export function ProcessMapBuilderClient({
         const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
         return rows.length <= 1 ? rows.join("\n") : rows.slice(0, -1).join("\n");
       });
+    } else if (TABLE_DIAGRAM_TYPES.has(diagramType)) {
+      if (diagramType === "sipoc") {
+        setItemsText((current) => {
+          const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
+          return rows.length <= 5 ? rows.join("\n") : rows.slice(0, -5).join("\n");
+        });
+      } else {
+        setMetricsText((current) => {
+          const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
+          return rows.length <= 1 ? rows.join("\n") : rows.slice(0, -1).join("\n");
+        });
+      }
     } else if (CHART_DATA_DIAGRAM_TYPES.has(diagramType)) {
       setMetricsText((current) => {
         const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
@@ -1969,6 +2066,10 @@ export function ProcessMapBuilderClient({
     setDiagramType(nextDiagramType);
     setItemsText(nextDefinition.starterItems.join("\n"));
     setRecommendation(null);
+    if (nextDiagramType === "fishbone") {
+      setFishboneEffect("Effect / Problem");
+      setFishboneCauseSlots(2);
+    }
     if (!title.trim() || title === "Process Map Draft") {
       setTitle(`${getDmaicPhaseOption(dmaicPhase).label} - ${nextDefinition.shortLabel} Draft`);
     }
@@ -3331,6 +3432,448 @@ export function ProcessMapBuilderClient({
     </div>
   );
 
+  const rowToolNoun =
+    formulaTool === "capability"
+      ? "measurement"
+      : diagramType === "fishbone"
+        ? "cause group"
+        : diagramType === "swimlane"
+          ? "process step"
+          : TABLE_DIAGRAM_TYPES.has(diagramType)
+            ? "table row"
+            : CHART_DATA_DIAGRAM_TYPES.has(diagramType)
+              ? "data point"
+              : "step";
+  const toolHelp =
+    diagramType === "fishbone"
+      ? "Add cause groups, rename the effect, and add blank cause spaces to branches."
+      : isCustomFlowDiagram
+        ? "Use shape tools for boxes, decisions, start/end nodes, connectors, zoom, and source sync."
+        : diagramType === "swimlane"
+          ? "Edit lanes and process steps separately so handoffs stay readable."
+          : CHART_DATA_DIAGRAM_TYPES.has(diagramType)
+            ? "Edit chart data as label, value, secondary value rows."
+            : TABLE_DIAGRAM_TYPES.has(diagramType)
+              ? "Edit table rows and detail cells for the selected controlled-document format."
+              : "Edit the step list used by this diagram.";
+
+  const diagramToolsPanel = (
+    <section className="grid gap-3 rounded-xl border border-slate-300/70 bg-white/80 p-3 text-sm dark:border-slate-700 dark:bg-slate-950/55">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-extrabold text-slate-950 dark:text-slate-50">
+            {definition.shortLabel} tools
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400">{toolHelp}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={addChartDataRow}
+            className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
+          >
+            <Plus size={14} />
+            Add {rowToolNoun}
+          </button>
+          <button
+            type="button"
+            onClick={removeChartDataRow}
+            className="inline-flex items-center gap-2 rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/20 dark:text-rose-200"
+          >
+            <Trash2 size={14} />
+            Remove {rowToolNoun}
+          </button>
+        </div>
+      </div>
+
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_18rem]">
+        <div className="grid gap-3">
+          {isCustomFlowDiagram ? (
+            <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Canvas shapes
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  ["select", "Select"],
+                  ["process", "Process"],
+                  ["decision", "Decision"],
+                  ["terminator", "Start/End"],
+                  ["connector", "Arrow"],
+                ].map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => {
+                      setDrawingMode(mode as DrawingMode);
+                      if (mode !== "connector") {
+                        setPendingConnectorNodeId(null);
+                        setDraftConnector(null);
+                        customConnectorDragRef.current = null;
+                      }
+                    }}
+                    className={cn(
+                      "rounded-md border px-2.5 py-1.5 text-xs font-semibold transition",
+                      drawingMode === mode
+                        ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
+                        : "border-slate-300 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={applyCustomFlowToSteps}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                >
+                  <RefreshCw size={14} />
+                  Sync source
+                </button>
+                <button
+                  type="button"
+                  onClick={deleteSelectedCustomNode}
+                  disabled={!selectedCustomNode}
+                  className="inline-flex items-center gap-2 rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-50 dark:text-rose-200"
+                >
+                  <Trash2 size={14} />
+                  Delete selected
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {diagramType === "fishbone" ? (
+            <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_14rem]">
+                <label className="grid gap-1">
+                  <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Effect / problem
+                  </span>
+                  <input
+                    value={fishboneEffect}
+                    onChange={(event) => setFishboneEffect(event.target.value)}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                  />
+                </label>
+                <div className="grid gap-1">
+                  <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Cause spaces
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setFishboneCauseSlots((current) => Math.max(0, current - 1))}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
+                      aria-label="Remove blank cause space"
+                      title="Remove blank cause space"
+                    >
+                      <Minus size={15} />
+                    </button>
+                    <span className="min-w-8 text-center text-sm font-extrabold text-slate-950 dark:text-slate-50">
+                      {fishboneCauseSlots}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setFishboneCauseSlots((current) => Math.min(5, current + 1))}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
+                      aria-label="Add blank cause space"
+                      title="Add blank cause space"
+                    >
+                      <Plus size={15} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <label className="grid gap-1">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Cause groups
+                </span>
+                <textarea
+                  ref={itemsTextareaRef}
+                  value={itemsText}
+                  onChange={(event) => setItemsText(event.target.value)}
+                  rows={5}
+                  className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                />
+              </label>
+            </div>
+          ) : diagramType === "swimlane" ? (
+            <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50 md:grid-cols-2">
+              <label className="grid gap-1">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Lanes
+                </span>
+                <textarea
+                  ref={lanesTextareaRef}
+                  value={lanesText}
+                  onChange={(event) => setLanesText(event.target.value)}
+                  rows={6}
+                  className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                />
+                <span className="flex flex-wrap gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={addLane}
+                    className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
+                  >
+                    <Plus size={14} />
+                    Add lane
+                  </button>
+                  <button
+                    type="button"
+                    onClick={removeLane}
+                    className="inline-flex items-center gap-2 rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/20 dark:text-rose-200"
+                  >
+                    <Trash2 size={14} />
+                    Remove lane
+                  </button>
+                </span>
+              </label>
+              <label className="grid gap-1">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Process steps
+                </span>
+                <textarea
+                  ref={itemsTextareaRef}
+                  value={itemsText}
+                  onChange={(event) => setItemsText(event.target.value)}
+                  rows={6}
+                  className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                />
+              </label>
+            </div>
+          ) : CHART_DATA_DIAGRAM_TYPES.has(diagramType) ? (
+            formulaTool === "capability" ? (
+              <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {(
+                    [
+                      ["LSL", specLower, setSpecLower],
+                      ["Target", targetValue, setTargetValue],
+                      ["USL", specUpper, setSpecUpper],
+                    ] as const
+                  ).map(([label, value, setter]) => (
+                    <label key={label} className="grid gap-1">
+                      <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        {label}
+                      </span>
+                      <input
+                        value={value}
+                        onChange={(event) => setter(event.target.value)}
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                      />
+                    </label>
+                  ))}
+                </div>
+                <label className="grid gap-1">
+                  <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Measurements
+                  </span>
+                  <textarea
+                    ref={metricsTextareaRef}
+                    value={capabilityDataText}
+                    onChange={(event) => setCapabilityDataText(event.target.value)}
+                    rows={7}
+                    className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                  />
+                </label>
+              </div>
+            ) : (
+              <label className="grid gap-1 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Chart data: label, value, secondary value
+                </span>
+                <textarea
+                  ref={metricsTextareaRef}
+                  value={metricsText}
+                  onChange={(event) => setMetricsText(event.target.value)}
+                  rows={7}
+                  className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                />
+              </label>
+            )
+          ) : TABLE_DIAGRAM_TYPES.has(diagramType) ? (
+            diagramType === "sipoc" ? (
+              <label className="grid gap-1 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  SIPOC cells in supplier, input, process, output, customer order
+                </span>
+                <textarea
+                  ref={itemsTextareaRef}
+                  value={itemsText}
+                  onChange={(event) => setItemsText(event.target.value)}
+                  rows={7}
+                  className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                />
+              </label>
+            ) : (
+            <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50 md:grid-cols-2">
+              <label className="grid gap-1">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Row labels
+                </span>
+                <textarea
+                  ref={metricsTextareaRef}
+                  value={metricsText}
+                  onChange={(event) => setMetricsText(event.target.value)}
+                  rows={6}
+                  className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                />
+              </label>
+              <label className="grid gap-1">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Detail cells
+                </span>
+                <textarea
+                  ref={itemsTextareaRef}
+                  value={itemsText}
+                  onChange={(event) => setItemsText(event.target.value)}
+                  rows={6}
+                  className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                />
+              </label>
+            </div>
+            )
+          ) : (
+            <label className="grid gap-1 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+              <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Steps / fields
+              </span>
+              <textarea
+                ref={itemsTextareaRef}
+                value={itemsText}
+                onChange={(event) => setItemsText(event.target.value)}
+                rows={7}
+                className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+              />
+            </label>
+          )}
+        </div>
+
+        <aside className="grid content-start gap-3">
+          <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Style
+            </p>
+            {(
+              [
+                ["primaryColor", "Primary"],
+                ["secondaryColor", "Secondary"],
+                ["accentColor", "Accent"],
+                ["riskColor", "Risk"],
+                ["backgroundColor", "Background"],
+              ] as const
+            ).map(([key, label]) => (
+              <label key={key} className="flex items-center justify-between gap-3 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                <span>{label}</span>
+                <input
+                  type="color"
+                  value={diagramStyle[key]}
+                  onChange={(event) => updateDiagramStyle(key, event.target.value)}
+                  className="h-8 w-12 rounded-md border border-slate-300 bg-white p-1 dark:border-slate-700 dark:bg-slate-950"
+                />
+              </label>
+            ))}
+          </div>
+
+          <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Layers
+            </p>
+            {(
+              [
+                ["showTitle", "Title"],
+                ["showGrid", "Grid"],
+              ] as const
+            ).map(([key, label]) => (
+              <label key={key} className="flex items-center justify-between gap-3 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                <span>{label}</span>
+                <input
+                  type="checkbox"
+                  checked={layerSettings[key]}
+                  onChange={(event) => updateLayerSetting(key, event.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-cyan-700 focus:ring-cyan-500"
+                />
+              </label>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={refreshPreview}
+              className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
+            >
+              <RefreshCw size={14} />
+              Refresh
+            </button>
+            <button
+              type="button"
+              onClick={() => setChartModalOpen(true)}
+              className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
+            >
+              <Maximize2 size={14} />
+              Preview
+            </button>
+            <button
+              type="button"
+              onClick={() => void copyOutline()}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+            >
+              {copied ? <CheckCircle2 size={14} /> : <Copy size={14} />}
+              {copied ? "Copied" : "Outline"}
+            </button>
+            <button
+              type="button"
+              onClick={downloadSvg}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+            >
+              <Download size={14} />
+              SVG
+            </button>
+            <button
+              type="button"
+              onClick={downloadDataCsv}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+            >
+              <FileDown size={14} />
+              CSV
+            </button>
+            <button
+              type="button"
+              onClick={downloadReportHtml}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+            >
+              <FileDown size={14} />
+              Report
+            </button>
+            <button
+              type="button"
+              onClick={printTool}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+            >
+              <Printer size={14} />
+              Print
+            </button>
+            <button
+              type="button"
+              onClick={() => void saveControlledDraft()}
+              disabled={!canEdit || saveBusy || !title.trim()}
+              className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/45 bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-emerald-200"
+              title={canEdit ? undefined : "Admin or system admin role required"}
+            >
+              {saveBusy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              Save
+            </button>
+          </div>
+        </aside>
+      </div>
+    </section>
+  );
+
   const executiveStats = [
     ["Method", `DMAIC ${phase.label}`],
     ["Diagram", definition.shortLabel],
@@ -3648,89 +4191,7 @@ export function ProcessMapBuilderClient({
                 </p>
               </div>
 
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={addChartDataRow}
-                  className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
-                >
-                  <Plus size={14} />
-                  Add row
-                </button>
-                <button
-                  type="button"
-                  onClick={removeChartDataRow}
-                  className="inline-flex items-center gap-2 rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/20 dark:text-rose-200"
-                >
-                  <Trash2 size={14} />
-                  Remove row
-                </button>
-                <button
-                  type="button"
-                  onClick={refreshPreview}
-                  className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
-                >
-                  <RefreshCw size={14} />
-                  Refresh
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setChartModalOpen(true)}
-                  className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
-                >
-                  Open large preview
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void copyOutline()}
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-                >
-                  {copied ? <CheckCircle2 size={14} /> : <Copy size={14} />}
-                  {copied ? "Copied" : "Copy Outline"}
-                </button>
-                <button
-                  type="button"
-                  onClick={downloadSvg}
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-                >
-                  <Download size={14} />
-                  SVG
-                </button>
-                <button
-                  type="button"
-                  onClick={downloadDataCsv}
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-                >
-                  <FileDown size={14} />
-                  CSV
-                </button>
-                <button
-                  type="button"
-                  onClick={downloadReportHtml}
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-                >
-                  <FileDown size={14} />
-                  Report
-                </button>
-                <button
-                  type="button"
-                  onClick={printTool}
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-                >
-                  <Printer size={14} />
-                  Print
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void saveControlledDraft()}
-                  disabled={!canEdit || saveBusy || !title.trim()}
-                  className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/45 bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-emerald-200"
-                  title={canEdit ? undefined : "Admin or system admin role required"}
-                >
-                  {saveBusy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                  Save Controlled Draft
-                </button>
-              </div>
+              {diagramToolsPanel}
             </div>
 
             <div className="grid gap-3">

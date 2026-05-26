@@ -83,6 +83,185 @@ const DEFAULT_FORMULA_NAMES: Record<FormulaTab, string> = {
   control_limits: "Control limits calculator",
 };
 
+interface FormulaGuide {
+  title: string;
+  formula: string;
+  calculation: string;
+  whenToUse: string;
+  scenario: string;
+  inputHints: string[];
+  resultHints: Record<string, string>;
+}
+
+const FORMULA_GUIDES: Record<FormulaTab, FormulaGuide> = {
+  oee: {
+    title: "Overall Equipment Effectiveness",
+    formula: "OEE = Availability x Performance x Quality",
+    calculation:
+      "Availability compares run time to planned time. Performance compares ideal output to actual run time. Quality compares good parts to total parts.",
+    whenToUse:
+      "Use OEE when equipment output is below plan and you need to separate downtime, speed loss, and scrap loss.",
+    scenario:
+      "A CNC cell is scheduled for 480 minutes, runs 420 minutes, produces 520 parts, and ships 498 good parts. OEE shows whether the biggest loss came from downtime, slow cycle time, or defects.",
+    inputHints: [
+      "Planned minutes should exclude planned breaks if those breaks are not production time.",
+      "Ideal cycle seconds should be the best demonstrated or engineered cycle for one good unit.",
+      "Good count should exclude scrap, rework that is not yet accepted, and rejected units.",
+    ],
+    resultHints: {
+      "Availability": "Run time divided by planned production time.",
+      "Performance": "Ideal cycle time times total count divided by run time.",
+      "Quality": "Good count divided by total count.",
+      "OEE": "Combined effective output after downtime, speed, and quality losses.",
+    },
+  },
+  capability: {
+    title: "Cp / Cpk Capability",
+    formula: "Cp = (USL - LSL) / (6 x sigma); Cpk = min(Cpu, Cpl)",
+    calculation:
+      "Cp compares tolerance width to process spread. Cpk also checks whether the process average is centered between the specification limits.",
+    whenToUse:
+      "Use capability after the process is stable and you need to know whether normal variation fits inside customer specifications.",
+    scenario:
+      "A turned shaft has a 10.00 mm target with 9.95 to 10.05 mm specs. Capability shows if the lathe can hold tolerance before raising inspection frequency or changing tooling.",
+    inputHints: [
+      "Use measurements from a stable process, not mixed setups or obvious special-cause events.",
+      "Enter LSL and USL in the same units as the measurements.",
+      "At least two measurements are required; larger samples make the estimate more useful.",
+    ],
+    resultHints: {
+      "N": "Number of measurements used.",
+      "Mean": "Average measured value.",
+      "Sigma": "Sample standard deviation, used as estimated process spread.",
+      "Cp": "Potential capability if the process were centered.",
+      "Cpk": "Actual capability after accounting for off-center average.",
+    },
+  },
+  dpmo: {
+    title: "Defects Per Million Opportunities",
+    formula: "DPMO = defects / (units x opportunities per unit) x 1,000,000",
+    calculation:
+      "DPMO normalizes defect counts so parts with different numbers of possible defect locations can be compared fairly.",
+    whenToUse:
+      "Use DPMO when each unit has multiple possible defect opportunities and you need a normalized defect rate.",
+    scenario:
+      "A harness has three inspected terminals per unit. Seven terminal defects found across 100 harnesses becomes a DPMO rate that can be compared with other products.",
+    inputHints: [
+      "Count opportunities as the number of defined defect chances on one unit.",
+      "Use the same defect definition every time or the trend will be misleading.",
+      "Defects can exceed units when one unit has multiple issues.",
+    ],
+    resultHints: {
+      "DPMO": "Defects normalized to one million opportunities.",
+      "Yield": "Approximate percent of opportunities without defects.",
+    },
+  },
+  takt: {
+    title: "Takt Time",
+    formula: "Takt time = available production time / customer demand",
+    calculation:
+      "Takt converts demand into the pace the process must sustain to meet customer need during the available production window.",
+    whenToUse:
+      "Use takt when staffing a line, balancing work content, or checking whether cycle time can meet demand.",
+    scenario:
+      "A packaging line has 420 available minutes and must ship 210 kits. Takt is 2 minutes per kit, so each station must be balanced around that pace.",
+    inputHints: [
+      "Available production minutes should reflect actual scheduled production time.",
+      "Customer demand should match the same time period as available time.",
+      "Compare takt to actual cycle time to find capacity gaps.",
+    ],
+    resultHints: {
+      "Minutes / unit": "Required production pace in minutes per finished unit.",
+      "Seconds / unit": "The same pace converted to seconds for line balancing.",
+    },
+  },
+  yield: {
+    title: "First Pass Yield and Rolled Throughput Yield",
+    formula: "FPY = (units - defects) / units; RTY = product of step yields",
+    calculation:
+      "First pass yield estimates the percent accepted without defects at one point. Rolled throughput yield multiplies step yields to show the chance a unit passes the whole route without rework.",
+    whenToUse:
+      "Use yield when scrap or rework is hiding the true cost of a multi-step manufacturing process.",
+    scenario:
+      "A coated part passes prep, coating, and final inspection at 98%, 97.5%, and 99%. RTY shows the end-to-end pass rate before rework masks the loss.",
+    inputHints: [
+      "Step yields can be entered as percentages such as 98 or decimals such as 0.98.",
+      "Defects should match the same population as units started.",
+      "Use RTY when a unit must pass multiple operations.",
+    ],
+    resultHints: {
+      "First pass yield": "Percent of started units not counted as defective at this point.",
+      "Defects / unit": "Average defects per started unit.",
+      "Step count": "Number of step yields included in RTY.",
+      "Rolled throughput yield": "Probability a unit passes all listed steps without a defect.",
+    },
+  },
+  little_law: {
+    title: "Little's Law",
+    formula: "WIP = throughput x lead time",
+    calculation:
+      "Any one missing value can be estimated when the other two are known: lead time, work in process, or throughput rate.",
+    whenToUse:
+      "Use Little's Law when queues, WIP, or lead time are the main constraint and you need a quick flow estimate.",
+    scenario:
+      "A fabrication queue has 120 orders in process and completes 30 orders per hour. Lead time is about 4 hours before an order clears the queue.",
+    inputHints: [
+      "Keep units consistent: if throughput is per hour, lead time is in hours.",
+      "Use average WIP and average throughput for the same process window.",
+      "Leave one field blank when you want the calculator to solve it.",
+    ],
+    resultHints: {
+      "WIP": "Average work in process estimated or entered.",
+      "Throughput / hour": "Average completed units per hour estimated or entered.",
+      "Lead time hours": "Average time a unit spends in the process.",
+    },
+  },
+  normal_curve: {
+    title: "Normal Curve Probability",
+    formula: "Z = (spec - mean) / standard deviation",
+    calculation:
+      "Specification limits are converted into z-scores, then the normal curve estimates the probability inside or outside those limits.",
+    whenToUse:
+      "Use this for a quick expected fallout estimate when measurements are approximately normal.",
+    scenario:
+      "A pin diameter averages 1.000 inch with 0.005 inch standard deviation and specs of 0.995 to 1.005. The normal curve estimates expected PPM outside spec.",
+    inputHints: [
+      "Mean, standard deviation, and specs must use the same unit of measure.",
+      "Use only when the measurement distribution is reasonably normal.",
+      "A very small standard deviation will make z-scores highly sensitive.",
+    ],
+    resultHints: {
+      "Z lower": "Lower spec distance from the mean in standard deviations.",
+      "Z upper": "Upper spec distance from the mean in standard deviations.",
+      "Probability within": "Estimated percent of output inside both specs.",
+      "Probability outside": "Estimated percent below LSL or above USL.",
+      "PPM outside": "Estimated out-of-spec units per million produced.",
+    },
+  },
+  control_limits: {
+    title: "Control Limits",
+    formula: "UCL = centerline + 3 x sigma; LCL = centerline - 3 x sigma",
+    calculation:
+      "The calculator estimates the process center and spread from the sample values, then places three-sigma limits around the centerline.",
+    whenToUse:
+      "Use control limits when monitoring stability and looking for special-cause variation over time.",
+    scenario:
+      "A press brake bend angle is checked every hour. Control limits help distinguish routine variation from a drift that needs reaction before parts fail inspection.",
+    inputHints: [
+      "Enter measurements in time order when using them for a control chart.",
+      "Control limits are not customer specification limits.",
+      "Investigate points outside limits or non-random patterns inside limits.",
+    ],
+    resultHints: {
+      "N": "Number of values used.",
+      "Centerline": "Average of the entered values.",
+      "Sigma": "Sample standard deviation of the entered values.",
+      "UCL": "Upper three-sigma control limit.",
+      "LCL": "Lower three-sigma control limit.",
+    },
+  },
+};
+
 function parsePositive(value: string) {
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
@@ -968,6 +1147,8 @@ export function FormulaLabClient() {
         ))}
       </div>
 
+      <FormulaGuidePanel guide={FORMULA_GUIDES[activeTab]} />
+
       {activeTab === "oee" ? (
         <section className="grid gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1094,6 +1275,7 @@ export function FormulaLabClient() {
             </label>
           </div>
           <FormulaResults
+            hints={FORMULA_GUIDES.capability.resultHints}
             rows={[
               ["N", String(capabilityStats?.count ?? 0)],
               ["Mean", formatNumber(capabilityStats?.mean ?? null, 3)],
@@ -1115,6 +1297,7 @@ export function FormulaLabClient() {
             ]}
           />
           <FormulaResults
+            hints={FORMULA_GUIDES.dpmo.resultHints}
             rows={[
               ["DPMO", formatNumber(dpmoStats.dpmo, 0)],
               ["Yield", dpmoStats.yieldPercent === null ? "N/A" : `${formatNumber(dpmoStats.yieldPercent, 2)}%`],
@@ -1132,6 +1315,7 @@ export function FormulaLabClient() {
             ]}
           />
           <FormulaResults
+            hints={FORMULA_GUIDES.takt.resultHints}
             rows={[
               ["Minutes / unit", formatNumber(taktStats.minutesPerUnit, 3)],
               ["Seconds / unit", formatNumber(taktStats.secondsPerUnit, 1)],
@@ -1160,6 +1344,7 @@ export function FormulaLabClient() {
             </label>
           </div>
           <FormulaResults
+            hints={FORMULA_GUIDES.yield.resultHints}
             rows={[
               ["First pass yield", formatPercent(yieldStats.fpy)],
               ["Defects / unit", formatNumber(yieldStats.dpu, 4)],
@@ -1180,6 +1365,7 @@ export function FormulaLabClient() {
             ]}
           />
           <FormulaResults
+            hints={FORMULA_GUIDES.little_law.resultHints}
             rows={[
               ["WIP", formatNumber(littleLawStats.wip, 3)],
               ["Throughput / hour", formatNumber(littleLawStats.throughput, 3)],
@@ -1200,6 +1386,7 @@ export function FormulaLabClient() {
             ]}
           />
           <FormulaResults
+            hints={FORMULA_GUIDES.normal_curve.resultHints}
             rows={[
               ["Z lower", formatNumber(normalCurveStats.zLower, 3)],
               ["Z upper", formatNumber(normalCurveStats.zUpper, 3)],
@@ -1228,6 +1415,7 @@ export function FormulaLabClient() {
             />
           </label>
           <FormulaResults
+            hints={FORMULA_GUIDES.control_limits.resultHints}
             rows={[
               ["N", String(controlLimitStats?.count ?? 0)],
               ["Centerline", formatNumber(controlLimitStats?.centerline ?? null, 3)],
@@ -1263,14 +1451,79 @@ function FormulaInputGrid({
   );
 }
 
-function FormulaResults({ rows }: { rows: Array<[string, string]> }) {
+function FormulaGuidePanel({ guide }: { guide: FormulaGuide }) {
+  return (
+    <section className="grid gap-3 rounded-2xl border border-slate-300/70 bg-white/90 p-4 text-sm shadow-sm dark:border-slate-700 dark:bg-slate-950/80 xl:grid-cols-[1.1fr_0.95fr_1fr]">
+      <div className="grid content-start gap-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          Formula guide
+        </p>
+        <h2 className="text-base font-extrabold text-slate-950 dark:text-slate-50">
+          {guide.title}
+        </h2>
+        <p className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 font-semibold text-cyan-900 dark:text-cyan-100">
+          {guide.formula}
+        </p>
+        <p className="text-slate-600 dark:text-slate-300">{guide.calculation}</p>
+      </div>
+      <div className="grid content-start gap-2">
+        <h3 className="text-sm font-extrabold text-slate-950 dark:text-slate-50">
+          When to use it
+        </h3>
+        <p className="text-slate-600 dark:text-slate-300">{guide.whenToUse}</p>
+        <h3 className="pt-1 text-sm font-extrabold text-slate-950 dark:text-slate-50">
+          Manufacturing example
+        </h3>
+        <p className="text-slate-600 dark:text-slate-300">{guide.scenario}</p>
+      </div>
+      <div className="grid content-start gap-2">
+        <h3 className="text-sm font-extrabold text-slate-950 dark:text-slate-50">
+          Input hints
+        </h3>
+        <ul className="grid gap-1 text-xs text-slate-600 dark:text-slate-300">
+          {guide.inputHints.map((hint) => (
+            <li key={hint} className="rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-900/55">
+              {hint}
+            </li>
+          ))}
+        </ul>
+        <h3 className="pt-1 text-sm font-extrabold text-slate-950 dark:text-slate-50">
+          Calculation outputs
+        </h3>
+        <dl className="grid gap-1 text-xs">
+          {Object.entries(guide.resultHints).map(([label, hint]) => (
+            <div key={label} className="rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-900/55">
+              <dt className="font-bold text-slate-800 dark:text-slate-100">{label}</dt>
+              <dd className="text-slate-600 dark:text-slate-300">{hint}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </section>
+  );
+}
+
+function FormulaResults({
+  rows,
+  hints,
+}: {
+  rows: Array<[string, string]>;
+  hints?: Record<string, string>;
+}) {
   return (
     <aside className="grid content-start gap-3 rounded-xl border border-slate-300/70 bg-white/75 p-4 dark:border-slate-700 dark:bg-slate-900/45">
       <h3 className="text-sm font-extrabold text-slate-950 dark:text-slate-50">Results</h3>
       <dl className="grid gap-2">
         {rows.map(([label, value]) => (
-          <div key={label} className="flex items-center justify-between gap-3 rounded-lg border border-slate-300/70 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-950/60">
-            <dt className="text-sm text-slate-600 dark:text-slate-300">{label}</dt>
+          <div key={label} className="grid gap-2 rounded-lg border border-slate-300/70 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-950/60 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <div className="min-w-0">
+              <dt className="text-sm text-slate-600 dark:text-slate-300">{label}</dt>
+              {hints?.[label] ? (
+                <dd className="mt-0.5 text-[11px] leading-snug text-slate-500 dark:text-slate-400">
+                  {hints[label]}
+                </dd>
+              ) : null}
+            </div>
             <dd className="font-extrabold text-slate-950 dark:text-slate-50">{value}</dd>
           </div>
         ))}

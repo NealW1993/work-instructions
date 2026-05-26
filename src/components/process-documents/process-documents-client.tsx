@@ -1202,11 +1202,11 @@ export function ProcessDocumentsClient({
   ];
 
   return (
-    <div className="process-workspace-shell process-documents-shell relative left-1/2 grid w-screen max-w-[1500px] -translate-x-1/2 gap-4 px-4 py-2 md:px-6">
-      <div className="process-workbench-card overflow-hidden rounded-2xl p-4">
+    <div className="process-workspace-shell process-documents-shell relative left-1/2 grid w-screen max-w-[1500px] -translate-x-1/2 gap-3 px-4 py-2 md:px-6">
+      <div className="process-workbench-card overflow-hidden rounded-2xl p-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-extrabold tracking-tight text-slate-950 dark:text-slate-50">
+          <h1 className="text-xl font-extrabold tracking-tight text-slate-950 dark:text-slate-50">
             Process Documentation
           </h1>
           <p className="text-sm text-slate-600 dark:text-slate-300">
@@ -1219,19 +1219,19 @@ export function ProcessDocumentsClient({
             type="button"
             onClick={() => void explainProcessDocumentsPage()}
             disabled={pageExplainBusy}
-            className="inline-flex items-center gap-2 rounded-xl border border-fuchsia-500/35 bg-fuchsia-500/10 px-4 py-2 text-sm font-semibold text-fuchsia-800 transition hover:bg-fuchsia-500/20 disabled:cursor-not-allowed disabled:opacity-60 dark:text-fuchsia-100"
+            className="inline-flex items-center gap-2 rounded-lg border border-fuchsia-500/35 bg-fuchsia-500/10 px-3 py-2 text-xs font-semibold text-fuchsia-800 transition hover:bg-fuchsia-500/20 disabled:cursor-not-allowed disabled:opacity-60 dark:text-fuchsia-100"
           >
             {pageExplainBusy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-            AI explain page
+            Explain
           </button>
           {canEdit ? (
             <button
               type="button"
               onClick={startNewDocument}
-              className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-4 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
+              className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
             >
-              <FilePlus2 size={16} />
-              New Controlled Document
+              <FilePlus2 size={14} />
+              New document
             </button>
           ) : null}
         </div>
@@ -1253,7 +1253,7 @@ export function ProcessDocumentsClient({
         </section>
       ) : null}
 
-      <section className="process-workbench-card grid gap-3 rounded-2xl p-4 md:grid-cols-[1fr_auto]">
+      <section className="process-workbench-card grid gap-3 rounded-2xl p-3 md:grid-cols-[1fr_auto]">
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           {executiveStats.map(([label, value]) => (
             <div key={label} className="min-w-0 border-l-2 border-cyan-500/45 pl-3">
@@ -1277,21 +1277,11 @@ export function ProcessDocumentsClient({
             <Search size={14} />
             Find
           </button>
-          {canEdit ? (
-            <button
-              type="button"
-              onClick={startNewDocument}
-              className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
-            >
-              <FilePlus2 size={14} />
-              New
-            </button>
-          ) : null}
         </div>
       </section>
 
-      <div className="grid gap-4 xl:grid-cols-[16rem_minmax(0,1fr)] 2xl:grid-cols-[16rem_minmax(0,1fr)_17rem]">
-        <aside id="doc-library" className="process-workbench-card grid h-fit scroll-mt-24 gap-4 rounded-2xl p-4 xl:sticky xl:top-24">
+      <div className="grid gap-3 xl:grid-cols-[16rem_minmax(0,1fr)] 2xl:grid-cols-[16rem_minmax(0,1fr)_17rem]">
+        <aside id="doc-library" className="process-workbench-card grid h-fit scroll-mt-24 gap-3 rounded-2xl p-3 xl:sticky xl:top-24">
           <div className="grid gap-1">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
               Workspace
@@ -1473,7 +1463,7 @@ export function ProcessDocumentsClient({
           </div>
         </aside>
 
-        <main className="grid min-w-0 gap-4">
+        <main className="grid min-w-0 gap-3">
           {message ? (
             <p className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-200">
               {message}
@@ -2384,35 +2374,44 @@ export function ProcessDocumentsClient({
               </section>
             </div>
           ) : !showEditor ? (
-            <section id="doc-dashboard" className="grid scroll-mt-24 gap-6 rounded-2xl border border-slate-300/70 bg-white/90 p-6 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
-              <div className="flex flex-wrap items-start justify-between gap-3">
+            <section id="doc-dashboard" className="process-workbench-card grid scroll-mt-24 content-start gap-3 rounded-2xl p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                     Controlled Document Storage
                   </p>
-                  <h2 className="mt-2 max-w-3xl text-3xl font-extrabold tracking-tight text-slate-950 dark:text-slate-50 md:text-4xl">
+                  <h2 className="mt-1 max-w-3xl text-2xl font-extrabold tracking-tight text-slate-950 dark:text-slate-50">
                     Process documentation workspace
                   </h2>
-                  <p className="mt-3 max-w-2xl text-sm text-slate-600 dark:text-slate-300">
-                    Use the library on the left to open controlled documents. Create new
-                    procedures, work instructions, forms, and process maps with approval evidence
-                    and revision history.
+                  <p className="mt-1 max-w-2xl text-sm text-slate-600 dark:text-slate-300">
+                    Open a document from the library, filter by channel, or start a controlled
+                    procedure, form, quality record, or process map.
                   </p>
                 </div>
-                {canEdit ? (
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => document.getElementById("process-document-search")?.focus()}
+                    className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                  >
+                    <Search size={14} />
+                    Search library
+                  </button>
+                  {canEdit ? (
                   <button
                     type="button"
                     onClick={startNewDocument}
-                    className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-4 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
+                    className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
                   >
-                    <FilePlus2 size={15} />
+                    <FilePlus2 size={14} />
                     New Document
                   </button>
-                ) : null}
+                  ) : null}
+                </div>
               </div>
 
-              <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-                <section className="grid gap-3 rounded-xl border border-slate-300/70 p-4 dark:border-slate-700">
+              <div className="grid gap-3 xl:grid-cols-[1.2fr_0.8fr]">
+                <section className="grid content-start gap-3 rounded-xl border border-slate-300/70 p-3 dark:border-slate-700">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h3 className="text-base font-extrabold text-slate-950 dark:text-slate-50">
                       Recently Updated
@@ -2429,7 +2428,7 @@ export function ProcessDocumentsClient({
                           key={document.id}
                           type="button"
                           onClick={() => selectDocument(document.id)}
-                          className="grid gap-1 rounded-lg border border-slate-300/70 bg-white/70 p-3 text-left transition hover:border-cyan-500/45 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/45"
+                          className="grid gap-1 rounded-lg border border-slate-300/70 bg-white/70 p-2.5 text-left transition hover:border-cyan-500/45 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/45"
                         >
                           <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
                             <p className="font-bold text-slate-950 dark:text-slate-50">
@@ -2459,12 +2458,12 @@ export function ProcessDocumentsClient({
                   )}
                 </section>
 
-                <section className="grid content-start gap-3 rounded-xl border border-slate-300/70 p-4 text-sm dark:border-slate-700">
+                <section className="grid content-start gap-3 rounded-xl border border-slate-300/70 p-3 text-sm dark:border-slate-700">
                   <h3 className="text-base font-extrabold text-slate-950 dark:text-slate-50">
                     ISO Readiness
                   </h3>
                   <div className="grid gap-2">
-                    <div className="flex items-start gap-2 rounded-lg bg-slate-50 p-3 dark:bg-slate-900/50">
+                    <div className="flex items-start gap-2 rounded-lg bg-slate-50 p-2.5 dark:bg-slate-900/50">
                       <CalendarClock size={16} className="mt-0.5 shrink-0 text-amber-600" />
                       <p>
                         {documentDashboardStats.overdueReviews} overdue review
@@ -2474,14 +2473,14 @@ export function ProcessDocumentsClient({
                         days.
                       </p>
                     </div>
-                    <div className="flex items-start gap-2 rounded-lg bg-slate-50 p-3 dark:bg-slate-900/50">
+                    <div className="flex items-start gap-2 rounded-lg bg-slate-50 p-2.5 dark:bg-slate-900/50">
                       <ClipboardList size={16} className="mt-0.5 shrink-0 text-cyan-700" />
                       <p>
                         Use templates for standard procedure, work instruction, form, quality
                         record, and process-map structure before submitting for approval.
                       </p>
                     </div>
-                    <div className="flex items-start gap-2 rounded-lg bg-slate-50 p-3 dark:bg-slate-900/50">
+                    <div className="flex items-start gap-2 rounded-lg bg-slate-50 p-2.5 dark:bg-slate-900/50">
                       <Upload size={16} className="mt-0.5 shrink-0 text-emerald-700" />
                       <p>
                         Imported documents are preserved as controlled revisions with source
