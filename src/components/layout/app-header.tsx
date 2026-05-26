@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   BookmarkPlus,
+  Calculator,
   ChartNetwork,
   Download,
   CircleAlert,
@@ -203,10 +204,28 @@ export function AppHeader({ profile }: { profile: Profile }) {
   const canViewArchivedInstructions = canCreateInstructions;
   const isDashboardActive = isActivePath(pathname, "/dashboard");
   const isProcessDocumentsActive = isActivePath(pathname, "/process-documents");
-  const isProcessMapsActive = isActivePath(pathname, "/process-maps");
+  const isFormulaToolsActive = isActivePath(pathname, "/process-maps/formulas");
+  const isProcessMapsActive =
+    isActivePath(pathname, "/process-maps") && !isFormulaToolsActive;
+  const isDashboardWorkspaceActive =
+    isDashboardActive || isProcessDocumentsActive || isProcessMapsActive || isFormulaToolsActive;
   const isNewInstructionActive = isActivePath(pathname, "/instructions/new");
   const isArchivedInstructionActive = isActivePath(pathname, "/instructions/archived");
   const instructionControlActive = isNewInstructionActive || isArchivedInstructionActive;
+  const dashboardControlHref = isProcessDocumentsActive
+    ? "/process-documents"
+    : isFormulaToolsActive
+      ? "/process-maps/formulas"
+      : isProcessMapsActive
+      ? "/process-maps"
+      : "/dashboard";
+  const dashboardControlLabel = isProcessDocumentsActive
+    ? "Process Docs"
+    : isFormulaToolsActive
+      ? "Formula Tools"
+      : isProcessMapsActive
+      ? "Process Maps"
+      : "Dashboard";
   const activeDashboardLayoutState = isDashboardActive
     ? dashboardLayoutState
     : DASHBOARD_LAYOUT_DEFAULT_STATE;
@@ -267,6 +286,32 @@ export function AppHeader({ profile }: { profile: Profile }) {
     () => new Map(DASHBOARD_LAYOUT_PRESETS.map((preset) => [preset.id, preset])),
     [],
   );
+  const dashboardNavigationItems = [
+    {
+      href: "/dashboard",
+      label: "Dashboard",
+      icon: LayoutGrid,
+      active: isDashboardActive,
+    },
+    {
+      href: "/process-documents",
+      label: "Process Docs",
+      icon: ClipboardList,
+      active: isProcessDocumentsActive,
+    },
+    {
+      href: "/process-maps",
+      label: "Process Maps",
+      icon: ChartNetwork,
+      active: isProcessMapsActive,
+    },
+    {
+      href: "/process-maps/formulas",
+      label: "Formula Tools",
+      icon: Calculator,
+      active: isFormulaToolsActive,
+    },
+  ];
   const customizeLabel =
     canSendDashboardLayoutActions && activeDashboardLayoutState.customizeOpen
       ? "Close Customize Panel"
@@ -650,7 +695,14 @@ export function AppHeader({ profile }: { profile: Profile }) {
       closeStudioMenu();
       closeInstructionMenu();
 
-      if (!isDashboardActive) {
+      let targetPathname = "/dashboard";
+      try {
+        targetPathname = new URL(event.currentTarget.href, window.location.href).pathname;
+      } catch {
+        targetPathname = "/dashboard";
+      }
+
+      if (pathname !== targetPathname) {
         return;
       }
 
@@ -666,7 +718,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
       closeDashboardMenu,
       closeInstructionMenu,
       closeStudioMenu,
-      isDashboardActive,
+      pathname,
     ],
   );
 
@@ -754,16 +806,16 @@ export function AppHeader({ profile }: { profile: Profile }) {
         className={cn(mobile ? "inline-flex max-w-full" : "relative inline-flex")}
       >
         <Link
-          href="/dashboard"
+          href={dashboardControlHref}
           onClick={handleDashboardLinkClick}
           className={cn(
             "inline-flex items-center rounded-l-xl border border-r-0 px-4 py-2 text-sm font-semibold transition",
-            isDashboardActive
+            isDashboardWorkspaceActive
               ? "border-cyan-700 bg-cyan-600 text-white shadow-sm dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900"
               : "border-slate-300/70 bg-white/80 text-slate-700 hover:border-slate-400 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-800",
           )}
         >
-          Dashboard
+          {dashboardControlLabel}
         </Link>
 
         <button
@@ -787,7 +839,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
           }}
           className={cn(
             "relative inline-flex items-center rounded-r-xl border px-2.5 py-2 transition",
-            isDashboardActive
+            isDashboardWorkspaceActive
               ? "border-cyan-700 bg-cyan-600 text-white hover:bg-cyan-700 dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
               : "border-slate-300/70 bg-white/80 text-slate-700 hover:border-slate-400 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-800",
           )}
@@ -820,6 +872,36 @@ export function AppHeader({ profile }: { profile: Profile }) {
               transformOrigin: mobile ? "top center" : "top left",
             }}
           >
+            <section className="grid gap-1 rounded-xl border border-white/15 bg-white/5 p-2">
+              <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                Workspaces
+              </p>
+              {dashboardNavigationItems.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => {
+                      closeDashboardMenu();
+                      closeStudioMenu();
+                      closeInstructionMenu();
+                    }}
+                    className={cn(
+                      "inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition",
+                      item.active
+                        ? "border-cyan-500/45 bg-cyan-500/20 text-cyan-100"
+                        : "border-white/10 bg-white/5 text-slate-100 hover:bg-white/15",
+                    )}
+                    aria-current={item.active ? "page" : undefined}
+                  >
+                    <Icon size={14} />
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </section>
+
             <button
               type="button"
               onClick={() => handleDashboardAction("toggle-customize")}
@@ -1270,48 +1352,6 @@ export function AppHeader({ profile }: { profile: Profile }) {
     );
   };
 
-  const renderProcessDocumentsControl = (mobile: boolean) => (
-    <Link
-      href="/process-documents"
-      onClick={() => {
-        closeDashboardMenu();
-        closeStudioMenu();
-        closeInstructionMenu();
-      }}
-      className={cn(
-        "inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-semibold transition",
-        mobile ? "max-w-full" : "",
-        isProcessDocumentsActive
-          ? "border-cyan-700 bg-cyan-600 text-white shadow-sm dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900"
-          : "border-slate-300/70 bg-white/80 text-slate-700 hover:border-slate-400 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-800",
-      )}
-    >
-      <ClipboardList size={14} />
-      Process Docs
-    </Link>
-  );
-
-  const renderProcessMapsControl = (mobile: boolean) => (
-    <Link
-      href="/process-maps"
-      onClick={() => {
-        closeDashboardMenu();
-        closeStudioMenu();
-        closeInstructionMenu();
-      }}
-      className={cn(
-        "inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-semibold transition",
-        mobile ? "max-w-full" : "",
-        isProcessMapsActive
-          ? "border-cyan-700 bg-cyan-600 text-white shadow-sm dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900"
-          : "border-slate-300/70 bg-white/80 text-slate-700 hover:border-slate-400 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-800",
-      )}
-    >
-      <ChartNetwork size={14} />
-      Process Maps
-    </Link>
-  );
-
   const renderInstructionControl = (mobile: boolean) => {
     if (!canCreateInstructions) {
       return null;
@@ -1475,8 +1515,6 @@ export function AppHeader({ profile }: { profile: Profile }) {
           <nav className="hidden items-center gap-3 md:flex">
             {renderDashboardStudioControl(false)}
             {renderDashboardControl(false)}
-            {renderProcessDocumentsControl(false)}
-            {renderProcessMapsControl(false)}
             {renderInstructionControl(false)}
           </nav>
           <span
@@ -1495,8 +1533,6 @@ export function AppHeader({ profile }: { profile: Profile }) {
         <nav className="relative mt-2 flex flex-wrap items-center justify-center gap-2 md:hidden">
           {renderDashboardStudioControl(true)}
           {renderDashboardControl(true)}
-          {renderProcessDocumentsControl(true)}
-          {renderProcessMapsControl(true)}
           {renderInstructionControl(true)}
           <span
             className={cn(

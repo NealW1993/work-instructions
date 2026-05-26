@@ -1655,10 +1655,8 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       return;
     }
 
-    if (selectedTool) {
-      setCommonToolSearchInput(selectedTool.name);
-    }
-    setToolPickerToolId(resolvedToolId);
+    setCommonToolSearchInput("");
+    setToolPickerToolId("");
     setCommonToolSelectOpen(false);
     setSelectedToolIds((current) =>
       current.includes(resolvedToolId) ? current : [...current, resolvedToolId],
@@ -3145,10 +3143,15 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                               setToolPickerToolId(matchedToolId);
                             }}
                             onKeyDown={(event) => {
-                              if (event.key === "Enter") {
-                                event.preventDefault();
-                                addCommonToolToToolList();
+                              const shouldAddTool =
+                                event.key === "Enter" ||
+                                (event.key === "Tab" && !event.shiftKey);
+                              if (!shouldAddTool || !resolveCommonToolSelectionId()) {
+                                return;
                               }
+
+                              event.preventDefault();
+                              addCommonToolToToolList();
                             }}
                             placeholder="Start typing to auto-suggest common tools..."
                             className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
@@ -3383,10 +3386,15 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                         value={uncommonToolsInput}
                         onChange={(event) => setUncommonToolsInput(event.target.value)}
                         onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            addUncommonToolsToToolList();
+                          const shouldAddTool =
+                            event.key === "Enter" ||
+                            (event.key === "Tab" && !event.shiftKey);
+                          if (!shouldAddTool || uncommonToolCandidates.length === 0) {
+                            return;
                           }
+
+                          event.preventDefault();
+                          addUncommonToolsToToolList();
                         }}
                         placeholder="Type uncommon tools here (comma separated if multiple)"
                         className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"

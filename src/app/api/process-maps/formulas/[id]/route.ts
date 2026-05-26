@@ -4,7 +4,15 @@ import { getRequestProfile } from "@/lib/api-auth";
 import { hasFullAccess } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
-type FormulaType = "oee" | "capability" | "dpmo" | "takt";
+type FormulaType =
+  | "oee"
+  | "capability"
+  | "dpmo"
+  | "takt"
+  | "yield"
+  | "little_law"
+  | "normal_curve"
+  | "control_limits";
 
 interface FormulaRequestBody {
   name?: unknown;
@@ -23,7 +31,16 @@ interface FormulaRow {
 }
 
 function isFormulaType(value: unknown): value is FormulaType {
-  return value === "oee" || value === "capability" || value === "dpmo" || value === "takt";
+  return (
+    value === "oee" ||
+    value === "capability" ||
+    value === "dpmo" ||
+    value === "takt" ||
+    value === "yield" ||
+    value === "little_law" ||
+    value === "normal_curve" ||
+    value === "control_limits"
+  );
 }
 
 function normalizeName(value: unknown) {

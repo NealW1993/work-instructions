@@ -17,7 +17,15 @@ interface OeeRow {
   goodCount: string;
 }
 
-type FormulaTab = "oee" | "capability" | "dpmo" | "takt";
+type FormulaTab =
+  | "oee"
+  | "capability"
+  | "dpmo"
+  | "takt"
+  | "yield"
+  | "little_law"
+  | "normal_curve"
+  | "control_limits";
 
 interface SavedFormula {
   id: string;
@@ -69,6 +77,10 @@ const DEFAULT_FORMULA_NAMES: Record<FormulaTab, string> = {
   capability: "Cp Cpk calculator",
   dpmo: "DPMO calculator",
   takt: "Takt time calculator",
+  yield: "FPY and RTY calculator",
+  little_law: "Little's Law calculator",
+  normal_curve: "Normal curve calculator",
+  control_limits: "Control limits calculator",
 };
 
 function parsePositive(value: string) {
@@ -149,6 +161,107 @@ function calculateCapability(values: number[], lslText: string, uslText: string)
   };
 }
 
+function erfApprox(value: number) {
+  const sign = value < 0 ? -1 : 1;
+  const x = Math.abs(value);
+  const t = 1 / (1 + 0.3275911 * x);
+  const y =
+    1 -
+    (((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t +
+      0.254829592) *
+      t *
+      Math.exp(-x * x));
+  return sign * y;
+}
+
+function normalCdf(value: number) {
+  return 0.5 * (1 + erfApprox(value / Math.SQRT2));
+}
+
+function parseRateValues(value: string) {
+  return value
+    .split(/[\s,\t;|]+/)
+    .map((entry) => Number.parseFloat(entry.trim()))
+    .filter((entry) => Number.isFinite(entry))
+    .map((entry) => (entry > 1 ? entry / 100 : entry))
+    .filter((entry) => entry >= 0 && entry <= 1);
+}
+
+function calculateYield(unitsText: string, defectsText: string, stepYieldsText: string) {
+  const units = parsePositive(unitsText);
+  const defects = Number.parseFloat(defectsText);
+  const stepYields = parseRateValues(stepYieldsText);
+  const fpy = units && Number.isFinite(defects) ? Math.max(0, Math.min(1, (units - defects) / units)) : null;
+  const dpu = units && Number.isFinite(defects) ? defects / units : null;
+  const rty = stepYields.length
+    ? stepYields.reduce((product, stepYield) => product * stepYield, 1)
+    : fpy;
+
+  return { fpy, dpu, rty, stepCount: stepYields.length };
+}
+
+function calculateLittleLaw(wipText: string, throughputText: string, leadTimeText: string) {
+  const wip = parsePositive(wipText);
+  const throughput = parsePositive(throughputText);
+  const leadTime = parsePositive(leadTimeText);
+
+  return {
+    leadTime: wip && throughput ? wip / throughput : leadTime,
+    wip: throughput && leadTime ? throughput * leadTime : wip,
+    throughput: wip && leadTime ? wip / leadTime : throughput,
+  };
+}
+
+function calculateNormalCurve(
+  meanText: string,
+  sigmaText: string,
+  lowerText: string,
+  upperText: string,
+) {
+  const mean = Number.parseFloat(meanText);
+  const sigma = parsePositive(sigmaText);
+  const lower = lowerText.trim() ? Number.parseFloat(lowerText) : null;
+  const upper = upperText.trim() ? Number.parseFloat(upperText) : null;
+  const hasLower = lower !== null && Number.isFinite(lower);
+  const hasUpper = upper !== null && Number.isFinite(upper);
+  const zLower = sigma && hasLower ? ((lower as number) - mean) / sigma : null;
+  const zUpper = sigma && hasUpper ? ((upper as number) - mean) / sigma : null;
+  const belowLower = zLower === null ? null : normalCdf(zLower);
+  const aboveUpper = zUpper === null ? null : 1 - normalCdf(zUpper);
+  const between =
+    zLower !== null && zUpper !== null ? Math.max(0, normalCdf(zUpper) - normalCdf(zLower)) : null;
+
+  return {
+    zLower,
+    zUpper,
+    belowLower,
+    aboveUpper,
+    between,
+    outside: belowLower !== null || aboveUpper !== null ? (belowLower ?? 0) + (aboveUpper ?? 0) : null,
+  };
+}
+
+function calculateControlLimits(valuesText: string) {
+  const values = parseMeasurementValues(valuesText);
+  if (values.length < 2) {
+    return null;
+  }
+
+  const centerline = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const variance =
+    values.reduce((sum, value) => sum + (value - centerline) ** 2, 0) /
+    Math.max(1, values.length - 1);
+  const sigma = Math.sqrt(variance);
+
+  return {
+    count: values.length,
+    centerline,
+    sigma,
+    ucl: centerline + 3 * sigma,
+    lcl: centerline - 3 * sigma,
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -180,6 +293,17 @@ export function FormulaLabClient() {
   const [dpmoOpps, setDpmoOpps] = useState("3");
   const [taktMinutes, setTaktMinutes] = useState("420");
   const [taktDemand, setTaktDemand] = useState("210");
+  const [yieldUnits, setYieldUnits] = useState("1000");
+  const [yieldDefects, setYieldDefects] = useState("24");
+  const [yieldStepYields, setYieldStepYields] = useState("98\n97.5\n99");
+  const [littleWip, setLittleWip] = useState("120");
+  const [littleThroughput, setLittleThroughput] = useState("30");
+  const [littleLeadTime, setLittleLeadTime] = useState("");
+  const [normalMean, setNormalMean] = useState("10");
+  const [normalSigma, setNormalSigma] = useState("0.05");
+  const [normalLower, setNormalLower] = useState("9.95");
+  const [normalUpper, setNormalUpper] = useState("10.05");
+  const [controlLimitValues, setControlLimitValues] = useState("50\n49\n51\n48\n52\n50");
   const [formulaName, setFormulaName] = useState("OEE calculator");
   const [savedFormulas, setSavedFormulas] = useState<SavedFormula[]>([]);
   const [selectedFormulaId, setSelectedFormulaId] = useState("");
@@ -224,6 +348,22 @@ export function FormulaLabClient() {
       secondsPerUnit: minutesPerUnit === null ? null : minutesPerUnit * 60,
     };
   }, [taktDemand, taktMinutes]);
+  const yieldStats = useMemo(
+    () => calculateYield(yieldUnits, yieldDefects, yieldStepYields),
+    [yieldDefects, yieldStepYields, yieldUnits],
+  );
+  const littleLawStats = useMemo(
+    () => calculateLittleLaw(littleWip, littleThroughput, littleLeadTime),
+    [littleLeadTime, littleThroughput, littleWip],
+  );
+  const normalCurveStats = useMemo(
+    () => calculateNormalCurve(normalMean, normalSigma, normalLower, normalUpper),
+    [normalLower, normalMean, normalSigma, normalUpper],
+  );
+  const controlLimitStats = useMemo(
+    () => calculateControlLimits(controlLimitValues),
+    [controlLimitValues],
+  );
 
   async function getAccessToken() {
     const {
@@ -308,6 +448,17 @@ export function FormulaLabClient() {
       dpmoOpps,
       taktMinutes,
       taktDemand,
+      yieldUnits,
+      yieldDefects,
+      yieldStepYields,
+      littleWip,
+      littleThroughput,
+      littleLeadTime,
+      normalMean,
+      normalSigma,
+      normalLower,
+      normalUpper,
+      controlLimitValues,
     };
   }
 
@@ -343,6 +494,19 @@ export function FormulaLabClient() {
     if (typeof payload.dpmoOpps === "string") setDpmoOpps(payload.dpmoOpps);
     if (typeof payload.taktMinutes === "string") setTaktMinutes(payload.taktMinutes);
     if (typeof payload.taktDemand === "string") setTaktDemand(payload.taktDemand);
+    if (typeof payload.yieldUnits === "string") setYieldUnits(payload.yieldUnits);
+    if (typeof payload.yieldDefects === "string") setYieldDefects(payload.yieldDefects);
+    if (typeof payload.yieldStepYields === "string") setYieldStepYields(payload.yieldStepYields);
+    if (typeof payload.littleWip === "string") setLittleWip(payload.littleWip);
+    if (typeof payload.littleThroughput === "string") setLittleThroughput(payload.littleThroughput);
+    if (typeof payload.littleLeadTime === "string") setLittleLeadTime(payload.littleLeadTime);
+    if (typeof payload.normalMean === "string") setNormalMean(payload.normalMean);
+    if (typeof payload.normalSigma === "string") setNormalSigma(payload.normalSigma);
+    if (typeof payload.normalLower === "string") setNormalLower(payload.normalLower);
+    if (typeof payload.normalUpper === "string") setNormalUpper(payload.normalUpper);
+    if (typeof payload.controlLimitValues === "string") {
+      setControlLimitValues(payload.controlLimitValues);
+    }
     setLibraryMessage(`Loaded ${formula.name}.`);
   }
 
@@ -531,12 +695,65 @@ export function FormulaLabClient() {
       ];
     }
 
+    if (activeTab === "takt") {
+      return [
+        ["Metric", "Value"],
+        ["Available production minutes", taktMinutes],
+        ["Customer demand", taktDemand],
+        ["Minutes / unit", formatNumber(taktStats.minutesPerUnit, 3)],
+        ["Seconds / unit", formatNumber(taktStats.secondsPerUnit, 1)],
+      ];
+    }
+
+    if (activeTab === "yield") {
+      return [
+        ["Metric", "Value"],
+        ["Units started", yieldUnits],
+        ["Defects", yieldDefects],
+        ["First pass yield", formatPercent(yieldStats.fpy)],
+        ["Defects per unit", formatNumber(yieldStats.dpu, 4)],
+        ["Step count", String(yieldStats.stepCount)],
+        ["Rolled throughput yield", formatPercent(yieldStats.rty)],
+      ];
+    }
+
+    if (activeTab === "little_law") {
+      return [
+        ["Metric", "Value"],
+        ["WIP", formatNumber(littleLawStats.wip, 3)],
+        ["Throughput / hour", formatNumber(littleLawStats.throughput, 3)],
+        ["Lead time hours", formatNumber(littleLawStats.leadTime, 3)],
+      ];
+    }
+
+    if (activeTab === "normal_curve") {
+      return [
+        ["Metric", "Value"],
+        ["Mean", normalMean],
+        ["Sigma", normalSigma],
+        ["Lower spec", normalLower],
+        ["Upper spec", normalUpper],
+        ["Z lower", formatNumber(normalCurveStats.zLower, 3)],
+        ["Z upper", formatNumber(normalCurveStats.zUpper, 3)],
+        ["Probability within", formatPercent(normalCurveStats.between)],
+        ["Probability outside", formatPercent(normalCurveStats.outside)],
+        [
+          "PPM outside",
+          normalCurveStats.outside === null
+            ? "N/A"
+            : formatNumber(normalCurveStats.outside * 1_000_000, 0),
+        ],
+      ];
+    }
+
     return [
       ["Metric", "Value"],
-      ["Available production minutes", taktMinutes],
-      ["Customer demand", taktDemand],
-      ["Minutes / unit", formatNumber(taktStats.minutesPerUnit, 3)],
-      ["Seconds / unit", formatNumber(taktStats.secondsPerUnit, 1)],
+      ["N", String(controlLimitStats?.count ?? 0)],
+      ["Centerline", formatNumber(controlLimitStats?.centerline ?? null, 3)],
+      ["Sigma", formatNumber(controlLimitStats?.sigma ?? null, 3)],
+      ["UCL", formatNumber(controlLimitStats?.ucl ?? null, 3)],
+      ["LCL", formatNumber(controlLimitStats?.lcl ?? null, 3)],
+      ["Measurements", controlLimitValues.replace(/\s+/g, " ").trim()],
     ];
   }
 
@@ -606,8 +823,8 @@ export function FormulaLabClient() {
             Formula Tools
           </h1>
           <p className="max-w-3xl text-sm text-slate-600 dark:text-slate-300">
-            Use quick calculators for process data. OEE supports multiple operator rows and
-            calculates the actual average percentage across recorded rows.
+            Use quick calculators for OEE, capability, defects, takt, yield, flow, normal
+            probability, and control-limit checks.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -729,6 +946,10 @@ export function FormulaLabClient() {
             ["capability", "Cp / Cpk"],
             ["dpmo", "DPMO"],
             ["takt", "Takt Time"],
+            ["yield", "Yield / RTY"],
+            ["little_law", "Little's Law"],
+            ["normal_curve", "Normal Curve"],
+            ["control_limits", "Control Limits"],
           ] as const
         ).map(([tab, label]) => (
           <button
@@ -914,6 +1135,105 @@ export function FormulaLabClient() {
             rows={[
               ["Minutes / unit", formatNumber(taktStats.minutesPerUnit, 3)],
               ["Seconds / unit", formatNumber(taktStats.secondsPerUnit, 1)],
+            ]}
+          />
+        </section>
+      ) : null}
+
+      {activeTab === "yield" ? (
+        <section className="grid gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80 lg:grid-cols-[1fr_20rem]">
+          <div className="grid content-start gap-4">
+            <FormulaInputGrid
+              fields={[
+                ["Units started", yieldUnits, setYieldUnits],
+                ["Defects", yieldDefects, setYieldDefects],
+              ]}
+            />
+            <label className="grid gap-1 text-sm">
+              <span className="font-semibold">Step yields</span>
+              <textarea
+                value={yieldStepYields}
+                onChange={(event) => setYieldStepYields(event.target.value)}
+                rows={7}
+                className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+              />
+            </label>
+          </div>
+          <FormulaResults
+            rows={[
+              ["First pass yield", formatPercent(yieldStats.fpy)],
+              ["Defects / unit", formatNumber(yieldStats.dpu, 4)],
+              ["Step count", String(yieldStats.stepCount)],
+              ["Rolled throughput yield", formatPercent(yieldStats.rty)],
+            ]}
+          />
+        </section>
+      ) : null}
+
+      {activeTab === "little_law" ? (
+        <section className="grid gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80 lg:grid-cols-[1fr_20rem]">
+          <FormulaInputGrid
+            fields={[
+              ["WIP", littleWip, setLittleWip],
+              ["Throughput / hour", littleThroughput, setLittleThroughput],
+              ["Lead time hours", littleLeadTime, setLittleLeadTime],
+            ]}
+          />
+          <FormulaResults
+            rows={[
+              ["WIP", formatNumber(littleLawStats.wip, 3)],
+              ["Throughput / hour", formatNumber(littleLawStats.throughput, 3)],
+              ["Lead time hours", formatNumber(littleLawStats.leadTime, 3)],
+            ]}
+          />
+        </section>
+      ) : null}
+
+      {activeTab === "normal_curve" ? (
+        <section className="grid gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80 lg:grid-cols-[1fr_20rem]">
+          <FormulaInputGrid
+            fields={[
+              ["Mean", normalMean, setNormalMean],
+              ["Std dev", normalSigma, setNormalSigma],
+              ["Lower spec", normalLower, setNormalLower],
+              ["Upper spec", normalUpper, setNormalUpper],
+            ]}
+          />
+          <FormulaResults
+            rows={[
+              ["Z lower", formatNumber(normalCurveStats.zLower, 3)],
+              ["Z upper", formatNumber(normalCurveStats.zUpper, 3)],
+              ["Probability within", formatPercent(normalCurveStats.between)],
+              ["Probability outside", formatPercent(normalCurveStats.outside)],
+              [
+                "PPM outside",
+                normalCurveStats.outside === null
+                  ? "N/A"
+                  : formatNumber(normalCurveStats.outside * 1_000_000, 0),
+              ],
+            ]}
+          />
+        </section>
+      ) : null}
+
+      {activeTab === "control_limits" ? (
+        <section className="grid gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80 lg:grid-cols-[1fr_20rem]">
+          <label className="grid gap-1 text-sm">
+            <span className="font-semibold">Measurements</span>
+            <textarea
+              value={controlLimitValues}
+              onChange={(event) => setControlLimitValues(event.target.value)}
+              rows={12}
+              className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+            />
+          </label>
+          <FormulaResults
+            rows={[
+              ["N", String(controlLimitStats?.count ?? 0)],
+              ["Centerline", formatNumber(controlLimitStats?.centerline ?? null, 3)],
+              ["Sigma", formatNumber(controlLimitStats?.sigma ?? null, 3)],
+              ["UCL", formatNumber(controlLimitStats?.ucl ?? null, 3)],
+              ["LCL", formatNumber(controlLimitStats?.lcl ?? null, 3)],
             ]}
           />
         </section>

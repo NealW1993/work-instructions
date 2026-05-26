@@ -251,6 +251,93 @@ h6 {
   color: currentColor;
 }
 
+.process-workspace-shell {
+  --process-workspace-border: rgb(203 213 225 / 0.78);
+  --process-workspace-surface: rgb(255 255 255 / 0.94);
+  --process-workspace-muted-surface: rgb(248 250 252 / 0.92);
+  --process-workspace-text: #172033;
+  --process-workspace-muted-text: #5b6475;
+}
+
+.dark .process-workspace-shell {
+  --process-workspace-border: rgb(64 64 64 / 0.9);
+  --process-workspace-surface: rgb(10 10 10 / 0.92);
+  --process-workspace-muted-surface: rgb(23 23 23 / 0.88);
+  --process-workspace-text: #f5f5f5;
+  --process-workspace-muted-text: #a3a3a3;
+}
+
+.process-workspace-shell :where(.rounded-3xl) {
+  border-radius: 0.9rem;
+}
+
+.process-workspace-shell :where(.rounded-2xl) {
+  border-radius: 0.75rem;
+}
+
+.process-workspace-shell :where(.rounded-xl) {
+  border-radius: 0.62rem;
+}
+
+.process-workspace-shell :where(.shadow-xl, .shadow-lg, .shadow-sm) {
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.08);
+}
+
+.process-workspace-shell :where(.bg-gradient-to-br) {
+  background-image: none;
+  background-color: var(--process-workspace-surface);
+}
+
+.process-workspace-shell :where(section, aside, main, div, label) {
+  min-width: 0;
+}
+
+.process-workspace-shell :where(button, a) {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.process-workspace-shell :where(input, textarea, select) {
+  border-color: var(--process-workspace-border);
+  background-color: var(--process-workspace-surface);
+}
+
+.process-workspace-shell :where(input:not([type="checkbox"]):not([type="radio"]):not([type="color"]), textarea, select) {
+  width: 100%;
+  min-width: 0;
+}
+
+.process-workspace-shell :where(details) {
+  box-shadow: none;
+}
+
+.process-workspace-shell :where(summary) {
+  list-style-position: outside;
+}
+
+.process-workspace-shell .process-workbench-card {
+  border: 1px solid var(--process-workspace-border);
+  background: var(--process-workspace-surface);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.08);
+}
+
+.process-workspace-shell .process-workbench-muted {
+  border: 1px solid var(--process-workspace-border);
+  background: var(--process-workspace-muted-surface);
+}
+
+.process-map-canvas-frame {
+  min-height: clamp(38rem, calc(100dvh - 17rem), 58rem);
+}
+
+.process-map-chart-frame {
+  min-height: clamp(28rem, calc(100dvh - 25rem), 44rem);
+}
+
+.process-map-canvas-frame svg {
+  touch-action: none;
+}
+
 .prose-markdown code {
   border-radius: 0.35rem;
   background: color-mix(in oklab, var(--foreground) 8%, transparent);

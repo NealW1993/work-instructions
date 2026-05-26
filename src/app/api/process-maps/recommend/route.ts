@@ -162,7 +162,6 @@ function buildSystemPrompt() {
 function buildUserPrompt(input: {
   prompt: string;
   dmaicPhase: DmaicPhase;
-  dmaicEnabled: boolean;
   processArea: string;
 }) {
   const diagramOptions = DIAGRAM_DEFINITIONS.map(
@@ -171,8 +170,8 @@ function buildUserPrompt(input: {
   ).join("\n");
 
   return [
-    `Improvement method: ${input.dmaicEnabled ? "DMAIC" : "General process documentation"}`,
-    `DMAIC phase: ${input.dmaicEnabled ? input.dmaicPhase : "Not enabled"}`,
+    "Improvement method: DMAIC",
+    `DMAIC phase: ${input.dmaicPhase}`,
     `Process area: ${input.processArea || "Not specified"}`,
     `User request: ${input.prompt}`,
     "",
@@ -224,7 +223,7 @@ export async function POST(request: NextRequest) {
   const requestBody = (await request.json().catch(() => ({}))) as RecommendationRequestBody;
   const prompt = normalizeString(requestBody.prompt, 2000);
   const processArea = normalizeString(requestBody.processArea, 200);
-  const dmaicEnabled = requestBody.dmaicEnabled !== false;
+  const dmaicEnabled = true;
   const dmaicPhase: DmaicPhase = isDmaicPhase(requestBody.dmaicPhase)
     ? requestBody.dmaicPhase
     : "define";
@@ -277,7 +276,7 @@ export async function POST(request: NextRequest) {
           },
           {
             role: "user",
-            content: buildUserPrompt({ prompt, processArea, dmaicPhase, dmaicEnabled }),
+            content: buildUserPrompt({ prompt, processArea, dmaicPhase }),
           },
         ],
         response_format: {

@@ -12,15 +12,19 @@ import {
   GitBranch,
   LineChart,
   Loader2,
+  Maximize2,
+  Minus,
   Network,
-  Palette,
+  Plus,
   Printer,
   RefreshCw,
+  Redo2,
   Save,
   Sparkles,
   Table2,
   Target,
   Trash2,
+  Undo2,
   Workflow,
   X,
 } from "lucide-react";
@@ -29,6 +33,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
+  type WheelEvent as ReactWheelEvent,
   useMemo,
   useRef,
   useState,
@@ -141,6 +146,37 @@ interface CustomFlowLink {
   to: string;
 }
 
+interface CustomFlowCanvasView {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface DraftConnector {
+  from: string;
+  x: number;
+  y: number;
+}
+
+interface CustomFlowSnapshot {
+  nodes: CustomFlowNode[];
+  links: CustomFlowLink[];
+  selectedNodeId: string | null;
+}
+
+type InlineChartEditTarget =
+  | { kind: "title"; value: string }
+  | { kind: "item"; index: number; value: string }
+  | { kind: "lane"; index: number; value: string }
+  | { kind: "metric"; index: number; field: "label" | "value" | "value2"; value: string };
+
+type InlineChartEditor = InlineChartEditTarget & {
+  left: number;
+  top: number;
+  width: number;
+};
+
 type RecommendationPayload = DiagramRecommendation & {
   error?: string;
 };
@@ -170,8 +206,6 @@ const CHART_DATA_DIAGRAM_TYPES = new Set<DiagramType>([
 const CUSTOM_FLOW_DIAGRAM_TYPES = new Set<DiagramType>([
   "process_map",
   "flowchart",
-  "swimlane",
-  "value_stream_map",
 ]);
 
 const DEFAULT_METRIC_ROWS = [
@@ -216,6 +250,21 @@ const DEFAULT_DIAGRAM_STYLE: DiagramStyle = {
 const DEFAULT_PROMPT =
   "Document the process boundary, inputs, outputs, owners, decisions, and major process steps for controlled process documentation.";
 
+const CUSTOM_FLOW_CANVAS_WIDTH = 1280;
+const CUSTOM_FLOW_CANVAS_HEIGHT = 720;
+const CUSTOM_FLOW_NODE_HALF_WIDTH = 82;
+const CUSTOM_FLOW_NODE_HALF_HEIGHT = 38;
+const CUSTOM_FLOW_DECISION_HALF_WIDTH = 88;
+const CUSTOM_FLOW_DECISION_HALF_HEIGHT = 54;
+const CUSTOM_FLOW_MIN_VIEW_WIDTH = 520;
+const CUSTOM_FLOW_MIN_VIEW_HEIGHT = 300;
+const CUSTOM_FLOW_DEFAULT_VIEW = {
+  x: 0,
+  y: 0,
+  width: CUSTOM_FLOW_CANVAS_WIDTH,
+  height: CUSTOM_FLOW_CANVAS_HEIGHT,
+};
+
 function escapeHtml(value: string) {
   return value
     .replaceAll("&", "&amp;")
@@ -227,6 +276,10 @@ function escapeHtml(value: string) {
 
 function truncate(value: string, maxLength: number) {
   return value.length > maxLength ? `${value.slice(0, Math.max(0, maxLength - 1))}...` : value;
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function toDocumentNumber() {
@@ -626,8 +679,8 @@ function buildSwimlaneSvg(title: string, items: string[], lanes: string[]) {
 }
 
 function buildCustomFlowSketchSvg(title: string, nodes: CustomFlowNode[], links: CustomFlowLink[]) {
-  const width = 960;
-  const boardHeight = 360;
+  const width = CUSTOM_FLOW_CANVAS_WIDTH;
+  const boardHeight = CUSTOM_FLOW_CANVAS_HEIGHT;
   const top = title ? 58 : 18;
   const height = top + boardHeight + 18;
   let body = title ? svgText(width / 2, 36, title, { size: 20, color: "#111827" }) : "";
@@ -646,7 +699,7 @@ function buildCustomFlowSketchSvg(title: string, nodes: CustomFlowNode[], links:
       return;
     }
 
-    body += `<line x1="${from.x + 56}" y1="${top + from.y}" x2="${to.x - 56}" y2="${
+    body += `<line x1="${from.x + CUSTOM_FLOW_NODE_HALF_WIDTH}" y1="${top + from.y}" x2="${to.x - CUSTOM_FLOW_NODE_HALF_WIDTH}" y2="${
       top + to.y
     }" stroke="#0f766e" stroke-width="3" marker-end="url(#arrowhead)"></line>`;
   });
@@ -654,11 +707,17 @@ function buildCustomFlowSketchSvg(title: string, nodes: CustomFlowNode[], links:
   nodes.forEach((node) => {
     const y = top + node.y;
     if (node.type === "decision") {
-      body += `<polygon points="${node.x},${y - 44} ${node.x + 70},${y} ${node.x},${
-        y + 44
-      } ${node.x - 70},${y}" fill="#fff7ed" stroke="#0f766e" stroke-width="2"></polygon>`;
+      body += `<polygon points="${node.x},${y - CUSTOM_FLOW_DECISION_HALF_HEIGHT} ${
+        node.x + CUSTOM_FLOW_DECISION_HALF_WIDTH
+      },${y} ${node.x},${y + CUSTOM_FLOW_DECISION_HALF_HEIGHT} ${
+        node.x - CUSTOM_FLOW_DECISION_HALF_WIDTH
+      },${y}" fill="#fff7ed" stroke="#0f766e" stroke-width="2"></polygon>`;
     } else {
-      body += `<rect x="${node.x - 72}" y="${y - 32}" width="144" height="64" rx="${
+      body += `<rect x="${node.x - CUSTOM_FLOW_NODE_HALF_WIDTH}" y="${
+        y - CUSTOM_FLOW_NODE_HALF_HEIGHT
+      }" width="${CUSTOM_FLOW_NODE_HALF_WIDTH * 2}" height="${
+        CUSTOM_FLOW_NODE_HALF_HEIGHT * 2
+      }" rx="${
         node.type === "terminator" ? 28 : 10
       }" fill="#ffffff" stroke="#0f766e" stroke-width="2"></rect>`;
     }
@@ -1310,11 +1369,9 @@ function buildControlledDocumentHtml(input: {
 
   return [
     `<h1>${escapeHtml(input.title)}</h1>`,
-    `<p><strong>Diagram type:</strong> ${escapeHtml(definition.label)}<br><strong>Method:</strong> ${
-      input.dmaicEnabled
-        ? `DMAIC - ${escapeHtml(phase.label)}`
-        : "General process documentation"
-    }<br><strong>Process area:</strong> ${escapeHtml(input.processArea || "Unassigned")}</p>`,
+    `<p><strong>Diagram type:</strong> ${escapeHtml(definition.label)}<br><strong>Method:</strong> DMAIC - ${escapeHtml(
+      phase.label,
+    )}<br><strong>Process area:</strong> ${escapeHtml(input.processArea || "Unassigned")}</p>`,
     `<h2>Purpose</h2>`,
     `<p>${escapeHtml(input.prompt)}</p>`,
     `<h2>Diagram</h2>`,
@@ -1432,11 +1489,10 @@ export function ProcessMapBuilderClient({
   const processAreaInputRef = useRef<HTMLInputElement | null>(null);
   const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const itemsTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const lanesTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const metricsTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [title, setTitle] = useState("Process Map Draft");
   const [diagramType, setDiagramType] = useState<DiagramType>("process_map");
-  const [dmaicEnabled, setDmaicEnabled] = useState(false);
+  const dmaicEnabled = true;
   const [dmaicPhase, setDmaicPhase] = useState<DmaicPhase>("define");
   const [departmentId, setDepartmentId] = useState("");
   const [processArea, setProcessArea] = useState("");
@@ -1461,8 +1517,8 @@ export function ProcessMapBuilderClient({
   const [oeeIdealCycleSeconds] = useState("45");
   const [oeeTotalCount] = useState("520");
   const [oeeGoodCount] = useState("498");
-  const [layerSettings, setLayerSettings] = useState<LayerSettings>(DEFAULT_LAYER_SETTINGS);
-  const [diagramStyle, setDiagramStyle] = useState<DiagramStyle>(DEFAULT_DIAGRAM_STYLE);
+  const [layerSettings] = useState<LayerSettings>(DEFAULT_LAYER_SETTINGS);
+  const [diagramStyle] = useState<DiagramStyle>(DEFAULT_DIAGRAM_STYLE);
   const [previewRevision, setPreviewRevision] = useState(1);
   const [recommendation, setRecommendation] = useState<DiagramRecommendation | null>(null);
   const [recommendBusy, setRecommendBusy] = useState(false);
@@ -1473,9 +1529,9 @@ export function ProcessMapBuilderClient({
   const [pageExplainError, setPageExplainError] = useState<string | null>(null);
   const [drawingMode, setDrawingMode] = useState<DrawingMode>("select");
   const [customFlowNodes, setCustomFlowNodes] = useState<CustomFlowNode[]>([
-    { id: "start", type: "terminator", label: "Start", x: 110, y: 120 },
-    { id: "step-1", type: "process", label: "Process step", x: 310, y: 120 },
-    { id: "decision-1", type: "decision", label: "Decision", x: 520, y: 120 },
+    { id: "start", type: "terminator", label: "Start", x: 180, y: 240 },
+    { id: "step-1", type: "process", label: "Process step", x: 470, y: 240 },
+    { id: "decision-1", type: "decision", label: "Decision", x: 780, y: 240 },
   ]);
   const [customFlowLinks, setCustomFlowLinks] = useState<CustomFlowLink[]>([
     { id: "start-step-1", from: "start", to: "step-1" },
@@ -1483,6 +1539,12 @@ export function ProcessMapBuilderClient({
   ]);
   const [selectedCustomNodeId, setSelectedCustomNodeId] = useState<string | null>("step-1");
   const [pendingConnectorNodeId, setPendingConnectorNodeId] = useState<string | null>(null);
+  const [customCanvasView, setCustomCanvasView] =
+    useState<CustomFlowCanvasView>(CUSTOM_FLOW_DEFAULT_VIEW);
+  const [draftConnector, setDraftConnector] = useState<DraftConnector | null>(null);
+  const [customFlowUndoStack, setCustomFlowUndoStack] = useState<CustomFlowSnapshot[]>([]);
+  const [customFlowRedoStack, setCustomFlowRedoStack] = useState<CustomFlowSnapshot[]>([]);
+  const [inlineChartEditor, setInlineChartEditor] = useState<InlineChartEditor | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -1492,8 +1554,22 @@ export function ProcessMapBuilderClient({
     offsetX: number;
     offsetY: number;
     moved: boolean;
+    historyCaptured: boolean;
+  } | null>(null);
+  const customFlowPanRef = useRef<{
+    pointerId: number;
+    startClientX: number;
+    startClientY: number;
+    startView: CustomFlowCanvasView;
+  } | null>(null);
+  const customConnectorDragRef = useRef<{
+    from: string;
+    pointerId: number;
   } | null>(null);
   const customFlowSuppressClickRef = useRef(false);
+  const customCanvasSvgRef = useRef<SVGSVGElement | null>(null);
+  const chartPreviewRef = useRef<HTMLDivElement | null>(null);
+  const inlineChartEditCancelledRef = useRef(false);
 
   const definition = getDiagramDefinition(diagramType);
   const phase = getDmaicPhaseOption(dmaicPhase);
@@ -1551,6 +1627,54 @@ export function ProcessMapBuilderClient({
   const svg = applySvgTheme(rawSvg, diagramStyle, layerSettings);
   const selectedCustomNode =
     customFlowNodes.find((node) => node.id === selectedCustomNodeId) ?? null;
+  const canUndoCustomFlow = customFlowUndoStack.length > 0;
+  const canRedoCustomFlow = customFlowRedoStack.length > 0;
+
+  function getCustomFlowSnapshot(): CustomFlowSnapshot {
+    return {
+      nodes: customFlowNodes.map((node) => ({ ...node })),
+      links: customFlowLinks.map((link) => ({ ...link })),
+      selectedNodeId: selectedCustomNodeId,
+    };
+  }
+
+  function restoreCustomFlowSnapshot(snapshot: CustomFlowSnapshot) {
+    setCustomFlowNodes(snapshot.nodes.map((node) => ({ ...node })));
+    setCustomFlowLinks(snapshot.links.map((link) => ({ ...link })));
+    setSelectedCustomNodeId(snapshot.selectedNodeId);
+    setPendingConnectorNodeId(null);
+    setDraftConnector(null);
+    customConnectorDragRef.current = null;
+    customFlowDragRef.current = null;
+  }
+
+  function pushCustomFlowHistory() {
+    const snapshot = getCustomFlowSnapshot();
+    setCustomFlowUndoStack((current) => [...current.slice(-49), snapshot]);
+    setCustomFlowRedoStack([]);
+  }
+
+  function undoCustomFlow() {
+    const previousSnapshot = customFlowUndoStack.at(-1);
+    if (!previousSnapshot) {
+      return;
+    }
+
+    setCustomFlowRedoStack((current) => [...current.slice(-49), getCustomFlowSnapshot()]);
+    setCustomFlowUndoStack((current) => current.slice(0, -1));
+    restoreCustomFlowSnapshot(previousSnapshot);
+  }
+
+  function redoCustomFlow() {
+    const nextSnapshot = customFlowRedoStack.at(-1);
+    if (!nextSnapshot) {
+      return;
+    }
+
+    setCustomFlowUndoStack((current) => [...current.slice(-49), getCustomFlowSnapshot()]);
+    setCustomFlowRedoStack((current) => current.slice(0, -1));
+    restoreCustomFlowSnapshot(nextSnapshot);
+  }
 
   function focusEditorField(
     ref: RefObject<HTMLInputElement | HTMLTextAreaElement | null>,
@@ -1589,6 +1713,12 @@ export function ProcessMapBuilderClient({
     setItemsText((current) => updateSourceLine(current, index, value, definition.starterItems));
   }
 
+  function updateLaneLine(index: number, value: string) {
+    setLanesText((current) =>
+      updateSourceLine(current, index, value, ["Operations", "Quality", "Supervisor"]),
+    );
+  }
+
   function updateMetricLine(
     index: number,
     field: "label" | "value" | "value2",
@@ -1610,10 +1740,211 @@ export function ProcessMapBuilderClient({
     });
   }
 
+  function getInlineChartEditTarget(displayText: string): InlineChartEditTarget | null {
+    const normalizedDisplayText = displayText.trim();
+    if (!normalizedDisplayText) {
+      return null;
+    }
+
+    const matchesRenderedText = (value: string | number) => {
+      const textValue = String(value);
+      return (
+        normalizedDisplayText === textValue ||
+        normalizedDisplayText === truncate(textValue, 28)
+      );
+    };
+
+    if (matchesRenderedText(title)) {
+      return { kind: "title", value: title };
+    }
+
+    const laneIndex = lanes.findIndex(matchesRenderedText);
+    if (laneIndex >= 0) {
+      return { kind: "lane", index: laneIndex, value: lanes[laneIndex] ?? "" };
+    }
+
+    const metricLabelIndex = metrics.findIndex((metric) => matchesRenderedText(metric.label));
+    if (metricLabelIndex >= 0) {
+      return {
+        kind: "metric",
+        index: metricLabelIndex,
+        field: "label",
+        value: metrics[metricLabelIndex]?.label ?? "",
+      };
+    }
+
+    const metricValueIndex = metrics.findIndex((metric) =>
+      [metric.value, Math.round(metric.value), formatAxisNumber(metric.value)].some(matchesRenderedText),
+    );
+    if (metricValueIndex >= 0) {
+      return {
+        kind: "metric",
+        index: metricValueIndex,
+        field: "value",
+        value: String(metrics[metricValueIndex]?.value ?? ""),
+      };
+    }
+
+    const metricValue2Index = metrics.findIndex((metric) =>
+      [metric.value2, Math.round(metric.value2), formatAxisNumber(metric.value2)].some(
+        matchesRenderedText,
+      ),
+    );
+    if (metricValue2Index >= 0) {
+      return {
+        kind: "metric",
+        index: metricValue2Index,
+        field: "value2",
+        value: String(metrics[metricValue2Index]?.value2 ?? ""),
+      };
+    }
+
+    const itemIndex = items.findIndex(matchesRenderedText);
+    if (itemIndex >= 0) {
+      return { kind: "item", index: itemIndex, value: items[itemIndex] ?? "" };
+    }
+
+    return null;
+  }
+
+  function openInlineChartEditor(
+    event: ReactMouseEvent<HTMLDivElement>,
+    target: InlineChartEditTarget,
+  ) {
+    const host = chartPreviewRef.current;
+    const targetElement = event.target instanceof Element ? event.target : null;
+    if (!host || !targetElement) {
+      return;
+    }
+
+    const hostRect = host.getBoundingClientRect();
+    const targetRect = targetElement.getBoundingClientRect();
+    const width = target.kind === "metric" && target.field !== "label" ? 120 : 260;
+    inlineChartEditCancelledRef.current = false;
+    setInlineChartEditor({
+      ...target,
+      left: clampNumber(targetRect.left - hostRect.left - 12 + host.scrollLeft, 8, Math.max(8, hostRect.width - width - 8)),
+      top: clampNumber(targetRect.top - hostRect.top - 30 + host.scrollTop, 8, Math.max(8, hostRect.height - 48)),
+      width,
+    });
+  }
+
+  function handleChartPreviewDoubleClick(event: ReactMouseEvent<HTMLDivElement>) {
+    if (isCustomFlowDiagram || TABLE_DIAGRAM_TYPES.has(diagramType)) {
+      return;
+    }
+
+    const targetElement = event.target instanceof Element ? event.target : null;
+    if (!targetElement) {
+      return;
+    }
+
+    const tagName = targetElement.tagName.toLowerCase();
+    let target =
+      tagName === "text" ? getInlineChartEditTarget(targetElement.textContent ?? "") : null;
+    if (!target && (tagName === "rect" || tagName === "circle")) {
+      const titleText = targetElement.querySelector("title")?.textContent ?? "";
+      const metricIndex = metrics.findIndex((metric) =>
+        titleText.startsWith(`${metric.label}:`),
+      );
+      if (metricIndex >= 0) {
+        target = {
+          kind: "metric",
+          index: metricIndex,
+          field: "value",
+          value: String(metrics[metricIndex]?.value ?? ""),
+        };
+      }
+    }
+
+    if (!target) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    openInlineChartEditor(event, target);
+  }
+
+  function commitInlineChartEdit() {
+    if (inlineChartEditCancelledRef.current) {
+      inlineChartEditCancelledRef.current = false;
+      return;
+    }
+
+    if (!inlineChartEditor) {
+      return;
+    }
+
+    const nextValue = inlineChartEditor.value.trim();
+    if (inlineChartEditor.kind === "title") {
+      setTitle(nextValue || "Untitled Process Map");
+    } else if (inlineChartEditor.kind === "item") {
+      updateItemLine(inlineChartEditor.index, nextValue || `Step ${inlineChartEditor.index + 1}`);
+    } else if (inlineChartEditor.kind === "lane") {
+      updateLaneLine(inlineChartEditor.index, nextValue || `Lane ${inlineChartEditor.index + 1}`);
+    } else {
+      updateMetricLine(
+        inlineChartEditor.index,
+        inlineChartEditor.field,
+        inlineChartEditor.field === "label" ? nextValue || `Point ${inlineChartEditor.index + 1}` : nextValue || "0",
+      );
+    }
+
+    setInlineChartEditor(null);
+    setPreviewRevision((current) => current + 1);
+  }
+
   function updateCapabilityLine(index: number, value: string) {
     setCapabilityDataText((current) =>
       updateSourceLine(current, index, value, DEFAULT_CAPABILITY_DATA.split("\n")),
     );
+  }
+
+  function addChartDataRow() {
+    if (formulaTool === "capability") {
+      setCapabilityDataText((current) => {
+        const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
+        const lastValue = Number.parseFloat(rows.at(-1) ?? "10");
+        rows.push(Number.isFinite(lastValue) ? (lastValue + 0.01).toFixed(2) : "10.00");
+        return rows.join("\n");
+      });
+    } else if (CHART_DATA_DIAGRAM_TYPES.has(diagramType)) {
+      setMetricsText((current) => {
+        const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
+        rows.push(`Point ${rows.length + 1},0,0`);
+        return rows.join("\n");
+      });
+    } else {
+      setItemsText((current) => {
+        const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
+        rows.push(`Step ${rows.length + 1}`);
+        return rows.join("\n");
+      });
+    }
+
+    setPreviewRevision((current) => current + 1);
+  }
+
+  function removeChartDataRow() {
+    if (formulaTool === "capability") {
+      setCapabilityDataText((current) => {
+        const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
+        return rows.length <= 1 ? rows.join("\n") : rows.slice(0, -1).join("\n");
+      });
+    } else if (CHART_DATA_DIAGRAM_TYPES.has(diagramType)) {
+      setMetricsText((current) => {
+        const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
+        return rows.length <= 1 ? rows.join("\n") : rows.slice(0, -1).join("\n");
+      });
+    } else {
+      setItemsText((current) => {
+        const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
+        return rows.length <= 1 ? rows.join("\n") : rows.slice(0, -1).join("\n");
+      });
+    }
+
+    setPreviewRevision((current) => current + 1);
   }
 
   function focusPrimaryPreviewSource() {
@@ -1632,19 +1963,19 @@ export function ProcessMapBuilderClient({
 
   function applyDiagramType(nextDiagramType: DiagramType) {
     const nextDefinition = getDiagramDefinition(nextDiagramType);
+    setCustomFlowUndoStack([]);
+    setCustomFlowRedoStack([]);
+    setInlineChartEditor(null);
     setDiagramType(nextDiagramType);
     setItemsText(nextDefinition.starterItems.join("\n"));
     setRecommendation(null);
     if (!title.trim() || title === "Process Map Draft") {
-      setTitle(
-        dmaicEnabled
-          ? `${getDmaicPhaseOption(dmaicPhase).label} - ${nextDefinition.shortLabel} Draft`
-          : `${nextDefinition.shortLabel} Draft`,
-      );
+      setTitle(`${getDmaicPhaseOption(dmaicPhase).label} - ${nextDefinition.shortLabel} Draft`);
     }
   }
 
   function addCustomFlowNode(type: CustomFlowNode["type"], x: number, y: number) {
+    pushCustomFlowHistory();
     const id = `${type}-${Date.now()}-${Math.round(x)}-${Math.round(y)}`;
     const nextNode: CustomFlowNode = {
       id,
@@ -1655,8 +1986,16 @@ export function ProcessMapBuilderClient({
           : type === "terminator"
             ? "Start / End"
             : "Process step",
-      x: Math.max(70, Math.min(850, x)),
-      y: Math.max(45, Math.min(315, y)),
+      x: clampNumber(
+        x,
+        CUSTOM_FLOW_DECISION_HALF_WIDTH,
+        CUSTOM_FLOW_CANVAS_WIDTH - CUSTOM_FLOW_DECISION_HALF_WIDTH,
+      ),
+      y: clampNumber(
+        y,
+        CUSTOM_FLOW_DECISION_HALF_HEIGHT,
+        CUSTOM_FLOW_CANVAS_HEIGHT - CUSTOM_FLOW_DECISION_HALF_HEIGHT,
+      ),
     };
     setCustomFlowNodes((current) => [...current, nextNode]);
     setSelectedCustomNodeId(id);
@@ -1668,8 +2007,8 @@ export function ProcessMapBuilderClient({
   ) {
     const bounds = svgElement.getBoundingClientRect();
     return {
-      x: ((event.clientX - bounds.left) / bounds.width) * 960,
-      y: ((event.clientY - bounds.top) / bounds.height) * 360,
+      x: customCanvasView.x + ((event.clientX - bounds.left) / bounds.width) * customCanvasView.width,
+      y: customCanvasView.y + ((event.clientY - bounds.top) / bounds.height) * customCanvasView.height,
     };
   }
 
@@ -1679,8 +2018,16 @@ export function ProcessMapBuilderClient({
         node.id === nodeId
           ? {
               ...node,
-              x: Math.max(70, Math.min(890, x)),
-              y: Math.max(45, Math.min(315, y)),
+              x: clampNumber(
+                x,
+                CUSTOM_FLOW_DECISION_HALF_WIDTH,
+                CUSTOM_FLOW_CANVAS_WIDTH - CUSTOM_FLOW_DECISION_HALF_WIDTH,
+              ),
+              y: clampNumber(
+                y,
+                CUSTOM_FLOW_DECISION_HALF_HEIGHT,
+                CUSTOM_FLOW_CANVAS_HEIGHT - CUSTOM_FLOW_DECISION_HALF_HEIGHT,
+              ),
             }
           : node,
       ),
@@ -1693,11 +2040,182 @@ export function ProcessMapBuilderClient({
         node.id === nodeId
           ? {
               ...node,
-              x: Math.max(70, Math.min(890, node.x + deltaX)),
-              y: Math.max(45, Math.min(315, node.y + deltaY)),
+              x: clampNumber(
+                node.x + deltaX,
+                CUSTOM_FLOW_DECISION_HALF_WIDTH,
+                CUSTOM_FLOW_CANVAS_WIDTH - CUSTOM_FLOW_DECISION_HALF_WIDTH,
+              ),
+              y: clampNumber(
+                node.y + deltaY,
+                CUSTOM_FLOW_DECISION_HALF_HEIGHT,
+                CUSTOM_FLOW_CANVAS_HEIGHT - CUSTOM_FLOW_DECISION_HALF_HEIGHT,
+              ),
             }
           : node,
       ),
+    );
+  }
+
+  function clampCustomCanvasView(view: CustomFlowCanvasView): CustomFlowCanvasView {
+    const width = clampNumber(view.width, CUSTOM_FLOW_MIN_VIEW_WIDTH, CUSTOM_FLOW_CANVAS_WIDTH);
+    const height = clampNumber(
+      view.height,
+      CUSTOM_FLOW_MIN_VIEW_HEIGHT,
+      CUSTOM_FLOW_CANVAS_HEIGHT,
+    );
+
+    return {
+      x: clampNumber(view.x, 0, CUSTOM_FLOW_CANVAS_WIDTH - width),
+      y: clampNumber(view.y, 0, CUSTOM_FLOW_CANVAS_HEIGHT - height),
+      width,
+      height,
+    };
+  }
+
+  function zoomCustomCanvas(factor: number, anchor?: { x: number; y: number }) {
+    setCustomCanvasView((current) => {
+      const nextWidth = clampNumber(
+        current.width * factor,
+        CUSTOM_FLOW_MIN_VIEW_WIDTH,
+        CUSTOM_FLOW_CANVAS_WIDTH,
+      );
+      const nextHeight = clampNumber(
+        current.height * factor,
+        CUSTOM_FLOW_MIN_VIEW_HEIGHT,
+        CUSTOM_FLOW_CANVAS_HEIGHT,
+      );
+      const zoomAnchor = anchor ?? {
+        x: current.x + current.width / 2,
+        y: current.y + current.height / 2,
+      };
+      const anchorRatioX = (zoomAnchor.x - current.x) / current.width;
+      const anchorRatioY = (zoomAnchor.y - current.y) / current.height;
+
+      return clampCustomCanvasView({
+        x: zoomAnchor.x - nextWidth * anchorRatioX,
+        y: zoomAnchor.y - nextHeight * anchorRatioY,
+        width: nextWidth,
+        height: nextHeight,
+      });
+    });
+  }
+
+  function resetCustomCanvasView() {
+    setCustomCanvasView(CUSTOM_FLOW_DEFAULT_VIEW);
+  }
+
+  function handleCustomCanvasWheel(event: ReactWheelEvent<SVGSVGElement>) {
+    if (!event.ctrlKey && !event.metaKey) {
+      return;
+    }
+
+    event.preventDefault();
+    const point = getCustomFlowPoint(event, event.currentTarget);
+    zoomCustomCanvas(event.deltaY > 0 ? 1.12 : 0.88, point);
+  }
+
+  function handleCustomCanvasKeyDown(event: ReactKeyboardEvent<SVGSVGElement>) {
+    if (!event.ctrlKey && !event.metaKey) {
+      return;
+    }
+
+    const key = event.key.toLowerCase();
+    if (key === "z" && !event.shiftKey) {
+      event.preventDefault();
+      undoCustomFlow();
+    } else if (key === "y" || (key === "z" && event.shiftKey)) {
+      event.preventDefault();
+      redoCustomFlow();
+    }
+  }
+
+  function handleCustomCanvasPointerDown(event: ReactPointerEvent<SVGSVGElement>) {
+    if (event.button !== 1 && !(event.button === 0 && event.altKey)) {
+      return;
+    }
+
+    event.preventDefault();
+    customFlowPanRef.current = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startView: customCanvasView,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleCustomCanvasPointerMove(event: ReactPointerEvent<SVGSVGElement>) {
+    const panState = customFlowPanRef.current;
+    if (!panState || panState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const deltaX = ((event.clientX - panState.startClientX) / bounds.width) * panState.startView.width;
+    const deltaY =
+      ((event.clientY - panState.startClientY) / bounds.height) * panState.startView.height;
+
+    setCustomCanvasView(
+      clampCustomCanvasView({
+        ...panState.startView,
+        x: panState.startView.x - deltaX,
+        y: panState.startView.y - deltaY,
+      }),
+    );
+  }
+
+  function finishCustomCanvasPan(event: ReactPointerEvent<SVGSVGElement>) {
+    const panState = customFlowPanRef.current;
+    if (!panState || panState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    customFlowPanRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function findCustomFlowNodeAtPoint(point: { x: number; y: number }, excludeNodeId?: string) {
+    return [...customFlowNodes]
+      .reverse()
+      .find((node) => {
+        if (node.id === excludeNodeId) {
+          return false;
+        }
+
+        if (node.type === "decision") {
+          return (
+            Math.abs(point.x - node.x) / CUSTOM_FLOW_DECISION_HALF_WIDTH +
+              Math.abs(point.y - node.y) / CUSTOM_FLOW_DECISION_HALF_HEIGHT <=
+            1
+          );
+        }
+
+        return (
+          Math.abs(point.x - node.x) <= CUSTOM_FLOW_NODE_HALF_WIDTH &&
+          Math.abs(point.y - node.y) <= CUSTOM_FLOW_NODE_HALF_HEIGHT
+        );
+      });
+  }
+
+  function addCustomFlowLink(fromNodeId: string, toNodeId: string) {
+    if (fromNodeId === toNodeId) {
+      return;
+    }
+
+    const id = `${fromNodeId}-${toNodeId}`;
+    if (customFlowLinks.some((link) => link.id === id)) {
+      return;
+    }
+
+    pushCustomFlowHistory();
+    setCustomFlowLinks((current) =>
+      current.some((link) => link.id === id)
+        ? current
+        : [...current, { id, from: fromNodeId, to: toNodeId }],
     );
   }
 
@@ -1706,16 +2224,36 @@ export function ProcessMapBuilderClient({
       return;
     }
 
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const x = ((event.clientX - bounds.left) / bounds.width) * 960;
-    const y = ((event.clientY - bounds.top) / bounds.height) * 360;
-    addCustomFlowNode(drawingMode, x, y);
+    const point = getCustomFlowPoint(event, event.currentTarget);
+    addCustomFlowNode(drawingMode, point.x, point.y);
   }
 
   function handleCustomNodePointerDown(
     node: CustomFlowNode,
     event: ReactPointerEvent<SVGGElement>,
   ) {
+    customCanvasSvgRef.current?.focus();
+
+    if (drawingMode === "connector" && event.button === 0) {
+      const svgElement = event.currentTarget.ownerSVGElement;
+      if (!svgElement) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      const point = getCustomFlowPoint(event, svgElement);
+      customConnectorDragRef.current = {
+        from: node.id,
+        pointerId: event.pointerId,
+      };
+      setSelectedCustomNodeId(node.id);
+      setPendingConnectorNodeId(node.id);
+      setDraftConnector({ from: node.id, x: point.x, y: point.y });
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
+
     if (drawingMode !== "select" || event.button !== 0) {
       return;
     }
@@ -1734,12 +2272,29 @@ export function ProcessMapBuilderClient({
       offsetX: point.x - node.x,
       offsetY: point.y - node.y,
       moved: false,
+      historyCaptured: false,
     };
     setSelectedCustomNodeId(node.id);
     event.currentTarget.setPointerCapture(event.pointerId);
   }
 
   function handleCustomNodePointerMove(event: ReactPointerEvent<SVGGElement>) {
+    const connectorState = customConnectorDragRef.current;
+    if (connectorState && connectorState.pointerId === event.pointerId) {
+      const svgElement = event.currentTarget.ownerSVGElement;
+      if (!svgElement) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      const point = getCustomFlowPoint(event, svgElement);
+      setDraftConnector((current) =>
+        current ? { ...current, x: point.x, y: point.y } : current,
+      );
+      return;
+    }
+
     const dragState = customFlowDragRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) {
       return;
@@ -1753,6 +2308,10 @@ export function ProcessMapBuilderClient({
     event.preventDefault();
     event.stopPropagation();
     const point = getCustomFlowPoint(event, svgElement);
+    if (!dragState.historyCaptured) {
+      pushCustomFlowHistory();
+      dragState.historyCaptured = true;
+    }
     dragState.moved = true;
     updateCustomFlowNodePosition(
       dragState.nodeId,
@@ -1762,6 +2321,31 @@ export function ProcessMapBuilderClient({
   }
 
   function finishCustomNodeDrag(event: ReactPointerEvent<SVGGElement>) {
+    const connectorState = customConnectorDragRef.current;
+    if (connectorState && connectorState.pointerId === event.pointerId) {
+      const svgElement = event.currentTarget.ownerSVGElement;
+      if (!svgElement) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      const point = getCustomFlowPoint(event, svgElement);
+      const targetNode = findCustomFlowNodeAtPoint(point, connectorState.from);
+      if (targetNode) {
+        addCustomFlowLink(connectorState.from, targetNode.id);
+        setSelectedCustomNodeId(targetNode.id);
+      }
+      customConnectorDragRef.current = null;
+      setDraftConnector(null);
+      setPendingConnectorNodeId(null);
+      customFlowSuppressClickRef.current = true;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      return;
+    }
+
     const dragState = customFlowDragRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) {
       return;
@@ -1794,12 +2378,7 @@ export function ProcessMapBuilderClient({
     }
 
     if (pendingConnectorNodeId !== nodeId) {
-      const id = `${pendingConnectorNodeId}-${nodeId}`;
-      setCustomFlowLinks((current) =>
-        current.some((link) => link.id === id)
-          ? current
-          : [...current, { id, from: pendingConnectorNodeId, to: nodeId }],
-      );
+      addCustomFlowLink(pendingConnectorNodeId, nodeId);
     }
     setPendingConnectorNodeId(null);
   }
@@ -1808,6 +2387,10 @@ export function ProcessMapBuilderClient({
     if (!selectedCustomNodeId) {
       return;
     }
+    if (selectedCustomNode?.label === label) {
+      return;
+    }
+    pushCustomFlowHistory();
     setCustomFlowNodes((current) =>
       current.map((node) => (node.id === selectedCustomNodeId ? { ...node, label } : node)),
     );
@@ -1828,6 +2411,7 @@ export function ProcessMapBuilderClient({
 
     if (movement) {
       event.preventDefault();
+      pushCustomFlowHistory();
       setSelectedCustomNodeId(node.id);
       moveCustomFlowNode(node.id, movement[0], movement[1]);
       return;
@@ -1835,6 +2419,7 @@ export function ProcessMapBuilderClient({
 
     if (event.key === "Delete" || event.key === "Backspace") {
       event.preventDefault();
+      pushCustomFlowHistory();
       setSelectedCustomNodeId(node.id);
       setCustomFlowNodes((current) => current.filter((entry) => entry.id !== node.id));
       setCustomFlowLinks((current) =>
@@ -1848,6 +2433,7 @@ export function ProcessMapBuilderClient({
     if (!selectedCustomNodeId) {
       return;
     }
+    pushCustomFlowHistory();
     setCustomFlowNodes((current) =>
       current.filter((node) => node.id !== selectedCustomNodeId),
     );
@@ -1858,16 +2444,16 @@ export function ProcessMapBuilderClient({
     );
     setSelectedCustomNodeId(null);
     setPendingConnectorNodeId(null);
+    setDraftConnector(null);
+    customConnectorDragRef.current = null;
   }
 
   function applyCustomFlowToSteps() {
     if (customFlowNodes.length === 0) {
       return;
     }
-    setDiagramType("flowchart");
     setItemsText(customFlowNodes.map((node) => node.label).join("\n"));
-    setMessage("Custom sketch copied into the flowchart steps.");
-    setChartModalOpen(true);
+    setMessage("Canvas steps synced to source data.");
   }
 
   async function getAccessToken() {
@@ -1890,7 +2476,7 @@ export function ProcessMapBuilderClient({
       const token = await getAccessToken();
       const context = [
         `Title: ${title || "Untitled"}`,
-        `Method: ${dmaicEnabled ? `DMAIC ${phase.label}` : "General"}`,
+        `Method: DMAIC ${phase.label}`,
         `Diagram: ${definition.label}`,
         `Process area: ${processArea || "Not specified"}`,
         `Prompt: ${prompt}`,
@@ -1983,8 +2569,8 @@ export function ProcessMapBuilderClient({
         },
         body: JSON.stringify({
           prompt,
-          dmaicPhase: dmaicEnabled ? dmaicPhase : null,
-          dmaicEnabled,
+          dmaicPhase,
+          dmaicEnabled: true,
           processArea,
         }),
       });
@@ -1996,14 +2582,8 @@ export function ProcessMapBuilderClient({
 
       setRecommendation(payload);
       setDiagramType(payload.diagramType);
-      if (dmaicEnabled) {
-        setDmaicPhase(payload.dmaicPhase);
-      }
-      setTitle(
-        dmaicEnabled
-          ? payload.suggestedTitle
-          : payload.suggestedTitle.replace(/^(Define|Measure|Analyze|Improve|Control)\s+-\s+/i, ""),
-      );
+      setDmaicPhase(payload.dmaicPhase);
+      setTitle(payload.suggestedTitle);
       setItemsText(payload.starterItems.join("\n"));
       setFormulaTool("none");
       if (payload.metricRows?.length) {
@@ -2226,7 +2806,7 @@ export function ProcessMapBuilderClient({
 <body>
   <h1>${escapeHtml(title)}</h1>
   <div class="meta">Diagram: ${escapeHtml(definition.label)} | ${
-    dmaicEnabled ? `DMAIC: ${escapeHtml(phase.label)}` : "Method: General process documentation"
+    `DMAIC: ${escapeHtml(phase.label)}`
   } | Process area: ${escapeHtml(processArea || "Unassigned")}</div>
   <h2>Purpose</h2>
   <p>${escapeHtml(prompt)}</p>
@@ -2262,24 +2842,34 @@ export function ProcessMapBuilderClient({
       void logProcessMapUsage("capability_analysis");
     }
 
-    const printWindow = window.open("", "_blank", "noopener,noreferrer,width=1100,height=800");
-    if (!printWindow) {
-      setError("Unable to open print window. Check your browser popup settings.");
+    const printFrame = document.createElement("iframe");
+    printFrame.title = "Print process map";
+    printFrame.style.position = "fixed";
+    printFrame.style.left = "-10000px";
+    printFrame.style.top = "0";
+    printFrame.style.width = "1200px";
+    printFrame.style.height = "900px";
+    printFrame.style.border = "0";
+    printFrame.style.opacity = "0";
+    document.body.appendChild(printFrame);
+
+    const printWindow = printFrame.contentWindow;
+    const printDocument = printWindow?.document;
+    if (!printWindow || !printDocument) {
+      printFrame.remove();
+      setError("Unable to prepare the print view.");
       return;
     }
 
-    printWindow.document.write(buildPrintableReportHtml());
-    printWindow.document.close();
-    printWindow.focus();
-    window.setTimeout(() => printWindow.print(), 250);
-  }
+    printDocument.open();
+    printDocument.write(buildPrintableReportHtml());
+    printDocument.close();
 
-  function updateLayerSetting(key: keyof LayerSettings, value: boolean) {
-    setLayerSettings((current) => ({ ...current, [key]: value }));
-  }
-
-  function updateDiagramStyle(key: keyof DiagramStyle, value: string) {
-    setDiagramStyle((current) => ({ ...current, [key]: value }));
+    window.setTimeout(() => {
+      printWindow.focus();
+      printWindow.print();
+      window.setTimeout(() => printFrame.remove(), 1000);
+    }, 300);
   }
 
   function refreshPreview() {
@@ -2292,7 +2882,7 @@ export function ProcessMapBuilderClient({
     const outline = [
       title,
       `Diagram: ${definition.label}`,
-      dmaicEnabled ? `DMAIC: ${phase.label}` : "Method: General process documentation",
+      `DMAIC: ${phase.label}`,
       `When to use: ${definition.whenToUse}`,
       "",
       "Items:",
@@ -2397,51 +2987,163 @@ export function ProcessMapBuilderClient({
   }
 
   const workspaceCanvas = isCustomFlowDiagram ? (
-    <div className="grid h-full min-h-[36rem] grid-rows-[auto_minmax(0,1fr)] bg-white dark:bg-slate-950">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/70">
-        <div>
-          <h3 className="text-sm font-extrabold text-slate-950 dark:text-slate-50">
-            Editable Diagram Canvas
-          </h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Place, connect, select, and drag shapes in this one workspace.
-          </p>
+    <div className="grid h-full min-h-[42rem] grid-rows-[auto_minmax(0,1fr)] bg-white dark:bg-slate-950">
+      <div className="grid gap-2 border-b border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-950">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-extrabold text-slate-950 dark:text-slate-50">
+              Diagram Canvas
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Ctrl-wheel to zoom. Alt-drag or middle-drag to pan. Use Arrow mode to connect shapes.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <div className="inline-flex rounded-lg border border-slate-300 bg-white p-1 dark:border-slate-700 dark:bg-slate-950">
+              {[
+                ["select", "Select"],
+                ["process", "Process"],
+                ["decision", "Decision"],
+                ["terminator", "Start/End"],
+                ["connector", "Arrow"],
+              ].map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => {
+                    setDrawingMode(mode as DrawingMode);
+                    if (mode !== "connector") {
+                      setPendingConnectorNodeId(null);
+                      setDraftConnector(null);
+                      customConnectorDragRef.current = null;
+                    }
+                  }}
+                  className={cn(
+                    "rounded-md px-2.5 py-1.5 text-xs font-semibold transition",
+                    drawingMode === mode
+                      ? "bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
+                      : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="inline-flex rounded-lg border border-slate-300 bg-white p-1 dark:border-slate-700 dark:bg-slate-950">
+              <button
+                type="button"
+                onClick={undoCustomFlow}
+                disabled={!canUndoCustomFlow}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35 dark:text-slate-300 dark:hover:bg-slate-900"
+                aria-label="Undo canvas change"
+                title="Undo canvas change"
+              >
+                <Undo2 size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={redoCustomFlow}
+                disabled={!canRedoCustomFlow}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-35 dark:text-slate-300 dark:hover:bg-slate-900"
+                aria-label="Redo canvas change"
+                title="Redo canvas change"
+              >
+                <Redo2 size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={() => zoomCustomCanvas(1.16)}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900"
+                aria-label="Zoom out"
+                title="Zoom out"
+              >
+                <Minus size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={() => zoomCustomCanvas(0.86)}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900"
+                aria-label="Zoom in"
+                title="Zoom in"
+              >
+                <Plus size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={resetCustomCanvasView}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900"
+                aria-label="Fit canvas view"
+                title="Fit canvas view"
+              >
+                <Target size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setChartModalOpen(true)}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900"
+                aria-label="Open large preview"
+                title="Open large preview"
+              >
+                <Maximize2 size={14} />
+              </button>
+            </div>
+          </div>
         </div>
-        <div className="flex flex-wrap gap-1.5">
-          {[
-            ["select", "Select"],
-            ["process", "Process"],
-            ["decision", "Decision"],
-            ["terminator", "Start/End"],
-            ["connector", "Arrow"],
-          ].map(([mode, label]) => (
+
+        {selectedCustomNode ? (
+          <div className="flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 dark:border-slate-800 dark:bg-slate-900/55">
+            <label className="grid min-w-[14rem] flex-1 gap-1 text-xs">
+              <span className="font-semibold text-slate-600 dark:text-slate-300">
+                Selected {selectedCustomNode.type}
+              </span>
+              <input
+                value={selectedCustomNode.label}
+                onChange={(event) => updateSelectedCustomNodeLabel(event.target.value)}
+                className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+              />
+            </label>
             <button
-              key={mode}
               type="button"
-              onClick={() => {
-                setDrawingMode(mode as DrawingMode);
-                if (mode !== "connector") {
-                  setPendingConnectorNodeId(null);
-                }
-              }}
-              className={cn(
-                "rounded-md border px-2.5 py-1.5 text-xs font-semibold transition",
-                drawingMode === mode
-                  ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-800 dark:text-cyan-100"
-                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900",
-              )}
+              onClick={applyCustomFlowToSteps}
+              className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
             >
-              {label}
+              Sync source
             </button>
-          ))}
-        </div>
+            <button
+              type="button"
+              onClick={deleteSelectedCustomNode}
+              className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-rose-300 bg-rose-50 px-3 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200"
+            >
+              <Trash2 size={14} />
+              Delete
+            </button>
+          </div>
+        ) : null}
       </div>
       <svg
-        viewBox="0 0 960 360"
-        className="h-full min-h-[32rem] w-full cursor-crosshair"
+        ref={customCanvasSvgRef}
+        tabIndex={0}
+        viewBox={`${customCanvasView.x} ${customCanvasView.y} ${customCanvasView.width} ${customCanvasView.height}`}
+        className={cn(
+          "h-full min-h-[38rem] w-full",
+          drawingMode === "select"
+            ? "cursor-default"
+            : drawingMode === "connector"
+              ? "cursor-crosshair"
+              : "cursor-copy",
+        )}
         role="img"
         aria-label="Custom process flow sketch board"
         onClick={handleDrawingBoardClick}
+        onKeyDown={handleCustomCanvasKeyDown}
+        onWheel={handleCustomCanvasWheel}
+        onPointerDown={(event) => {
+          event.currentTarget.focus();
+          handleCustomCanvasPointerDown(event);
+        }}
+        onPointerMove={handleCustomCanvasPointerMove}
+        onPointerUp={finishCustomCanvasPan}
+        onPointerCancel={finishCustomCanvasPan}
       >
         <defs>
           <marker
@@ -2464,8 +3166,16 @@ export function ProcessMapBuilderClient({
             />
           </pattern>
         </defs>
-        <rect width="960" height="360" fill={diagramStyle.backgroundColor} />
-        <rect width="960" height="360" fill="url(#custom-grid-workspace)" />
+        <rect
+          width={CUSTOM_FLOW_CANVAS_WIDTH}
+          height={CUSTOM_FLOW_CANVAS_HEIGHT}
+          fill={diagramStyle.backgroundColor}
+        />
+        <rect
+          width={CUSTOM_FLOW_CANVAS_WIDTH}
+          height={CUSTOM_FLOW_CANVAS_HEIGHT}
+          fill="url(#custom-grid-workspace)"
+        />
         {customFlowLinks.map((link) => {
           const from = customFlowNodes.find((node) => node.id === link.from);
           const to = customFlowNodes.find((node) => node.id === link.to);
@@ -2475,9 +3185,9 @@ export function ProcessMapBuilderClient({
           return (
             <line
               key={link.id}
-              x1={from.x + 56}
+              x1={from.x + CUSTOM_FLOW_NODE_HALF_WIDTH}
               y1={from.y}
-              x2={to.x - 56}
+              x2={to.x - CUSTOM_FLOW_NODE_HALF_WIDTH}
               y2={to.y}
               stroke={diagramStyle.primaryColor}
               strokeWidth="3"
@@ -2485,6 +3195,26 @@ export function ProcessMapBuilderClient({
             />
           );
         })}
+        {draftConnector ? (
+          (() => {
+            const from = customFlowNodes.find((node) => node.id === draftConnector.from);
+            if (!from) {
+              return null;
+            }
+            return (
+              <line
+                x1={from.x}
+                y1={from.y}
+                x2={draftConnector.x}
+                y2={draftConnector.y}
+                stroke={diagramStyle.accentColor}
+                strokeDasharray="10 8"
+                strokeWidth="3"
+                markerEnd="url(#custom-flow-arrow-workspace)"
+              />
+            );
+          })()
+        ) : null}
         {customFlowNodes.map((node) => {
           const isSelected = node.id === selectedCustomNodeId;
           const isPending = node.id === pendingConnectorNodeId;
@@ -2506,24 +3236,33 @@ export function ProcessMapBuilderClient({
             >
               {node.type === "decision" ? (
                 <polygon
-                  points={`${node.x},${node.y - 44} ${node.x + 70},${node.y} ${node.x},${node.y + 44} ${node.x - 70},${node.y}`}
+                  points={`${node.x},${node.y - CUSTOM_FLOW_DECISION_HALF_HEIGHT} ${
+                    node.x + CUSTOM_FLOW_DECISION_HALF_WIDTH
+                  },${node.y} ${node.x},${node.y + CUSTOM_FLOW_DECISION_HALF_HEIGHT} ${
+                    node.x - CUSTOM_FLOW_DECISION_HALF_WIDTH
+                  },${node.y}`}
                   fill={isSelected ? "#ccfbf1" : "#fff7ed"}
                   stroke={isPending ? diagramStyle.accentColor : diagramStyle.primaryColor}
                   strokeWidth={isSelected || isPending ? 4 : 2}
                 />
               ) : (
                 <rect
-                  x={node.x - 72}
-                  y={node.y - 32}
-                  width="144"
-                  height="64"
+                  x={node.x - CUSTOM_FLOW_NODE_HALF_WIDTH}
+                  y={node.y - CUSTOM_FLOW_NODE_HALF_HEIGHT}
+                  width={CUSTOM_FLOW_NODE_HALF_WIDTH * 2}
+                  height={CUSTOM_FLOW_NODE_HALF_HEIGHT * 2}
                   rx={node.type === "terminator" ? 28 : 10}
                   fill={isSelected ? "#ccfbf1" : "#ffffff"}
                   stroke={isPending ? diagramStyle.accentColor : diagramStyle.primaryColor}
                   strokeWidth={isSelected || isPending ? 4 : 2}
                 />
               )}
-              <foreignObject x={node.x - 56} y={node.y - 22} width="112" height="44">
+              <foreignObject
+                x={node.x - CUSTOM_FLOW_NODE_HALF_WIDTH + 18}
+                y={node.y - 24}
+                width={CUSTOM_FLOW_NODE_HALF_WIDTH * 2 - 36}
+                height="48"
+              >
                 <div className="flex h-full items-center justify-center text-center text-xs font-bold leading-tight text-slate-900">
                   {node.label}
                 </div>
@@ -2544,32 +3283,64 @@ export function ProcessMapBuilderClient({
   ) : (
     <div
       key={previewRevision}
-      className="h-full min-h-[36rem] w-full overflow-auto bg-slate-50 p-4 dark:bg-slate-900/60 [&>svg]:h-full [&>svg]:min-h-[32rem] [&>svg]:w-full"
-      role="button"
-      tabIndex={0}
-      aria-label="Edit the source text or chart data for this preview"
-      title="Click to edit the source text or chart data"
-      onClick={focusPrimaryPreviewSource}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          focusPrimaryPreviewSource();
-        }
-      }}
-      dangerouslySetInnerHTML={{ __html: svg }}
-    />
+      ref={chartPreviewRef}
+      className="relative h-full min-h-[36rem] w-full overflow-auto bg-slate-50 p-4 dark:bg-slate-900/60 [&_svg]:h-full [&_svg]:min-h-[32rem] [&_svg]:w-full"
+      aria-label="Diagram preview"
+      title="Double-click chart labels or values to edit them"
+      onDoubleClick={handleChartPreviewDoubleClick}
+    >
+      <div dangerouslySetInnerHTML={{ __html: svg }} />
+      {inlineChartEditor ? (
+        <form
+          className="absolute z-20 rounded-lg border border-cyan-500/45 bg-white p-1 shadow-lg shadow-slate-950/10 dark:bg-slate-950"
+          style={{
+            left: inlineChartEditor.left,
+            top: inlineChartEditor.top,
+            width: inlineChartEditor.width,
+          }}
+          onSubmit={(event) => {
+            event.preventDefault();
+            commitInlineChartEdit();
+          }}
+        >
+          <input
+            autoFocus
+            value={inlineChartEditor.value}
+            inputMode={
+              inlineChartEditor.kind === "metric" && inlineChartEditor.field !== "label"
+                ? "decimal"
+                : "text"
+            }
+            onChange={(event) =>
+              setInlineChartEditor((current) =>
+                current ? { ...current, value: event.target.value } : current,
+              )
+            }
+            onBlur={commitInlineChartEdit}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                inlineChartEditCancelledRef.current = true;
+                setInlineChartEditor(null);
+              }
+            }}
+            className="h-9 rounded-md border border-slate-300 bg-white px-2 text-sm font-semibold outline-none focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+          />
+        </form>
+      ) : null}
+    </div>
   );
 
   const executiveStats = [
-    ["Method", dmaicEnabled ? `DMAIC ${phase.label}` : "General"],
+    ["Method", `DMAIC ${phase.label}`],
     ["Diagram", definition.shortLabel],
     ["X/Y Data Rows", String(metrics.length)],
     ["Flow Sketch", isCustomFlowDiagram ? "Editable" : "Not used"],
   ];
 
   return (
-    <div className="grid gap-5">
-      <header className="overflow-hidden rounded-3xl border border-white/60 bg-gradient-to-br from-white via-cyan-50/80 to-slate-100 p-5 shadow-xl shadow-slate-200/70 backdrop-blur dark:border-white/10 dark:from-slate-950 dark:via-slate-900 dark:to-cyan-950/40 dark:shadow-black/20">
+    <div className="process-workspace-shell process-map-builder-shell relative left-1/2 grid w-screen max-w-[1760px] -translate-x-1/2 gap-4 px-4 py-2 md:px-6">
+      <header className="process-workbench-card overflow-hidden rounded-2xl p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="grid gap-1">
           <p className="inline-flex w-fit items-center gap-2 rounded-full border border-cyan-500/35 bg-cyan-500/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-cyan-800 dark:text-cyan-200">
@@ -2580,8 +3351,8 @@ export function ProcessMapBuilderClient({
             Chart and Process Map Builder
           </h1>
           <p className="max-w-3xl text-sm text-slate-600 dark:text-slate-300">
-            Build process maps, flow charts, and quality charts. Turn DMAIC on when the work is a
-            Six Sigma project, or keep it general for everyday process documentation.
+            Build process maps, flow charts, and quality charts with DMAIC context included for
+            every workspace.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -2630,7 +3401,7 @@ export function ProcessMapBuilderClient({
         </section>
       ) : null}
 
-      <section className="grid gap-3 rounded-2xl border border-white/50 bg-white/80 p-4 shadow-lg shadow-slate-200/60 backdrop-blur dark:border-white/10 dark:bg-slate-950/65 dark:shadow-black/20">
+      <section className="process-workbench-card grid gap-3 rounded-2xl p-4">
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           {executiveStats.map(([label, value]) => (
             <div key={label} className="min-w-0 border-l-2 border-cyan-500/45 pl-3">
@@ -2645,7 +3416,7 @@ export function ProcessMapBuilderClient({
         </div>
       </section>
 
-      <section className="grid gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80 lg:grid-cols-[minmax(0,1fr)_18rem]">
+      <section className="process-workbench-card grid gap-4 rounded-2xl p-4 lg:grid-cols-[minmax(0,1fr)_16rem]">
         <div className="grid gap-3">
           <label className="grid gap-2 text-sm">
             <span className="font-bold text-slate-900 dark:text-slate-100">
@@ -2655,7 +3426,7 @@ export function ProcessMapBuilderClient({
               ref={promptTextareaRef}
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
-              rows={5}
+              rows={3}
               className="min-w-0 resize-y rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
             />
           </label>
@@ -2700,55 +3471,34 @@ export function ProcessMapBuilderClient({
         </div>
       </section>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(16rem,20rem)_minmax(0,1fr)]">
-        <aside id="map-setup" className="grid min-w-0 scroll-mt-24 content-start gap-3 rounded-2xl border border-slate-300/70 bg-white/90 p-3 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
+      <div className="grid gap-4 xl:grid-cols-[18rem_minmax(0,1fr)]">
+        <aside id="map-setup" className="process-workbench-card grid min-w-0 scroll-mt-24 content-start gap-3 rounded-2xl p-3 xl:sticky xl:top-24">
           <div className="grid min-w-0 gap-3">
-            <div className="grid gap-2 rounded-lg border border-slate-300/70 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/50">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="font-bold text-slate-900 dark:text-slate-100">Method</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Use DMAIC for Six Sigma work or General for documentation.
-                  </p>
-                </div>
-                <div className="inline-flex rounded-lg border border-slate-300 bg-white p-1 dark:border-slate-700 dark:bg-slate-950">
-                  {(["general", "dmaic"] as const).map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => setDmaicEnabled(mode === "dmaic")}
-                      className={cn(
-                        "rounded-md px-2.5 py-1 text-xs font-extrabold transition",
-                        (mode === "dmaic") === dmaicEnabled
-                          ? "bg-cyan-500/20 text-cyan-900 dark:text-cyan-100"
-                          : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900",
-                      )}
-                    >
-                      {mode === "dmaic" ? "DMAIC" : "General"}
-                    </button>
-                  ))}
-                </div>
+            <div className="grid gap-3 rounded-lg border border-slate-300/70 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/50">
+              <div>
+                <p className="font-bold text-slate-900 dark:text-slate-100">DMAIC Phase</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Every process-map workspace includes DMAIC context.
+                </p>
               </div>
-              {dmaicEnabled ? (
-                <div className="grid grid-cols-5 gap-1">
-                  {DMAIC_PHASE_OPTIONS.map((option) => (
-                    <button
-                      key={option.id}
-                      type="button"
-                      onClick={() => setDmaicPhase(option.id)}
-                      title={option.purpose}
-                      className={cn(
-                        "rounded-md border px-1.5 py-1 text-[11px] font-bold transition",
-                        option.id === dmaicPhase
-                          ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
-                          : "border-slate-300 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300",
-                      )}
-                    >
-                      {option.label.slice(0, 1)}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
+              <div className="grid grid-cols-5 gap-1">
+                {DMAIC_PHASE_OPTIONS.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => setDmaicPhase(option.id)}
+                    title={option.purpose}
+                    className={cn(
+                      "rounded-md border px-1.5 py-1 text-[11px] font-bold transition",
+                      option.id === dmaicPhase
+                        ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
+                        : "border-slate-300 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300",
+                    )}
+                  >
+                    {option.label.slice(0, 1)}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <label className="grid gap-1 text-sm">
@@ -2761,25 +3511,23 @@ export function ProcessMapBuilderClient({
               />
             </label>
 
-            {dmaicEnabled ? (
-              <label className="grid gap-1 text-sm">
-                <span className="font-semibold">DMAIC Phase</span>
-                <select
-                  value={dmaicPhase}
-                  onChange={(event) => setDmaicPhase(event.target.value as DmaicPhase)}
-                  className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                >
-                  {DMAIC_PHASE_OPTIONS.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                <span className="text-xs text-slate-500 dark:text-slate-400">
-                  {phase.purpose}
-                </span>
-              </label>
-            ) : null}
+            <label className="grid gap-1 text-sm">
+              <span className="font-semibold">DMAIC Phase</span>
+              <select
+                value={dmaicPhase}
+                onChange={(event) => setDmaicPhase(event.target.value as DmaicPhase)}
+                className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+              >
+                {DMAIC_PHASE_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                {phase.purpose}
+              </span>
+            </label>
 
             <label className="grid gap-1 text-sm">
               <span className="font-semibold">Process Area</span>
@@ -2815,8 +3563,8 @@ export function ProcessMapBuilderClient({
               Formula Tools
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              OEE, Cp/Cpk, DPMO, takt time, and control-limit calculators now live on their own
-              page so chart setup stays focused on diagrams and data.
+              OEE, Cp/Cpk, DPMO, takt, yield, Little&apos;s Law, normal curve, and control-limit
+              calculators live on their own page so chart setup stays focused on diagrams.
             </p>
             <Link
               href="/process-maps/formulas"
@@ -2855,11 +3603,9 @@ export function ProcessMapBuilderClient({
                   </span>
                   <span className="text-[11px] text-slate-500 dark:text-slate-400">
                     {entry.category}
-                    {dmaicEnabled
-                      ? ` | ${entry.dmaicPhases
-                          .map((phaseId) => getDmaicPhaseOption(phaseId).label)
-                          .join(", ")}`
-                      : ""}
+                    {` | ${entry.dmaicPhases
+                      .map((phaseId) => getDmaicPhaseOption(phaseId).label)
+                      .join(", ")}`}
                   </span>
                 </button>
               ))}
@@ -2868,21 +3614,57 @@ export function ProcessMapBuilderClient({
         </aside>
 
         <main className="grid gap-4">
-          <section id="map-preview" className="grid scroll-mt-24 gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-extrabold text-slate-950 dark:text-slate-50">
-                  Process Map Workspace
-                </h2>
-                <p className="text-sm text-slate-600 dark:text-slate-300">
-                  {definition.label}: {definition.description}
+          <section id="map-preview" className="process-workbench-card grid scroll-mt-24 gap-4 rounded-2xl p-4">
+            <div className="grid gap-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-extrabold text-slate-950 dark:text-slate-50">
+                    Process Map Workspace
+                  </h2>
+                  <p className="text-sm text-slate-600 dark:text-slate-300">
+                    {definition.label}: {definition.description}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <span className="inline-flex items-center gap-2 rounded-full border border-slate-300/70 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                    <ChartIcon diagramType={diagramType} />
+                    {definition.category}
+                  </span>
+                  <span className="inline-flex items-center gap-2 rounded-full border border-cyan-500/35 bg-cyan-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-cyan-800 dark:text-cyan-100">
+                    DMAIC:{" "}
+                    {definition.dmaicPhases
+                      .map((phaseId) => getDmaicPhaseOption(phaseId).label)
+                      .join(", ")}
+                  </span>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900/45">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  Purpose
+                </p>
+                <p className="mt-1 text-slate-700 dark:text-slate-200">
+                  {prompt.trim() || "Describe the process boundary, problem, or chart objective."}
                 </p>
               </div>
-              <span className="inline-flex items-center gap-2 rounded-full border border-slate-300/70 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:border-slate-700 dark:text-slate-300">
-                <ChartIcon diagramType={diagramType} />
-                {definition.category}
-              </span>
+
               <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={addChartDataRow}
+                  className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
+                >
+                  <Plus size={14} />
+                  Add row
+                </button>
+                <button
+                  type="button"
+                  onClick={removeChartDataRow}
+                  className="inline-flex items-center gap-2 rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/20 dark:text-rose-200"
+                >
+                  <Trash2 size={14} />
+                  Remove row
+                </button>
                 <button
                   type="button"
                   onClick={refreshPreview}
@@ -2951,8 +3733,13 @@ export function ProcessMapBuilderClient({
               </div>
             </div>
 
-            <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
-              <div className="min-h-[36rem] overflow-hidden rounded-xl border border-slate-300/70 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/60">
+            <div className="grid gap-3">
+              <div
+                className={cn(
+                  "overflow-hidden rounded-xl border border-slate-300/70 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/60",
+                  isCustomFlowDiagram ? "process-map-canvas-frame" : "process-map-chart-frame",
+                )}
+              >
                 {workspaceCanvas}
                 {false && CUSTOM_FLOW_DIAGRAM_TYPES.has(diagramType) ? (
                   <div className="grid gap-3 rounded-xl border border-cyan-500/25 bg-slate-50 p-3 dark:border-cyan-500/20 dark:bg-slate-900/60">
@@ -3114,191 +3901,6 @@ export function ProcessMapBuilderClient({
                 ) : null}
               </div>
 
-              <aside className="grid content-start gap-3 rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm dark:border-slate-700 dark:bg-slate-950/60">
-                {isCustomFlowDiagram ? (
-                  <section className="grid gap-3">
-                    <div>
-                      <h3 className="font-bold text-slate-900 dark:text-slate-100">
-                        Selected shape
-                      </h3>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">
-                        {selectedCustomNode
-                          ? `${selectedCustomNode.type}. Drag it on the sketch or use arrow keys.`
-                          : "None selected"}
-                      </p>
-                    </div>
-                    <label className="grid gap-1 text-xs">
-                      <span className="font-semibold">Label</span>
-                      <input
-                        value={selectedCustomNode?.label ?? ""}
-                        onChange={(event) => updateSelectedCustomNodeLabel(event.target.value)}
-                        disabled={!selectedCustomNode}
-                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950"
-                      />
-                    </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={applyCustomFlowToSteps}
-                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
-                      >
-                        Sync steps
-                      </button>
-                      <button
-                        type="button"
-                        onClick={deleteSelectedCustomNode}
-                        disabled={!selectedCustomNode}
-                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-50 dark:text-rose-200"
-                      >
-                        <Trash2 size={14} />
-                        Delete
-                      </button>
-                    </div>
-                  </section>
-                ) : null}
-
-                <details
-                  open={!isCustomFlowDiagram}
-                  className="rounded-lg border border-slate-300/70 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/45"
-                >
-                  <summary className="cursor-pointer text-sm font-bold text-slate-900 dark:text-slate-100">
-                    Source Data
-                  </summary>
-                  <div className="mt-3 grid gap-3">
-                    <label className="grid gap-1 text-sm">
-                      <span className="font-semibold">Steps, Categories, or Fields</span>
-                      <textarea
-                        ref={itemsTextareaRef}
-                        value={itemsText}
-                        onChange={(event) => setItemsText(event.target.value)}
-                        rows={5}
-                        className="min-w-0 resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                      />
-                    </label>
-                    <label className="grid gap-1 text-sm">
-                      <span className="flex items-center justify-between gap-2 font-semibold">
-                        Swimlanes
-                        {diagramType !== "swimlane" ? (
-                          <button
-                            type="button"
-                            onClick={() => applyDiagramType("swimlane")}
-                            className="rounded-md border border-slate-300 px-2 py-0.5 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900"
-                          >
-                            Show lanes
-                          </button>
-                        ) : null}
-                      </span>
-                      <textarea
-                        ref={lanesTextareaRef}
-                        value={lanesText}
-                        onChange={(event) => setLanesText(event.target.value)}
-                        rows={3}
-                        className="min-w-0 resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                      />
-                    </label>
-                    <label className="grid gap-1 text-sm">
-                      <span className="flex items-center justify-between gap-2 font-semibold">
-                        Chart Data (X / Y)
-                        <button
-                          type="button"
-                          onClick={refreshPreview}
-                          className="rounded-md border border-slate-300 px-2 py-0.5 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900"
-                        >
-                          Update
-                        </button>
-                      </span>
-                      <textarea
-                        ref={metricsTextareaRef}
-                        value={metricsText}
-                        onChange={(event) => setMetricsText(event.target.value)}
-                        rows={4}
-                        placeholder="X label/date, Y value, optional secondary Y"
-                        className="min-w-0 resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                      />
-                    </label>
-                  </div>
-                </details>
-
-                <details
-                  open
-                  className="rounded-lg border border-slate-300/70 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/45"
-                >
-                  <summary className="inline-flex cursor-pointer items-center gap-2 text-sm font-bold text-slate-900 dark:text-slate-100">
-                    <Palette size={16} />
-                    Display Settings
-                  </summary>
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    {[
-                      ["showTitle", "Title"],
-                      ["showDataLayer", "Values"],
-                      ["showControlLimits", "Limits"],
-                      ["showGrid", "Grid"],
-                      ["showLegend", "Legend"],
-                      ["showIsoNotes", "ISO"],
-                    ].map(([key, label]) => (
-                      <label
-                        key={key}
-                        className="flex items-center justify-between gap-2 rounded-md border border-slate-300/70 bg-white px-2 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-950"
-                      >
-                        <span className="font-semibold">{label}</span>
-                        <input
-                          type="checkbox"
-                          checked={layerSettings[key as keyof LayerSettings]}
-                          onChange={(event) =>
-                            updateLayerSetting(key as keyof LayerSettings, event.target.checked)
-                          }
-                          className="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
-                        />
-                      </label>
-                    ))}
-                  </div>
-                  <div className="mt-3 grid grid-cols-5 gap-2">
-                    {[
-                      ["primaryColor", "Primary"],
-                      ["secondaryColor", "Chart"],
-                      ["accentColor", "Accent"],
-                      ["riskColor", "Limits"],
-                      ["backgroundColor", "Background"],
-                    ].map(([key, label]) => (
-                      <label key={key} className="grid gap-1 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
-                        <span className="truncate">{label}</span>
-                        <input
-                          type="color"
-                          value={diagramStyle[key as keyof DiagramStyle]}
-                          onChange={(event) =>
-                            updateDiagramStyle(key as keyof DiagramStyle, event.target.value)
-                          }
-                          className="h-8 w-full rounded border border-slate-300 bg-white p-1 dark:border-slate-700 dark:bg-slate-950"
-                        />
-                      </label>
-                    ))}
-                  </div>
-                </details>
-
-                <details className="rounded-lg border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/35">
-                  <summary className="cursor-pointer text-sm font-bold text-slate-900 dark:text-slate-100">
-                    Guidance
-                  </summary>
-                  <div className="mt-3 grid gap-3 text-sm text-slate-600 dark:text-slate-300">
-                    <div>
-                      <h3 className="font-bold text-slate-900 dark:text-slate-100">When to use</h3>
-                      <p>{definition.whenToUse}</p>
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-slate-900 dark:text-slate-100">ISO use</h3>
-                      <p>{definition.isoUse}</p>
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-slate-900 dark:text-slate-100">Key fields</h3>
-                      <ul className="grid gap-1">
-                        {definition.keyFields.map((field) => (
-                          <li key={field}>- {field}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                </details>
-              </aside>
             </div>
           </section>
         </main>
@@ -3313,7 +3915,7 @@ export function ProcessMapBuilderClient({
             <header className="z-10 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950 sm:px-5">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Generated chart preview
+                  {isCustomFlowDiagram ? "Expanded diagram canvas" : "Generated chart preview"}
                 </p>
                 <h2 className="text-xl font-extrabold text-slate-950 dark:text-slate-50">
                   {title || definition.label}
@@ -3350,6 +3952,13 @@ export function ProcessMapBuilderClient({
               </div>
             </header>
 
+            {isCustomFlowDiagram ? (
+              <div className="min-h-0 overflow-hidden p-3 sm:p-4">
+                <div className="process-map-canvas-frame min-h-[calc(100dvh-8rem)] overflow-hidden rounded-xl border border-slate-300/70 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/60">
+                  {workspaceCanvas}
+                </div>
+              </div>
+            ) : (
             <div className="grid min-h-0 gap-4 overflow-y-auto overflow-x-hidden p-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
               <div className="min-h-[min(64dvh,42rem)] overflow-y-auto overflow-x-hidden rounded-xl border border-slate-300/70 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/60 sm:p-4">
                 {TABLE_DIAGRAM_TYPES.has(diagramType) ? (
@@ -3379,7 +3988,7 @@ export function ProcessMapBuilderClient({
                     </div>
                     <div className="flex justify-between gap-3">
                       <dt className="text-slate-500 dark:text-slate-400">Method</dt>
-                      <dd className="font-bold">{dmaicEnabled ? `DMAIC ${phase.label}` : "General"}</dd>
+                      <dd className="font-bold">DMAIC {phase.label}</dd>
                     </div>
                     <div className="flex justify-between gap-3">
                       <dt className="text-slate-500 dark:text-slate-400">Rows</dt>
@@ -3461,6 +4070,7 @@ export function ProcessMapBuilderClient({
                 </section>
               </aside>
             </div>
+            )}
           </section>
         </div>
       ) : null}

@@ -1202,8 +1202,8 @@ export function ProcessDocumentsClient({
   ];
 
   return (
-    <div className="mx-auto grid w-full max-w-7xl gap-5 px-4 py-6 md:px-8">
-      <div className="overflow-hidden rounded-3xl border border-white/60 bg-gradient-to-br from-white via-cyan-50/80 to-slate-100 p-5 shadow-xl shadow-slate-200/70 backdrop-blur dark:border-white/10 dark:from-slate-950 dark:via-slate-900 dark:to-cyan-950/40 dark:shadow-black/20">
+    <div className="process-workspace-shell process-documents-shell relative left-1/2 grid w-screen max-w-[1500px] -translate-x-1/2 gap-4 px-4 py-2 md:px-6">
+      <div className="process-workbench-card overflow-hidden rounded-2xl p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-extrabold tracking-tight text-slate-950 dark:text-slate-50">
@@ -1253,7 +1253,7 @@ export function ProcessDocumentsClient({
         </section>
       ) : null}
 
-      <section className="grid gap-3 rounded-2xl border border-white/50 bg-white/80 p-4 shadow-lg shadow-slate-200/60 backdrop-blur dark:border-white/10 dark:bg-slate-950/65 dark:shadow-black/20 md:grid-cols-[1fr_auto]">
+      <section className="process-workbench-card grid gap-3 rounded-2xl p-4 md:grid-cols-[1fr_auto]">
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           {executiveStats.map(([label, value]) => (
             <div key={label} className="min-w-0 border-l-2 border-cyan-500/45 pl-3">
@@ -1290,8 +1290,8 @@ export function ProcessDocumentsClient({
         </div>
       </section>
 
-      <div className="grid gap-5 xl:grid-cols-[18rem_minmax(0,1fr)] 2xl:grid-cols-[18rem_minmax(0,1fr)_18rem]">
-        <aside id="doc-library" className="grid h-fit scroll-mt-24 gap-4 rounded-2xl border border-slate-300/70 bg-white/85 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/75 xl:sticky xl:top-24">
+      <div className="grid gap-4 xl:grid-cols-[16rem_minmax(0,1fr)] 2xl:grid-cols-[16rem_minmax(0,1fr)_17rem]">
+        <aside id="doc-library" className="process-workbench-card grid h-fit scroll-mt-24 gap-4 rounded-2xl p-4 xl:sticky xl:top-24">
           <div className="grid gap-1">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
               Workspace
@@ -1486,7 +1486,7 @@ export function ProcessDocumentsClient({
           ) : null}
 
           {selectedDocument ? (
-            <section id="doc-dashboard" className="grid scroll-mt-24 gap-3 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
+            <section id="doc-dashboard" className="process-workbench-card grid scroll-mt-24 gap-3 rounded-2xl p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-cyan-500/40 bg-cyan-500/15 text-cyan-700 dark:text-cyan-200">
@@ -1514,7 +1514,55 @@ export function ProcessDocumentsClient({
                 ) : null}
               </div>
 
-              <dl className="grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-4">
+              <div className="grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/50">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Document
+                  </p>
+                  <p className="truncate font-bold text-slate-900 dark:text-slate-100">
+                    {selectedDocument.document_number} | Rev {selectedDocument.current_revision}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/50">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Owner
+                  </p>
+                  <p className="truncate font-bold text-slate-900 dark:text-slate-100">
+                    {selectedDocument.owner_name ?? "Unassigned"}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/50">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Status
+                  </p>
+                  <span
+                    className={cn(
+                      "inline-flex rounded-full border px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide",
+                      statusTone(selectedDocument.status),
+                    )}
+                  >
+                    {getProcessDocumentStatusLabel(selectedDocument.status)}
+                  </span>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/50">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Next Review
+                  </p>
+                  <p className="truncate font-bold text-slate-900 dark:text-slate-100">
+                    {selectedDocument.next_review_at ? (
+                      <LocalDateTime value={selectedDocument.next_review_at} mode="date" />
+                    ) : (
+                      "Not scheduled"
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              <details className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-950">
+                <summary className="cursor-pointer font-bold text-slate-900 dark:text-slate-100">
+                  Full control record
+                </summary>
+              <dl className="mt-3 grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-4">
                 <div>
                   <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                     Document
@@ -1629,6 +1677,7 @@ export function ProcessDocumentsClient({
                   </dd>
                 </div>
               </dl>
+              </details>
             </section>
           ) : null}
 
@@ -1796,6 +1845,30 @@ export function ProcessDocumentsClient({
                 </label>
               </div>
 
+              <RichTextEditor
+                label="Document Body"
+                value={form.bodyHtml}
+                onChange={(value) => updateForm("bodyHtml", value)}
+                placeholder="Write the controlled document..."
+                minHeightClassName="min-h-[34rem]"
+              />
+
+              <details className="rounded-xl border border-slate-300/70 bg-white/80 p-4 dark:border-slate-700 dark:bg-slate-950/55">
+                <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3">
+                  <div className="grid gap-1">
+                    <span className="text-sm font-extrabold text-slate-950 dark:text-slate-50">
+                      Document settings
+                    </span>
+                    <span className="text-xs text-slate-600 dark:text-slate-300">
+                      Process metadata, ISO clauses, linked instructions, templates, and export context.
+                    </span>
+                  </div>
+                  <span className="rounded-full border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
+                    Advanced
+                  </span>
+                </summary>
+
+                <div className="mt-4 grid gap-4">
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-sm text-slate-700 dark:text-slate-200">
                 <span className="inline-flex items-center gap-2">
                   <FileText size={15} className="text-cyan-700 dark:text-cyan-200" />
@@ -1961,24 +2034,23 @@ export function ProcessDocumentsClient({
                 </section>
               </div>
 
-              <section className="grid gap-4 rounded-xl border border-slate-300/70 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-900/45">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
+              <details className="rounded-xl border border-slate-300/70 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-900/45">
+                <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3">
+                  <div className="grid gap-1">
                     <div className="inline-flex items-center gap-2 text-sm font-extrabold text-slate-950 dark:text-slate-50">
                       <Sparkles size={16} className="text-cyan-700 dark:text-cyan-200" />
                       Template Builder
                     </div>
-                    <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
-                      Build a controlled document layout with a cover image, standard ISO
-                      sections, and rich text blocks.
+                    <p className="text-xs text-slate-600 dark:text-slate-300">
+                      Optional presets, cover image, and reusable text blocks.
                     </p>
                   </div>
-                  <span className="rounded-full border border-cyan-500/35 bg-cyan-500/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-cyan-800 dark:text-cyan-100">
-                    Slite-style workspace
+                  <span className="rounded-full border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
+                    Open tools
                   </span>
-                </div>
+                </summary>
 
-                <div className="grid gap-3 lg:grid-cols-[0.85fr_1.15fr]">
+                <div className="mt-4 grid gap-3 lg:grid-cols-[0.85fr_1.15fr]">
                   <div className="grid gap-2 text-sm">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="font-semibold">Cover image</span>
@@ -2093,19 +2165,18 @@ export function ProcessDocumentsClient({
                     </div>
                   </div>
                 </div>
-              </section>
+              </details>
 
-              <section className="grid gap-3 rounded-lg border border-slate-300/70 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-900/45">
-                <div>
+              <details className="rounded-lg border border-slate-300/70 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-900/45">
+                <summary className="cursor-pointer list-none">
                   <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
                     Header and Footer
                   </h3>
                   <p className="text-xs text-slate-600 dark:text-slate-300">
-                    Add controlled-document context that will be included with saved revisions,
-                    imported files, template documents, printouts, and exports.
+                    Optional saved revision and export context.
                   </p>
-                </div>
-                <div className="grid gap-3 lg:grid-cols-2">
+                </summary>
+                <div className="mt-3 grid gap-3 lg:grid-cols-2">
                   <label className="grid gap-1 text-sm">
                     <span className="font-semibold">Header</span>
                     <textarea
@@ -2127,15 +2198,9 @@ export function ProcessDocumentsClient({
                     />
                   </label>
                 </div>
-              </section>
-
-              <RichTextEditor
-                label="Document Body"
-                value={form.bodyHtml}
-                onChange={(value) => updateForm("bodyHtml", value)}
-                placeholder="Write the controlled document..."
-                minHeightClassName="min-h-[28rem]"
-              />
+              </details>
+                </div>
+              </details>
 
               {form.importedFileName ? (
                 <section className="grid gap-2 rounded-lg border border-slate-300/70 bg-slate-100/80 p-3 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300">
