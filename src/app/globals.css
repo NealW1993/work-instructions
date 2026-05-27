@@ -327,7 +327,7 @@ h6 {
 }
 
 .process-map-canvas-frame {
-  min-height: clamp(38rem, calc(100dvh - 17rem), 58rem);
+  min-height: clamp(56rem, calc(100dvh - 5rem), 78rem);
 }
 
 .process-map-chart-frame {

@@ -4,17 +4,20 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   BarChart3,
+  Bold,
   CheckCircle2,
   Copy,
   FileDown,
   Download,
   FileText,
   GitBranch,
+  Italic,
   LineChart,
   Loader2,
   Maximize2,
   Minus,
   Network,
+  Palette,
   Plus,
   Printer,
   RefreshCw,
@@ -24,6 +27,8 @@ import {
   Table2,
   Target,
   Trash2,
+  Type,
+  Underline,
   Undo2,
   Workflow,
   X,
@@ -130,7 +135,27 @@ interface DiagramStyle {
   backgroundColor: string;
 }
 
-type DrawingMode = "select" | "process" | "decision" | "terminator" | "connector";
+interface DiagramTextStyle {
+  color: string;
+  fontFamily: string;
+  fontScale: number;
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+}
+
+type DrawingMode = "select" | "process" | "decision" | "terminator" | "connector" | "custom";
+
+interface DiagramElementStyle {
+  fillColor: string;
+  strokeColor: string;
+  textColor: string;
+}
+
+interface CustomFlowAnchor {
+  x: number;
+  y: number;
+}
 
 interface CustomFlowNode {
   id: string;
@@ -138,12 +163,21 @@ interface CustomFlowNode {
   label: string;
   x: number;
   y: number;
+  width?: number;
+  height?: number;
+  points?: CustomFlowAnchor[];
+  style?: Partial<DiagramElementStyle>;
 }
 
 interface CustomFlowLink {
   id: string;
   from: string;
   to: string;
+  fromOffset?: CustomFlowAnchor;
+  toOffset?: CustomFlowAnchor;
+  label?: string;
+  anchors?: CustomFlowAnchor[];
+  style?: Partial<DiagramElementStyle>;
 }
 
 interface CustomFlowCanvasView {
@@ -157,19 +191,46 @@ interface DraftConnector {
   from: string;
   x: number;
   y: number;
+  fromOffset?: CustomFlowAnchor;
+  targetNodeId?: string | null;
 }
 
 interface CustomFlowSnapshot {
   nodes: CustomFlowNode[];
   links: CustomFlowLink[];
   selectedNodeId: string | null;
+  selectedLinkId: string | null;
+}
+
+interface SwimlaneStep {
+  id: string;
+  label: string;
+  laneIndex: number;
+  x: number;
+  style?: Partial<DiagramElementStyle>;
+}
+
+interface SwimlaneLink {
+  id: string;
+  from: string;
+  to: string;
+  label: string;
+  bendX: number;
+  bendY: number;
+  style?: Partial<DiagramElementStyle>;
 }
 
 type InlineChartEditTarget =
   | { kind: "title"; value: string }
+  | { kind: "purpose"; value: string }
   | { kind: "item"; index: number; value: string }
   | { kind: "lane"; index: number; value: string }
-  | { kind: "metric"; index: number; field: "label" | "value" | "value2"; value: string };
+  | { kind: "fishboneEffect"; value: string }
+  | { kind: "metric"; index: number; field: "label" | "value" | "value2"; value: string }
+  | { kind: "customNode"; nodeId: string; value: string }
+  | { kind: "customLink"; linkId: string; value: string }
+  | { kind: "swimlaneStep"; stepId: string; value: string }
+  | { kind: "swimlaneArrow"; linkId: string; value: string };
 
 type InlineChartEditor = InlineChartEditTarget & {
   left: number;
@@ -247,6 +308,15 @@ const DEFAULT_DIAGRAM_STYLE: DiagramStyle = {
   backgroundColor: "#f8fafc",
 };
 
+const DEFAULT_DIAGRAM_TEXT_STYLE: DiagramTextStyle = {
+  color: "#0f172a",
+  fontFamily: "Inter, Arial, sans-serif",
+  fontScale: 1,
+  bold: true,
+  italic: false,
+  underline: false,
+};
+
 const DEFAULT_PROMPT =
   "Document the process boundary, inputs, outputs, owners, decisions, and major process steps for controlled process documentation.";
 
@@ -256,14 +326,28 @@ const CUSTOM_FLOW_NODE_HALF_WIDTH = 82;
 const CUSTOM_FLOW_NODE_HALF_HEIGHT = 38;
 const CUSTOM_FLOW_DECISION_HALF_WIDTH = 88;
 const CUSTOM_FLOW_DECISION_HALF_HEIGHT = 54;
+const CUSTOM_FLOW_CUSTOM_MIN_SIZE = 36;
+const CUSTOM_FLOW_CONNECT_SNAP_DISTANCE = 96;
 const CUSTOM_FLOW_MIN_VIEW_WIDTH = 520;
 const CUSTOM_FLOW_MIN_VIEW_HEIGHT = 300;
 const CUSTOM_FLOW_DEFAULT_VIEW = {
   x: 0,
-  y: 0,
+  y: 150,
   width: CUSTOM_FLOW_CANVAS_WIDTH,
-  height: CUSTOM_FLOW_CANVAS_HEIGHT,
+  height: 500,
 };
+const QUICK_COLOR_SWATCHES = [
+  "#0f766e",
+  "#0284c7",
+  "#f59e0b",
+  "#dc2626",
+  "#ffffff",
+  "#111827",
+  "#7c3aed",
+  "#16a34a",
+  "#f97316",
+  "#e879f9",
+];
 
 function escapeHtml(value: string) {
   return value
@@ -280,6 +364,261 @@ function truncate(value: string, maxLength: number) {
 
 function clampNumber(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function getDefaultElementStyle(
+  fillColor: string,
+  strokeColor: string,
+  textColor: string,
+): DiagramElementStyle {
+  return {
+    fillColor,
+    strokeColor,
+    textColor,
+  };
+}
+
+function mergeElementStyle(
+  baseStyle: DiagramElementStyle,
+  override?: Partial<DiagramElementStyle>,
+): DiagramElementStyle {
+  return {
+    fillColor: override?.fillColor ?? baseStyle.fillColor,
+    strokeColor: override?.strokeColor ?? baseStyle.strokeColor,
+    textColor: override?.textColor ?? baseStyle.textColor,
+  };
+}
+
+function getCustomFlowNodeDefaultStyle(node: CustomFlowNode): DiagramElementStyle {
+  return getDefaultElementStyle(
+    node.type === "decision" ? "#fff7ed" : node.type === "custom" ? "#f5f3ff" : "#ffffff",
+    node.type === "custom" ? "#7c3aed" : "#0f766e",
+    "#0f172a",
+  );
+}
+
+function getCustomFlowNodeStyle(node: CustomFlowNode): DiagramElementStyle {
+  return mergeElementStyle(getCustomFlowNodeDefaultStyle(node), node.style);
+}
+
+function getCustomFlowLinkStyle(link: CustomFlowLink): DiagramElementStyle {
+  return mergeElementStyle(
+    getDefaultElementStyle("transparent", "#0f766e", "#0f172a"),
+    link.style,
+  );
+}
+
+function getSwimlaneStepStyle(step: SwimlaneStep): DiagramElementStyle {
+  return mergeElementStyle(
+    getDefaultElementStyle("#e0f2fe", "#0284c7", "#0f172a"),
+    step.style,
+  );
+}
+
+function getSwimlaneLinkStyle(link: SwimlaneLink): DiagramElementStyle {
+  return mergeElementStyle(
+    getDefaultElementStyle("transparent", "#0f766e", "#0f172a"),
+    link.style,
+  );
+}
+
+function getCustomFlowNodeEdgePoint(
+  node: CustomFlowNode,
+  toward: { x: number; y: number },
+) {
+  const deltaX = toward.x - node.x;
+  const deltaY = toward.y - node.y;
+  const halfSize = getCustomFlowNodeHalfSize(node);
+
+  if (deltaX === 0 && deltaY === 0) {
+    return { x: node.x, y: node.y };
+  }
+
+  if (node.type === "decision") {
+    const scale =
+      1 /
+      Math.max(
+        Math.abs(deltaX) / CUSTOM_FLOW_DECISION_HALF_WIDTH +
+          Math.abs(deltaY) / CUSTOM_FLOW_DECISION_HALF_HEIGHT,
+        0.0001,
+      );
+    return {
+      x: node.x + deltaX * scale,
+      y: node.y + deltaY * scale,
+    };
+  }
+
+  const scale = Math.min(
+    halfSize.width / Math.max(Math.abs(deltaX), 0.0001),
+    halfSize.height / Math.max(Math.abs(deltaY), 0.0001),
+  );
+
+  return {
+    x: node.x + deltaX * scale,
+    y: node.y + deltaY * scale,
+  };
+}
+
+function getCustomFlowNodeHalfSize(node: CustomFlowNode) {
+  if (node.type === "decision") {
+    return {
+      width: CUSTOM_FLOW_DECISION_HALF_WIDTH,
+      height: CUSTOM_FLOW_DECISION_HALF_HEIGHT,
+    };
+  }
+
+  if (node.type === "custom") {
+    return {
+      width: Math.max(CUSTOM_FLOW_CUSTOM_MIN_SIZE / 2, (node.width ?? 110) / 2),
+      height: Math.max(CUSTOM_FLOW_CUSTOM_MIN_SIZE / 2, (node.height ?? 72) / 2),
+    };
+  }
+
+  return {
+    width: CUSTOM_FLOW_NODE_HALF_WIDTH,
+    height: CUSTOM_FLOW_NODE_HALF_HEIGHT,
+  };
+}
+
+function getCustomFlowShapePath(node: CustomFlowNode) {
+  const points =
+    node.points && node.points.length >= 3
+      ? node.points
+      : [
+          { x: -56, y: -34 },
+          { x: 54, y: -26 },
+          { x: 68, y: 22 },
+          { x: 6, y: 42 },
+          { x: -64, y: 18 },
+        ];
+
+  return points
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${node.x + point.x} ${node.y + point.y}`)
+    .join(" ")
+    .concat(" Z");
+}
+
+function isPointInsideCustomFlowNode(
+  point: { x: number; y: number },
+  node: CustomFlowNode,
+) {
+  if (node.type === "decision") {
+    return (
+      Math.abs(point.x - node.x) / CUSTOM_FLOW_DECISION_HALF_WIDTH +
+        Math.abs(point.y - node.y) / CUSTOM_FLOW_DECISION_HALF_HEIGHT <=
+      1
+    );
+  }
+
+  const halfSize = getCustomFlowNodeHalfSize(node);
+  return (
+    Math.abs(point.x - node.x) <= halfSize.width &&
+    Math.abs(point.y - node.y) <= halfSize.height
+  );
+}
+
+function getCustomFlowLinkRoute(
+  link: CustomFlowLink,
+  from: CustomFlowNode,
+  to: CustomFlowNode,
+) {
+  const anchors = link.anchors ?? [];
+  const fromPoint = link.fromOffset
+    ? { x: from.x + link.fromOffset.x, y: from.y + link.fromOffset.y }
+    : null;
+  const toPoint = link.toOffset
+    ? { x: to.x + link.toOffset.x, y: to.y + link.toOffset.y }
+    : null;
+  const firstTarget = anchors[0] ?? toPoint ?? { x: to.x, y: to.y };
+  const lastSource = anchors.at(-1) ?? fromPoint ?? { x: from.x, y: from.y };
+
+  return [
+    fromPoint ?? getCustomFlowNodeEdgePoint(from, firstTarget),
+    ...anchors,
+    toPoint ?? getCustomFlowNodeEdgePoint(to, lastSource),
+  ];
+}
+
+function getCustomFlowConnectionOffset(
+  node: CustomFlowNode,
+  point: { x: number; y: number },
+) {
+  const connectionPoint = isPointInsideCustomFlowNode(point, node)
+    ? point
+    : getCustomFlowNodeEdgePoint(node, point);
+
+  return {
+    x: connectionPoint.x - node.x,
+    y: connectionPoint.y - node.y,
+  };
+}
+
+function customFlowPathFromRoute(route: Array<{ x: number; y: number }>) {
+  if (route.length === 0) {
+    return "";
+  }
+
+  const [start, ...rest] = route;
+  return `M ${start.x} ${start.y} ${rest.map((point) => `L ${point.x} ${point.y}`).join(" ")}`;
+}
+
+function getRouteMidpoint(route: Array<{ x: number; y: number }>) {
+  if (route.length === 0) {
+    return { x: 0, y: 0 };
+  }
+
+  const middleIndex = Math.max(0, Math.floor((route.length - 1) / 2));
+  const from = route[middleIndex];
+  const to = route[Math.min(route.length - 1, middleIndex + 1)] ?? from;
+  return {
+    x: (from.x + to.x) / 2,
+    y: (from.y + to.y) / 2,
+  };
+}
+
+function distanceToSegmentSquared(
+  point: { x: number; y: number },
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+) {
+  const deltaX = to.x - from.x;
+  const deltaY = to.y - from.y;
+  const lengthSquared = deltaX * deltaX + deltaY * deltaY;
+
+  if (lengthSquared === 0) {
+    const pointDeltaX = point.x - from.x;
+    const pointDeltaY = point.y - from.y;
+    return pointDeltaX * pointDeltaX + pointDeltaY * pointDeltaY;
+  }
+
+  const t = clampNumber(
+    ((point.x - from.x) * deltaX + (point.y - from.y) * deltaY) / lengthSquared,
+    0,
+    1,
+  );
+  const projectionX = from.x + t * deltaX;
+  const projectionY = from.y + t * deltaY;
+  const projectionDeltaX = point.x - projectionX;
+  const projectionDeltaY = point.y - projectionY;
+  return projectionDeltaX * projectionDeltaX + projectionDeltaY * projectionDeltaY;
+}
+
+function getClosestRouteSegmentIndex(
+  route: Array<{ x: number; y: number }>,
+  point: { x: number; y: number },
+) {
+  let closestIndex = 0;
+  let closestDistance = Number.POSITIVE_INFINITY;
+
+  for (let index = 0; index < route.length - 1; index += 1) {
+    const distance = distanceToSegmentSquared(point, route[index], route[index + 1]);
+    if (distance < closestDistance) {
+      closestDistance = distance;
+      closestIndex = index;
+    }
+  }
+
+  return closestIndex;
 }
 
 function toDocumentNumber() {
@@ -542,7 +881,7 @@ function svgShell(width: number, height: number, body: string) {
   return `<svg xmlns="http://www.w3.org/2000/svg" role="img" viewBox="0 0 ${width} ${height}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">
   <defs>
     <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="8" refY="3.5" orient="auto">
-      <path d="M0,0 L10,3.5 L0,7 Z" fill="#0f766e"></path>
+      <path d="M0,0 L10,3.5 L0,7 Z" fill="context-stroke"></path>
     </marker>
   </defs>
   <rect x="0" y="0" width="${width}" height="${height}" rx="14" fill="#f8fafc"></rect>
@@ -595,6 +934,36 @@ function applySvgTheme(svg: string, style: DiagramStyle, layerSettings: LayerSet
   }
 
   return themedSvg;
+}
+
+function applySvgTextStyle(svg: string, textStyle: DiagramTextStyle) {
+  let styledSvg = svg
+    .replaceAll(
+      'font-family="Inter, Arial, sans-serif"',
+      `font-family="${escapeHtml(textStyle.fontFamily)}"`,
+    )
+    .replace(/font-size="([0-9.]+)"/g, (_, size: string) => {
+      const scaledSize = clampNumber(
+        Number.parseFloat(size) * textStyle.fontScale,
+        8,
+        30,
+      );
+      return `font-size="${scaledSize.toFixed(scaledSize >= 10 ? 1 : 2)}"`;
+    })
+    .replace(/font-weight="[0-9]+"/g, `font-weight="${textStyle.bold ? 800 : 500}"`);
+
+  const extraTextAttributes = [
+    textStyle.italic ? 'font-style="italic"' : "",
+    textStyle.underline ? 'text-decoration="underline"' : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  if (extraTextAttributes) {
+    styledSvg = styledSvg.replace(/<text /g, `<text ${extraTextAttributes} `);
+  }
+
+  return styledSvg;
 }
 
 function buildFlowSvg(title: string, items: string[], valueStream = false) {
@@ -678,10 +1047,70 @@ function buildSwimlaneSvg(title: string, items: string[], lanes: string[]) {
   return svgShell(width, height, body);
 }
 
+function buildSwimlaneSandboxSvg(
+  title: string,
+  lanes: string[],
+  steps: SwimlaneStep[],
+  links: SwimlaneLink[],
+) {
+  const width = 960;
+  const laneHeight = 92;
+  const laneHeaderWidth = 154;
+  const top = title ? 70 : 28;
+  const stepWidth = 164;
+  const stepHeight = 48;
+  const visibleLanes = lanes.length > 0 ? lanes : ["Operations"];
+  const height = top + visibleLanes.length * laneHeight + 36;
+  const stepById = new Map(steps.map((step) => [step.id, step]));
+  let body = title ? svgText(width / 2, 38, title, { size: 20, color: "#111827" }) : "";
+
+  visibleLanes.forEach((lane, laneIndex) => {
+    const y = top + laneIndex * laneHeight;
+    body += `<rect x="36" y="${y}" width="888" height="${laneHeight}" fill="${
+      laneIndex % 2 === 0 ? "#f1f5f9" : "#ffffff"
+    }" stroke="#cbd5e1" stroke-width="1.5"></rect>`;
+    body += `<rect x="36" y="${y}" width="${laneHeaderWidth}" height="${laneHeight}" fill="#ccfbf1" stroke="#99f6e4" stroke-width="1.5"></rect>`;
+    body += svgText(36 + laneHeaderWidth / 2, y + laneHeight / 2 + 5, lane, {
+      size: 12,
+      color: "#0f172a",
+    });
+  });
+
+  links.forEach((link) => {
+    const from = stepById.get(link.from);
+    const to = stepById.get(link.to);
+    if (!from || !to) {
+      return;
+    }
+
+    const fromY = top + from.laneIndex * laneHeight + laneHeight / 2;
+    const toY = top + to.laneIndex * laneHeight + laneHeight / 2;
+    const fromX = from.x + stepWidth / 2;
+    const toX = to.x - stepWidth / 2;
+    const bendX = Number.isFinite(link.bendX) ? link.bendX : (fromX + toX) / 2;
+    const bendY = Number.isFinite(link.bendY) ? top + link.bendY : (fromY + toY) / 2;
+    const linkStyle = getSwimlaneLinkStyle(link);
+    body += `<path d="M ${fromX} ${fromY} Q ${bendX} ${bendY} ${toX} ${toY}" fill="none" stroke="${linkStyle.strokeColor}" stroke-width="2.5" marker-end="url(#arrowhead)"></path>`;
+    if (link.label.trim()) {
+      body += svgText(bendX, bendY - 10, link.label, { size: 10, color: linkStyle.textColor });
+    }
+  });
+
+  steps.forEach((step) => {
+    const laneIndex = clampNumber(step.laneIndex, 0, visibleLanes.length - 1);
+    const y = top + laneIndex * laneHeight + laneHeight / 2 - stepHeight / 2;
+    const stepStyle = getSwimlaneStepStyle(step);
+    body += `<rect x="${step.x - stepWidth / 2}" y="${y}" width="${stepWidth}" height="${stepHeight}" rx="9" fill="${stepStyle.fillColor}" stroke="${stepStyle.strokeColor}" stroke-width="2"></rect>`;
+    body += svgText(step.x, y + 29, step.label, { size: 11, color: stepStyle.textColor });
+  });
+
+  return svgShell(width, height, body);
+}
+
 function buildCustomFlowSketchSvg(title: string, nodes: CustomFlowNode[], links: CustomFlowLink[]) {
   const width = CUSTOM_FLOW_CANVAS_WIDTH;
   const boardHeight = CUSTOM_FLOW_CANVAS_HEIGHT;
-  const top = title ? 58 : 18;
+  const top = title ? 50 : 8;
   const height = top + boardHeight + 18;
   let body = title ? svgText(width / 2, 36, title, { size: 20, color: "#111827" }) : "";
 
@@ -699,19 +1128,33 @@ function buildCustomFlowSketchSvg(title: string, nodes: CustomFlowNode[], links:
       return;
     }
 
-    body += `<line x1="${from.x + CUSTOM_FLOW_NODE_HALF_WIDTH}" y1="${top + from.y}" x2="${to.x - CUSTOM_FLOW_NODE_HALF_WIDTH}" y2="${
-      top + to.y
-    }" stroke="#0f766e" stroke-width="3" marker-end="url(#arrowhead)"></line>`;
+    const route = getCustomFlowLinkRoute(link, from, to).map((point) => ({
+      x: point.x,
+      y: top + point.y,
+    }));
+    const linkStyle = getCustomFlowLinkStyle(link);
+    body += `<path d="${customFlowPathFromRoute(route)}" fill="none" stroke="${linkStyle.strokeColor}" stroke-width="3" marker-end="url(#arrowhead)"></path>`;
+    if (link.label?.trim()) {
+      const labelPoint = getRouteMidpoint(route);
+      body += svgText(labelPoint.x, labelPoint.y - 10, link.label, {
+        size: 10,
+        color: linkStyle.textColor,
+      });
+    }
   });
 
   nodes.forEach((node) => {
     const y = top + node.y;
-    if (node.type === "decision") {
+    const nodeStyle = getCustomFlowNodeStyle(node);
+    if (node.type === "custom") {
+      const path = getCustomFlowShapePath({ ...node, y });
+      body += `<path d="${path}" fill="${nodeStyle.fillColor}" stroke="${nodeStyle.strokeColor}" stroke-width="2"></path>`;
+    } else if (node.type === "decision") {
       body += `<polygon points="${node.x},${y - CUSTOM_FLOW_DECISION_HALF_HEIGHT} ${
         node.x + CUSTOM_FLOW_DECISION_HALF_WIDTH
       },${y} ${node.x},${y + CUSTOM_FLOW_DECISION_HALF_HEIGHT} ${
         node.x - CUSTOM_FLOW_DECISION_HALF_WIDTH
-      },${y}" fill="#fff7ed" stroke="#0f766e" stroke-width="2"></polygon>`;
+      },${y}" fill="${nodeStyle.fillColor}" stroke="${nodeStyle.strokeColor}" stroke-width="2"></polygon>`;
     } else {
       body += `<rect x="${node.x - CUSTOM_FLOW_NODE_HALF_WIDTH}" y="${
         y - CUSTOM_FLOW_NODE_HALF_HEIGHT
@@ -719,10 +1162,10 @@ function buildCustomFlowSketchSvg(title: string, nodes: CustomFlowNode[], links:
         CUSTOM_FLOW_NODE_HALF_HEIGHT * 2
       }" rx="${
         node.type === "terminator" ? 28 : 10
-      }" fill="#ffffff" stroke="#0f766e" stroke-width="2"></rect>`;
+      }" fill="${nodeStyle.fillColor}" stroke="${nodeStyle.strokeColor}" stroke-width="2"></rect>`;
     }
 
-    body += svgText(node.x, y + 4, node.label, { size: 12, color: "#0f172a" });
+    body += svgText(node.x, y + 4, node.label, { size: 12, color: nodeStyle.textColor });
   });
 
   return svgShell(width, height, body);
@@ -1364,7 +1807,7 @@ function buildControlledDocumentHtml(input: {
   diagramType: DiagramType;
   dmaicEnabled: boolean;
   dmaicPhase: DmaicPhase;
-  prompt: string;
+  purpose: string;
   processArea: string;
   items: string[];
   lanes: string[];
@@ -1401,7 +1844,7 @@ function buildControlledDocumentHtml(input: {
       phase.label,
     )}<br><strong>Process area:</strong> ${escapeHtml(input.processArea || "Unassigned")}</p>`,
     `<h2>Purpose</h2>`,
-    `<p>${escapeHtml(input.prompt)}</p>`,
+    `<p>${escapeHtml(input.purpose)}</p>`,
     `<h2>Diagram</h2>`,
     TABLE_DIAGRAM_TYPES.has(input.diagramType)
       ? buildTableDiagramHtml(input.diagramType, input.items, input.metrics)
@@ -1517,7 +1960,6 @@ export function ProcessMapBuilderClient({
   const processAreaInputRef = useRef<HTMLInputElement | null>(null);
   const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const itemsTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const lanesTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const metricsTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [title, setTitle] = useState("Process Map Draft");
   const [diagramType, setDiagramType] = useState<DiagramType>("process_map");
@@ -1526,6 +1968,7 @@ export function ProcessMapBuilderClient({
   const [departmentId, setDepartmentId] = useState("");
   const [processArea, setProcessArea] = useState("");
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
+  const [purpose, setPurpose] = useState(DEFAULT_PROMPT);
   const [itemsText, setItemsText] = useState(
     getDiagramDefinition("process_map").starterItems.join("\n"),
   );
@@ -1549,7 +1992,10 @@ export function ProcessMapBuilderClient({
   const [oeeTotalCount] = useState("520");
   const [oeeGoodCount] = useState("498");
   const [layerSettings, setLayerSettings] = useState<LayerSettings>(DEFAULT_LAYER_SETTINGS);
-  const [diagramStyle, setDiagramStyle] = useState<DiagramStyle>(DEFAULT_DIAGRAM_STYLE);
+  const [diagramStyle] = useState<DiagramStyle>(DEFAULT_DIAGRAM_STYLE);
+  const [diagramTextStyle, setDiagramTextStyle] = useState<DiagramTextStyle>(
+    DEFAULT_DIAGRAM_TEXT_STYLE,
+  );
   const [previewRevision, setPreviewRevision] = useState(1);
   const [recommendation, setRecommendation] = useState<DiagramRecommendation | null>(null);
   const [recommendBusy, setRecommendBusy] = useState(false);
@@ -1569,13 +2015,27 @@ export function ProcessMapBuilderClient({
     { id: "step-1-decision-1", from: "step-1", to: "decision-1" },
   ]);
   const [selectedCustomNodeId, setSelectedCustomNodeId] = useState<string | null>("step-1");
+  const [selectedCustomLinkId, setSelectedCustomLinkId] = useState<string | null>(null);
   const [pendingConnectorNodeId, setPendingConnectorNodeId] = useState<string | null>(null);
   const [customCanvasView, setCustomCanvasView] =
     useState<CustomFlowCanvasView>(CUSTOM_FLOW_DEFAULT_VIEW);
   const [draftConnector, setDraftConnector] = useState<DraftConnector | null>(null);
+  const [draftCustomShapePoints, setDraftCustomShapePoints] = useState<CustomFlowAnchor[] | null>(
+    null,
+  );
   const [customFlowUndoStack, setCustomFlowUndoStack] = useState<CustomFlowSnapshot[]>([]);
   const [customFlowRedoStack, setCustomFlowRedoStack] = useState<CustomFlowSnapshot[]>([]);
+  const [swimlaneSteps, setSwimlaneSteps] = useState<SwimlaneStep[]>([
+    { id: "swim-step-1", label: "Operator: Receive work", laneIndex: 0, x: 305 },
+    { id: "swim-step-2", label: "Quality: Verify requirements", laneIndex: 1, x: 455 },
+    { id: "swim-step-3", label: "Supervisor: Approve release", laneIndex: 2, x: 605 },
+  ]);
+  const [swimlaneLinks, setSwimlaneLinks] = useState<SwimlaneLink[]>([
+    { id: "swim-link-1", from: "swim-step-1", to: "swim-step-2", label: "", bendX: 380, bendY: 138 },
+    { id: "swim-link-2", from: "swim-step-2", to: "swim-step-3", label: "", bendX: 530, bendY: 230 },
+  ]);
   const [inlineChartEditor, setInlineChartEditor] = useState<InlineChartEditor | null>(null);
+  const [showAdvancedColors, setShowAdvancedColors] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -1596,11 +2056,44 @@ export function ProcessMapBuilderClient({
   const customConnectorDragRef = useRef<{
     from: string;
     pointerId: number;
+    fromOffset?: CustomFlowAnchor;
+  } | null>(null);
+  const customShapeDrawRef = useRef<{
+    pointerId: number;
+    points: CustomFlowAnchor[];
+  } | null>(null);
+  const customLinkBendDragRef = useRef<{
+    linkId: string;
+    pointerId: number;
+    anchorIndex: number | null;
+    segmentIndex: number;
+    moved: boolean;
+    historyCaptured: boolean;
   } | null>(null);
   const customFlowSuppressClickRef = useRef(false);
   const customCanvasSvgRef = useRef<SVGSVGElement | null>(null);
   const chartPreviewRef = useRef<HTMLDivElement | null>(null);
+  const sandboxHostRef = useRef<HTMLDivElement | null>(null);
+  const editBarRef = useRef<HTMLFormElement | null>(null);
   const inlineChartEditCancelledRef = useRef(false);
+  const swimlaneSvgRef = useRef<SVGSVGElement | null>(null);
+  const swimlaneSuppressClickRef = useRef(false);
+  const swimlaneDragRef = useRef<
+    | {
+        type: "step";
+        stepId: string;
+        pointerId: number;
+        offsetX: number;
+        moved: boolean;
+      }
+    | {
+        type: "link";
+        linkId: string;
+        pointerId: number;
+        moved: boolean;
+      }
+    | null
+  >(null);
 
   const definition = getDiagramDefinition(diagramType);
   const phase = getDmaicPhaseOption(dmaicPhase);
@@ -1637,6 +2130,13 @@ export function ProcessMapBuilderClient({
   const rawSvg =
     isCustomFlowDiagram
       ? buildCustomFlowSketchSvg(layerSettings.showTitle ? title : "", customFlowNodes, customFlowLinks)
+      : diagramType === "swimlane"
+        ? buildSwimlaneSandboxSvg(
+            layerSettings.showTitle ? title : "",
+            lanes,
+            swimlaneSteps,
+            swimlaneLinks,
+          )
       : formulaTool === "capability" && (diagramType === "histogram" || diagramType === "control_chart")
       ? buildCapabilitySvg(
           layerSettings.showTitle ? title : "",
@@ -1657,7 +2157,10 @@ export function ProcessMapBuilderClient({
           fishboneEffect,
           fishboneCauseSlots,
         });
-  const svg = applySvgTheme(rawSvg, diagramStyle, layerSettings);
+  const svg = applySvgTextStyle(
+    applySvgTheme(rawSvg, diagramStyle, layerSettings),
+    diagramTextStyle,
+  );
   const selectedCustomNode =
     customFlowNodes.find((node) => node.id === selectedCustomNodeId) ?? null;
   const canUndoCustomFlow = customFlowUndoStack.length > 0;
@@ -1665,20 +2168,45 @@ export function ProcessMapBuilderClient({
 
   function getCustomFlowSnapshot(): CustomFlowSnapshot {
     return {
-      nodes: customFlowNodes.map((node) => ({ ...node })),
-      links: customFlowLinks.map((link) => ({ ...link })),
+      nodes: customFlowNodes.map((node) => ({
+        ...node,
+        points: node.points?.map((point) => ({ ...point })),
+      })),
+      links: customFlowLinks.map((link) => ({
+        ...link,
+        fromOffset: link.fromOffset ? { ...link.fromOffset } : undefined,
+        toOffset: link.toOffset ? { ...link.toOffset } : undefined,
+        anchors: link.anchors?.map((anchor) => ({ ...anchor })),
+      })),
       selectedNodeId: selectedCustomNodeId,
+      selectedLinkId: selectedCustomLinkId,
     };
   }
 
   function restoreCustomFlowSnapshot(snapshot: CustomFlowSnapshot) {
-    setCustomFlowNodes(snapshot.nodes.map((node) => ({ ...node })));
-    setCustomFlowLinks(snapshot.links.map((link) => ({ ...link })));
+    setCustomFlowNodes(
+      snapshot.nodes.map((node) => ({
+        ...node,
+        points: node.points?.map((point) => ({ ...point })),
+      })),
+    );
+    setCustomFlowLinks(
+      snapshot.links.map((link) => ({
+        ...link,
+        fromOffset: link.fromOffset ? { ...link.fromOffset } : undefined,
+        toOffset: link.toOffset ? { ...link.toOffset } : undefined,
+        anchors: link.anchors?.map((anchor) => ({ ...anchor })),
+      })),
+    );
     setSelectedCustomNodeId(snapshot.selectedNodeId);
+    setSelectedCustomLinkId(snapshot.selectedLinkId);
     setPendingConnectorNodeId(null);
     setDraftConnector(null);
+    setDraftCustomShapePoints(null);
     customConnectorDragRef.current = null;
     customFlowDragRef.current = null;
+    customLinkBendDragRef.current = null;
+    customShapeDrawRef.current = null;
   }
 
   function pushCustomFlowHistory() {
@@ -1791,6 +2319,10 @@ export function ProcessMapBuilderClient({
       return { kind: "title", value: title };
     }
 
+    if (matchesRenderedText(fishboneEffect)) {
+      return { kind: "fishboneEffect", value: fishboneEffect };
+    }
+
     const laneIndex = lanes.findIndex(matchesRenderedText);
     if (laneIndex >= 0) {
       return { kind: "lane", index: laneIndex, value: lanes[laneIndex] ?? "" };
@@ -1844,7 +2376,7 @@ export function ProcessMapBuilderClient({
     event: ReactMouseEvent<HTMLDivElement>,
     target: InlineChartEditTarget,
   ) {
-    const host = chartPreviewRef.current;
+    const host = sandboxHostRef.current ?? chartPreviewRef.current;
     const targetElement = event.target instanceof Element ? event.target : null;
     if (!host || !targetElement) {
       return;
@@ -1862,7 +2394,28 @@ export function ProcessMapBuilderClient({
     });
   }
 
-  function handleChartPreviewDoubleClick(event: ReactMouseEvent<HTMLDivElement>) {
+  function openInlineChartEditorAtPoint(
+    clientX: number,
+    clientY: number,
+    target: InlineChartEditTarget,
+    width = 300,
+  ) {
+    const host = sandboxHostRef.current ?? chartPreviewRef.current;
+    if (!host) {
+      return;
+    }
+
+    const hostRect = host.getBoundingClientRect();
+    inlineChartEditCancelledRef.current = false;
+    setInlineChartEditor({
+      ...target,
+      left: clampNumber(clientX - hostRect.left + host.scrollLeft - 18, 8, Math.max(8, hostRect.width - width - 8)),
+      top: clampNumber(clientY - hostRect.top + host.scrollTop - 56, 8, Math.max(8, hostRect.height - 64)),
+      width,
+    });
+  }
+
+  function handleChartPreviewClick(event: ReactMouseEvent<HTMLDivElement>) {
     if (isCustomFlowDiagram || TABLE_DIAGRAM_TYPES.has(diagramType)) {
       return;
     }
@@ -1899,32 +2452,59 @@ export function ProcessMapBuilderClient({
     openInlineChartEditor(event, target);
   }
 
-  function commitInlineChartEdit() {
-    if (inlineChartEditCancelledRef.current) {
-      inlineChartEditCancelledRef.current = false;
-      return;
-    }
+  function updateInlineChartEditValue(value: string) {
+    setInlineChartEditor((current) => (current ? { ...current, value } : current));
 
     if (!inlineChartEditor) {
       return;
     }
 
-    const nextValue = inlineChartEditor.value.trim();
     if (inlineChartEditor.kind === "title") {
-      setTitle(nextValue || "Untitled Process Map");
+      setTitle(value || "Untitled Process Map");
+    } else if (inlineChartEditor.kind === "purpose") {
+      setPurpose(value);
     } else if (inlineChartEditor.kind === "item") {
-      updateItemLine(inlineChartEditor.index, nextValue || `Step ${inlineChartEditor.index + 1}`);
+      updateItemLine(inlineChartEditor.index, value || `Step ${inlineChartEditor.index + 1}`);
     } else if (inlineChartEditor.kind === "lane") {
-      updateLaneLine(inlineChartEditor.index, nextValue || `Lane ${inlineChartEditor.index + 1}`);
+      updateLaneLine(inlineChartEditor.index, value || `Lane ${inlineChartEditor.index + 1}`);
+    } else if (inlineChartEditor.kind === "fishboneEffect") {
+      setFishboneEffect(value || "Effect / Problem");
+    } else if (inlineChartEditor.kind === "customNode") {
+      updateSelectedCustomNodeLabel(value || "Process step");
+    } else if (inlineChartEditor.kind === "customLink") {
+      setCustomFlowLinks((current) =>
+        current.map((link) =>
+          link.id === inlineChartEditor.linkId ? { ...link, label: value } : link,
+        ),
+      );
+    } else if (inlineChartEditor.kind === "swimlaneStep") {
+      setSwimlaneSteps((current) =>
+        current.map((step) =>
+          step.id === inlineChartEditor.stepId
+            ? { ...step, label: value || `Step ${current.indexOf(step) + 1}` }
+            : step,
+        ),
+      );
+      setItemsText((current) => {
+        const nextSteps = swimlaneSteps.map((step) =>
+          step.id === inlineChartEditor.stepId ? { ...step, label: value } : step,
+        );
+        return nextSteps.map((step) => step.label).join("\n") || current;
+      });
+    } else if (inlineChartEditor.kind === "swimlaneArrow") {
+      setSwimlaneLinks((current) =>
+        current.map((link) =>
+          link.id === inlineChartEditor.linkId ? { ...link, label: value } : link,
+        ),
+      );
     } else {
       updateMetricLine(
         inlineChartEditor.index,
         inlineChartEditor.field,
-        inlineChartEditor.field === "label" ? nextValue || `Point ${inlineChartEditor.index + 1}` : nextValue || "0",
+        inlineChartEditor.field === "label" ? value || `Point ${inlineChartEditor.index + 1}` : value || "0",
       );
     }
 
-    setInlineChartEditor(null);
     setPreviewRevision((current) => current + 1);
   }
 
@@ -1938,8 +2518,60 @@ export function ProcessMapBuilderClient({
     setLayerSettings((current) => ({ ...current, [key]: value }));
   }
 
-  function updateDiagramStyle(key: keyof DiagramStyle, value: string) {
-    setDiagramStyle((current) => ({ ...current, [key]: value }));
+  function updateCustomFlowNodeStyle(
+    nodeId: string,
+    stylePatch: Partial<DiagramElementStyle>,
+  ) {
+    setCustomFlowNodes((current) =>
+      current.map((node) =>
+        node.id === nodeId ? { ...node, style: { ...node.style, ...stylePatch } } : node,
+      ),
+    );
+    setPreviewRevision((current) => current + 1);
+  }
+
+  function updateCustomFlowLinkStyle(
+    linkId: string,
+    stylePatch: Partial<DiagramElementStyle>,
+  ) {
+    setCustomFlowLinks((current) =>
+      current.map((link) =>
+        link.id === linkId ? { ...link, style: { ...link.style, ...stylePatch } } : link,
+      ),
+    );
+    setPreviewRevision((current) => current + 1);
+  }
+
+  function updateSwimlaneStepStyle(
+    stepId: string,
+    stylePatch: Partial<DiagramElementStyle>,
+  ) {
+    setSwimlaneSteps((current) =>
+      current.map((step) =>
+        step.id === stepId ? { ...step, style: { ...step.style, ...stylePatch } } : step,
+      ),
+    );
+    setPreviewRevision((current) => current + 1);
+  }
+
+  function updateSwimlaneLinkStyle(
+    linkId: string,
+    stylePatch: Partial<DiagramElementStyle>,
+  ) {
+    setSwimlaneLinks((current) =>
+      current.map((link) =>
+        link.id === linkId ? { ...link, style: { ...link.style, ...stylePatch } } : link,
+      ),
+    );
+    setPreviewRevision((current) => current + 1);
+  }
+
+  function updateDiagramTextStyle<K extends keyof DiagramTextStyle>(
+    key: K,
+    value: DiagramTextStyle[K],
+  ) {
+    setDiagramTextStyle((current) => ({ ...current, [key]: value }));
+    setPreviewRevision((current) => current + 1);
   }
 
   function addLane() {
@@ -1952,10 +2584,18 @@ export function ProcessMapBuilderClient({
   }
 
   function removeLane() {
+    const laneCount = lanes.length;
     setLanesText((current) => {
       const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
       return rows.length <= 1 ? rows.join("\n") : rows.slice(0, -1).join("\n");
     });
+    if (diagramType === "swimlane" && laneCount > 1) {
+      setSwimlaneSteps((current) =>
+        current
+          .filter((step) => step.laneIndex < laneCount - 1)
+          .map((step) => ({ ...step, laneIndex: clampNumber(step.laneIndex, 0, laneCount - 2) })),
+      );
+    }
     setPreviewRevision((current) => current + 1);
   }
 
@@ -2000,6 +2640,38 @@ export function ProcessMapBuilderClient({
         rows.push(`Cause group ${rows.length + 1}`);
         return rows.join("\n");
       });
+    } else if (diagramType === "swimlane") {
+      const nextIndex = swimlaneSteps.length + 1;
+      const laneIndex = Math.min(
+        Math.max(0, lanes.length - 1),
+        Math.max(0, swimlaneSteps.at(-1)?.laneIndex ?? 0),
+      );
+      const nextStep: SwimlaneStep = {
+        id: `swim-step-${Date.now()}`,
+        label: `${lanes[laneIndex] ?? "Lane"}: Step ${nextIndex}`,
+        laneIndex,
+        x: clampNumber(300 + nextIndex * 120, 250, 840),
+      };
+      const previousStep = swimlaneSteps.at(-1);
+      setSwimlaneSteps((current) => [...current, nextStep]);
+      setItemsText((current) => {
+        const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
+        rows.push(nextStep.label);
+        return rows.join("\n");
+      });
+      if (previousStep) {
+        setSwimlaneLinks((current) => [
+          ...current,
+          {
+            id: `swim-link-${Date.now()}`,
+            from: previousStep.id,
+            to: nextStep.id,
+            label: "",
+            bendX: (previousStep.x + nextStep.x) / 2,
+            bendY: laneIndex * 92 + 46,
+          },
+        ]);
+      }
     } else {
       setItemsText((current) => {
         const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
@@ -2034,6 +2706,18 @@ export function ProcessMapBuilderClient({
         const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
         return rows.length <= 1 ? rows.join("\n") : rows.slice(0, -1).join("\n");
       });
+    } else if (diagramType === "swimlane") {
+      const stepToRemove = swimlaneSteps.at(-1);
+      if (stepToRemove) {
+        setSwimlaneSteps((current) => current.filter((step) => step.id !== stepToRemove.id));
+        setSwimlaneLinks((current) =>
+          current.filter((link) => link.from !== stepToRemove.id && link.to !== stepToRemove.id),
+        );
+        setItemsText((current) => {
+          const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
+          return rows.length <= 1 ? rows.join("\n") : rows.slice(0, -1).join("\n");
+        });
+      }
     } else {
       setItemsText((current) => {
         const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
@@ -2042,6 +2726,83 @@ export function ProcessMapBuilderClient({
     }
 
     setPreviewRevision((current) => current + 1);
+  }
+
+  function deleteCurrentEditTarget() {
+    if (!inlineChartEditor) {
+      removeChartDataRow();
+      return;
+    }
+
+    if (inlineChartEditor.kind === "swimlaneStep") {
+      const stepId = inlineChartEditor.stepId;
+      const stepIndex = swimlaneSteps.findIndex((step) => step.id === stepId);
+      setSwimlaneSteps((current) => current.filter((step) => step.id !== stepId));
+      setSwimlaneLinks((current) =>
+        current.filter((link) => link.from !== stepId && link.to !== stepId),
+      );
+      setItemsText((current) =>
+        current
+          .split(/\r?\n/)
+          .filter((_, index) => index !== stepIndex)
+          .join("\n"),
+      );
+    } else if (inlineChartEditor.kind === "swimlaneArrow") {
+      setSwimlaneLinks((current) =>
+        current.filter((link) => link.id !== inlineChartEditor.linkId),
+      );
+    } else if (inlineChartEditor.kind === "customNode") {
+      deleteSelectedCustomNode();
+    } else if (inlineChartEditor.kind === "customLink") {
+      pushCustomFlowHistory();
+      setCustomFlowLinks((current) =>
+        current.filter((link) => link.id !== inlineChartEditor.linkId),
+      );
+      setSelectedCustomLinkId(null);
+    } else if (inlineChartEditor.kind === "lane") {
+      removeLane();
+    } else if (inlineChartEditor.kind === "metric") {
+      setMetricsText((current) =>
+        current
+          .split(/\r?\n/)
+          .filter((_, index) => index !== inlineChartEditor.index)
+          .join("\n"),
+      );
+    } else if (inlineChartEditor.kind === "item") {
+      setItemsText((current) =>
+        current
+          .split(/\r?\n/)
+          .filter((_, index) => index !== inlineChartEditor.index)
+          .join("\n"),
+      );
+    } else {
+      removeChartDataRow();
+    }
+
+    setInlineChartEditor(null);
+    setPreviewRevision((current) => current + 1);
+  }
+
+  function addCurrentEditTarget() {
+    if (inlineChartEditor?.kind === "lane") {
+      addLane();
+      return;
+    }
+
+    addChartDataRow();
+  }
+
+  function handleSandboxPointerDownCapture(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!inlineChartEditor) {
+      return;
+    }
+
+    const targetElement = event.target instanceof Element ? event.target : null;
+    if (targetElement?.closest("[data-process-edit-bar]")) {
+      return;
+    }
+
+    setInlineChartEditor(null);
   }
 
   function focusPrimaryPreviewSource() {
@@ -2062,6 +2823,7 @@ export function ProcessMapBuilderClient({
     const nextDefinition = getDiagramDefinition(nextDiagramType);
     setCustomFlowUndoStack([]);
     setCustomFlowRedoStack([]);
+    setSelectedCustomLinkId(null);
     setInlineChartEditor(null);
     setDiagramType(nextDiagramType);
     setItemsText(nextDefinition.starterItems.join("\n"));
@@ -2069,6 +2831,28 @@ export function ProcessMapBuilderClient({
     if (nextDiagramType === "fishbone") {
       setFishboneEffect("Effect / Problem");
       setFishboneCauseSlots(2);
+    }
+    if (nextDiagramType === "swimlane") {
+      const defaultSteps: SwimlaneStep[] = nextDefinition.starterItems.map((item, index) => ({
+        id: `swim-step-${index + 1}`,
+        label: item,
+        laneIndex: index % Math.max(1, lanes.length),
+        x: 305 + index * 150,
+      }));
+      setSwimlaneSteps(defaultSteps);
+      setSwimlaneLinks(
+        defaultSteps.slice(1).map((step, index) => {
+          const previousStep = defaultSteps[index];
+          return {
+            id: `swim-link-${index + 1}`,
+            from: previousStep.id,
+            to: step.id,
+            label: "",
+            bendX: (previousStep.x + step.x) / 2,
+            bendY: step.laneIndex * 92 + 46,
+          };
+        }),
+      );
     }
     if (!title.trim() || title === "Process Map Draft") {
       setTitle(`${getDmaicPhaseOption(dmaicPhase).label} - ${nextDefinition.shortLabel} Draft`);
@@ -2100,6 +2884,48 @@ export function ProcessMapBuilderClient({
     };
     setCustomFlowNodes((current) => [...current, nextNode]);
     setSelectedCustomNodeId(id);
+    setSelectedCustomLinkId(null);
+  }
+
+  function addCustomFlowFreeformShape(points: CustomFlowAnchor[]) {
+    if (points.length < 3) {
+      return;
+    }
+
+    const minX = Math.min(...points.map((point) => point.x));
+    const maxX = Math.max(...points.map((point) => point.x));
+    const minY = Math.min(...points.map((point) => point.y));
+    const maxY = Math.max(...points.map((point) => point.y));
+    const drawnWidth = maxX - minX;
+    const drawnHeight = maxY - minY;
+    const width = Math.max(CUSTOM_FLOW_CUSTOM_MIN_SIZE, drawnWidth);
+    const height = Math.max(CUSTOM_FLOW_CUSTOM_MIN_SIZE, drawnHeight);
+
+    if (drawnWidth < 10 && drawnHeight < 10) {
+      return;
+    }
+
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+    const id = `custom-${Date.now()}-${Math.round(centerX)}-${Math.round(centerY)}`;
+    const nextNode: CustomFlowNode = {
+      id,
+      type: "custom",
+      label: "Custom shape",
+      x: clampNumber(centerX, width / 2, CUSTOM_FLOW_CANVAS_WIDTH - width / 2),
+      y: clampNumber(centerY, height / 2, CUSTOM_FLOW_CANVAS_HEIGHT - height / 2),
+      width,
+      height,
+      points: points.map((point) => ({
+        x: point.x - centerX,
+        y: point.y - centerY,
+      })),
+    };
+
+    pushCustomFlowHistory();
+    setCustomFlowNodes((current) => [...current, nextNode]);
+    setSelectedCustomNodeId(id);
+    setSelectedCustomLinkId(null);
   }
 
   function getCustomFlowPoint(
@@ -2117,19 +2943,14 @@ export function ProcessMapBuilderClient({
     setCustomFlowNodes((current) =>
       current.map((node) =>
         node.id === nodeId
-          ? {
-              ...node,
-              x: clampNumber(
-                x,
-                CUSTOM_FLOW_DECISION_HALF_WIDTH,
-                CUSTOM_FLOW_CANVAS_WIDTH - CUSTOM_FLOW_DECISION_HALF_WIDTH,
-              ),
-              y: clampNumber(
-                y,
-                CUSTOM_FLOW_DECISION_HALF_HEIGHT,
-                CUSTOM_FLOW_CANVAS_HEIGHT - CUSTOM_FLOW_DECISION_HALF_HEIGHT,
-              ),
-            }
+          ? (() => {
+              const halfSize = getCustomFlowNodeHalfSize(node);
+              return {
+                ...node,
+                x: clampNumber(x, halfSize.width, CUSTOM_FLOW_CANVAS_WIDTH - halfSize.width),
+                y: clampNumber(y, halfSize.height, CUSTOM_FLOW_CANVAS_HEIGHT - halfSize.height),
+              };
+            })()
           : node,
       ),
     );
@@ -2139,19 +2960,22 @@ export function ProcessMapBuilderClient({
     setCustomFlowNodes((current) =>
       current.map((node) =>
         node.id === nodeId
-          ? {
-              ...node,
-              x: clampNumber(
-                node.x + deltaX,
-                CUSTOM_FLOW_DECISION_HALF_WIDTH,
-                CUSTOM_FLOW_CANVAS_WIDTH - CUSTOM_FLOW_DECISION_HALF_WIDTH,
-              ),
-              y: clampNumber(
-                node.y + deltaY,
-                CUSTOM_FLOW_DECISION_HALF_HEIGHT,
-                CUSTOM_FLOW_CANVAS_HEIGHT - CUSTOM_FLOW_DECISION_HALF_HEIGHT,
-              ),
-            }
+          ? (() => {
+              const halfSize = getCustomFlowNodeHalfSize(node);
+              return {
+                ...node,
+                x: clampNumber(
+                  node.x + deltaX,
+                  halfSize.width,
+                  CUSTOM_FLOW_CANVAS_WIDTH - halfSize.width,
+                ),
+                y: clampNumber(
+                  node.y + deltaY,
+                  halfSize.height,
+                  CUSTOM_FLOW_CANVAS_HEIGHT - halfSize.height,
+                ),
+              };
+            })()
           : node,
       ),
     );
@@ -2216,11 +3040,17 @@ export function ProcessMapBuilderClient({
   }
 
   function handleCustomCanvasKeyDown(event: ReactKeyboardEvent<SVGSVGElement>) {
+    const key = event.key.toLowerCase();
+    if ((event.key === "Delete" || event.key === "Backspace") && selectedCustomLinkId) {
+      event.preventDefault();
+      deleteSelectedCustomElement();
+      return;
+    }
+
     if (!event.ctrlKey && !event.metaKey) {
       return;
     }
 
-    const key = event.key.toLowerCase();
     if (key === "z" && !event.shiftKey) {
       event.preventDefault();
       undoCustomFlow();
@@ -2279,6 +3109,63 @@ export function ProcessMapBuilderClient({
     }
   }
 
+  function handleCustomShapePointerDown(event: ReactPointerEvent<SVGSVGElement>) {
+    if (drawingMode !== "custom" || event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const point = getCustomFlowPoint(event, event.currentTarget);
+    customShapeDrawRef.current = {
+      pointerId: event.pointerId,
+      points: [point],
+    };
+    setDraftCustomShapePoints([point]);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleCustomShapePointerMove(event: ReactPointerEvent<SVGSVGElement>) {
+    const drawState = customShapeDrawRef.current;
+    if (!drawState || drawState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const point = getCustomFlowPoint(event, event.currentTarget);
+    const previousPoint = drawState.points.at(-1);
+    if (previousPoint) {
+      const deltaX = point.x - previousPoint.x;
+      const deltaY = point.y - previousPoint.y;
+      if (deltaX * deltaX + deltaY * deltaY < 25) {
+        return;
+      }
+    }
+
+    drawState.points = [...drawState.points, point];
+    setDraftCustomShapePoints(drawState.points);
+  }
+
+  function finishCustomShapeDrawing(event: ReactPointerEvent<SVGSVGElement>) {
+    const drawState = customShapeDrawRef.current;
+    if (!drawState || drawState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const point = getCustomFlowPoint(event, event.currentTarget);
+    const points = [...drawState.points, point];
+    addCustomFlowFreeformShape(points);
+    customShapeDrawRef.current = null;
+    setDraftCustomShapePoints(null);
+    customFlowSuppressClickRef.current = true;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
   function findCustomFlowNodeAtPoint(point: { x: number; y: number }, excludeNodeId?: string) {
     return [...customFlowNodes]
       .reverse()
@@ -2287,41 +3174,173 @@ export function ProcessMapBuilderClient({
           return false;
         }
 
-        if (node.type === "decision") {
-          return (
-            Math.abs(point.x - node.x) / CUSTOM_FLOW_DECISION_HALF_WIDTH +
-              Math.abs(point.y - node.y) / CUSTOM_FLOW_DECISION_HALF_HEIGHT <=
-            1
-          );
-        }
-
-        return (
-          Math.abs(point.x - node.x) <= CUSTOM_FLOW_NODE_HALF_WIDTH &&
-          Math.abs(point.y - node.y) <= CUSTOM_FLOW_NODE_HALF_HEIGHT
-        );
+        return isPointInsideCustomFlowNode(point, node);
       });
   }
 
-  function addCustomFlowLink(fromNodeId: string, toNodeId: string) {
+  function getNearestCustomFlowNodeAtPoint(
+    point: { x: number; y: number },
+    excludeNodeId?: string,
+    snapDistance = CUSTOM_FLOW_CONNECT_SNAP_DISTANCE,
+  ) {
+    const directNode = [...customFlowNodes]
+      .reverse()
+      .find((node) => node.id !== excludeNodeId && isPointInsideCustomFlowNode(point, node));
+
+    if (directNode) {
+      return directNode;
+    }
+
+    let nearestNode: CustomFlowNode | null = null;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+
+    for (const node of customFlowNodes) {
+      if (node.id === excludeNodeId) {
+        continue;
+      }
+
+      const deltaX = point.x - node.x;
+      const deltaY = point.y - node.y;
+      const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+      if (distance < nearestDistance && distance <= snapDistance) {
+        nearestDistance = distance;
+        nearestNode = node;
+      }
+    }
+
+    return nearestNode;
+  }
+
+  function addCustomFlowLink(
+    fromNodeId: string,
+    toNodeId: string,
+    options: { fromOffset?: CustomFlowAnchor; toOffset?: CustomFlowAnchor } = {},
+  ) {
     if (fromNodeId === toNodeId) {
       return;
     }
 
-    const id = `${fromNodeId}-${toNodeId}`;
-    if (customFlowLinks.some((link) => link.id === id)) {
-      return;
-    }
+    const baseId = `${fromNodeId}-${toNodeId}`;
+    const id = customFlowLinks.some((link) => link.id === baseId)
+      ? `${baseId}-${Date.now()}`
+      : baseId;
 
     pushCustomFlowHistory();
+    setCustomFlowLinks((current) => [
+      ...current,
+      {
+        id,
+        from: fromNodeId,
+        to: toNodeId,
+        fromOffset: options.fromOffset,
+        toOffset: options.toOffset,
+      },
+    ]);
+    setSelectedCustomNodeId(null);
+    setSelectedCustomLinkId(id);
+  }
+
+  function getCustomFlowLinkRouteById(linkId: string) {
+    const link = customFlowLinks.find((entry) => entry.id === linkId);
+    if (!link) {
+      return null;
+    }
+
+    const from = customFlowNodes.find((node) => node.id === link.from);
+    const to = customFlowNodes.find((node) => node.id === link.to);
+    if (!from || !to) {
+      return null;
+    }
+
+    return getCustomFlowLinkRoute(link, from, to);
+  }
+
+  function addCustomFlowLinkAnchor(
+    linkId: string,
+    segmentIndex: number,
+    point: { x: number; y: number },
+  ) {
     setCustomFlowLinks((current) =>
-      current.some((link) => link.id === id)
-        ? current
-        : [...current, { id, from: fromNodeId, to: toNodeId }],
+      current.map((link) => {
+        if (link.id !== linkId) {
+          return link;
+        }
+
+        const anchors = [...(link.anchors ?? [])];
+        anchors.splice(segmentIndex, 0, {
+          x: clampNumber(point.x, 24, CUSTOM_FLOW_CANVAS_WIDTH - 24),
+          y: clampNumber(point.y, 24, CUSTOM_FLOW_CANVAS_HEIGHT - 24),
+        });
+        return { ...link, anchors };
+      }),
+    );
+    setSelectedCustomNodeId(null);
+    setSelectedCustomLinkId(linkId);
+  }
+
+  function updateCustomFlowLinkAnchor(
+    linkId: string,
+    anchorIndex: number,
+    point: { x: number; y: number },
+  ) {
+    setCustomFlowLinks((current) =>
+      current.map((link) => {
+        if (link.id !== linkId) {
+          return link;
+        }
+
+        const anchors = [...(link.anchors ?? [])];
+        if (!anchors[anchorIndex]) {
+          return link;
+        }
+
+        anchors[anchorIndex] = {
+          x: clampNumber(point.x, 24, CUSTOM_FLOW_CANVAS_WIDTH - 24),
+          y: clampNumber(point.y, 24, CUSTOM_FLOW_CANVAS_HEIGHT - 24),
+        };
+        return { ...link, anchors };
+      }),
     );
   }
 
+  function removeCustomFlowLinkAnchor(linkId: string, anchorIndex: number) {
+    pushCustomFlowHistory();
+    setCustomFlowLinks((current) =>
+      current.map((link) => {
+        if (link.id !== linkId) {
+          return link;
+        }
+
+        return {
+          ...link,
+          anchors: (link.anchors ?? []).filter((_, index) => index !== anchorIndex),
+        };
+      }),
+    );
+    setSelectedCustomNodeId(null);
+    setSelectedCustomLinkId(linkId);
+  }
+
+  function deleteSelectedCustomElement() {
+    if (selectedCustomLinkId) {
+      pushCustomFlowHistory();
+      setCustomFlowLinks((current) =>
+        current.filter((link) => link.id !== selectedCustomLinkId),
+      );
+      setSelectedCustomLinkId(null);
+      setInlineChartEditor((current) =>
+        current?.kind === "customLink" && current.linkId === selectedCustomLinkId
+          ? null
+          : current,
+      );
+      return;
+    }
+
+    deleteSelectedCustomNode();
+  }
+
   function handleDrawingBoardClick(event: ReactMouseEvent<SVGSVGElement>) {
-    if (drawingMode === "select" || drawingMode === "connector") {
+    if (drawingMode === "select" || drawingMode === "connector" || drawingMode === "custom") {
       return;
     }
 
@@ -2344,13 +3363,21 @@ export function ProcessMapBuilderClient({
       event.preventDefault();
       event.stopPropagation();
       const point = getCustomFlowPoint(event, svgElement);
+      const fromOffset = getCustomFlowConnectionOffset(node, point);
       customConnectorDragRef.current = {
         from: node.id,
         pointerId: event.pointerId,
+        fromOffset,
       };
       setSelectedCustomNodeId(node.id);
+      setSelectedCustomLinkId(null);
       setPendingConnectorNodeId(node.id);
-      setDraftConnector({ from: node.id, x: point.x, y: point.y });
+      setDraftConnector({
+        from: node.id,
+        fromOffset,
+        x: point.x,
+        y: point.y,
+      });
       event.currentTarget.setPointerCapture(event.pointerId);
       return;
     }
@@ -2376,6 +3403,7 @@ export function ProcessMapBuilderClient({
       historyCaptured: false,
     };
     setSelectedCustomNodeId(node.id);
+    setSelectedCustomLinkId(null);
     event.currentTarget.setPointerCapture(event.pointerId);
   }
 
@@ -2390,8 +3418,14 @@ export function ProcessMapBuilderClient({
       event.preventDefault();
       event.stopPropagation();
       const point = getCustomFlowPoint(event, svgElement);
+      const targetNode = getNearestCustomFlowNodeAtPoint(point, connectorState.from);
+      const snappedPoint = targetNode
+        ? getCustomFlowNodeEdgePoint(targetNode, point)
+        : point;
       setDraftConnector((current) =>
-        current ? { ...current, x: point.x, y: point.y } : current,
+        current
+          ? { ...current, x: snappedPoint.x, y: snappedPoint.y, targetNodeId: targetNode?.id ?? null }
+          : current,
       );
       return;
     }
@@ -2432,10 +3466,14 @@ export function ProcessMapBuilderClient({
       event.preventDefault();
       event.stopPropagation();
       const point = getCustomFlowPoint(event, svgElement);
-      const targetNode = findCustomFlowNodeAtPoint(point, connectorState.from);
+      const targetNode =
+        findCustomFlowNodeAtPoint(point, connectorState.from) ??
+        getNearestCustomFlowNodeAtPoint(point, connectorState.from);
       if (targetNode) {
-        addCustomFlowLink(connectorState.from, targetNode.id);
-        setSelectedCustomNodeId(targetNode.id);
+        addCustomFlowLink(connectorState.from, targetNode.id, {
+          fromOffset: connectorState.fromOffset,
+          toOffset: getCustomFlowConnectionOffset(targetNode, point),
+        });
       }
       customConnectorDragRef.current = null;
       setDraftConnector(null);
@@ -2461,15 +3499,24 @@ export function ProcessMapBuilderClient({
     }
   }
 
-  function handleCustomNodeClick(nodeId: string) {
+  function handleCustomNodeClick(nodeId: string, event?: ReactMouseEvent<SVGGElement>) {
     if (customFlowSuppressClickRef.current) {
       customFlowSuppressClickRef.current = false;
       return;
     }
 
     setSelectedCustomNodeId(nodeId);
+    setSelectedCustomLinkId(null);
 
     if (drawingMode !== "connector") {
+      const node = customFlowNodes.find((entry) => entry.id === nodeId);
+      if (node && event) {
+        openInlineChartEditorAtPoint(event.clientX, event.clientY, {
+          kind: "customNode",
+          nodeId,
+          value: node.label,
+        });
+      }
       return;
     }
 
@@ -2482,6 +3529,133 @@ export function ProcessMapBuilderClient({
       addCustomFlowLink(pendingConnectorNodeId, nodeId);
     }
     setPendingConnectorNodeId(null);
+  }
+
+  function beginCustomLinkBendDrag(
+    linkId: string,
+    anchorIndex: number | null,
+    segmentIndex: number,
+    event: ReactPointerEvent<SVGElement>,
+  ) {
+    if (drawingMode !== "select" || event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    customCanvasSvgRef.current?.focus();
+    setSelectedCustomNodeId(null);
+    setSelectedCustomLinkId(linkId);
+    customLinkBendDragRef.current = {
+      linkId,
+      pointerId: event.pointerId,
+      anchorIndex,
+      segmentIndex,
+      moved: false,
+      historyCaptured: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleCustomLinkPathPointerDown(
+    link: CustomFlowLink,
+    event: ReactPointerEvent<SVGPathElement>,
+  ) {
+    const svgElement = event.currentTarget.ownerSVGElement;
+    if (!svgElement) {
+      return;
+    }
+
+    const point = getCustomFlowPoint(event, svgElement);
+    const route = getCustomFlowLinkRouteById(link.id);
+    const segmentIndex = route ? getClosestRouteSegmentIndex(route, point) : 0;
+    beginCustomLinkBendDrag(link.id, null, segmentIndex, event);
+  }
+
+  function handleCustomLinkAnchorPointerDown(
+    linkId: string,
+    anchorIndex: number,
+    event: ReactPointerEvent<SVGCircleElement>,
+  ) {
+    beginCustomLinkBendDrag(linkId, anchorIndex, anchorIndex, event);
+  }
+
+  function handleCustomLinkBendPointerMove(event: ReactPointerEvent<SVGElement>) {
+    const dragState = customLinkBendDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const svgElement = event.currentTarget.ownerSVGElement ?? customCanvasSvgRef.current;
+    if (!svgElement) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const point = getCustomFlowPoint(event, svgElement);
+    if (!dragState.historyCaptured) {
+      pushCustomFlowHistory();
+      dragState.historyCaptured = true;
+    }
+
+    if (dragState.anchorIndex === null) {
+      dragState.anchorIndex = dragState.segmentIndex;
+      addCustomFlowLinkAnchor(dragState.linkId, dragState.segmentIndex, point);
+    } else {
+      updateCustomFlowLinkAnchor(dragState.linkId, dragState.anchorIndex, point);
+    }
+    dragState.moved = true;
+  }
+
+  function finishCustomLinkBendDrag(event: ReactPointerEvent<SVGElement>) {
+    const dragState = customLinkBendDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    customFlowSuppressClickRef.current = dragState.moved;
+    customLinkBendDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function handleCustomLinkClick(link: CustomFlowLink, event: ReactMouseEvent<SVGPathElement>) {
+    if (customFlowSuppressClickRef.current) {
+      customFlowSuppressClickRef.current = false;
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    setSelectedCustomNodeId(null);
+    setSelectedCustomLinkId(link.id);
+    openInlineChartEditorAtPoint(event.clientX, event.clientY, {
+      kind: "customLink",
+      linkId: link.id,
+      value: link.label ?? "",
+    });
+  }
+
+  function handleCustomLinkDoubleClick(
+    link: CustomFlowLink,
+    event: ReactMouseEvent<SVGPathElement>,
+  ) {
+    const svgElement = event.currentTarget.ownerSVGElement;
+    if (!svgElement) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const point = getCustomFlowPoint(event, svgElement);
+    const route = getCustomFlowLinkRouteById(link.id);
+    const segmentIndex = route ? getClosestRouteSegmentIndex(route, point) : 0;
+    pushCustomFlowHistory();
+    addCustomFlowLinkAnchor(link.id, segmentIndex, point);
   }
 
   function updateSelectedCustomNodeLabel(label: string) {
@@ -2527,6 +3701,7 @@ export function ProcessMapBuilderClient({
         current.filter((link) => link.from !== node.id && link.to !== node.id),
       );
       setPendingConnectorNodeId((current) => (current === node.id ? null : current));
+      setSelectedCustomLinkId(null);
     }
   }
 
@@ -2544,6 +3719,7 @@ export function ProcessMapBuilderClient({
       ),
     );
     setSelectedCustomNodeId(null);
+    setSelectedCustomLinkId(null);
     setPendingConnectorNodeId(null);
     setDraftConnector(null);
     customConnectorDragRef.current = null;
@@ -2555,6 +3731,162 @@ export function ProcessMapBuilderClient({
     }
     setItemsText(customFlowNodes.map((node) => node.label).join("\n"));
     setMessage("Canvas steps synced to source data.");
+  }
+
+  function getSwimlaneTop() {
+    return layerSettings.showTitle ? 70 : 28;
+  }
+
+  function getSwimlaneHeight() {
+    return getSwimlaneTop() + Math.max(1, lanes.length) * 92 + 36;
+  }
+
+  function getSwimlanePoint(
+    event: ReactPointerEvent<SVGElement> | ReactMouseEvent<SVGElement>,
+    svg: SVGSVGElement,
+  ) {
+    const bounds = svg.getBoundingClientRect();
+    const height = getSwimlaneHeight();
+    return {
+      x: ((event.clientX - bounds.left) / Math.max(1, bounds.width)) * 960,
+      y: ((event.clientY - bounds.top) / Math.max(1, bounds.height)) * height,
+    };
+  }
+
+  function syncSwimlaneStepsToItems(nextSteps: SwimlaneStep[]) {
+    setItemsText(nextSteps.map((step) => step.label).join("\n"));
+  }
+
+  function handleSwimlaneStepPointerDown(
+    step: SwimlaneStep,
+    event: ReactPointerEvent<SVGGElement>,
+  ) {
+    const svgElement = event.currentTarget.ownerSVGElement;
+    if (!svgElement || event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const point = getSwimlanePoint(event, svgElement);
+    swimlaneDragRef.current = {
+      type: "step",
+      stepId: step.id,
+      pointerId: event.pointerId,
+      offsetX: point.x - step.x,
+      moved: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleSwimlaneLinkPointerDown(
+    link: SwimlaneLink,
+    event: ReactPointerEvent<SVGPathElement>,
+  ) {
+    if (event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    swimlaneDragRef.current = {
+      type: "link",
+      linkId: link.id,
+      pointerId: event.pointerId,
+      moved: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleSwimlanePointerMove(event: ReactPointerEvent<SVGSVGElement>) {
+    const dragState = swimlaneDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const point = getSwimlanePoint(event, event.currentTarget);
+    const top = getSwimlaneTop();
+    const laneIndex = clampNumber(
+      Math.floor((point.y - top) / 92),
+      0,
+      Math.max(0, lanes.length - 1),
+    );
+
+    if (dragState.type === "step") {
+      dragState.moved = true;
+      const nextSteps = swimlaneSteps.map((step) =>
+        step.id === dragState.stepId
+          ? {
+              ...step,
+              laneIndex,
+              x: clampNumber(point.x - dragState.offsetX, 250, 850),
+            }
+          : step,
+      );
+      setSwimlaneSteps(nextSteps);
+      syncSwimlaneStepsToItems(nextSteps);
+    } else {
+      dragState.moved = true;
+      setSwimlaneLinks((current) =>
+        current.map((link) =>
+          link.id === dragState.linkId
+            ? {
+                ...link,
+                bendX: clampNumber(point.x, 210, 900),
+                bendY: clampNumber(point.y - top, 18, Math.max(18, lanes.length * 92 - 18)),
+              }
+            : link,
+        ),
+      );
+    }
+  }
+
+  function finishSwimlaneDrag(event: ReactPointerEvent<SVGElement>) {
+    const dragState = swimlaneDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    swimlaneSuppressClickRef.current = dragState.moved;
+    swimlaneDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setPreviewRevision((current) => current + 1);
+  }
+
+  function handleSwimlaneStepClick(step: SwimlaneStep, event: ReactMouseEvent<SVGGElement>) {
+    if (swimlaneSuppressClickRef.current) {
+      swimlaneSuppressClickRef.current = false;
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    openInlineChartEditorAtPoint(event.clientX, event.clientY, {
+      kind: "swimlaneStep",
+      stepId: step.id,
+      value: step.label,
+    });
+  }
+
+  function handleSwimlaneLinkClick(link: SwimlaneLink, event: ReactMouseEvent<SVGPathElement>) {
+    if (swimlaneSuppressClickRef.current) {
+      swimlaneSuppressClickRef.current = false;
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    openInlineChartEditorAtPoint(event.clientX, event.clientY, {
+      kind: "swimlaneArrow",
+      linkId: link.id,
+      value: link.label,
+    });
   }
 
   async function getAccessToken() {
@@ -2580,6 +3912,7 @@ export function ProcessMapBuilderClient({
         `Method: DMAIC ${phase.label}`,
         `Diagram: ${definition.label}`,
         `Process area: ${processArea || "Not specified"}`,
+        `Purpose: ${purpose}`,
         `Prompt: ${prompt}`,
         `Steps or fields: ${items.join("; ")}`,
         `Chart data: ${metrics.map((metric) => `${metric.label}=${metric.value}/${metric.value2}`).join("; ")}`,
@@ -2618,6 +3951,7 @@ export function ProcessMapBuilderClient({
       diagramType,
       dmaicPhase,
       processArea,
+      purposeLength: purpose.trim().length,
       formulaTool,
       usesCapability: formulaTool === "capability",
       usesOee: formulaTool === "oee",
@@ -2632,6 +3966,39 @@ export function ProcessMapBuilderClient({
       availability: oeeStats.availability,
       performance: oeeStats.performance,
       quality: oeeStats.quality,
+    };
+  }
+
+  function buildProcessMapPayload() {
+    return {
+      version: 1,
+      title,
+      purpose,
+      prompt,
+      diagramType,
+      dmaicPhase,
+      processArea,
+      departmentId: departmentId || null,
+      items,
+      lanes,
+      metrics,
+      formulaTool,
+      capabilityData: capabilityValues,
+      specLower: normalizedSpecLower,
+      specUpper: normalizedSpecUpper,
+      target: normalizedTarget,
+      style: diagramStyle,
+      textStyle: diagramTextStyle,
+      layers: layerSettings,
+      customFlow: {
+        nodes: customFlowNodes,
+        links: customFlowLinks,
+        view: customCanvasView,
+      },
+      swimlane: {
+        steps: swimlaneSteps,
+        links: swimlaneLinks,
+      },
     };
   }
 
@@ -2683,9 +4050,33 @@ export function ProcessMapBuilderClient({
 
       setRecommendation(payload);
       setDiagramType(payload.diagramType);
+      setSelectedCustomLinkId(null);
+      setInlineChartEditor(null);
       setDmaicPhase(payload.dmaicPhase);
       setTitle(payload.suggestedTitle);
       setItemsText(payload.starterItems.join("\n"));
+      if (payload.diagramType === "swimlane") {
+        const defaultSteps: SwimlaneStep[] = payload.starterItems.map((item, index) => ({
+          id: `swim-step-${index + 1}`,
+          label: item,
+          laneIndex: index % Math.max(1, lanes.length),
+          x: 305 + index * 150,
+        }));
+        setSwimlaneSteps(defaultSteps);
+        setSwimlaneLinks(
+          defaultSteps.slice(1).map((step, index) => {
+            const previousStep = defaultSteps[index];
+            return {
+              id: `swim-link-${index + 1}`,
+              from: previousStep.id,
+              to: step.id,
+              label: "",
+              bendX: (previousStep.x + step.x) / 2,
+              bendY: step.laneIndex * 92 + 46,
+            };
+          }),
+        );
+      }
       setFormulaTool("none");
       if (payload.metricRows?.length) {
         setMetricsText(payload.metricRows.join("\n"));
@@ -2714,7 +4105,6 @@ export function ProcessMapBuilderClient({
             : "Rules-based chart recommendation applied."),
       );
       setPreviewRevision((current) => current + 1);
-      setChartModalOpen(true);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unable to recommend a chart.");
     } finally {
@@ -2910,7 +4300,7 @@ export function ProcessMapBuilderClient({
     `DMAIC: ${escapeHtml(phase.label)}`
   } | Process area: ${escapeHtml(processArea || "Unassigned")}</div>
   <h2>Purpose</h2>
-  <p>${escapeHtml(prompt)}</p>
+  <p>${escapeHtml(purpose)}</p>
   <h2>Diagram</h2>
   <div class="diagram">${
     TABLE_DIAGRAM_TYPES.has(diagramType) ? buildTableDiagramHtml(diagramType, items, metrics) : svg
@@ -2976,7 +4366,6 @@ export function ProcessMapBuilderClient({
   function refreshPreview() {
     setPreviewRevision((current) => current + 1);
     setMessage("Chart preview refreshed with the current data.");
-    setChartModalOpen(true);
   }
 
   async function copyOutline() {
@@ -3009,7 +4398,7 @@ export function ProcessMapBuilderClient({
         diagramType,
         dmaicEnabled,
         dmaicPhase,
-        prompt,
+        purpose,
         processArea,
         items,
         lanes,
@@ -3040,7 +4429,8 @@ export function ProcessMapBuilderClient({
           status: "draft",
           departmentId: departmentId || null,
           processName: title,
-          processScope: prompt,
+          processScope: purpose,
+          processPurpose: purpose,
           processInputs: definition.keyFields.join(", "),
           processOutputs: `${definition.label} controlled draft`,
           processRisks:
@@ -3056,6 +4446,7 @@ export function ProcessMapBuilderClient({
             "10.2 Nonconformity and corrective action",
           ],
           bodyHtml,
+          processMapPayload: buildProcessMapPayload(),
           changeSummary: `Initial ${definition.label} draft created in the process map builder.`,
           sourceType: "manual",
         }),
@@ -3087,18 +4478,441 @@ export function ProcessMapBuilderClient({
     }
   }
 
-  const workspaceCanvas = isCustomFlowDiagram ? (
-    <div className="grid h-full min-h-[42rem] grid-rows-[auto_minmax(0,1fr)] bg-white dark:bg-slate-950">
-      <div className="grid gap-2 border-b border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-950">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-extrabold text-slate-950 dark:text-slate-50">
-              Diagram Canvas
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Ctrl-wheel to zoom. Alt-drag or middle-drag to pan. Use Arrow mode to connect shapes.
-            </p>
+  const diagramTextCss = {
+    color: diagramTextStyle.color,
+    fontFamily: diagramTextStyle.fontFamily,
+    fontSize: `${12 * diagramTextStyle.fontScale}px`,
+    fontWeight: diagramTextStyle.bold ? 800 : 600,
+    fontStyle: diagramTextStyle.italic ? "italic" : "normal",
+    textDecoration: diagramTextStyle.underline ? "underline" : "none",
+  };
+  const editTargetLabel =
+    inlineChartEditor?.kind === "metric"
+      ? inlineChartEditor.field === "label"
+        ? "Label"
+        : inlineChartEditor.field === "value"
+          ? "Value"
+          : "Secondary"
+      : inlineChartEditor?.kind === "lane"
+        ? "Lane"
+        : inlineChartEditor?.kind === "swimlaneArrow"
+          ? "Arrow"
+          : inlineChartEditor?.kind === "customLink"
+            ? "Arrow"
+          : inlineChartEditor?.kind === "purpose"
+            ? "Purpose"
+            : inlineChartEditor?.kind === "title"
+              ? "Title"
+              : "Text";
+
+  const inlineStyleTarget = (() => {
+    if (!inlineChartEditor) {
+      return null;
+    }
+
+    if (inlineChartEditor.kind === "customNode") {
+      const node = customFlowNodes.find((entry) => entry.id === inlineChartEditor.nodeId);
+      return node ? { style: getCustomFlowNodeStyle(node), supportsFill: true, supportsText: true } : null;
+    }
+
+    if (inlineChartEditor.kind === "customLink") {
+      const link = customFlowLinks.find((entry) => entry.id === inlineChartEditor.linkId);
+      return link ? { style: getCustomFlowLinkStyle(link), supportsFill: false, supportsText: true } : null;
+    }
+
+    if (inlineChartEditor.kind === "swimlaneStep") {
+      const step = swimlaneSteps.find((entry) => entry.id === inlineChartEditor.stepId);
+      return step ? { style: getSwimlaneStepStyle(step), supportsFill: true, supportsText: true } : null;
+    }
+
+    if (inlineChartEditor.kind === "swimlaneArrow") {
+      const link = swimlaneLinks.find((entry) => entry.id === inlineChartEditor.linkId);
+      return link ? { style: getSwimlaneLinkStyle(link), supportsFill: false, supportsText: true } : null;
+    }
+
+    return null;
+  })();
+
+  function updateInlineElementStyle(stylePatch: Partial<DiagramElementStyle>) {
+    if (!inlineChartEditor) {
+      return;
+    }
+
+    if (inlineChartEditor.kind === "customNode") {
+      updateCustomFlowNodeStyle(inlineChartEditor.nodeId, stylePatch);
+    } else if (inlineChartEditor.kind === "customLink") {
+      updateCustomFlowLinkStyle(inlineChartEditor.linkId, stylePatch);
+    } else if (inlineChartEditor.kind === "swimlaneStep") {
+      updateSwimlaneStepStyle(inlineChartEditor.stepId, stylePatch);
+    } else if (inlineChartEditor.kind === "swimlaneArrow") {
+      updateSwimlaneLinkStyle(inlineChartEditor.linkId, stylePatch);
+    }
+  }
+
+  function applyQuickColor(color: string) {
+    if (!inlineStyleTarget) {
+      return;
+    }
+
+    if (inlineStyleTarget?.supportsFill) {
+      updateInlineElementStyle({ fillColor: color });
+      return;
+    }
+
+    updateInlineElementStyle({ strokeColor: color });
+  }
+
+  const canAddFromEditTarget = Boolean(
+    inlineChartEditor &&
+      ["item", "lane", "metric", "swimlaneStep"].includes(inlineChartEditor.kind),
+  );
+  const canDeleteFromEditTarget = Boolean(
+    inlineChartEditor &&
+      !["title", "purpose", "fishboneEffect"].includes(inlineChartEditor.kind),
+  );
+
+  const canvasQuickControls = (() => {
+    if (isCustomFlowDiagram) {
+      const hasSelection = Boolean(selectedCustomNodeId || selectedCustomLinkId);
+
+      if (!hasSelection) {
+        return null;
+      }
+
+      return (
+        <div
+          className="absolute right-3 top-12 z-20 inline-flex rounded-lg border border-slate-300/80 bg-white/95 p-1 shadow-sm dark:border-slate-700 dark:bg-slate-950/95"
+          data-process-edit-bar
+        >
+          <button
+            type="button"
+            onClick={deleteSelectedCustomElement}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-rose-700 transition hover:bg-rose-500/15 dark:text-rose-200"
+            aria-label="Delete selected shape or arrow"
+            title="Delete selected shape or arrow"
+          >
+            <Trash2 size={16} />
+          </button>
+        </div>
+      );
+    }
+
+    const addLabel =
+      diagramType === "swimlane"
+        ? "Add swimlane step"
+        : diagramType === "fishbone"
+          ? "Add cause group"
+          : CHART_DATA_DIAGRAM_TYPES.has(diagramType) || TABLE_DIAGRAM_TYPES.has(diagramType)
+            ? "Add data row"
+            : "Add item";
+    const deleteLabel =
+      diagramType === "swimlane"
+        ? "Delete selected or last swimlane step"
+        : diagramType === "fishbone"
+          ? "Delete cause group"
+          : CHART_DATA_DIAGRAM_TYPES.has(diagramType) || TABLE_DIAGRAM_TYPES.has(diagramType)
+            ? "Delete data row"
+            : "Delete item";
+
+    return (
+      <div
+        className="absolute right-3 top-3 z-10 inline-flex rounded-lg border border-slate-300/80 bg-white/95 p-1 shadow-sm dark:border-slate-700 dark:bg-slate-950/95"
+        data-process-edit-bar
+      >
+        <button
+          type="button"
+          onClick={addChartDataRow}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-cyan-800 transition hover:bg-cyan-500/15 dark:text-cyan-100"
+          aria-label={addLabel}
+          title={addLabel}
+        >
+          <Plus size={16} />
+        </button>
+        <button
+          type="button"
+          onClick={deleteCurrentEditTarget}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-rose-700 transition hover:bg-rose-500/15 dark:text-rose-200"
+          aria-label={deleteLabel}
+          title={deleteLabel}
+        >
+          <Trash2 size={16} />
+        </button>
+      </div>
+    );
+  })();
+
+  const floatingEditBar = inlineChartEditor ? (
+    <form
+      ref={editBarRef}
+      className="absolute z-30 grid min-w-[18rem] gap-2 rounded-lg border border-slate-300/80 bg-white p-2 text-xs shadow-lg shadow-slate-950/15 dark:border-slate-700 dark:bg-slate-950"
+      data-process-edit-bar
+      style={{
+        left: inlineChartEditor.left,
+        top: inlineChartEditor.top,
+        width: inlineChartEditor.width,
+      }}
+      onPointerDown={(event) => event.stopPropagation()}
+      onSubmit={(event) => {
+        event.preventDefault();
+        setInlineChartEditor(null);
+      }}
+    >
+      <div className="flex items-center gap-1.5">
+        <Type size={14} className="shrink-0 text-slate-500" />
+        <input
+          autoFocus
+          aria-label={`Edit ${editTargetLabel.toLowerCase()}`}
+          value={inlineChartEditor.value}
+          inputMode={
+            inlineChartEditor.kind === "metric" && inlineChartEditor.field !== "label"
+              ? "decimal"
+              : "text"
+          }
+          onChange={(event) => updateInlineChartEditValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              inlineChartEditCancelledRef.current = true;
+              setInlineChartEditor(null);
+            }
+          }}
+          className="h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold outline-none focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+        />
+        <button
+          type="button"
+          onClick={addCurrentEditTarget}
+          hidden={!canAddFromEditTarget}
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-cyan-500/35 text-cyan-800 transition hover:bg-cyan-500/15 dark:text-cyan-100"
+          aria-label="Add related item"
+          title="Add related item"
+        >
+          <Plus size={14} />
+        </button>
+        <button
+          type="button"
+          onClick={deleteCurrentEditTarget}
+          hidden={!canDeleteFromEditTarget}
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-rose-500/35 text-rose-700 transition hover:bg-rose-500/15 dark:text-rose-200"
+          aria-label="Delete selected item"
+          title="Delete selected item"
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        {inlineStyleTarget ? (
+          <>
+            {QUICK_COLOR_SWATCHES.map((color) => (
+              <button
+                key={color}
+                type="button"
+                onClick={() => applyQuickColor(color)}
+                className={cn(
+                  "inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white p-1 transition hover:scale-105 dark:border-slate-700 dark:bg-slate-950",
+                  (inlineStyleTarget.supportsFill
+                    ? inlineStyleTarget.style.fillColor
+                    : inlineStyleTarget.style.strokeColor) === color
+                    ? "ring-2 ring-cyan-500/45"
+                    : "",
+                )}
+                aria-label={`Apply ${color}`}
+                title={`Apply ${color}`}
+              >
+                <span
+                  className="block h-5 w-5 rounded"
+                  style={{
+                    backgroundColor: color,
+                    border: color.toLowerCase() === "#ffffff" ? "1px solid #94a3b8" : "0",
+                  }}
+                />
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setShowAdvancedColors((current) => !current)}
+              className={cn(
+                "inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] font-bold transition",
+                showAdvancedColors
+                  ? "border-cyan-500/45 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
+                  : "border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300",
+              )}
+              aria-label="See more colors"
+              title="See more colors"
+            >
+              <Palette size={12} />
+              More
+            </button>
+          </>
+        ) : null}
+        {showAdvancedColors && inlineStyleTarget ? (
+          <div className="grid basis-full gap-1.5 rounded-md border border-slate-300/80 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900/70">
+            <div className="grid grid-cols-3 gap-1.5">
+              <label
+                className={cn(
+                  "grid gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400",
+                  inlineStyleTarget?.supportsFill === false ? "opacity-45" : "",
+                )}
+              >
+                Fill
+                <input
+                  type="color"
+                  disabled={inlineStyleTarget?.supportsFill === false}
+                  value={inlineStyleTarget?.style.fillColor ?? diagramStyle.secondaryColor}
+                  onChange={(event) => updateInlineElementStyle({ fillColor: event.target.value })}
+                  className="h-7 w-full cursor-pointer rounded border border-slate-300 bg-transparent p-0 disabled:cursor-not-allowed dark:border-slate-700"
+                />
+              </label>
+              <label className="grid gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Line
+                <input
+                  type="color"
+                  value={inlineStyleTarget?.style.strokeColor ?? diagramStyle.primaryColor}
+                  onChange={(event) => updateInlineElementStyle({ strokeColor: event.target.value })}
+                  className="h-7 w-full cursor-pointer rounded border border-slate-300 bg-transparent p-0 dark:border-slate-700"
+                />
+              </label>
+              <label className="grid gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Text
+                <input
+                  type="color"
+                  value={inlineStyleTarget?.style.textColor ?? diagramTextStyle.color}
+                  onChange={(event) => {
+                    if (inlineStyleTarget) {
+                      updateInlineElementStyle({ textColor: event.target.value });
+                    } else {
+                      updateDiagramTextStyle("color", event.target.value);
+                    }
+                  }}
+                  className="h-7 w-full cursor-pointer rounded border border-slate-300 bg-transparent p-0 dark:border-slate-700"
+                />
+              </label>
+            </div>
           </div>
+        ) : null}
+        <select
+          aria-label="Font"
+          value={diagramTextStyle.fontFamily}
+          onChange={(event) => updateDiagramTextStyle("fontFamily", event.target.value)}
+          className="h-7 min-w-[7rem] rounded-md border border-slate-300 bg-white px-1.5 text-[11px] font-semibold outline-none focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+        >
+          <option value="Inter, Arial, sans-serif">Inter</option>
+          <option value="Arial, sans-serif">Arial</option>
+          <option value="Georgia, serif">Georgia</option>
+          <option value="'Courier New', monospace">Courier</option>
+        </select>
+        <button
+          type="button"
+          onClick={() => updateDiagramTextStyle("bold", !diagramTextStyle.bold)}
+          className={cn(
+            "inline-flex h-7 w-7 items-center justify-center rounded-md border transition",
+            diagramTextStyle.bold
+              ? "border-cyan-500/45 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
+              : "border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300",
+          )}
+          aria-label="Bold"
+          title="Bold"
+        >
+          <Bold size={13} />
+        </button>
+        <button
+          type="button"
+          onClick={() => updateDiagramTextStyle("italic", !diagramTextStyle.italic)}
+          className={cn(
+            "inline-flex h-7 w-7 items-center justify-center rounded-md border transition",
+            diagramTextStyle.italic
+              ? "border-cyan-500/45 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
+              : "border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300",
+          )}
+          aria-label="Italic"
+          title="Italic"
+        >
+          <Italic size={13} />
+        </button>
+        <button
+          type="button"
+          onClick={() => updateDiagramTextStyle("underline", !diagramTextStyle.underline)}
+          className={cn(
+            "inline-flex h-7 w-7 items-center justify-center rounded-md border transition",
+            diagramTextStyle.underline
+              ? "border-cyan-500/45 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
+              : "border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300",
+          )}
+          aria-label="Underline"
+          title="Underline"
+        >
+          <Underline size={13} />
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            updateDiagramTextStyle(
+              "fontScale",
+              clampNumber(diagramTextStyle.fontScale - 0.08, 0.78, 1.5),
+            )
+          }
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300"
+          aria-label="Smaller text"
+          title="Smaller text"
+        >
+          <Minus size={13} />
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            updateDiagramTextStyle(
+              "fontScale",
+              clampNumber(diagramTextStyle.fontScale + 0.08, 0.78, 1.5),
+            )
+          }
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300"
+          aria-label="Larger text"
+          title="Larger text"
+        >
+          <Plus size={13} />
+        </button>
+        <button
+          type="button"
+          onClick={() => updateLayerSetting("showTitle", !layerSettings.showTitle)}
+          className={cn(
+            "inline-flex h-7 min-w-7 items-center justify-center rounded-md border px-1.5 text-[10px] font-bold transition",
+            layerSettings.showTitle
+              ? "border-cyan-500/45 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
+              : "border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300",
+          )}
+          aria-label="Toggle title"
+          title="Toggle title"
+        >
+          T
+        </button>
+        <button
+          type="button"
+          onClick={() => updateLayerSetting("showGrid", !layerSettings.showGrid)}
+          className={cn(
+            "inline-flex h-7 min-w-7 items-center justify-center rounded-md border px-1.5 text-[10px] font-bold transition",
+            layerSettings.showGrid
+              ? "border-cyan-500/45 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
+              : "border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300",
+          )}
+          aria-label="Toggle grid"
+          title="Toggle grid"
+        >
+          #
+        </button>
+      </div>
+    </form>
+  ) : null;
+
+  const workspaceCanvas = isCustomFlowDiagram ? (
+    <div
+      ref={sandboxHostRef}
+      className="relative grid h-[calc(100dvh-5rem)] min-h-[56rem] grid-rows-[auto_minmax(0,1fr)] bg-white dark:bg-slate-950"
+      onPointerDownCapture={handleSandboxPointerDownCapture}
+    >
+      {canvasQuickControls}
+      {floatingEditBar}
+      <div className="border-b border-slate-200 bg-white px-2 py-1 dark:border-slate-800 dark:bg-slate-950">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
             <div className="inline-flex rounded-lg border border-slate-300 bg-white p-1 dark:border-slate-700 dark:bg-slate-950">
               {[
@@ -3106,6 +4920,7 @@ export function ProcessMapBuilderClient({
                 ["process", "Process"],
                 ["decision", "Decision"],
                 ["terminator", "Start/End"],
+                ["custom", "Custom"],
                 ["connector", "Arrow"],
               ].map(([mode, label]) => (
                 <button
@@ -3180,6 +4995,15 @@ export function ProcessMapBuilderClient({
               </button>
               <button
                 type="button"
+                onClick={applyCustomFlowToSteps}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900"
+                aria-label="Sync canvas labels to rows"
+                title="Sync canvas labels to rows"
+              >
+                <RefreshCw size={14} />
+              </button>
+              <button
+                type="button"
                 onClick={() => setChartModalOpen(true)}
                 className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900"
                 aria-label="Open large preview"
@@ -3191,35 +5015,6 @@ export function ProcessMapBuilderClient({
           </div>
         </div>
 
-        {selectedCustomNode ? (
-          <div className="flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 dark:border-slate-800 dark:bg-slate-900/55">
-            <label className="grid min-w-[14rem] flex-1 gap-1 text-xs">
-              <span className="font-semibold text-slate-600 dark:text-slate-300">
-                Selected {selectedCustomNode.type}
-              </span>
-              <input
-                value={selectedCustomNode.label}
-                onChange={(event) => updateSelectedCustomNodeLabel(event.target.value)}
-                className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-              />
-            </label>
-            <button
-              type="button"
-              onClick={applyCustomFlowToSteps}
-              className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-            >
-              Sync source
-            </button>
-            <button
-              type="button"
-              onClick={deleteSelectedCustomNode}
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-rose-300 bg-rose-50 px-3 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200"
-            >
-              <Trash2 size={14} />
-              Delete
-            </button>
-          </div>
-        ) : null}
       </div>
       <svg
         ref={customCanvasSvgRef}
@@ -3229,7 +5024,7 @@ export function ProcessMapBuilderClient({
           "h-full min-h-[38rem] w-full",
           drawingMode === "select"
             ? "cursor-default"
-            : drawingMode === "connector"
+            : drawingMode === "connector" || drawingMode === "custom"
               ? "cursor-crosshair"
               : "cursor-copy",
         )}
@@ -3240,11 +5035,21 @@ export function ProcessMapBuilderClient({
         onWheel={handleCustomCanvasWheel}
         onPointerDown={(event) => {
           event.currentTarget.focus();
+          handleCustomShapePointerDown(event);
           handleCustomCanvasPointerDown(event);
         }}
-        onPointerMove={handleCustomCanvasPointerMove}
-        onPointerUp={finishCustomCanvasPan}
-        onPointerCancel={finishCustomCanvasPan}
+        onPointerMove={(event) => {
+          handleCustomShapePointerMove(event);
+          handleCustomCanvasPointerMove(event);
+        }}
+        onPointerUp={(event) => {
+          finishCustomShapeDrawing(event);
+          finishCustomCanvasPan(event);
+        }}
+        onPointerCancel={(event) => {
+          finishCustomShapeDrawing(event);
+          finishCustomCanvasPan(event);
+        }}
       >
         <defs>
           <marker
@@ -3256,7 +5061,7 @@ export function ProcessMapBuilderClient({
             orient="auto"
             markerUnits="strokeWidth"
           >
-            <path d="M0,0 L0,6 L9,3 z" fill={diagramStyle.primaryColor} />
+            <path d="M0,0 L0,6 L9,3 z" fill="context-stroke" />
           </marker>
           <pattern id="custom-grid-workspace" width="24" height="24" patternUnits="userSpaceOnUse">
             <path
@@ -3277,23 +5082,170 @@ export function ProcessMapBuilderClient({
           height={CUSTOM_FLOW_CANVAS_HEIGHT}
           fill="url(#custom-grid-workspace)"
         />
+        {draftCustomShapePoints && draftCustomShapePoints.length > 1 ? (
+          <path
+            d={`${draftCustomShapePoints
+              .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
+              .join(" ")} Z`}
+            fill="#f5f3ff"
+            fillOpacity="0.58"
+            stroke="#7c3aed"
+            strokeDasharray="8 6"
+            strokeWidth="2.5"
+            pointerEvents="none"
+          />
+        ) : null}
         {customFlowLinks.map((link) => {
           const from = customFlowNodes.find((node) => node.id === link.from);
           const to = customFlowNodes.find((node) => node.id === link.to);
           if (!from || !to) {
             return null;
           }
+          const route = getCustomFlowLinkRoute(link, from, to);
+          const path = customFlowPathFromRoute(route);
+          const linkStyle = getCustomFlowLinkStyle(link);
+          const isSelected = link.id === selectedCustomLinkId;
+          const labelPoint = getRouteMidpoint(route);
           return (
-            <line
-              key={link.id}
-              x1={from.x + CUSTOM_FLOW_NODE_HALF_WIDTH}
-              y1={from.y}
-              x2={to.x - CUSTOM_FLOW_NODE_HALF_WIDTH}
-              y2={to.y}
-              stroke={diagramStyle.primaryColor}
-              strokeWidth="3"
-              markerEnd="url(#custom-flow-arrow-workspace)"
-            />
+            <g key={link.id}>
+              <path
+                d={path}
+                fill="none"
+                stroke={linkStyle.strokeColor}
+                strokeWidth="14"
+                strokeOpacity="0"
+                className="cursor-crosshair"
+                onPointerDown={(event) => handleCustomLinkPathPointerDown(link, event)}
+                onPointerMove={handleCustomLinkBendPointerMove}
+                onPointerUp={finishCustomLinkBendDrag}
+                onPointerCancel={finishCustomLinkBendDrag}
+                onClick={(event) => handleCustomLinkClick(link, event)}
+                onDoubleClick={(event) => handleCustomLinkDoubleClick(link, event)}
+              />
+              <path
+                d={path}
+                fill="none"
+                stroke={linkStyle.strokeColor}
+                strokeWidth={isSelected ? 4 : 3}
+                markerEnd="url(#custom-flow-arrow-workspace)"
+                pointerEvents="none"
+              />
+              {isSelected ? (
+                <path
+                  d={path}
+                  fill="none"
+                  stroke="#0ea5e9"
+                  strokeDasharray="7 7"
+                  strokeWidth="1.5"
+                  pointerEvents="none"
+                />
+              ) : null}
+              {link.label?.trim() ? (
+                <foreignObject
+                  x={labelPoint.x - 70}
+                  y={labelPoint.y - 34}
+                  width="140"
+                  height="24"
+                  pointerEvents="none"
+                >
+                  <div
+                    className="flex h-full items-center justify-center rounded bg-white/80 px-1 text-center leading-tight dark:bg-slate-950/80"
+                    style={{
+                      ...diagramTextCss,
+                      color: linkStyle.textColor,
+                      fontSize: `${10 * diagramTextStyle.fontScale}px`,
+                    }}
+                  >
+                    {link.label}
+                  </div>
+                </foreignObject>
+              ) : null}
+              {isSelected
+                ? route.slice(0, -1).map((point, segmentIndex) => {
+                    const nextPoint = route[segmentIndex + 1];
+                    const midpoint = {
+                      x: (point.x + nextPoint.x) / 2,
+                      y: (point.y + nextPoint.y) / 2,
+                    };
+                    return (
+                      <g key={`${link.id}-segment-${segmentIndex}`}>
+                        <circle
+                          cx={midpoint.x}
+                          cy={midpoint.y}
+                          r="10"
+                          fill="#ffffff"
+                          stroke="#0ea5e9"
+                          strokeWidth="1.5"
+                          className="cursor-copy"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            pushCustomFlowHistory();
+                            addCustomFlowLinkAnchor(link.id, segmentIndex, midpoint);
+                          }}
+                        />
+                        <text
+                          x={midpoint.x}
+                          y={midpoint.y + 4}
+                          textAnchor="middle"
+                          fontSize="15"
+                          fontWeight="800"
+                          fill="#0369a1"
+                          pointerEvents="none"
+                        >
+                          +
+                        </text>
+                      </g>
+                    );
+                  })
+                : null}
+              {isSelected
+                ? (link.anchors ?? []).map((anchor, anchorIndex) => (
+                    <g key={`${link.id}-anchor-${anchorIndex}`}>
+                      <circle
+                        cx={anchor.x}
+                        cy={anchor.y}
+                        r="8"
+                        fill={diagramStyle.accentColor}
+                        stroke="#ffffff"
+                        strokeWidth="2"
+                        className="cursor-move"
+                        onPointerDown={(event) =>
+                          handleCustomLinkAnchorPointerDown(link.id, anchorIndex, event)
+                        }
+                        onPointerMove={handleCustomLinkBendPointerMove}
+                        onPointerUp={finishCustomLinkBendDrag}
+                        onPointerCancel={finishCustomLinkBendDrag}
+                      />
+                      <circle
+                        cx={anchor.x + 13}
+                        cy={anchor.y - 13}
+                        r="6"
+                        fill="#ffffff"
+                        stroke="#e11d48"
+                        strokeWidth="1.5"
+                        className="cursor-pointer"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          removeCustomFlowLinkAnchor(link.id, anchorIndex);
+                        }}
+                      />
+                      <text
+                        x={anchor.x + 13}
+                        y={anchor.y - 10}
+                        textAnchor="middle"
+                        fontSize="10"
+                        fontWeight="800"
+                        fill="#e11d48"
+                        pointerEvents="none"
+                      >
+                        -
+                      </text>
+                    </g>
+                  ))
+                : null}
+            </g>
           );
         })}
         {draftConnector ? (
@@ -3302,10 +5254,16 @@ export function ProcessMapBuilderClient({
             if (!from) {
               return null;
             }
+            const start = draftConnector.fromOffset
+              ? {
+                  x: from.x + draftConnector.fromOffset.x,
+                  y: from.y + draftConnector.fromOffset.y,
+                }
+              : getCustomFlowNodeEdgePoint(from, draftConnector);
             return (
               <line
-                x1={from.x}
-                y1={from.y}
+                x1={start.x}
+                y1={start.y}
                 x2={draftConnector.x}
                 y2={draftConnector.y}
                 stroke={diagramStyle.accentColor}
@@ -3319,6 +5277,9 @@ export function ProcessMapBuilderClient({
         {customFlowNodes.map((node) => {
           const isSelected = node.id === selectedCustomNodeId;
           const isPending = node.id === pendingConnectorNodeId;
+          const isConnectorTarget = draftConnector?.targetNodeId === node.id;
+          const nodeStyle = getCustomFlowNodeStyle(node);
+          const halfSize = getCustomFlowNodeHalfSize(node);
           return (
             <g
               key={node.id}
@@ -3331,20 +5292,27 @@ export function ProcessMapBuilderClient({
               onKeyDown={(event) => handleCustomNodeKeyDown(node, event)}
               onClick={(event) => {
                 event.stopPropagation();
-                handleCustomNodeClick(node.id);
+                handleCustomNodeClick(node.id, event);
               }}
               className={drawingMode === "select" ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}
             >
-              {node.type === "decision" ? (
+              {node.type === "custom" ? (
+                <path
+                  d={getCustomFlowShapePath(node)}
+                  fill={nodeStyle.fillColor}
+                  stroke={isPending || isConnectorTarget ? diagramStyle.accentColor : nodeStyle.strokeColor}
+                  strokeWidth={isSelected || isPending || isConnectorTarget ? 4 : 2}
+                />
+              ) : node.type === "decision" ? (
                 <polygon
                   points={`${node.x},${node.y - CUSTOM_FLOW_DECISION_HALF_HEIGHT} ${
                     node.x + CUSTOM_FLOW_DECISION_HALF_WIDTH
                   },${node.y} ${node.x},${node.y + CUSTOM_FLOW_DECISION_HALF_HEIGHT} ${
                     node.x - CUSTOM_FLOW_DECISION_HALF_WIDTH
                   },${node.y}`}
-                  fill={isSelected ? "#ccfbf1" : "#fff7ed"}
-                  stroke={isPending ? diagramStyle.accentColor : diagramStyle.primaryColor}
-                  strokeWidth={isSelected || isPending ? 4 : 2}
+                  fill={nodeStyle.fillColor}
+                  stroke={isPending || isConnectorTarget ? diagramStyle.accentColor : nodeStyle.strokeColor}
+                  strokeWidth={isSelected || isPending || isConnectorTarget ? 4 : 2}
                 />
               ) : (
                 <rect
@@ -3353,18 +5321,21 @@ export function ProcessMapBuilderClient({
                   width={CUSTOM_FLOW_NODE_HALF_WIDTH * 2}
                   height={CUSTOM_FLOW_NODE_HALF_HEIGHT * 2}
                   rx={node.type === "terminator" ? 28 : 10}
-                  fill={isSelected ? "#ccfbf1" : "#ffffff"}
-                  stroke={isPending ? diagramStyle.accentColor : diagramStyle.primaryColor}
-                  strokeWidth={isSelected || isPending ? 4 : 2}
+                  fill={nodeStyle.fillColor}
+                  stroke={isPending || isConnectorTarget ? diagramStyle.accentColor : nodeStyle.strokeColor}
+                  strokeWidth={isSelected || isPending || isConnectorTarget ? 4 : 2}
                 />
               )}
               <foreignObject
-                x={node.x - CUSTOM_FLOW_NODE_HALF_WIDTH + 18}
+                x={node.x - halfSize.width + 18}
                 y={node.y - 24}
-                width={CUSTOM_FLOW_NODE_HALF_WIDTH * 2 - 36}
+                width={Math.max(32, halfSize.width * 2 - 36)}
                 height="48"
               >
-                <div className="flex h-full items-center justify-center text-center text-xs font-bold leading-tight text-slate-900">
+                <div
+                  className="flex h-full items-center justify-center text-center leading-tight"
+                  style={{ ...diagramTextCss, color: nodeStyle.textColor }}
+                >
                   {node.label}
                 </div>
               </foreignObject>
@@ -3373,8 +5344,222 @@ export function ProcessMapBuilderClient({
         })}
       </svg>
     </div>
+  ) : diagramType === "swimlane" ? (
+    <div
+      ref={sandboxHostRef}
+      className="relative h-full min-h-[36rem] w-full overflow-auto bg-slate-50 p-4 dark:bg-slate-900/60"
+      onPointerDownCapture={handleSandboxPointerDownCapture}
+    >
+      {canvasQuickControls}
+      {floatingEditBar}
+      <svg
+        ref={swimlaneSvgRef}
+        viewBox={`0 0 960 ${getSwimlaneHeight()}`}
+        className="h-full min-h-[32rem] w-full"
+        role="img"
+        aria-label="Editable swimlane map"
+        onPointerMove={handleSwimlanePointerMove}
+        onPointerUp={finishSwimlaneDrag}
+        onPointerCancel={finishSwimlaneDrag}
+      >
+        <defs>
+          <marker
+            id="swimlane-arrow-workspace"
+            markerWidth="10"
+            markerHeight="10"
+            refX="8"
+            refY="3"
+            orient="auto"
+            markerUnits="strokeWidth"
+          >
+            <path d="M0,0 L0,6 L9,3 z" fill="context-stroke" />
+          </marker>
+          <pattern id="swimlane-grid-workspace" width="24" height="24" patternUnits="userSpaceOnUse">
+            <path
+              d="M 24 0 L 0 0 0 24"
+              fill="none"
+              stroke={layerSettings.showGrid ? "#cbd5e1" : "transparent"}
+              strokeWidth="0.7"
+            />
+          </pattern>
+        </defs>
+        <rect width="960" height={getSwimlaneHeight()} fill={diagramStyle.backgroundColor} />
+        <rect width="960" height={getSwimlaneHeight()} fill="url(#swimlane-grid-workspace)" opacity="0.52" />
+        {layerSettings.showTitle ? (
+          <text
+            x="480"
+            y="38"
+            textAnchor="middle"
+            fill={diagramTextStyle.color}
+            fontFamily={diagramTextStyle.fontFamily}
+            fontSize={20 * diagramTextStyle.fontScale}
+            fontWeight={diagramTextStyle.bold ? 800 : 500}
+            fontStyle={diagramTextStyle.italic ? "italic" : "normal"}
+            textDecoration={diagramTextStyle.underline ? "underline" : "none"}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              openInlineChartEditorAtPoint(event.clientX, event.clientY, {
+                kind: "title",
+                value: title,
+              });
+            }}
+            className="cursor-text"
+          >
+            {title}
+          </text>
+        ) : null}
+        {lanes.map((lane, laneIndex) => {
+          const y = getSwimlaneTop() + laneIndex * 92;
+          return (
+            <g key={`${lane}-${laneIndex}`}>
+              <rect
+                x="36"
+                y={y}
+                width="888"
+                height="92"
+                fill={laneIndex % 2 === 0 ? "#f1f5f9" : "#ffffff"}
+                stroke="#cbd5e1"
+                strokeWidth="1.5"
+              />
+              <rect
+                x="36"
+                y={y}
+                width="154"
+                height="92"
+                fill="#ccfbf1"
+                stroke="#99f6e4"
+                strokeWidth="1.5"
+              />
+              <foreignObject x="48" y={y + 24} width="130" height="44">
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    openInlineChartEditorAtPoint(event.clientX, event.clientY, {
+                      kind: "lane",
+                      index: laneIndex,
+                      value: lane,
+                    });
+                  }}
+                  className="flex h-full w-full items-center justify-center rounded-md bg-transparent text-center leading-tight hover:bg-white/35"
+                  style={diagramTextCss}
+                >
+                  {lane}
+                </button>
+              </foreignObject>
+            </g>
+          );
+        })}
+        {swimlaneLinks.map((link) => {
+          const from = swimlaneSteps.find((step) => step.id === link.from);
+          const to = swimlaneSteps.find((step) => step.id === link.to);
+          if (!from || !to) {
+            return null;
+          }
+          const fromY = getSwimlaneTop() + from.laneIndex * 92 + 46;
+          const toY = getSwimlaneTop() + to.laneIndex * 92 + 46;
+          const fromX = from.x + 82;
+          const toX = to.x - 82;
+          const bendX = Number.isFinite(link.bendX) ? link.bendX : (fromX + toX) / 2;
+          const bendY = Number.isFinite(link.bendY)
+            ? getSwimlaneTop() + link.bendY
+            : (fromY + toY) / 2;
+          const linkStyle = getSwimlaneLinkStyle(link);
+          return (
+            <g key={link.id}>
+              <path
+                d={`M ${fromX} ${fromY} Q ${bendX} ${bendY} ${toX} ${toY}`}
+                fill="none"
+                stroke={linkStyle.strokeColor}
+                strokeWidth="8"
+                strokeOpacity="0"
+                className="cursor-move"
+                onPointerDown={(event) => handleSwimlaneLinkPointerDown(link, event)}
+                onPointerUp={finishSwimlaneDrag}
+                onPointerCancel={finishSwimlaneDrag}
+                onClick={(event) => handleSwimlaneLinkClick(link, event)}
+              />
+              <path
+                d={`M ${fromX} ${fromY} Q ${bendX} ${bendY} ${toX} ${toY}`}
+                fill="none"
+                stroke={linkStyle.strokeColor}
+                strokeWidth="2.5"
+                markerEnd="url(#swimlane-arrow-workspace)"
+                pointerEvents="none"
+              />
+              <circle
+                cx={bendX}
+                cy={bendY}
+                r="6"
+                fill={diagramStyle.accentColor}
+                stroke="#ffffff"
+                strokeWidth="2"
+                pointerEvents="none"
+              />
+              {link.label ? (
+                <text
+                  x={bendX}
+                  y={bendY - 12}
+                  textAnchor="middle"
+                  fill={linkStyle.textColor}
+                  fontFamily={diagramTextStyle.fontFamily}
+                  fontSize={10 * diagramTextStyle.fontScale}
+                  fontWeight={diagramTextStyle.bold ? 800 : 500}
+                  fontStyle={diagramTextStyle.italic ? "italic" : "normal"}
+                  textDecoration={diagramTextStyle.underline ? "underline" : "none"}
+                >
+                  {link.label}
+                </text>
+              ) : null}
+            </g>
+          );
+        })}
+        {swimlaneSteps.map((step) => {
+          const laneIndex = clampNumber(step.laneIndex, 0, Math.max(0, lanes.length - 1));
+          const y = getSwimlaneTop() + laneIndex * 92 + 22;
+          const stepStyle = getSwimlaneStepStyle(step);
+          return (
+            <g
+              key={step.id}
+              className="cursor-grab active:cursor-grabbing"
+              onPointerDown={(event) => handleSwimlaneStepPointerDown(step, event)}
+              onPointerMove={handleSwimlanePointerMove}
+              onPointerUp={finishSwimlaneDrag}
+              onPointerCancel={finishSwimlaneDrag}
+              onClick={(event) => handleSwimlaneStepClick(step, event)}
+            >
+              <rect
+                x={step.x - 82}
+                y={y}
+                width="164"
+                height="48"
+                rx="9"
+                fill={stepStyle.fillColor}
+                stroke={stepStyle.strokeColor}
+                strokeWidth="2"
+              />
+              <foreignObject x={step.x - 70} y={y + 5} width="140" height="38">
+                <div
+                  className="flex h-full items-center justify-center text-center leading-tight"
+                  style={{ ...diagramTextCss, color: stepStyle.textColor }}
+                >
+                  {step.label}
+                </div>
+              </foreignObject>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
   ) : TABLE_DIAGRAM_TYPES.has(diagramType) ? (
-    <div className="min-h-[36rem] overflow-auto bg-slate-50 p-4 dark:bg-slate-900/60">
+    <div
+      ref={sandboxHostRef}
+      className="relative min-h-[36rem] overflow-auto bg-slate-50 p-4 dark:bg-slate-900/60"
+      onPointerDownCapture={handleSandboxPointerDownCapture}
+    >
+      {canvasQuickControls}
+      {floatingEditBar}
       {buildTableRows(diagramType, items, metrics, {
         editable: true,
         onItemChange: updateItemLine,
@@ -3385,493 +5570,16 @@ export function ProcessMapBuilderClient({
     <div
       key={previewRevision}
       ref={chartPreviewRef}
+      onPointerDownCapture={handleSandboxPointerDownCapture}
       className="relative h-full min-h-[36rem] w-full overflow-auto bg-slate-50 p-4 dark:bg-slate-900/60 [&_svg]:h-full [&_svg]:min-h-[32rem] [&_svg]:w-full"
       aria-label="Diagram preview"
-      title="Double-click chart labels or values to edit them"
-      onDoubleClick={handleChartPreviewDoubleClick}
+      title="Click chart labels or values to edit them"
+      onClick={handleChartPreviewClick}
     >
+      {canvasQuickControls}
+      {floatingEditBar}
       <div dangerouslySetInnerHTML={{ __html: svg }} />
-      {inlineChartEditor ? (
-        <form
-          className="absolute z-20 rounded-lg border border-cyan-500/45 bg-white p-1 shadow-lg shadow-slate-950/10 dark:bg-slate-950"
-          style={{
-            left: inlineChartEditor.left,
-            top: inlineChartEditor.top,
-            width: inlineChartEditor.width,
-          }}
-          onSubmit={(event) => {
-            event.preventDefault();
-            commitInlineChartEdit();
-          }}
-        >
-          <input
-            autoFocus
-            value={inlineChartEditor.value}
-            inputMode={
-              inlineChartEditor.kind === "metric" && inlineChartEditor.field !== "label"
-                ? "decimal"
-                : "text"
-            }
-            onChange={(event) =>
-              setInlineChartEditor((current) =>
-                current ? { ...current, value: event.target.value } : current,
-              )
-            }
-            onBlur={commitInlineChartEdit}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.preventDefault();
-                inlineChartEditCancelledRef.current = true;
-                setInlineChartEditor(null);
-              }
-            }}
-            className="h-9 rounded-md border border-slate-300 bg-white px-2 text-sm font-semibold outline-none focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-          />
-        </form>
-      ) : null}
     </div>
-  );
-
-  const rowToolNoun =
-    formulaTool === "capability"
-      ? "measurement"
-      : diagramType === "fishbone"
-        ? "cause group"
-        : diagramType === "swimlane"
-          ? "process step"
-          : TABLE_DIAGRAM_TYPES.has(diagramType)
-            ? "table row"
-            : CHART_DATA_DIAGRAM_TYPES.has(diagramType)
-              ? "data point"
-              : "step";
-  const toolHelp =
-    diagramType === "fishbone"
-      ? "Add cause groups, rename the effect, and add blank cause spaces to branches."
-      : isCustomFlowDiagram
-        ? "Use shape tools for boxes, decisions, start/end nodes, connectors, zoom, and source sync."
-        : diagramType === "swimlane"
-          ? "Edit lanes and process steps separately so handoffs stay readable."
-          : CHART_DATA_DIAGRAM_TYPES.has(diagramType)
-            ? "Edit chart data as label, value, secondary value rows."
-            : TABLE_DIAGRAM_TYPES.has(diagramType)
-              ? "Edit table rows and detail cells for the selected controlled-document format."
-              : "Edit the step list used by this diagram.";
-
-  const diagramToolsPanel = (
-    <section className="grid gap-3 rounded-xl border border-slate-300/70 bg-white/80 p-3 text-sm dark:border-slate-700 dark:bg-slate-950/55">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-extrabold text-slate-950 dark:text-slate-50">
-            {definition.shortLabel} tools
-          </h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400">{toolHelp}</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={addChartDataRow}
-            className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
-          >
-            <Plus size={14} />
-            Add {rowToolNoun}
-          </button>
-          <button
-            type="button"
-            onClick={removeChartDataRow}
-            className="inline-flex items-center gap-2 rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/20 dark:text-rose-200"
-          >
-            <Trash2 size={14} />
-            Remove {rowToolNoun}
-          </button>
-        </div>
-      </div>
-
-      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_18rem]">
-        <div className="grid gap-3">
-          {isCustomFlowDiagram ? (
-            <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
-              <p className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                Canvas shapes
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {[
-                  ["select", "Select"],
-                  ["process", "Process"],
-                  ["decision", "Decision"],
-                  ["terminator", "Start/End"],
-                  ["connector", "Arrow"],
-                ].map(([mode, label]) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => {
-                      setDrawingMode(mode as DrawingMode);
-                      if (mode !== "connector") {
-                        setPendingConnectorNodeId(null);
-                        setDraftConnector(null);
-                        customConnectorDragRef.current = null;
-                      }
-                    }}
-                    className={cn(
-                      "rounded-md border px-2.5 py-1.5 text-xs font-semibold transition",
-                      drawingMode === mode
-                        ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
-                        : "border-slate-300 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300",
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={applyCustomFlowToSteps}
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
-                >
-                  <RefreshCw size={14} />
-                  Sync source
-                </button>
-                <button
-                  type="button"
-                  onClick={deleteSelectedCustomNode}
-                  disabled={!selectedCustomNode}
-                  className="inline-flex items-center gap-2 rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-50 dark:text-rose-200"
-                >
-                  <Trash2 size={14} />
-                  Delete selected
-                </button>
-              </div>
-            </div>
-          ) : null}
-
-          {diagramType === "fishbone" ? (
-            <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
-              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_14rem]">
-                <label className="grid gap-1">
-                  <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                    Effect / problem
-                  </span>
-                  <input
-                    value={fishboneEffect}
-                    onChange={(event) => setFishboneEffect(event.target.value)}
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                  />
-                </label>
-                <div className="grid gap-1">
-                  <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                    Cause spaces
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setFishboneCauseSlots((current) => Math.max(0, current - 1))}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
-                      aria-label="Remove blank cause space"
-                      title="Remove blank cause space"
-                    >
-                      <Minus size={15} />
-                    </button>
-                    <span className="min-w-8 text-center text-sm font-extrabold text-slate-950 dark:text-slate-50">
-                      {fishboneCauseSlots}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setFishboneCauseSlots((current) => Math.min(5, current + 1))}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
-                      aria-label="Add blank cause space"
-                      title="Add blank cause space"
-                    >
-                      <Plus size={15} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-              <label className="grid gap-1">
-                <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Cause groups
-                </span>
-                <textarea
-                  ref={itemsTextareaRef}
-                  value={itemsText}
-                  onChange={(event) => setItemsText(event.target.value)}
-                  rows={5}
-                  className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                />
-              </label>
-            </div>
-          ) : diagramType === "swimlane" ? (
-            <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50 md:grid-cols-2">
-              <label className="grid gap-1">
-                <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Lanes
-                </span>
-                <textarea
-                  ref={lanesTextareaRef}
-                  value={lanesText}
-                  onChange={(event) => setLanesText(event.target.value)}
-                  rows={6}
-                  className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                />
-                <span className="flex flex-wrap gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={addLane}
-                    className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
-                  >
-                    <Plus size={14} />
-                    Add lane
-                  </button>
-                  <button
-                    type="button"
-                    onClick={removeLane}
-                    className="inline-flex items-center gap-2 rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/20 dark:text-rose-200"
-                  >
-                    <Trash2 size={14} />
-                    Remove lane
-                  </button>
-                </span>
-              </label>
-              <label className="grid gap-1">
-                <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Process steps
-                </span>
-                <textarea
-                  ref={itemsTextareaRef}
-                  value={itemsText}
-                  onChange={(event) => setItemsText(event.target.value)}
-                  rows={6}
-                  className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                />
-              </label>
-            </div>
-          ) : CHART_DATA_DIAGRAM_TYPES.has(diagramType) ? (
-            formulaTool === "capability" ? (
-              <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
-                <div className="grid gap-3 sm:grid-cols-3">
-                  {(
-                    [
-                      ["LSL", specLower, setSpecLower],
-                      ["Target", targetValue, setTargetValue],
-                      ["USL", specUpper, setSpecUpper],
-                    ] as const
-                  ).map(([label, value, setter]) => (
-                    <label key={label} className="grid gap-1">
-                      <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                        {label}
-                      </span>
-                      <input
-                        value={value}
-                        onChange={(event) => setter(event.target.value)}
-                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                      />
-                    </label>
-                  ))}
-                </div>
-                <label className="grid gap-1">
-                  <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                    Measurements
-                  </span>
-                  <textarea
-                    ref={metricsTextareaRef}
-                    value={capabilityDataText}
-                    onChange={(event) => setCapabilityDataText(event.target.value)}
-                    rows={7}
-                    className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                  />
-                </label>
-              </div>
-            ) : (
-              <label className="grid gap-1 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
-                <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Chart data: label, value, secondary value
-                </span>
-                <textarea
-                  ref={metricsTextareaRef}
-                  value={metricsText}
-                  onChange={(event) => setMetricsText(event.target.value)}
-                  rows={7}
-                  className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                />
-              </label>
-            )
-          ) : TABLE_DIAGRAM_TYPES.has(diagramType) ? (
-            diagramType === "sipoc" ? (
-              <label className="grid gap-1 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
-                <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  SIPOC cells in supplier, input, process, output, customer order
-                </span>
-                <textarea
-                  ref={itemsTextareaRef}
-                  value={itemsText}
-                  onChange={(event) => setItemsText(event.target.value)}
-                  rows={7}
-                  className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                />
-              </label>
-            ) : (
-            <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50 md:grid-cols-2">
-              <label className="grid gap-1">
-                <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Row labels
-                </span>
-                <textarea
-                  ref={metricsTextareaRef}
-                  value={metricsText}
-                  onChange={(event) => setMetricsText(event.target.value)}
-                  rows={6}
-                  className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                />
-              </label>
-              <label className="grid gap-1">
-                <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Detail cells
-                </span>
-                <textarea
-                  ref={itemsTextareaRef}
-                  value={itemsText}
-                  onChange={(event) => setItemsText(event.target.value)}
-                  rows={6}
-                  className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                />
-              </label>
-            </div>
-            )
-          ) : (
-            <label className="grid gap-1 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
-              <span className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                Steps / fields
-              </span>
-              <textarea
-                ref={itemsTextareaRef}
-                value={itemsText}
-                onChange={(event) => setItemsText(event.target.value)}
-                rows={7}
-                className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-              />
-            </label>
-          )}
-        </div>
-
-        <aside className="grid content-start gap-3">
-          <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
-            <p className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Style
-            </p>
-            {(
-              [
-                ["primaryColor", "Primary"],
-                ["secondaryColor", "Secondary"],
-                ["accentColor", "Accent"],
-                ["riskColor", "Risk"],
-                ["backgroundColor", "Background"],
-              ] as const
-            ).map(([key, label]) => (
-              <label key={key} className="flex items-center justify-between gap-3 text-xs font-semibold text-slate-600 dark:text-slate-300">
-                <span>{label}</span>
-                <input
-                  type="color"
-                  value={diagramStyle[key]}
-                  onChange={(event) => updateDiagramStyle(key, event.target.value)}
-                  className="h-8 w-12 rounded-md border border-slate-300 bg-white p-1 dark:border-slate-700 dark:bg-slate-950"
-                />
-              </label>
-            ))}
-          </div>
-
-          <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
-            <p className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              Layers
-            </p>
-            {(
-              [
-                ["showTitle", "Title"],
-                ["showGrid", "Grid"],
-              ] as const
-            ).map(([key, label]) => (
-              <label key={key} className="flex items-center justify-between gap-3 text-xs font-semibold text-slate-600 dark:text-slate-300">
-                <span>{label}</span>
-                <input
-                  type="checkbox"
-                  checked={layerSettings[key]}
-                  onChange={(event) => updateLayerSetting(key, event.target.checked)}
-                  className="h-4 w-4 rounded border-slate-300 text-cyan-700 focus:ring-cyan-500"
-                />
-              </label>
-            ))}
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={refreshPreview}
-              className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
-            >
-              <RefreshCw size={14} />
-              Refresh
-            </button>
-            <button
-              type="button"
-              onClick={() => setChartModalOpen(true)}
-              className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
-            >
-              <Maximize2 size={14} />
-              Preview
-            </button>
-            <button
-              type="button"
-              onClick={() => void copyOutline()}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-            >
-              {copied ? <CheckCircle2 size={14} /> : <Copy size={14} />}
-              {copied ? "Copied" : "Outline"}
-            </button>
-            <button
-              type="button"
-              onClick={downloadSvg}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-            >
-              <Download size={14} />
-              SVG
-            </button>
-            <button
-              type="button"
-              onClick={downloadDataCsv}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-            >
-              <FileDown size={14} />
-              CSV
-            </button>
-            <button
-              type="button"
-              onClick={downloadReportHtml}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-            >
-              <FileDown size={14} />
-              Report
-            </button>
-            <button
-              type="button"
-              onClick={printTool}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-            >
-              <Printer size={14} />
-              Print
-            </button>
-            <button
-              type="button"
-              onClick={() => void saveControlledDraft()}
-              disabled={!canEdit || saveBusy || !title.trim()}
-              className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/45 bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-emerald-200"
-              title={canEdit ? undefined : "Admin or system admin role required"}
-            >
-              {saveBusy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              Save
-            </button>
-          </div>
-        </aside>
-      </div>
-    </section>
   );
 
   const executiveStats = [
@@ -3880,6 +5588,83 @@ export function ProcessMapBuilderClient({
     ["X/Y Data Rows", String(metrics.length)],
     ["Flow Sketch", isCustomFlowDiagram ? "Editable" : "Not used"],
   ];
+  const previewActionControls = (
+    <div className="flex flex-wrap gap-1.5">
+      <button
+        type="button"
+        onClick={refreshPreview}
+        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-cyan-500/45 bg-cyan-500/15 text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
+        aria-label="Refresh preview"
+        title="Refresh preview"
+      >
+        <RefreshCw size={15} />
+      </button>
+      <button
+        type="button"
+        onClick={() => setChartModalOpen(true)}
+        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-cyan-500/45 bg-cyan-500/15 text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
+        aria-label="Open large preview"
+        title="Open large preview"
+      >
+        <Maximize2 size={15} />
+      </button>
+      <button
+        type="button"
+        onClick={downloadSvg}
+        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+        aria-label="Download SVG"
+        title="Download SVG"
+      >
+        <Download size={15} />
+      </button>
+      <button
+        type="button"
+        onClick={downloadDataCsv}
+        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+        aria-label="Download CSV"
+        title="Download CSV"
+      >
+        <FileDown size={15} />
+      </button>
+      <button
+        type="button"
+        onClick={downloadReportHtml}
+        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+        aria-label="Download report"
+        title="Download report"
+      >
+        <FileText size={15} />
+      </button>
+      <button
+        type="button"
+        onClick={() => void copyOutline()}
+        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+        aria-label="Copy outline"
+        title={copied ? "Copied outline" : "Copy outline"}
+      >
+        {copied ? <CheckCircle2 size={15} /> : <Copy size={15} />}
+      </button>
+      <button
+        type="button"
+        onClick={printTool}
+        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+        aria-label="Print"
+        title="Print"
+      >
+        <Printer size={15} />
+      </button>
+      <button
+        type="button"
+        onClick={() => void saveControlledDraft()}
+        disabled={!canEdit || saveBusy || !title.trim()}
+        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-emerald-500/45 bg-emerald-500/15 text-emerald-800 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-emerald-200"
+        aria-label="Save controlled draft"
+        title={canEdit ? "Save controlled draft" : "Admin or system admin role required"}
+      >
+        {saveBusy ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+      </button>
+    </div>
+  );
 
   return (
     <div className="process-workspace-shell process-map-builder-shell relative left-1/2 grid w-screen max-w-[1760px] -translate-x-1/2 gap-4 px-4 py-2 md:px-6">
@@ -4156,9 +5941,15 @@ export function ProcessMapBuilderClient({
           </section>
         </aside>
 
-        <main className="grid gap-4">
-          <section id="map-preview" className="process-workbench-card grid scroll-mt-24 gap-4 rounded-2xl p-4">
-            <div className="grid gap-3">
+        <main className="grid content-start gap-4">
+          <section
+            id="map-preview"
+            className={cn(
+              "process-workbench-card grid content-start scroll-mt-24 rounded-2xl",
+              isCustomFlowDiagram ? "gap-2 p-2" : "gap-4 p-4",
+            )}
+          >
+            <div className={cn("grid", isCustomFlowDiagram ? "gap-2" : "gap-3")}>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <h2 className="text-lg font-extrabold text-slate-950 dark:text-slate-50">
@@ -4179,22 +5970,29 @@ export function ProcessMapBuilderClient({
                       .map((phaseId) => getDmaicPhaseOption(phaseId).label)
                       .join(", ")}
                   </span>
+                  {isCustomFlowDiagram ? previewActionControls : null}
                 </div>
               </div>
 
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900/45">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                  Purpose
-                </p>
-                <p className="mt-1 text-slate-700 dark:text-slate-200">
-                  {prompt.trim() || "Describe the process boundary, problem, or chart objective."}
-                </p>
+              {!isCustomFlowDiagram ? (
+              <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                <label className="grid gap-1 text-sm">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Purpose
+                  </span>
+                  <textarea
+                    value={purpose}
+                    rows={2}
+                    onChange={(event) => setPurpose(event.target.value)}
+                    className="resize-y rounded-lg border border-transparent bg-transparent px-0 py-1 text-sm text-slate-700 outline-none transition hover:border-slate-300 hover:px-2 focus:border-cyan-500 focus:bg-white focus:px-2 dark:text-slate-200 dark:focus:bg-slate-950"
+                  />
+                </label>
+                {previewActionControls}
               </div>
-
-              {diagramToolsPanel}
+              ) : null}
             </div>
 
-            <div className="grid gap-3">
+            <div className={cn("grid", isCustomFlowDiagram ? "gap-1" : "gap-3")}>
               <div
                 className={cn(
                   "overflow-hidden rounded-xl border border-slate-300/70 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/60",

@@ -26,6 +26,7 @@ interface ProcessDocumentRequestBody {
   departmentId?: unknown;
   ownerUserId?: unknown;
   processName?: unknown;
+  processPurpose?: unknown;
   processScope?: unknown;
   processInputs?: unknown;
   processOutputs?: unknown;
@@ -34,6 +35,7 @@ interface ProcessDocumentRequestBody {
   isoClauseRefs?: unknown;
   relatedInstructionIds?: unknown;
   bodyHtml?: unknown;
+  processMapPayload?: unknown;
   documentCoverImageDataUrl?: unknown;
   documentCoverImageName?: unknown;
   changeSummary?: unknown;
@@ -90,6 +92,14 @@ function normalizeUuidArray(value: unknown) {
 
 function normalizeSourceType(value: unknown): ProcessDocumentSourceType {
   return value === "template" || value === "import" ? value : "manual";
+}
+
+function normalizeJsonObject(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return value as Record<string, unknown>;
 }
 
 function normalizeImportedFileSize(value: unknown) {
@@ -190,7 +200,10 @@ export async function POST(request: NextRequest) {
   const departmentId = normalizeNullableUuid(requestBody.departmentId);
   const ownerUserId = normalizeNullableUuid(requestBody.ownerUserId) ?? requester.id;
   const processScope = normalizeString(requestBody.processScope, 4000);
+  const processPurpose =
+    normalizeString(requestBody.processPurpose, 4000) || processScope;
   const processControls = normalizeString(requestBody.processControls, 4000);
+  const processMapPayload = normalizeJsonObject(requestBody.processMapPayload);
   const isoClauseRefs = normalizeIsoClauseRefs(requestBody.isoClauseRefs);
   const documentCoverImageDataUrl = normalizeCoverImageDataUrl(
     requestBody.documentCoverImageDataUrl,
@@ -262,6 +275,7 @@ export async function POST(request: NextRequest) {
       department_id: departmentId,
       owner_user_id: ownerUserId,
       process_name: normalizeString(requestBody.processName, 180),
+      process_purpose: processPurpose,
       process_scope: processScope,
       process_inputs: normalizeString(requestBody.processInputs, 4000),
       process_outputs: normalizeString(requestBody.processOutputs, 4000),
@@ -271,6 +285,7 @@ export async function POST(request: NextRequest) {
       iso_clause_refs: isoClauseRefs,
       document_cover_image_data_url: documentCoverImageDataUrl,
       document_cover_image_name: documentCoverImageName,
+      process_map_payload: processMapPayload,
       current_revision: 1,
       created_by: requester.id,
       updated_by: requester.id,
@@ -298,6 +313,7 @@ export async function POST(request: NextRequest) {
       imported_file_name: importedFileName,
       imported_file_type: importedFileType,
       imported_file_size: importedFileSize,
+      process_map_payload: processMapPayload,
       prepared_by: requester.id,
       ...approvalFields,
     })
