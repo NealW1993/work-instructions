@@ -220,6 +220,13 @@ interface SwimlaneLink {
   style?: Partial<DiagramElementStyle>;
 }
 
+interface ValueStreamNote {
+  id: string;
+  text: string;
+  x: number;
+  y: number;
+}
+
 type InlineChartEditTarget =
   | { kind: "title"; value: string }
   | { kind: "purpose"; value: string }
@@ -230,7 +237,9 @@ type InlineChartEditTarget =
   | { kind: "customNode"; nodeId: string; value: string }
   | { kind: "customLink"; linkId: string; value: string }
   | { kind: "swimlaneStep"; stepId: string; value: string }
-  | { kind: "swimlaneArrow"; linkId: string; value: string };
+  | { kind: "swimlaneArrow"; linkId: string; value: string }
+  | { kind: "valueStreamTimeline"; value: string }
+  | { kind: "valueStreamNote"; noteId: string; value: string };
 
 type InlineChartEditor = InlineChartEditTarget & {
   left: number;
@@ -254,6 +263,7 @@ const TABLE_DIAGRAM_TYPES = new Set<DiagramType>([
   "control_plan",
   "solution_matrix",
 ]);
+const SIPOC_HEADERS = ["Suppliers", "Inputs", "Process", "Outputs", "Customers"];
 
 const BAR_DIAGRAM_TYPES = new Set<DiagramType>(["pareto", "histogram"]);
 const LINE_DIAGRAM_TYPES = new Set<DiagramType>(["run_chart", "control_chart"]);
@@ -1012,6 +1022,56 @@ function buildFlowSvg(title: string, items: string[], valueStream = false) {
   return svgShell(width, height, body);
 }
 
+function buildValueStreamSvg(
+  title: string,
+  items: string[],
+  timelineLabel: string,
+  notes: ValueStreamNote[],
+) {
+  const width = 960;
+  const height = 420;
+  const visibleItems = items.length > 0 ? items : getDiagramDefinition("value_stream_map").starterItems;
+  const count = Math.max(visibleItems.length, 1);
+  const top = title ? 58 : 20;
+  const y = top + 112;
+  const left = 78;
+  const right = 78;
+  const availableWidth = width - left - right;
+  const stepGap = count > 1 ? availableWidth / (count - 1) : 0;
+  const boxWidth = clampNumber(stepGap - 34, 112, 142);
+  const boxHeight = 66;
+  let body = title ? svgText(width / 2, 36, title, { size: 20, color: "#111827" }) : "";
+
+  visibleItems.forEach((item, index) => {
+    const x = count === 1 ? width / 2 : left + stepGap * index;
+    if (index > 0) {
+      const previousX = count === 1 ? width / 2 : left + stepGap * (index - 1);
+      body += `<line x1="${previousX + boxWidth / 2 + 10}" y1="${y}" x2="${x - boxWidth / 2 - 12}" y2="${y}" stroke="#0f766e" stroke-width="3" marker-end="url(#arrowhead)"></line>`;
+    }
+    body += `<rect x="${x - boxWidth / 2}" y="${y - boxHeight / 2}" width="${boxWidth}" height="${boxHeight}" rx="10" fill="#e0f2fe" stroke="#0284c7" stroke-width="2"></rect>`;
+    body += svgText(x, y - 5, item, { size: 12, color: "#0f172a" });
+    body += svgText(x, y + 17, `CT ${index + 2}m | WIP ${index + 1}`, {
+      size: 10,
+      weight: 600,
+      color: "#475569",
+    });
+  });
+
+  body += `<line x1="110" y1="${top + 252}" x2="850" y2="${top + 252}" stroke="#64748b" stroke-width="2"></line>`;
+  body += svgText(480, top + 282, timelineLabel, {
+    size: 13,
+    weight: 700,
+    color: "#475569",
+  });
+
+  notes.forEach((note) => {
+    body += `<rect x="${note.x - 70}" y="${note.y - 22}" width="140" height="44" rx="8" fill="#fef9c3" stroke="#ca8a04" stroke-width="1.5"></rect>`;
+    body += svgText(note.x, note.y + 4, note.text, { size: 10, weight: 700, color: "#713f12" });
+  });
+
+  return svgShell(width, height, body);
+}
+
 function buildSwimlaneSvg(title: string, items: string[], lanes: string[]) {
   const width = 960;
   const height = 420;
@@ -1645,19 +1705,44 @@ function buildEditableCell(input: {
   );
 }
 
+function splitTableInputPreservingBlanks(value: string, fallback: string[] = []) {
+  const entries = value.split(/\r?\n|,/).map((entry) => entry.trim());
+  return entries.some(Boolean) ? entries : fallback;
+}
+
+function trimTrailingBlankRows(rows: string[]) {
+  const nextRows = [...rows];
+  while (nextRows.length > 0 && !nextRows.at(-1)?.trim()) {
+    nextRows.pop();
+  }
+  return nextRows;
+}
+
+function removeSipocRowFromSource(currentText: string, rowIndex: number) {
+  const rows = currentText.split(/\r?\n/);
+  const startIndex = rowIndex * SIPOC_HEADERS.length;
+  while (rows.length < startIndex + SIPOC_HEADERS.length) {
+    rows.push("");
+  }
+  rows.splice(startIndex, SIPOC_HEADERS.length);
+  const trimmedRows = trimTrailingBlankRows(rows);
+  return trimmedRows.length > 0 ? trimmedRows.join("\n") : SIPOC_HEADERS.map(() => "").join("\n");
+}
+
 function buildTableRows(
   diagramType: DiagramType,
   items: string[],
   metrics: MetricPoint[],
   options: {
     editable?: boolean;
+    sipocRowCount?: number;
     onItemChange?: (index: number, value: string) => void;
     onMetricChange?: (index: number, field: "label" | "value" | "value2", value: string) => void;
   } = {},
 ) {
   if (diagramType === "sipoc") {
-    const headers = ["Suppliers", "Inputs", "Process", "Outputs", "Customers"];
-    const rowCount = Math.max(4, Math.ceil(items.length / headers.length));
+    const headers = SIPOC_HEADERS;
+    const rowCount = Math.max(1, options.sipocRowCount ?? Math.ceil(items.length / headers.length));
     return (
       <table className="w-full table-fixed border-collapse text-sm leading-relaxed">
         <thead>
@@ -1757,14 +1842,19 @@ function buildTableRows(
   );
 }
 
-function buildTableDiagramHtml(diagramType: DiagramType, items: string[], metrics: MetricPoint[]) {
+function buildTableDiagramHtml(
+  diagramType: DiagramType,
+  items: string[],
+  metrics: MetricPoint[],
+  options: { sipocRowCount?: number } = {},
+) {
   if (diagramType === "sipoc") {
-    const headers = ["Suppliers", "Inputs", "Process", "Outputs", "Customers"];
-    const rowCount = Math.max(4, Math.ceil(items.length / headers.length));
+    const headers = SIPOC_HEADERS;
+    const rowCount = Math.max(1, options.sipocRowCount ?? Math.ceil(items.length / headers.length));
     const rows = Array.from({ length: rowCount }, (_, rowIndex) =>
       headers.map(
         (header, columnIndex) =>
-          items[rowIndex * headers.length + columnIndex] ?? `${header} ${rowIndex + 1}`,
+          items[rowIndex * headers.length + columnIndex] ?? "",
       ),
     );
     return buildHtmlTable(headers, rows);
@@ -2034,6 +2124,11 @@ export function ProcessMapBuilderClient({
     { id: "swim-link-1", from: "swim-step-1", to: "swim-step-2", label: "", bendX: 380, bendY: 138 },
     { id: "swim-link-2", from: "swim-step-2", to: "swim-step-3", label: "", bendX: 530, bendY: 230 },
   ]);
+  const [sipocRowCount, setSipocRowCount] = useState(1);
+  const [valueStreamTimelineLabel, setValueStreamTimelineLabel] = useState(
+    "Lead time / wait time timeline",
+  );
+  const [valueStreamNotes, setValueStreamNotes] = useState<ValueStreamNote[]>([]);
   const [inlineChartEditor, setInlineChartEditor] = useState<InlineChartEditor | null>(null);
   const [showAdvancedColors, setShowAdvancedColors] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -2070,6 +2165,13 @@ export function ProcessMapBuilderClient({
     moved: boolean;
     historyCaptured: boolean;
   } | null>(null);
+  const customLinkEndpointDragRef = useRef<{
+    linkId: string;
+    pointerId: number;
+    endpoint: "from" | "to";
+    moved: boolean;
+    historyCaptured: boolean;
+  } | null>(null);
   const customFlowSuppressClickRef = useRef(false);
   const customCanvasSvgRef = useRef<SVGSVGElement | null>(null);
   const chartPreviewRef = useRef<HTMLDivElement | null>(null);
@@ -2094,11 +2196,26 @@ export function ProcessMapBuilderClient({
       }
     | null
   >(null);
+  const valueStreamSvgRef = useRef<SVGSVGElement | null>(null);
+  const valueStreamSuppressClickRef = useRef(false);
+  const valueStreamNoteDragRef = useRef<{
+    noteId: string;
+    pointerId: number;
+    offsetX: number;
+    offsetY: number;
+    moved: boolean;
+  } | null>(null);
 
   const definition = getDiagramDefinition(diagramType);
   const phase = getDmaicPhaseOption(dmaicPhase);
   const isCustomFlowDiagram = CUSTOM_FLOW_DIAGRAM_TYPES.has(diagramType);
   const items = splitListInput(itemsText, definition.starterItems);
+  const tableItems =
+    diagramType === "sipoc" ? splitTableInputPreservingBlanks(itemsText, definition.starterItems) : items;
+  const sipocDisplayRowCount =
+    diagramType === "sipoc"
+      ? Math.max(1, sipocRowCount, Math.ceil(tableItems.length / SIPOC_HEADERS.length))
+      : 1;
   const lanes = splitListInput(lanesText, ["Operations", "Quality", "Supervisor"]);
   const metrics = parseMetricRows(metricsText, definition.starterItems);
   const capabilityValues = parseMeasurementValues(capabilityDataText);
@@ -2136,6 +2253,13 @@ export function ProcessMapBuilderClient({
             lanes,
             swimlaneSteps,
             swimlaneLinks,
+          )
+      : diagramType === "value_stream_map"
+        ? buildValueStreamSvg(
+            layerSettings.showTitle ? title : "",
+            items,
+            valueStreamTimelineLabel,
+            valueStreamNotes,
           )
       : formulaTool === "capability" && (diagramType === "histogram" || diagramType === "control_chart")
       ? buildCapabilitySvg(
@@ -2497,6 +2621,14 @@ export function ProcessMapBuilderClient({
           link.id === inlineChartEditor.linkId ? { ...link, label: value } : link,
         ),
       );
+    } else if (inlineChartEditor.kind === "valueStreamTimeline") {
+      setValueStreamTimelineLabel(value || "Lead time / wait time timeline");
+    } else if (inlineChartEditor.kind === "valueStreamNote") {
+      setValueStreamNotes((current) =>
+        current.map((note) =>
+          note.id === inlineChartEditor.noteId ? { ...note, text: value } : note,
+        ),
+      );
     } else {
       updateMetricLine(
         inlineChartEditor.index,
@@ -2574,6 +2706,18 @@ export function ProcessMapBuilderClient({
     setPreviewRevision((current) => current + 1);
   }
 
+  function addValueStreamNote(point?: { x: number; y: number }) {
+    const note: ValueStreamNote = {
+      id: `vsm-note-${Date.now()}`,
+      text: "Note",
+      x: clampNumber(point?.x ?? 480, 90, 870),
+      y: clampNumber(point?.y ?? 310, 70, 390),
+    };
+    setValueStreamNotes((current) => [...current, note]);
+    setPreviewRevision((current) => current + 1);
+    return note;
+  }
+
   function addLane() {
     setLanesText((current) => {
       const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
@@ -2609,18 +2753,7 @@ export function ProcessMapBuilderClient({
       });
     } else if (TABLE_DIAGRAM_TYPES.has(diagramType)) {
       if (diagramType === "sipoc") {
-        setItemsText((current) => {
-          const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
-          const rowNumber = Math.floor(rows.length / 5) + 1;
-          rows.push(
-            `Supplier ${rowNumber}`,
-            `Input ${rowNumber}`,
-            `Process ${rowNumber}`,
-            `Output ${rowNumber}`,
-            `Customer ${rowNumber}`,
-          );
-          return rows.join("\n");
-        });
+        setSipocRowCount((current) => current + 1);
       } else {
         setMetricsText((current) => {
           const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
@@ -2672,6 +2805,12 @@ export function ProcessMapBuilderClient({
           },
         ]);
       }
+    } else if (diagramType === "value_stream_map") {
+      setItemsText((current) => {
+        const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
+        rows.push(`Step ${rows.length + 1}`);
+        return rows.join("\n");
+      });
     } else {
       setItemsText((current) => {
         const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
@@ -2691,9 +2830,13 @@ export function ProcessMapBuilderClient({
       });
     } else if (TABLE_DIAGRAM_TYPES.has(diagramType)) {
       if (diagramType === "sipoc") {
+        if (sipocDisplayRowCount <= 1) {
+          return;
+        }
+        setSipocRowCount((current) => Math.max(1, current - 1));
         setItemsText((current) => {
-          const rows = current.split(/\r?\n/).filter((row) => row.trim().length > 0);
-          return rows.length <= 5 ? rows.join("\n") : rows.slice(0, -5).join("\n");
+          const rowIndex = Math.max(0, sipocDisplayRowCount - 1);
+          return removeSipocRowFromSource(current, rowIndex);
         });
       } else {
         setMetricsText((current) => {
@@ -2759,6 +2902,10 @@ export function ProcessMapBuilderClient({
         current.filter((link) => link.id !== inlineChartEditor.linkId),
       );
       setSelectedCustomLinkId(null);
+    } else if (inlineChartEditor.kind === "valueStreamNote") {
+      setValueStreamNotes((current) =>
+        current.filter((note) => note.id !== inlineChartEditor.noteId),
+      );
     } else if (inlineChartEditor.kind === "lane") {
       removeLane();
     } else if (inlineChartEditor.kind === "metric") {
@@ -2769,12 +2916,22 @@ export function ProcessMapBuilderClient({
           .join("\n"),
       );
     } else if (inlineChartEditor.kind === "item") {
-      setItemsText((current) =>
-        current
-          .split(/\r?\n/)
-          .filter((_, index) => index !== inlineChartEditor.index)
-          .join("\n"),
-      );
+      if (diagramType === "sipoc") {
+        setSipocRowCount((current) => Math.max(1, current - 1));
+        setItemsText((current) =>
+          removeSipocRowFromSource(
+            current,
+            Math.floor(inlineChartEditor.index / SIPOC_HEADERS.length),
+          ),
+        );
+      } else {
+        setItemsText((current) =>
+          current
+            .split(/\r?\n/)
+            .filter((_, index) => index !== inlineChartEditor.index)
+            .join("\n"),
+        );
+      }
     } else {
       removeChartDataRow();
     }
@@ -2786,6 +2943,11 @@ export function ProcessMapBuilderClient({
   function addCurrentEditTarget() {
     if (inlineChartEditor?.kind === "lane") {
       addLane();
+      return;
+    }
+
+    if (inlineChartEditor?.kind === "valueStreamNote") {
+      addValueStreamNote();
       return;
     }
 
@@ -2827,6 +2989,11 @@ export function ProcessMapBuilderClient({
     setInlineChartEditor(null);
     setDiagramType(nextDiagramType);
     setItemsText(nextDefinition.starterItems.join("\n"));
+    setSipocRowCount(nextDiagramType === "sipoc" ? 1 : sipocRowCount);
+    if (nextDiagramType === "value_stream_map") {
+      setValueStreamTimelineLabel("Lead time / wait time timeline");
+      setValueStreamNotes([]);
+    }
     setRecommendation(null);
     if (nextDiagramType === "fishbone") {
       setFishboneEffect("Effect / Problem");
@@ -3029,8 +3196,31 @@ export function ProcessMapBuilderClient({
     setCustomCanvasView(CUSTOM_FLOW_DEFAULT_VIEW);
   }
 
+  function setCustomDrawingMode(mode: DrawingMode) {
+    setDrawingMode(mode);
+    if (mode !== "connector") {
+      setPendingConnectorNodeId(null);
+      setDraftConnector(null);
+      customConnectorDragRef.current = null;
+    }
+  }
+
+  function clearCustomFlowInteraction() {
+    setCustomDrawingMode("select");
+    setPendingConnectorNodeId(null);
+    setDraftConnector(null);
+    setDraftCustomShapePoints(null);
+    setSelectedCustomNodeId(null);
+    setSelectedCustomLinkId(null);
+    customConnectorDragRef.current = null;
+    customLinkBendDragRef.current = null;
+    customLinkEndpointDragRef.current = null;
+    customShapeDrawRef.current = null;
+    setInlineChartEditor((current) => (current?.kind === "customLink" ? null : current));
+  }
+
   function handleCustomCanvasWheel(event: ReactWheelEvent<SVGSVGElement>) {
-    if (!event.ctrlKey && !event.metaKey) {
+    if (!event.ctrlKey && !event.metaKey && !event.shiftKey) {
       return;
     }
 
@@ -3041,22 +3231,55 @@ export function ProcessMapBuilderClient({
 
   function handleCustomCanvasKeyDown(event: ReactKeyboardEvent<SVGSVGElement>) {
     const key = event.key.toLowerCase();
-    if ((event.key === "Delete" || event.key === "Backspace") && selectedCustomLinkId) {
+    const target = event.target;
+    if (
+      target instanceof HTMLElement &&
+      ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(target.tagName)
+    ) {
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      clearCustomFlowInteraction();
+      return;
+    }
+
+    if ((event.key === "Delete" || event.key === "Backspace") && (selectedCustomLinkId || selectedCustomNodeId)) {
       event.preventDefault();
       deleteSelectedCustomElement();
       return;
     }
 
-    if (!event.ctrlKey && !event.metaKey) {
+    if (event.ctrlKey || event.metaKey) {
+      if (key === "z" && !event.shiftKey) {
+        event.preventDefault();
+        undoCustomFlow();
+      } else if (key === "y" || (key === "z" && event.shiftKey)) {
+        event.preventDefault();
+        redoCustomFlow();
+      }
       return;
     }
 
-    if (key === "z" && !event.shiftKey) {
+    if (event.altKey) {
+      return;
+    }
+
+    const modeShortcuts: Partial<Record<string, DrawingMode>> = {
+      a: "connector",
+      c: "custom",
+      d: "decision",
+      e: "terminator",
+      p: "process",
+      s: "select",
+      t: "terminator",
+      v: "select",
+    };
+    const nextMode = modeShortcuts[key];
+    if (nextMode) {
       event.preventDefault();
-      undoCustomFlow();
-    } else if (key === "y" || (key === "z" && event.shiftKey)) {
-      event.preventDefault();
-      redoCustomFlow();
+      setCustomDrawingMode(nextMode);
     }
   }
 
@@ -3321,6 +3544,37 @@ export function ProcessMapBuilderClient({
     setSelectedCustomLinkId(linkId);
   }
 
+  function updateCustomFlowLinkEndpoint(
+    linkId: string,
+    endpoint: "from" | "to",
+    point: { x: number; y: number },
+  ) {
+    setCustomFlowLinks((current) =>
+      current.map((link) => {
+        if (link.id !== linkId) {
+          return link;
+        }
+
+        const fixedNodeId = endpoint === "to" ? link.from : link.to;
+        const currentEndpointNodeId = endpoint === "to" ? link.to : link.from;
+        const snappedNode =
+          getNearestCustomFlowNodeAtPoint(point, fixedNodeId) ??
+          customFlowNodes.find((node) => node.id === currentEndpointNodeId);
+
+        if (!snappedNode || snappedNode.id === fixedNodeId) {
+          return link;
+        }
+
+        const offset = getCustomFlowConnectionOffset(snappedNode, point);
+        return endpoint === "to"
+          ? { ...link, to: snappedNode.id, toOffset: offset }
+          : { ...link, from: snappedNode.id, fromOffset: offset };
+      }),
+    );
+    setSelectedCustomNodeId(null);
+    setSelectedCustomLinkId(linkId);
+  }
+
   function deleteSelectedCustomElement() {
     if (selectedCustomLinkId) {
       pushCustomFlowHistory();
@@ -3568,6 +3822,25 @@ export function ProcessMapBuilderClient({
 
     const point = getCustomFlowPoint(event, svgElement);
     const route = getCustomFlowLinkRouteById(link.id);
+    const startPoint = route?.[0];
+    const endPoint = route?.at(-1);
+    if (endPoint) {
+      const deltaX = point.x - endPoint.x;
+      const deltaY = point.y - endPoint.y;
+      if (deltaX * deltaX + deltaY * deltaY <= 625) {
+        beginCustomLinkEndpointDrag(link.id, "to", event);
+        return;
+      }
+    }
+    if (startPoint) {
+      const deltaX = point.x - startPoint.x;
+      const deltaY = point.y - startPoint.y;
+      if (deltaX * deltaX + deltaY * deltaY <= 400) {
+        beginCustomLinkEndpointDrag(link.id, "from", event);
+        return;
+      }
+    }
+
     const segmentIndex = route ? getClosestRouteSegmentIndex(route, point) : 0;
     beginCustomLinkBendDrag(link.id, null, segmentIndex, event);
   }
@@ -3578,6 +3851,30 @@ export function ProcessMapBuilderClient({
     event: ReactPointerEvent<SVGCircleElement>,
   ) {
     beginCustomLinkBendDrag(linkId, anchorIndex, anchorIndex, event);
+  }
+
+  function beginCustomLinkEndpointDrag(
+    linkId: string,
+    endpoint: "from" | "to",
+    event: ReactPointerEvent<SVGElement>,
+  ) {
+    if (drawingMode !== "select" || event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    customCanvasSvgRef.current?.focus();
+    setSelectedCustomNodeId(null);
+    setSelectedCustomLinkId(linkId);
+    customLinkEndpointDragRef.current = {
+      linkId,
+      pointerId: event.pointerId,
+      endpoint,
+      moved: false,
+      historyCaptured: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
   }
 
   function handleCustomLinkBendPointerMove(event: ReactPointerEvent<SVGElement>) {
@@ -3618,6 +3915,44 @@ export function ProcessMapBuilderClient({
     event.stopPropagation();
     customFlowSuppressClickRef.current = dragState.moved;
     customLinkBendDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function handleCustomLinkEndpointPointerMove(event: ReactPointerEvent<SVGElement>) {
+    const dragState = customLinkEndpointDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const svgElement = event.currentTarget.ownerSVGElement ?? customCanvasSvgRef.current;
+    if (!svgElement) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const point = getCustomFlowPoint(event, svgElement);
+    if (!dragState.historyCaptured) {
+      pushCustomFlowHistory();
+      dragState.historyCaptured = true;
+    }
+
+    updateCustomFlowLinkEndpoint(dragState.linkId, dragState.endpoint, point);
+    dragState.moved = true;
+  }
+
+  function finishCustomLinkEndpointDrag(event: ReactPointerEvent<SVGElement>) {
+    const dragState = customLinkEndpointDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    customFlowSuppressClickRef.current = dragState.moved;
+    customLinkEndpointDragRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -3798,15 +4133,23 @@ export function ProcessMapBuilderClient({
     event.currentTarget.setPointerCapture(event.pointerId);
   }
 
-  function handleSwimlanePointerMove(event: ReactPointerEvent<SVGSVGElement>) {
+  function handleSwimlanePointerMove(event: ReactPointerEvent<SVGElement>) {
     const dragState = swimlaneDragRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) {
       return;
     }
 
+    const svgElement =
+      event.currentTarget instanceof SVGSVGElement
+        ? event.currentTarget
+        : event.currentTarget.ownerSVGElement;
+    if (!svgElement) {
+      return;
+    }
+
     event.preventDefault();
     event.stopPropagation();
-    const point = getSwimlanePoint(event, event.currentTarget);
+    const point = getSwimlanePoint(event, svgElement);
     const top = getSwimlaneTop();
     const laneIndex = clampNumber(
       Math.floor((point.y - top) / 92),
@@ -3886,6 +4229,152 @@ export function ProcessMapBuilderClient({
       kind: "swimlaneArrow",
       linkId: link.id,
       value: link.label,
+    });
+  }
+
+  function getValueStreamPoint(
+    event: ReactPointerEvent<SVGElement> | ReactMouseEvent<SVGElement>,
+    svg: SVGSVGElement,
+  ) {
+    const bounds = svg.getBoundingClientRect();
+    return {
+      x: ((event.clientX - bounds.left) / Math.max(1, bounds.width)) * 960,
+      y: ((event.clientY - bounds.top) / Math.max(1, bounds.height)) * 420,
+    };
+  }
+
+  function getValueStreamStepLayout(index: number, count: number) {
+    const left = 78;
+    const right = 78;
+    const availableWidth = 960 - left - right;
+    const safeCount = Math.max(count, 1);
+    const stepGap = safeCount > 1 ? availableWidth / (safeCount - 1) : 0;
+    const width = clampNumber(stepGap - 34, 112, 142);
+    return {
+      x: safeCount === 1 ? 480 : left + stepGap * index,
+      y: layerSettings.showTitle ? 170 : 132,
+      width,
+      height: 66,
+    };
+  }
+
+  function handleValueStreamCanvasDoubleClick(event: ReactMouseEvent<SVGRectElement>) {
+    const svgElement = event.currentTarget.ownerSVGElement;
+    if (!svgElement) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const point = getValueStreamPoint(event, svgElement);
+    const note = addValueStreamNote(point);
+    openInlineChartEditorAtPoint(event.clientX, event.clientY, {
+      kind: "valueStreamNote",
+      noteId: note.id,
+      value: note.text,
+    });
+  }
+
+  function handleValueStreamStepClick(index: number, event: ReactMouseEvent<SVGGElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    openInlineChartEditorAtPoint(event.clientX, event.clientY, {
+      kind: "item",
+      index,
+      value: items[index] ?? "",
+    });
+  }
+
+  function handleValueStreamTimelineClick(event: ReactMouseEvent<SVGTextElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    openInlineChartEditorAtPoint(event.clientX, event.clientY, {
+      kind: "valueStreamTimeline",
+      value: valueStreamTimelineLabel,
+    });
+  }
+
+  function handleValueStreamNotePointerDown(
+    note: ValueStreamNote,
+    event: ReactPointerEvent<SVGGElement>,
+  ) {
+    const svgElement = event.currentTarget.ownerSVGElement;
+    if (!svgElement || event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const point = getValueStreamPoint(event, svgElement);
+    valueStreamNoteDragRef.current = {
+      noteId: note.id,
+      pointerId: event.pointerId,
+      offsetX: point.x - note.x,
+      offsetY: point.y - note.y,
+      moved: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleValueStreamNotePointerMove(event: ReactPointerEvent<SVGElement>) {
+    const dragState = valueStreamNoteDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const svgElement =
+      event.currentTarget instanceof SVGSVGElement
+        ? event.currentTarget
+        : event.currentTarget.ownerSVGElement;
+    if (!svgElement) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const point = getValueStreamPoint(event, svgElement);
+    dragState.moved = true;
+    setValueStreamNotes((current) =>
+      current.map((note) =>
+        note.id === dragState.noteId
+          ? {
+              ...note,
+              x: clampNumber(point.x - dragState.offsetX, 75, 885),
+              y: clampNumber(point.y - dragState.offsetY, 52, 392),
+            }
+          : note,
+      ),
+    );
+  }
+
+  function finishValueStreamNoteDrag(event: ReactPointerEvent<SVGElement>) {
+    const dragState = valueStreamNoteDragRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    valueStreamSuppressClickRef.current = dragState.moved;
+    valueStreamNoteDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setPreviewRevision((current) => current + 1);
+  }
+
+  function handleValueStreamNoteClick(note: ValueStreamNote, event: ReactMouseEvent<SVGGElement>) {
+    if (valueStreamSuppressClickRef.current) {
+      valueStreamSuppressClickRef.current = false;
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    openInlineChartEditorAtPoint(event.clientX, event.clientY, {
+      kind: "valueStreamNote",
+      noteId: note.id,
+      value: note.text,
     });
   }
 
@@ -3990,6 +4479,13 @@ export function ProcessMapBuilderClient({
       style: diagramStyle,
       textStyle: diagramTextStyle,
       layers: layerSettings,
+      sipoc: {
+        rowCount: sipocDisplayRowCount,
+      },
+      valueStream: {
+        timelineLabel: valueStreamTimelineLabel,
+        notes: valueStreamNotes,
+      },
       customFlow: {
         nodes: customFlowNodes,
         links: customFlowLinks,
@@ -4055,6 +4551,11 @@ export function ProcessMapBuilderClient({
       setDmaicPhase(payload.dmaicPhase);
       setTitle(payload.suggestedTitle);
       setItemsText(payload.starterItems.join("\n"));
+      setSipocRowCount(payload.diagramType === "sipoc" ? 1 : sipocRowCount);
+      if (payload.diagramType === "value_stream_map") {
+        setValueStreamTimelineLabel("Lead time / wait time timeline");
+        setValueStreamNotes([]);
+      }
       if (payload.diagramType === "swimlane") {
         const defaultSteps: SwimlaneStep[] = payload.starterItems.map((item, index) => ({
           id: `swim-step-${index + 1}`,
@@ -4303,7 +4804,9 @@ export function ProcessMapBuilderClient({
   <p>${escapeHtml(purpose)}</p>
   <h2>Diagram</h2>
   <div class="diagram">${
-    TABLE_DIAGRAM_TYPES.has(diagramType) ? buildTableDiagramHtml(diagramType, items, metrics) : svg
+    TABLE_DIAGRAM_TYPES.has(diagramType)
+      ? buildTableDiagramHtml(diagramType, tableItems, metrics, { sipocRowCount: sipocDisplayRowCount })
+      : svg
   }</div>
   ${formulaTable ? `<h2>Calculator Results</h2>${formulaTable}` : ""}
   <h2>Data</h2>
@@ -4499,6 +5002,10 @@ export function ProcessMapBuilderClient({
           ? "Arrow"
           : inlineChartEditor?.kind === "customLink"
             ? "Arrow"
+          : inlineChartEditor?.kind === "valueStreamTimeline"
+            ? "Timeline"
+          : inlineChartEditor?.kind === "valueStreamNote"
+            ? "Note"
           : inlineChartEditor?.kind === "purpose"
             ? "Purpose"
             : inlineChartEditor?.kind === "title"
@@ -4564,11 +5071,11 @@ export function ProcessMapBuilderClient({
 
   const canAddFromEditTarget = Boolean(
     inlineChartEditor &&
-      ["item", "lane", "metric", "swimlaneStep"].includes(inlineChartEditor.kind),
+      ["item", "lane", "metric", "swimlaneStep", "valueStreamNote"].includes(inlineChartEditor.kind),
   );
   const canDeleteFromEditTarget = Boolean(
     inlineChartEditor &&
-      !["title", "purpose", "fishboneEffect"].includes(inlineChartEditor.kind),
+      !["title", "purpose", "fishboneEffect", "valueStreamTimeline"].includes(inlineChartEditor.kind),
   );
 
   const canvasQuickControls = (() => {
@@ -4600,6 +5107,8 @@ export function ProcessMapBuilderClient({
     const addLabel =
       diagramType === "swimlane"
         ? "Add swimlane step"
+        : diagramType === "value_stream_map"
+          ? "Add value stream step"
         : diagramType === "fishbone"
           ? "Add cause group"
           : CHART_DATA_DIAGRAM_TYPES.has(diagramType) || TABLE_DIAGRAM_TYPES.has(diagramType)
@@ -4608,6 +5117,8 @@ export function ProcessMapBuilderClient({
     const deleteLabel =
       diagramType === "swimlane"
         ? "Delete selected or last swimlane step"
+        : diagramType === "value_stream_map"
+          ? "Delete selected or last value stream step"
         : diagramType === "fishbone"
           ? "Delete cause group"
           : CHART_DATA_DIAGRAM_TYPES.has(diagramType) || TABLE_DIAGRAM_TYPES.has(diagramType)
@@ -4628,6 +5139,17 @@ export function ProcessMapBuilderClient({
         >
           <Plus size={16} />
         </button>
+        {diagramType === "value_stream_map" ? (
+          <button
+            type="button"
+            onClick={() => addValueStreamNote()}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-amber-700 transition hover:bg-amber-400/20 dark:text-amber-200"
+            aria-label="Add value stream note"
+            title="Add value stream note"
+          >
+            <Type size={16} />
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={deleteCurrentEditTarget}
@@ -4916,30 +5438,24 @@ export function ProcessMapBuilderClient({
           <div className="flex flex-wrap items-center gap-1.5">
             <div className="inline-flex rounded-lg border border-slate-300 bg-white p-1 dark:border-slate-700 dark:bg-slate-950">
               {[
-                ["select", "Select"],
-                ["process", "Process"],
-                ["decision", "Decision"],
-                ["terminator", "Start/End"],
-                ["custom", "Custom"],
-                ["connector", "Arrow"],
-              ].map(([mode, label]) => (
+                ["select", "Select", "V"],
+                ["process", "Process", "P"],
+                ["decision", "Decision", "D"],
+                ["terminator", "Start/End", "T"],
+                ["custom", "Custom", "C"],
+                ["connector", "Arrow", "A"],
+              ].map(([mode, label, shortcut]) => (
                 <button
                   key={mode}
                   type="button"
-                  onClick={() => {
-                    setDrawingMode(mode as DrawingMode);
-                    if (mode !== "connector") {
-                      setPendingConnectorNodeId(null);
-                      setDraftConnector(null);
-                      customConnectorDragRef.current = null;
-                    }
-                  }}
+                  onClick={() => setCustomDrawingMode(mode as DrawingMode)}
                   className={cn(
                     "rounded-md px-2.5 py-1.5 text-xs font-semibold transition",
                     drawingMode === mode
                       ? "bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
                       : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900",
                   )}
+                  title={`${label} (${shortcut})`}
                 >
                   {label}
                 </button>
@@ -5106,6 +5622,8 @@ export function ProcessMapBuilderClient({
           const linkStyle = getCustomFlowLinkStyle(link);
           const isSelected = link.id === selectedCustomLinkId;
           const labelPoint = getRouteMidpoint(route);
+          const startPoint = route[0];
+          const endPoint = route.at(-1) ?? startPoint;
           return (
             <g key={link.id}>
               <path
@@ -5245,6 +5763,37 @@ export function ProcessMapBuilderClient({
                     </g>
                   ))
                 : null}
+              {isSelected && startPoint && endPoint ? (
+                <g>
+                  <circle
+                    cx={startPoint.x}
+                    cy={startPoint.y}
+                    r="8"
+                    fill="#ffffff"
+                    stroke="#64748b"
+                    strokeWidth="2"
+                    className="cursor-grab active:cursor-grabbing"
+                    onPointerDown={(event) => beginCustomLinkEndpointDrag(link.id, "from", event)}
+                    onPointerMove={handleCustomLinkEndpointPointerMove}
+                    onPointerUp={finishCustomLinkEndpointDrag}
+                    onPointerCancel={finishCustomLinkEndpointDrag}
+                  />
+                  <circle
+                    cx={endPoint.x}
+                    cy={endPoint.y}
+                    r="11"
+                    fill="#ffffff"
+                    stroke="#0ea5e9"
+                    strokeWidth="2"
+                    className="cursor-grab active:cursor-grabbing"
+                    onPointerDown={(event) => beginCustomLinkEndpointDrag(link.id, "to", event)}
+                    onPointerMove={handleCustomLinkEndpointPointerMove}
+                    onPointerUp={finishCustomLinkEndpointDrag}
+                    onPointerCancel={finishCustomLinkEndpointDrag}
+                  />
+                  <circle cx={endPoint.x} cy={endPoint.y} r="4" fill={linkStyle.strokeColor} pointerEvents="none" />
+                </g>
+              ) : null}
             </g>
           );
         })}
@@ -5342,6 +5891,188 @@ export function ProcessMapBuilderClient({
             </g>
           );
         })}
+      </svg>
+    </div>
+  ) : diagramType === "value_stream_map" ? (
+    <div
+      ref={sandboxHostRef}
+      className="relative h-full min-h-[36rem] w-full overflow-auto bg-slate-50 p-4 dark:bg-slate-900/60"
+      onPointerDownCapture={handleSandboxPointerDownCapture}
+    >
+      {canvasQuickControls}
+      {floatingEditBar}
+      <svg
+        ref={valueStreamSvgRef}
+        viewBox="0 0 960 420"
+        className="h-full min-h-[32rem] w-full"
+        role="img"
+        aria-label="Editable value stream map"
+        onPointerMove={handleValueStreamNotePointerMove}
+        onPointerUp={finishValueStreamNoteDrag}
+        onPointerCancel={finishValueStreamNoteDrag}
+      >
+        <defs>
+          <marker
+            id="value-stream-arrow-workspace"
+            markerWidth="10"
+            markerHeight="10"
+            refX="8"
+            refY="3"
+            orient="auto"
+            markerUnits="strokeWidth"
+          >
+            <path d="M0,0 L0,6 L9,3 z" fill="context-stroke" />
+          </marker>
+          <pattern id="value-stream-grid-workspace" width="24" height="24" patternUnits="userSpaceOnUse">
+            <path
+              d="M 24 0 L 0 0 0 24"
+              fill="none"
+              stroke={layerSettings.showGrid ? "#cbd5e1" : "transparent"}
+              strokeWidth="0.7"
+            />
+          </pattern>
+        </defs>
+        <rect
+          width="960"
+          height="420"
+          fill={diagramStyle.backgroundColor}
+          onDoubleClick={handleValueStreamCanvasDoubleClick}
+        />
+        <rect
+          width="960"
+          height="420"
+          fill="url(#value-stream-grid-workspace)"
+          opacity="0.5"
+          pointerEvents="none"
+        />
+        {layerSettings.showTitle ? (
+          <text
+            x="480"
+            y="38"
+            textAnchor="middle"
+            fill={diagramTextStyle.color}
+            fontFamily={diagramTextStyle.fontFamily}
+            fontSize={20 * diagramTextStyle.fontScale}
+            fontWeight={diagramTextStyle.bold ? 800 : 500}
+            fontStyle={diagramTextStyle.italic ? "italic" : "normal"}
+            textDecoration={diagramTextStyle.underline ? "underline" : "none"}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              openInlineChartEditorAtPoint(event.clientX, event.clientY, {
+                kind: "title",
+                value: title,
+              });
+            }}
+            className="cursor-text"
+          >
+            {title}
+          </text>
+        ) : null}
+        {items.map((item, index) => {
+          const layout = getValueStreamStepLayout(index, items.length);
+          const previousLayout = index > 0 ? getValueStreamStepLayout(index - 1, items.length) : null;
+          return (
+            <g key={`${item}-${index}`}>
+              {previousLayout ? (
+                <line
+                  x1={previousLayout.x + previousLayout.width / 2 + 10}
+                  y1={previousLayout.y}
+                  x2={layout.x - layout.width / 2 - 12}
+                  y2={layout.y}
+                  stroke={diagramStyle.accentColor}
+                  strokeWidth="3"
+                  markerEnd="url(#value-stream-arrow-workspace)"
+                  pointerEvents="none"
+                />
+              ) : null}
+              <g
+                className="cursor-text"
+                onClick={(event) => handleValueStreamStepClick(index, event)}
+              >
+                <rect
+                  x={layout.x - layout.width / 2}
+                  y={layout.y - layout.height / 2}
+                  width={layout.width}
+                  height={layout.height}
+                  rx="10"
+                  fill="#e0f2fe"
+                  stroke="#0284c7"
+                  strokeWidth="2"
+                />
+                <foreignObject
+                  x={layout.x - layout.width / 2 + 8}
+                  y={layout.y - 28}
+                  width={layout.width - 16}
+                  height="36"
+                  pointerEvents="none"
+                >
+                  <div
+                    className="flex h-full items-center justify-center text-center leading-tight"
+                    style={{ ...diagramTextCss, color: "#0f172a" }}
+                  >
+                    {item}
+                  </div>
+                </foreignObject>
+                <text
+                  x={layout.x}
+                  y={layout.y + 22}
+                  textAnchor="middle"
+                  fill="#475569"
+                  fontFamily={diagramTextStyle.fontFamily}
+                  fontSize={10 * diagramTextStyle.fontScale}
+                  fontWeight="700"
+                  pointerEvents="none"
+                >
+                  {`CT ${index + 2}m | WIP ${index + 1}`}
+                </text>
+              </g>
+            </g>
+          );
+        })}
+        <line x1="110" y1="312" x2="850" y2="312" stroke="#64748b" strokeWidth="2" />
+        <text
+          x="480"
+          y="342"
+          textAnchor="middle"
+          fill="#475569"
+          fontFamily={diagramTextStyle.fontFamily}
+          fontSize={13 * diagramTextStyle.fontScale}
+          fontWeight="800"
+          fontStyle={diagramTextStyle.italic ? "italic" : "normal"}
+          textDecoration={diagramTextStyle.underline ? "underline" : "none"}
+          className="cursor-text"
+          onClick={handleValueStreamTimelineClick}
+        >
+          {valueStreamTimelineLabel}
+        </text>
+        {valueStreamNotes.map((note) => (
+          <g
+            key={note.id}
+            className="cursor-grab active:cursor-grabbing"
+            onPointerDown={(event) => handleValueStreamNotePointerDown(note, event)}
+            onPointerMove={handleValueStreamNotePointerMove}
+            onPointerUp={finishValueStreamNoteDrag}
+            onPointerCancel={finishValueStreamNoteDrag}
+            onClick={(event) => handleValueStreamNoteClick(note, event)}
+          >
+            <rect
+              x={note.x - 72}
+              y={note.y - 24}
+              width="144"
+              height="48"
+              rx="8"
+              fill="#fef9c3"
+              stroke="#ca8a04"
+              strokeWidth="1.5"
+            />
+            <foreignObject x={note.x - 62} y={note.y - 18} width="124" height="36" pointerEvents="none">
+              <div className="flex h-full items-center justify-center text-center text-[10px] font-bold leading-tight text-amber-900">
+                {note.text}
+              </div>
+            </foreignObject>
+          </g>
+        ))}
       </svg>
     </div>
   ) : diagramType === "swimlane" ? (
@@ -5560,8 +6291,9 @@ export function ProcessMapBuilderClient({
     >
       {canvasQuickControls}
       {floatingEditBar}
-      {buildTableRows(diagramType, items, metrics, {
+      {buildTableRows(diagramType, tableItems, metrics, {
         editable: true,
+        sipocRowCount: sipocDisplayRowCount,
         onItemChange: updateItemLine,
         onMetricChange: updateMetricLine,
       })}
@@ -5571,14 +6303,14 @@ export function ProcessMapBuilderClient({
       key={previewRevision}
       ref={chartPreviewRef}
       onPointerDownCapture={handleSandboxPointerDownCapture}
-      className="relative h-full min-h-[36rem] w-full overflow-auto bg-slate-50 p-4 dark:bg-slate-900/60 [&_svg]:h-full [&_svg]:min-h-[32rem] [&_svg]:w-full"
+      className="relative h-full min-h-[36rem] w-full overflow-auto bg-slate-50 p-4 dark:bg-slate-900/60"
       aria-label="Diagram preview"
       title="Click chart labels or values to edit them"
       onClick={handleChartPreviewClick}
     >
       {canvasQuickControls}
       {floatingEditBar}
-      <div dangerouslySetInnerHTML={{ __html: svg }} />
+      <div className="[&>svg]:h-full [&>svg]:min-h-[32rem] [&>svg]:w-full" dangerouslySetInnerHTML={{ __html: svg }} />
     </div>
   );
 
@@ -6133,8 +6865,9 @@ export function ProcessMapBuilderClient({
                 {false ? (
                 <div className="min-h-[28rem] overflow-auto rounded-xl border border-slate-300/70 bg-slate-50 p-6 dark:border-slate-700 dark:bg-slate-900/60">
                 {TABLE_DIAGRAM_TYPES.has(diagramType) ? (
-                  buildTableRows(diagramType, items, metrics, {
+                  buildTableRows(diagramType, tableItems, metrics, {
                     editable: true,
+                    sipocRowCount: sipocDisplayRowCount,
                     onItemChange: updateItemLine,
                     onMetricChange: updateMetricLine,
                   })
@@ -6221,8 +6954,9 @@ export function ProcessMapBuilderClient({
             <div className="grid min-h-0 gap-4 overflow-y-auto overflow-x-hidden p-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
               <div className="min-h-[min(64dvh,42rem)] overflow-y-auto overflow-x-hidden rounded-xl border border-slate-300/70 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/60 sm:p-4">
                 {TABLE_DIAGRAM_TYPES.has(diagramType) ? (
-                  buildTableRows(diagramType, items, metrics, {
+                  buildTableRows(diagramType, tableItems, metrics, {
                     editable: true,
+                    sipocRowCount: sipocDisplayRowCount,
                     onItemChange: updateItemLine,
                     onMetricChange: updateMetricLine,
                   })
