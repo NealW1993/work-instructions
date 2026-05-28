@@ -1,6 +1,6 @@
 import { ProcessMapBuilderClient } from "@/components/process-maps/process-map-builder-client";
 import { requireAuthenticatedUser } from "@/lib/auth";
-import { canEditInstructions } from "@/lib/roles";
+import { canCreateControlledDocuments } from "@/lib/roles";
 
 interface DepartmentRow {
   id: string;
@@ -17,7 +17,7 @@ export default async function ProcessMapsPage() {
 
   return (
     <ProcessMapBuilderClient
-      canEdit={canEditInstructions(profile.role)}
+      canEdit={canCreateControlledDocuments(profile.role)}
       departments={((departmentRows ?? []) as DepartmentRow[]).map((department) => ({
         id: department.id,
         name: department.name,

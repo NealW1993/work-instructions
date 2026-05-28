@@ -10,7 +10,11 @@ import {
   isProcessDocumentType,
   normalizeIsoClauseRefs,
 } from "@/lib/process-documents";
-import { canEditInstructions, hasFullAccess } from "@/lib/roles";
+import {
+  canApproveControlledDocuments,
+  canCreateControlledDocuments,
+  hasFullAccess,
+} from "@/lib/roles";
 import {
   hasMeaningfulRichText,
   sanitizeRichHtml,
@@ -44,6 +48,9 @@ interface ProcessDocumentRequestBody {
   importedFileName?: unknown;
   importedFileType?: unknown;
   importedFileSize?: unknown;
+  importedFileDataBase64?: unknown;
+  importedFileSha256?: unknown;
+  accessGroupIds?: unknown;
 }
 
 interface InsertedDocumentRow {
@@ -58,6 +65,7 @@ interface InsertedRevisionRow {
 
 const DEFAULT_NEXT_REVIEW_DAYS = 365;
 const MAX_COVER_IMAGE_DATA_URL_LENGTH = 500_000;
+const MAX_IMPORT_BASE64_LENGTH = 22_000_000;
 
 function normalizeString(value: unknown, maxLength = 5000) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
@@ -110,6 +118,20 @@ function normalizeImportedFileSize(value: unknown) {
   return Math.round(value);
 }
 
+function normalizeBase64(value: unknown) {
+  const normalized = normalizeString(value, MAX_IMPORT_BASE64_LENGTH).replace(/\s+/g, "");
+  if (!normalized) {
+    return null;
+  }
+
+  return /^[a-z0-9+/]+={0,2}$/i.test(normalized) ? normalized : null;
+}
+
+function normalizeSha256(value: unknown) {
+  const normalized = normalizeString(value, 64).toLowerCase();
+  return /^[a-f0-9]{64}$/.test(normalized) ? normalized : "";
+}
+
 function normalizeCoverImageDataUrl(value: unknown) {
   const normalized = normalizeString(value, MAX_COVER_IMAGE_DATA_URL_LENGTH);
   if (!normalized) {
@@ -137,7 +159,107 @@ function normalizeRequestedStatus(
     return { error: "Only admins can obsolete controlled documents." };
   }
 
+  if (status === "approved" && !canApproveControlledDocuments(requesterRole)) {
+    return { error: "Only admins can approve controlled documents." };
+  }
+
   return status;
+}
+
+async function normalizeAllowedAccessGroupIds(input: {
+  supabaseAdmin: ReturnType<typeof getSupabaseAdminClient>;
+  requestedIds: string[];
+  requesterId: string;
+  requesterCanUseAnyGroup: boolean;
+}) {
+  if (input.requestedIds.length === 0) {
+    return { groupIds: [] as string[], error: null as string | null };
+  }
+
+  const { data: groups, error: groupsError } = await input.supabaseAdmin
+    .from("access_groups")
+    .select("id")
+    .eq("is_active", true)
+    .in("id", input.requestedIds);
+
+  if (groupsError) {
+    return { groupIds: [] as string[], error: groupsError.message };
+  }
+
+  const activeGroupIds = new Set(
+    ((groups ?? []) as Array<{ id: string }>).map((group) => group.id),
+  );
+  const requestedActiveIds = input.requestedIds.filter((groupId) =>
+    activeGroupIds.has(groupId),
+  );
+
+  if (requestedActiveIds.length !== input.requestedIds.length) {
+    return {
+      groupIds: [] as string[],
+      error: "One or more selected access groups were not found.",
+    };
+  }
+
+  if (input.requesterCanUseAnyGroup) {
+    return { groupIds: requestedActiveIds, error: null };
+  }
+
+  const { data: memberships, error: membershipsError } = await input.supabaseAdmin
+    .from("access_group_memberships")
+    .select("group_id")
+    .eq("user_id", input.requesterId)
+    .in("group_id", requestedActiveIds);
+
+  if (membershipsError) {
+    return { groupIds: [] as string[], error: membershipsError.message };
+  }
+
+  const memberGroupIds = new Set(
+    ((memberships ?? []) as Array<{ group_id: string }>).map(
+      (membership) => membership.group_id,
+    ),
+  );
+
+  if (!requestedActiveIds.every((groupId) => memberGroupIds.has(groupId))) {
+    return {
+      groupIds: [] as string[],
+      error: "You can only restrict documents to groups you belong to.",
+    };
+  }
+
+  return { groupIds: requestedActiveIds, error: null };
+}
+
+async function replaceDocumentGroupAccess(input: {
+  supabaseAdmin: ReturnType<typeof getSupabaseAdminClient>;
+  documentId: string;
+  groupIds: string[];
+  actorUserId: string;
+}) {
+  const { error: deleteError } = await input.supabaseAdmin
+    .from("process_document_group_access")
+    .delete()
+    .eq("document_id", input.documentId);
+
+  if (deleteError) {
+    return deleteError.message;
+  }
+
+  if (input.groupIds.length === 0) {
+    return null;
+  }
+
+  const { error: insertError } = await input.supabaseAdmin
+    .from("process_document_group_access")
+    .insert(
+      input.groupIds.map((groupId) => ({
+        document_id: input.documentId,
+        group_id: groupId,
+        created_by: input.actorUserId,
+      })),
+    );
+
+  return insertError?.message ?? null;
 }
 
 function getApprovalReadinessIssues(input: {
@@ -176,9 +298,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  if (!canEditInstructions(requester.role)) {
+  if (!canCreateControlledDocuments(requester.role)) {
     return NextResponse.json(
-      { error: "Only admins and system admins can create controlled documents." },
+      { error: "You do not have permission to create controlled documents." },
       { status: 403 },
     );
   }
@@ -217,6 +339,11 @@ export async function POST(request: NextRequest) {
     sourceType === "import" ? normalizeString(requestBody.importedFileType, 120) : null;
   const importedFileSize =
     sourceType === "import" ? normalizeImportedFileSize(requestBody.importedFileSize) : null;
+  const importedFileDataBase64 =
+    sourceType === "import" ? normalizeBase64(requestBody.importedFileDataBase64) : null;
+  const importedFileSha256 =
+    sourceType === "import" ? normalizeSha256(requestBody.importedFileSha256) : "";
+  const accessGroupIds = normalizeUuidArray(requestBody.accessGroupIds);
   const now = new Date();
 
   if (typeof requestedStatus !== "string") {
@@ -233,6 +360,13 @@ export async function POST(request: NextRequest) {
 
   if (!hasMeaningfulRichText(bodyHtml)) {
     return NextResponse.json({ error: "Document body is required." }, { status: 400 });
+  }
+
+  if (sourceType === "import" && !importedFileDataBase64) {
+    return NextResponse.json(
+      { error: "Imported source file content is required for database retention." },
+      { status: 400 },
+    );
   }
 
   if (requestedStatus === "approved") {
@@ -265,6 +399,17 @@ export async function POST(request: NextRequest) {
         };
 
   const supabaseAdmin = getSupabaseAdminClient();
+  const groupAccess = await normalizeAllowedAccessGroupIds({
+    supabaseAdmin,
+    requestedIds: accessGroupIds,
+    requesterId: requester.id,
+    requesterCanUseAnyGroup: hasFullAccess(requester.role),
+  });
+
+  if (groupAccess.error) {
+    return NextResponse.json({ error: groupAccess.error }, { status: 400 });
+  }
+
   const { data: insertedDocument, error: insertError } = await supabaseAdmin
     .from("process_documents")
     .insert({
@@ -325,6 +470,36 @@ export async function POST(request: NextRequest) {
       { error: revisionError?.message ?? "Unable to create document revision." },
       { status: 500 },
     );
+  }
+
+  const groupAccessError = await replaceDocumentGroupAccess({
+    supabaseAdmin,
+    documentId: insertedDocument.id,
+    groupIds: groupAccess.groupIds,
+    actorUserId: requester.id,
+  });
+
+  if (groupAccessError) {
+    return NextResponse.json({ error: groupAccessError }, { status: 500 });
+  }
+
+  if (sourceType === "import" && importedFileName && importedFileDataBase64) {
+    const { error: importFileError } = await supabaseAdmin
+      .from("process_document_import_files")
+      .insert({
+        document_id: insertedDocument.id,
+        revision_id: insertedRevision.id,
+        file_name: importedFileName,
+        content_type: importedFileType || "application/octet-stream",
+        file_size: importedFileSize ?? 0,
+        file_sha256: importedFileSha256,
+        content_base64: importedFileDataBase64,
+        uploaded_by: requester.id,
+      });
+
+    if (importFileError) {
+      return NextResponse.json({ error: importFileError.message }, { status: 500 });
+    }
   }
 
   if (requestedStatus !== "draft") {

@@ -4,6 +4,7 @@ import { InstructionBackButton } from "@/components/instructions/instruction-bac
 import { InstructionEditor } from "@/components/instructions/instruction-editor";
 import { requireAuthenticatedUser } from "@/lib/auth";
 import { canEditInstructions } from "@/lib/roles";
+import type { InstructionApprovalStatus } from "@/lib/types";
 
 interface EditInstructionPageProps {
   params: Promise<{
@@ -28,6 +29,8 @@ interface EditInstructionRecord {
   acceptance_criteria: string | null;
   verification_records: string | null;
   risk_controls: string | null;
+  approval_status: InstructionApprovalStatus | null;
+  created_by: string;
   revision: number;
   fork_root_instruction_id: string | null;
   fork_number: number | null;
@@ -55,14 +58,10 @@ export default async function EditInstructionPage({ params }: EditInstructionPag
   const { id } = await params;
   const { supabase, profile } = await requireAuthenticatedUser();
 
-  if (!canEditInstructions(profile.role)) {
-    redirect(`/instructions/${id}`);
-  }
-
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, is_archived, body_markdown, uncommon_tools, iso_clause_refs, process_scope, acceptance_criteria, verification_records, risk_controls, revision, fork_root_instruction_id, fork_number, merged_into_root_at, merge_count, work_item_id, work_items(id, department_id, part_id, item_title)",
+      "id, is_archived, body_markdown, uncommon_tools, iso_clause_refs, process_scope, acceptance_criteria, verification_records, risk_controls, approval_status, created_by, revision, fork_root_instruction_id, fork_number, merged_into_root_at, merge_count, work_item_id, work_items(id, department_id, part_id, item_title)",
     )
     .eq("id", id)
     .eq("is_archived", false)
@@ -78,6 +77,15 @@ export default async function EditInstructionPage({ params }: EditInstructionPag
 
   const instruction = data as EditInstructionRecord;
   const workItem = normalizeWorkItem(instruction.work_items);
+  const canEditOwnPendingInstruction =
+    instruction.created_by === profile.id &&
+    (instruction.approval_status === "draft" ||
+      instruction.approval_status === "pending_review" ||
+      instruction.approval_status === "rejected");
+
+  if (!canEditInstructions(profile.role) && !canEditOwnPendingInstruction) {
+    redirect(`/instructions/${id}`);
+  }
 
   const { data: suggestedToolLinkData, error: suggestedToolLinkError } = await supabase
     .from("instruction_suggested_tools")

@@ -2,6 +2,7 @@ import { ProcessDocumentsClient } from "@/components/process-documents/process-d
 import type {
   ProcessDocumentAuditItem,
   ProcessDocumentDepartmentOption,
+  ProcessDocumentAccessGroupOption,
   ProcessDocumentInstructionOption,
   ProcessDocumentListItem,
   ProcessDocumentProfileOption,
@@ -14,7 +15,11 @@ import type {
   ProcessDocumentType,
   ProcessDocumentSourceType,
 } from "@/lib/process-documents";
-import { canEditInstructions, hasFullAccess } from "@/lib/roles";
+import {
+  canApproveControlledDocuments,
+  canCreateControlledDocuments,
+  hasFullAccess,
+} from "@/lib/roles";
 
 interface ProcessDocumentsPageProps {
   searchParams: Promise<{
@@ -71,6 +76,12 @@ interface ProcessDocumentRevisionRow {
   created_at: string;
 }
 
+interface ProcessDocumentImportFileRow {
+  id: string;
+  revision_id: string;
+  file_sha256: string | null;
+}
+
 interface ProcessDocumentAuditRow {
   id: string;
   document_id: string;
@@ -104,6 +115,17 @@ interface ProfileRow {
   email: string;
 }
 
+interface AccessGroupRow {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+interface ProcessDocumentGroupAccessRow {
+  document_id: string;
+  group_id: string;
+}
+
 interface InstructionOptionRow {
   id: string;
   revision: number;
@@ -134,16 +156,20 @@ export default async function ProcessDocumentsPage({
 }: ProcessDocumentsPageProps) {
   const { supabase, profile } = await requireAuthenticatedUser();
   const params = await searchParams;
-  const canEdit = canEditInstructions(profile.role);
+  const canEdit = canCreateControlledDocuments(profile.role);
+  const canApprove = canApproveControlledDocuments(profile.role);
 
   const [
     { data: documentRows },
     { data: revisionRows },
+    { data: importFileRows },
     { data: auditRows },
     { data: templateRows },
     { data: departmentRows },
     { data: profileRows },
     { data: instructionRows },
+    { data: accessGroupRows },
+    { data: documentGroupAccessRows },
   ] = await Promise.all([
     supabase
       .from("process_documents")
@@ -154,6 +180,11 @@ export default async function ProcessDocumentsPage({
       .from("process_document_revisions")
       .select("*")
       .order("revision", { ascending: false })
+      .range(0, 2999),
+    supabase
+      .from("process_document_import_files")
+      .select("id, revision_id, file_sha256")
+      .order("created_at", { ascending: false })
       .range(0, 2999),
     supabase
       .from("process_document_audit_events")
@@ -181,6 +212,15 @@ export default async function ProcessDocumentsPage({
       .eq("is_archived", false)
       .order("updated_at", { ascending: false })
       .range(0, 499),
+    supabase
+      .from("access_groups")
+      .select("id, name, slug")
+      .eq("is_active", true)
+      .order("name", { ascending: true }),
+    supabase
+      .from("process_document_group_access")
+      .select("document_id, group_id")
+      .range(0, 9999),
   ]);
 
   const departments = ((departmentRows ?? []) as DepartmentRow[]).map(
@@ -206,11 +246,33 @@ export default async function ProcessDocumentsPage({
     ]),
   );
 
+  const accessGroups = ((accessGroupRows ?? []) as AccessGroupRow[]).map(
+    (group): ProcessDocumentAccessGroupOption => ({
+      id: group.id,
+      name: group.name,
+      slug: group.slug,
+    }),
+  );
+  const groupNameById = new Map(accessGroups.map((group) => [group.id, group.name]));
+  const groupIdsByDocumentId = new Map<string, string[]>();
+  for (const row of (documentGroupAccessRows ?? []) as ProcessDocumentGroupAccessRow[]) {
+    const groupIds = groupIdsByDocumentId.get(row.document_id) ?? [];
+    groupIds.push(row.group_id);
+    groupIdsByDocumentId.set(row.document_id, groupIds);
+  }
+  const importFileByRevisionId = new Map(
+    ((importFileRows ?? []) as ProcessDocumentImportFileRow[]).map((file) => [
+      file.revision_id,
+      file,
+    ]),
+  );
+
   const documents = ((documentRows ?? []) as ProcessDocumentRow[]).map(
     (document): ProcessDocumentListItem => {
       const department = document.department_id
         ? departmentById.get(document.department_id) ?? null
         : null;
+      const accessGroupIds = groupIdsByDocumentId.get(document.id) ?? [];
 
       return {
         id: document.id,
@@ -250,32 +312,42 @@ export default async function ProcessDocumentsPage({
         approved_by_name: document.approved_by
           ? profileNameById.get(document.approved_by) ?? null
           : null,
+        access_group_ids: accessGroupIds,
+        access_group_names: accessGroupIds
+          .map((groupId) => groupNameById.get(groupId))
+          .filter((groupName): groupName is string => Boolean(groupName)),
       };
     },
   );
 
   const revisions = ((revisionRows ?? []) as ProcessDocumentRevisionRow[]).map(
-    (revision): ProcessDocumentRevisionItem => ({
-      id: revision.id,
-      document_id: revision.document_id,
-      revision: revision.revision,
-      title: revision.title,
-      body_html: revision.body_html,
-      change_summary: revision.change_summary ?? "",
-      source_type: revision.source_type,
-      template_id: revision.template_id,
-      imported_file_name: revision.imported_file_name,
-      imported_file_type: revision.imported_file_type,
-      imported_file_size: revision.imported_file_size,
-      prepared_by: revision.prepared_by,
-      approved_by: revision.approved_by,
-      approved_at: revision.approved_at,
-      created_at: revision.created_at,
-      prepared_by_name: profileNameById.get(revision.prepared_by) ?? null,
-      approved_by_name: revision.approved_by
-        ? profileNameById.get(revision.approved_by) ?? null
-        : null,
-    }),
+    (revision): ProcessDocumentRevisionItem => {
+      const importFile = importFileByRevisionId.get(revision.id) ?? null;
+
+      return {
+        id: revision.id,
+        document_id: revision.document_id,
+        revision: revision.revision,
+        title: revision.title,
+        body_html: revision.body_html,
+        change_summary: revision.change_summary ?? "",
+        source_type: revision.source_type,
+        template_id: revision.template_id,
+        imported_file_name: revision.imported_file_name,
+        imported_file_type: revision.imported_file_type,
+        imported_file_size: revision.imported_file_size,
+        prepared_by: revision.prepared_by,
+        approved_by: revision.approved_by,
+        approved_at: revision.approved_at,
+        created_at: revision.created_at,
+        prepared_by_name: profileNameById.get(revision.prepared_by) ?? null,
+        approved_by_name: revision.approved_by
+          ? profileNameById.get(revision.approved_by) ?? null
+          : null,
+        import_file_id: importFile?.id ?? null,
+        import_file_sha256: importFile?.file_sha256 ?? "",
+      };
+    },
   );
 
   const auditEvents = ((auditRows ?? []) as ProcessDocumentAuditRow[]).map(
@@ -329,6 +401,7 @@ export default async function ProcessDocumentsPage({
   return (
     <ProcessDocumentsClient
       canEdit={canEdit}
+      canApprove={canApprove}
       isSystemAdmin={hasFullAccess(profile.role)}
       currentUserId={profile.id}
       initialDocumentId={params.doc?.trim() ?? null}
@@ -339,6 +412,7 @@ export default async function ProcessDocumentsPage({
       departments={departments}
       profiles={profiles}
       instructions={instructions}
+      accessGroups={accessGroups}
     />
   );
 }

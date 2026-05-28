@@ -9,7 +9,7 @@ import {
 } from "@/lib/ai-usage";
 import { serverEnv } from "@/lib/env.server";
 import { ISO_9001_CLAUSE_OPTIONS } from "@/lib/process-documents";
-import { canEditInstructions } from "@/lib/roles";
+import { canCreateInstructions } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 interface EnhanceInstructionRequestBody {
@@ -290,9 +290,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  if (!canEditInstructions(requester.role)) {
+  if (!canCreateInstructions(requester.role)) {
     return NextResponse.json(
-      { error: "Only editors can enhance work instructions." },
+      { error: "You do not have permission to enhance work instructions." },
       { status: 403 },
     );
   }

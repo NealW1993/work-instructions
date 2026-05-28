@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  BookOpen,
   BookmarkPlus,
   Calculator,
   ChartNetwork,
@@ -16,6 +17,7 @@ import {
   RefreshCw,
   Save,
   Undo2,
+  UsersRound,
 } from "lucide-react";
 import {
   type MouseEvent as ReactMouseEvent,
@@ -42,7 +44,7 @@ import {
   type DashboardWidgetLayoutItem,
   type DashboardWidgetSize,
 } from "@/lib/dashboard-layout";
-import { accessLevelLabel, canEditInstructions } from "@/lib/roles";
+import { accessLevelLabel, canCreateInstructions, hasFullAccess } from "@/lib/roles";
 import type { Profile } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -199,27 +201,43 @@ export function AppHeader({ profile }: { profile: Profile }) {
   const studioMenuCloseTimeoutRef = useRef<number | null>(null);
   const instructionMenuCloseTimeoutRef = useRef<number | null>(null);
 
-  const canCreateInstructions = canEditInstructions(profile.role);
+  const userCanCreateInstructions = canCreateInstructions(profile.role);
+  const userHasFullAccess = hasFullAccess(profile.role);
   const accessLabel = accessLevelLabel(profile.role);
-  const canViewArchivedInstructions = canCreateInstructions;
+  const canViewArchivedInstructions = userHasFullAccess;
   const isDashboardActive = isActivePath(pathname, "/dashboard");
+  const isDocCenterActive = isActivePath(pathname, "/doc-center");
+  const isGroupsActive = isActivePath(pathname, "/groups");
   const isProcessDocumentsActive = isActivePath(pathname, "/process-documents");
   const isFormulaToolsActive = isActivePath(pathname, "/process-maps/formulas");
   const isProcessMapsActive =
     isActivePath(pathname, "/process-maps") && !isFormulaToolsActive;
   const isDashboardWorkspaceActive =
-    isDashboardActive || isProcessDocumentsActive || isProcessMapsActive || isFormulaToolsActive;
+    isDashboardActive ||
+    isDocCenterActive ||
+    isGroupsActive ||
+    isProcessDocumentsActive ||
+    isProcessMapsActive ||
+    isFormulaToolsActive;
   const isNewInstructionActive = isActivePath(pathname, "/instructions/new");
   const isArchivedInstructionActive = isActivePath(pathname, "/instructions/archived");
   const instructionControlActive = isNewInstructionActive || isArchivedInstructionActive;
-  const dashboardControlHref = isProcessDocumentsActive
+  const dashboardControlHref = isDocCenterActive
+    ? "/doc-center"
+    : isGroupsActive
+    ? "/groups"
+    : isProcessDocumentsActive
     ? "/process-documents"
     : isFormulaToolsActive
       ? "/process-maps/formulas"
       : isProcessMapsActive
       ? "/process-maps"
       : "/dashboard";
-  const dashboardControlLabel = isProcessDocumentsActive
+  const dashboardControlLabel = isDocCenterActive
+    ? "Doc Center"
+    : isGroupsActive
+    ? "Groups"
+    : isProcessDocumentsActive
     ? "Process Docs"
     : isFormulaToolsActive
       ? "Formula Tools"
@@ -294,6 +312,12 @@ export function AppHeader({ profile }: { profile: Profile }) {
       active: isDashboardActive,
     },
     {
+      href: "/doc-center",
+      label: "Doc Center",
+      icon: BookOpen,
+      active: isDocCenterActive,
+    },
+    {
       href: "/process-documents",
       label: "Process Docs",
       icon: ClipboardList,
@@ -310,6 +334,12 @@ export function AppHeader({ profile }: { profile: Profile }) {
       label: "Formula Tools",
       icon: Calculator,
       active: isFormulaToolsActive,
+    },
+    {
+      href: "/groups",
+      label: "Groups",
+      icon: UsersRound,
+      active: isGroupsActive,
     },
   ];
   const customizeLabel =
@@ -1353,7 +1383,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
   };
 
   const renderInstructionControl = (mobile: boolean) => {
-    if (!canCreateInstructions) {
+    if (!userCanCreateInstructions) {
       return null;
     }
 
@@ -1520,7 +1550,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
           <span
             className={cn(
               "hidden rounded-full border px-3 py-1 text-xs font-extrabold uppercase tracking-wide md:inline-flex",
-              canCreateInstructions
+              userHasFullAccess
                 ? "border-emerald-500/35 bg-emerald-500/15 text-emerald-800 dark:text-emerald-100"
                 : "border-amber-500/40 bg-amber-500/15 text-amber-800 dark:text-amber-100",
             )}
@@ -1537,7 +1567,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
           <span
             className={cn(
               "inline-flex rounded-full border px-3 py-1 text-xs font-extrabold uppercase tracking-wide",
-              canCreateInstructions
+              userHasFullAccess
                 ? "border-emerald-500/35 bg-emerald-500/15 text-emerald-800 dark:text-emerald-100"
                 : "border-amber-500/40 bg-amber-500/15 text-amber-800 dark:text-amber-100",
             )}

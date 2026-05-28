@@ -18,6 +18,7 @@ import {
   Link2,
   List,
   Loader2,
+  Lock,
   MoreVertical,
   Plus,
   Search,
@@ -84,6 +85,8 @@ export interface ProcessDocumentListItem {
   approved_by_name: string | null;
   document_cover_image_data_url: string;
   document_cover_image_name: string;
+  access_group_ids: string[];
+  access_group_names: string[];
 }
 
 export interface ProcessDocumentRevisionItem {
@@ -104,6 +107,8 @@ export interface ProcessDocumentRevisionItem {
   created_at: string;
   prepared_by_name: string | null;
   approved_by_name: string | null;
+  import_file_id: string | null;
+  import_file_sha256: string;
 }
 
 export interface ProcessDocumentAuditItem {
@@ -148,8 +153,15 @@ export interface ProcessDocumentInstructionOption {
   department_name: string;
 }
 
+export interface ProcessDocumentAccessGroupOption {
+  id: string;
+  name: string;
+  slug: string;
+}
+
 interface ProcessDocumentsClientProps {
   canEdit: boolean;
+  canApprove: boolean;
   isSystemAdmin: boolean;
   currentUserId: string;
   initialDocumentId: string | null;
@@ -160,6 +172,7 @@ interface ProcessDocumentsClientProps {
   departments: ProcessDocumentDepartmentOption[];
   profiles: ProcessDocumentProfileOption[];
   instructions: ProcessDocumentInstructionOption[];
+  accessGroups: ProcessDocumentAccessGroupOption[];
 }
 
 interface ProcessDocumentFormState {
@@ -188,6 +201,9 @@ interface ProcessDocumentFormState {
   importedFileName: string | null;
   importedFileType: string | null;
   importedFileSize: number | null;
+  importedFileDataBase64: string | null;
+  importedFileSha256: string | null;
+  accessGroupIds: string[];
 }
 
 interface ImportReport {
@@ -237,6 +253,9 @@ const EMPTY_FORM: ProcessDocumentFormState = {
   importedFileName: null,
   importedFileType: null,
   importedFileSize: null,
+  importedFileDataBase64: null,
+  importedFileSha256: null,
+  accessGroupIds: [],
 };
 
 const PROCESS_DOCUMENT_AUTHORING_TYPE_OPTIONS = PROCESS_DOCUMENT_TYPE_OPTIONS.filter(
@@ -420,6 +439,7 @@ function composeDocumentBodyHtml(form: ProcessDocumentFormState) {
 
 export function ProcessDocumentsClient({
   canEdit,
+  canApprove,
   isSystemAdmin,
   currentUserId,
   initialDocumentId,
@@ -430,6 +450,7 @@ export function ProcessDocumentsClient({
   departments,
   profiles,
   instructions,
+  accessGroups,
 }: ProcessDocumentsClientProps) {
   const router = useRouter();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
@@ -590,6 +611,19 @@ export function ProcessDocumentsClient({
     [departments, documents],
   );
 
+  const groupChannels = useMemo(
+    () =>
+      accessGroups
+        .map((group) => ({
+          id: `group:${group.id}`,
+          label: group.name,
+          count: documents.filter((document) => document.access_group_ids.includes(group.id))
+            .length,
+        }))
+        .filter((channel) => channel.count > 0),
+    [accessGroups, documents],
+  );
+
   const authoringTemplates = useMemo(
     () => templates.filter((template) => template.document_type !== "work_instruction"),
     [templates],
@@ -674,6 +708,10 @@ export function ProcessDocumentsClient({
 
       if (selectedChannelId.startsWith("department:")) {
         return document.department_id === selectedChannelId.replace("department:", "");
+      }
+
+      if (selectedChannelId.startsWith("group:")) {
+        return document.access_group_ids.includes(selectedChannelId.replace("group:", ""));
       }
 
       return true;
@@ -780,6 +818,9 @@ export function ProcessDocumentsClient({
       importedFileName: null,
       importedFileType: null,
       importedFileSize: null,
+      importedFileDataBase64: null,
+      importedFileSha256: null,
+      accessGroupIds: selectedDocument.access_group_ids ?? [],
     });
   }, [creating, currentUserId, documents.length, selectedDocument, selectedRevision]);
 
@@ -932,6 +973,8 @@ export function ProcessDocumentsClient({
       importedFileName: null,
       importedFileType: null,
       importedFileSize: null,
+      importedFileDataBase64: null,
+      importedFileSha256: null,
     }));
   }
 
@@ -983,6 +1026,8 @@ export function ProcessDocumentsClient({
         fileName?: string;
         fileType?: string;
         fileSize?: number;
+        fileDataBase64?: string;
+        fileSha256?: string;
         textLength?: number;
         warnings?: string[];
         error?: string;
@@ -1000,6 +1045,8 @@ export function ProcessDocumentsClient({
         importedFileName: payload.fileName ?? file.name,
         importedFileType: payload.fileType ?? file.type,
         importedFileSize: payload.fileSize ?? file.size,
+        importedFileDataBase64: payload.fileDataBase64 ?? null,
+        importedFileSha256: payload.fileSha256 ?? null,
       }));
       setMessage(
         payload.warnings?.length
@@ -1181,17 +1228,25 @@ export function ProcessDocumentsClient({
     setActionsOpen(false);
   }
 
-  const canApprove = canEdit;
   const canApproveCurrentForm = canApprove && approvalReadinessIssues.length === 0;
   const canObsolete = isSystemAdmin && Boolean(selectedDocument);
-  const showEditor = Boolean(canEdit && (creating || selectedDocument));
+  const canEditSelectedDocument = Boolean(
+    canEdit &&
+      (creating ||
+        !selectedDocument ||
+        isSystemAdmin ||
+        (selectedDocument.status !== "approved" &&
+          (selectedDocument.created_by === currentUserId ||
+            selectedDocument.owner_user_id === currentUserId))),
+  );
+  const showEditor = Boolean(canEditSelectedDocument && (creating || selectedDocument));
   const activeDocumentHtml = showEditor ? form.bodyHtml : selectedRevision?.body_html ?? "";
   const documentOutline = useMemo(
     () => extractHeadingOutline(activeDocumentHtml),
     [activeDocumentHtml],
   );
   const selectedChannelLabel =
-    [...primaryChannels, ...typeChannels, ...departmentChannels].find(
+    [...primaryChannels, ...typeChannels, ...departmentChannels, ...groupChannels].find(
       (channel) => channel.id === selectedChannelId,
     )?.label ?? "All controlled docs";
   const executiveStats = [
@@ -1392,6 +1447,31 @@ export function ProcessDocumentsClient({
                 ))}
               </div>
             ) : null}
+            {groupChannels.length > 0 ? (
+              <div className="grid gap-1">
+                <p className="px-2 pt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                  Groups
+                </p>
+                {groupChannels.map((channel) => (
+                  <button
+                    key={channel.id}
+                    type="button"
+                    onClick={() => setSelectedChannelId(channel.id)}
+                    className={cn(
+                      "flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-sm font-semibold transition",
+                      selectedChannelId === channel.id
+                        ? "bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
+                        : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900",
+                    )}
+                  >
+                    <span className="truncate">{channel.label}</span>
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+                      {channel.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
 
           <div className="grid gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
@@ -1443,6 +1523,12 @@ export function ProcessDocumentsClient({
                     Rev {document.current_revision} |{" "}
                     {getProcessDocumentTypeLabel(document.document_type)}
                   </p>
+                  {document.access_group_names.length > 0 ? (
+                    <p className="inline-flex min-w-0 items-center gap-1 text-xs font-semibold text-slate-500 dark:text-slate-300">
+                      <Lock size={12} className="shrink-0" />
+                      <span className="truncate">{document.access_group_names.join(", ")}</span>
+                    </p>
+                  ) : null}
                 </button>
               ))
             )}
@@ -1666,6 +1752,16 @@ export function ProcessDocumentsClient({
                       : "Not mapped"}
                   </dd>
                 </div>
+                <div className="md:col-span-2">
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Group Visibility
+                  </dt>
+                  <dd className="font-bold text-slate-900 dark:text-slate-100">
+                    {selectedDocument.access_group_names.length > 0
+                      ? selectedDocument.access_group_names.join(", ")
+                      : "All authorized users"}
+                  </dd>
+                </div>
               </dl>
               </details>
             </section>
@@ -1824,6 +1920,47 @@ export function ProcessDocumentsClient({
                     ))}
                   </select>
                 </label>
+
+                <fieldset className="grid gap-2 rounded-xl border border-slate-300/70 p-3 text-sm dark:border-slate-700 md:col-span-2">
+                  <legend className="px-1 font-semibold">Group Visibility</legend>
+                  {accessGroups.length === 0 ? (
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      No access groups are available.
+                    </p>
+                  ) : (
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      {accessGroups.map((group) => {
+                        const checked = form.accessGroupIds.includes(group.id);
+                        return (
+                          <label
+                            key={group.id}
+                            className={cn(
+                              "flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2 text-xs font-semibold transition",
+                              checked
+                                ? "border-cyan-500/45 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
+                                : "border-slate-300/70 bg-white/70 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950/50 dark:text-slate-300 dark:hover:bg-slate-900",
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() =>
+                                updateForm(
+                                  "accessGroupIds",
+                                  checked
+                                    ? form.accessGroupIds.filter((groupId) => groupId !== group.id)
+                                    : [...form.accessGroupIds, group.id],
+                                )
+                              }
+                              className="h-4 w-4 rounded border-slate-400 text-cyan-600 focus:ring-cyan-500"
+                            />
+                            <span className="truncate">{group.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </fieldset>
 
                 <label className="grid gap-1 text-sm">
                   <span className="font-semibold">Process Name</span>
@@ -2207,6 +2344,11 @@ export function ProcessDocumentsClient({
                       <span className="rounded-full border border-slate-300 bg-white/70 px-2 py-0.5 dark:border-slate-700 dark:bg-slate-950/60">
                         {importReport.fileType || "application/octet-stream"}
                       </span>
+                      {form.importedFileSha256 ? (
+                        <span className="rounded-full border border-slate-300 bg-white/70 px-2 py-0.5 dark:border-slate-700 dark:bg-slate-950/60">
+                          SHA-256 {form.importedFileSha256.slice(0, 12)}
+                        </span>
+                      ) : null}
                     </div>
                   ) : null}
                   {importReport?.warnings.length ? (
@@ -2336,6 +2478,18 @@ export function ProcessDocumentsClient({
                           ? ` | Approved by ${revision.approved_by_name}`
                           : ""}
                       </p>
+                      {revision.import_file_id ? (
+                        <a
+                          href={`/api/process-documents/files/${revision.import_file_id}`}
+                          className="inline-flex w-fit items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+                        >
+                          <Download size={13} />
+                          Source file
+                          {revision.import_file_sha256
+                            ? ` | SHA-256 ${revision.import_file_sha256.slice(0, 12)}`
+                            : ""}
+                        </a>
+                      ) : null}
                     </article>
                   ))}
                 </div>

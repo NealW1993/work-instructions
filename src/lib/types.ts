@@ -2,6 +2,7 @@ export type AppRole = "system_admin" | "admin" | "user";
 export type ThemePreference = "light" | "dark";
 
 export type MediaType = "image" | "video";
+export type InstructionApprovalStatus = "draft" | "pending_review" | "approved" | "rejected";
 
 export interface Department {
   id: string;
@@ -54,6 +55,14 @@ export interface WorkInstruction {
   notes_markdown: string;
   revision: number;
   last_change_summary?: string | null;
+  approval_status?: InstructionApprovalStatus;
+  submitted_by?: string | null;
+  submitted_at?: string | null;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  rejected_by?: string | null;
+  rejected_at?: string | null;
+  approval_note?: string;
   ai_assisted?: boolean;
   ai_assisted_at?: string | null;
   ai_assistance_last_event_id?: string | null;

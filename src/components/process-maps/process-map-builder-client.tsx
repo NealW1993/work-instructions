@@ -6391,7 +6391,7 @@ export function ProcessMapBuilderClient({
         disabled={!canEdit || saveBusy || !title.trim()}
         className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-emerald-500/45 bg-emerald-500/15 text-emerald-800 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-emerald-200"
         aria-label="Save controlled draft"
-        title={canEdit ? "Save controlled draft" : "Admin or system admin role required"}
+        title={canEdit ? "Save controlled draft" : "Document authoring is unavailable"}
       >
         {saveBusy ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
       </button>

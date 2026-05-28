@@ -1,8 +1,9 @@
 import mammoth from "mammoth";
+import { createHash } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
-import { canEditInstructions } from "@/lib/roles";
+import { canCreateControlledDocuments } from "@/lib/roles";
 import {
   extractTextFromHtml,
   hasMeaningfulRichText,
@@ -44,9 +45,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  if (!canEditInstructions(requester.role)) {
+  if (!canCreateControlledDocuments(requester.role)) {
     return NextResponse.json(
-      { error: "Only admins and system admins can import controlled documents." },
+      { error: "You do not have permission to import controlled documents." },
       { status: 403 },
     );
   }
@@ -78,12 +79,13 @@ export async function POST(request: NextRequest) {
 
   try {
     const arrayBuffer = await file.arrayBuffer();
+    const fileBuffer = Buffer.from(arrayBuffer);
     let rawHtml = "";
     let warnings: string[] = [];
 
     if (isWordDocument(file)) {
       const result = await mammoth.convertToHtml(
-        { buffer: Buffer.from(arrayBuffer) },
+        { buffer: fileBuffer },
         {
           convertImage: mammoth.images.imgElement((image) =>
             image.read("base64").then((imageBuffer) => ({
@@ -120,6 +122,8 @@ export async function POST(request: NextRequest) {
       fileName: file.name,
       fileType: file.type || "application/octet-stream",
       fileSize: file.size,
+      fileDataBase64: fileBuffer.toString("base64"),
+      fileSha256: createHash("sha256").update(fileBuffer).digest("hex"),
       textLength,
       warnings: Array.from(new Set(warnings)).slice(0, 10),
     });

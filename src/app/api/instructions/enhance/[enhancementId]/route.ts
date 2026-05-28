@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
-import { canEditInstructions } from "@/lib/roles";
+import { canCreateInstructions } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 interface UpdateEnhancementOutcomeRequestBody {
@@ -31,9 +31,9 @@ export async function PATCH(
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  if (!canEditInstructions(requester.role)) {
+  if (!canCreateInstructions(requester.role)) {
     return NextResponse.json(
-      { error: "Only editors can update AI enhancement outcomes." },
+      { error: "You do not have permission to update AI enhancement outcomes." },
       { status: 403 },
     );
   }

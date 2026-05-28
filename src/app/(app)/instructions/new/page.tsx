@@ -3,12 +3,12 @@ import { redirect } from "next/navigation";
 import { InstructionBackButton } from "@/components/instructions/instruction-back-button";
 import { InstructionEditor } from "@/components/instructions/instruction-editor";
 import { requireAuthenticatedUser } from "@/lib/auth";
-import { canEditInstructions } from "@/lib/roles";
+import { canCreateInstructions } from "@/lib/roles";
 
 export default async function NewInstructionPage() {
   const { profile } = await requireAuthenticatedUser();
 
-  if (!canEditInstructions(profile.role)) {
+  if (!canCreateInstructions(profile.role)) {
     redirect("/dashboard");
   }
 

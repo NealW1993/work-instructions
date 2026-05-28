@@ -2190,6 +2190,24 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       return;
     }
 
+    if (!processScope.trim()) {
+      setError("Process scope / applicability is required before an instruction can be submitted for review.");
+      setBusy(false);
+      return;
+    }
+
+    if (!acceptanceCriteria.trim()) {
+      setError("Acceptance criteria is required before an instruction can be submitted for review.");
+      setBusy(false);
+      return;
+    }
+
+    if (!verificationRecords.trim()) {
+      setError("Verification records are required before an instruction can be submitted for review.");
+      setBusy(false);
+      return;
+    }
+
     if (hasEditRevisionBump && !confirmedRevisionBumpRef.current) {
       setRevisionBumpConfirmationModal({
         currentRevision,
@@ -2209,35 +2227,48 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         throw new Error("You must be signed in.");
       }
 
-      const workItemPayload: {
-        id?: string;
-        department_id: string;
-        part_id: string;
-        item_title: string;
-        created_by: string;
-      } = {
-        department_id: normalizedDepartmentId,
-        part_id: normalizedPartId,
-        item_title: itemTitle.trim(),
-        created_by: user.id,
-      };
+      const normalizedItemTitle = itemTitle.trim();
+      const initialWorkItemStillMatches =
+        Boolean(workItemId) &&
+        normalizeSnapshotValue(initialData?.departmentId ?? "") === normalizedDepartmentId &&
+        normalizeSnapshotValue(initialData?.partId ?? "") === normalizedPartId &&
+        normalizeSnapshotValue(initialData?.itemTitle ?? "") === normalizedItemTitle;
+      let typedWorkItem: { id: string } | null =
+        initialWorkItemStillMatches && workItemId ? { id: workItemId } : null;
 
-      if (workItemId) {
-        workItemPayload.id = workItemId;
+      if (!typedWorkItem) {
+        const { data: existingWorkItem, error: existingWorkItemError } = await supabase
+          .from("work_items")
+          .select("id")
+          .eq("department_id", normalizedDepartmentId)
+          .eq("part_id", normalizedPartId)
+          .eq("item_title", normalizedItemTitle)
+          .maybeSingle();
+
+        if (existingWorkItemError) {
+          throw new Error(existingWorkItemError.message ?? "Unable to find work item.");
+        }
+
+        typedWorkItem = (existingWorkItem as { id: string } | null) ?? null;
       }
 
-      const { data: workItem, error: workItemError } = await supabase
-        .from("work_items")
-        .upsert(workItemPayload, {
-          onConflict: "part_id,item_title,department_id",
-        })
-        .select("id")
-        .single();
+      if (!typedWorkItem) {
+        const { data: insertedWorkItem, error: insertWorkItemError } = await supabase
+          .from("work_items")
+          .insert({
+            department_id: normalizedDepartmentId,
+            part_id: normalizedPartId,
+            item_title: normalizedItemTitle,
+            created_by: user.id,
+          })
+          .select("id")
+          .single();
 
-      const typedWorkItem = workItem as { id: string } | null;
+        typedWorkItem = insertedWorkItem as { id: string } | null;
 
-      if (workItemError || !typedWorkItem) {
-        throw new Error(workItemError?.message ?? "Unable to save work item.");
+        if (insertWorkItemError || !typedWorkItem) {
+          throw new Error(insertWorkItemError?.message ?? "Unable to save work item.");
+        }
       }
 
       const existingForkRootInstructionId = normalizeOptionalUuid(
@@ -2464,6 +2495,14 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           risk_controls: string;
           revision: number;
           last_change_summary: string;
+          approval_status: "pending_review";
+          submitted_by: string;
+          submitted_at: string;
+          approved_by: null;
+          approved_at: null;
+          rejected_by: null;
+          rejected_at: null;
+          approval_note: string;
           created_by: string;
           updated_by: string;
           fork_root_instruction_id?: string | null;
@@ -2485,6 +2524,14 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           risk_controls: riskControls.trim(),
           revision,
           last_change_summary: changeSummary,
+          approval_status: "pending_review",
+          submitted_by: user.id,
+          submitted_at: new Date().toISOString(),
+          approved_by: null,
+          approved_at: null,
+          rejected_by: null,
+          rejected_at: null,
+          approval_note: "",
           created_by: user.id,
           updated_by: user.id,
         };
@@ -2584,6 +2631,14 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           risk_controls: string;
           revision: number;
           last_change_summary: string;
+          approval_status: "pending_review";
+          submitted_by: string;
+          submitted_at: string;
+          approved_by: null;
+          approved_at: null;
+          rejected_by: null;
+          rejected_at: null;
+          approval_note: string;
           updated_by: string;
           ai_assisted?: boolean;
           ai_assisted_at?: string;
@@ -2600,6 +2655,14 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           risk_controls: riskControls.trim(),
           revision,
           last_change_summary: changeSummary,
+          approval_status: "pending_review",
+          submitted_by: user.id,
+          submitted_at: new Date().toISOString(),
+          approved_by: null,
+          approved_at: null,
+          rejected_by: null,
+          rejected_at: null,
+          approval_note: "",
           updated_by: user.id,
         };
 
@@ -2758,12 +2821,12 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
       setMessage(
         isEditRevisionBump
-          ? "New revision created successfully."
+          ? "New revision submitted for review."
           : mode === "edit"
-            ? "Instruction updated successfully."
+            ? "Instruction changes submitted for review."
             : mode === "fork"
-            ? `Fork ${createdForkNumber ?? "?"} created successfully.`
-            : "Instruction created successfully.",
+            ? `Fork ${createdForkNumber ?? "?"} submitted for review.`
+            : "Instruction submitted for review.",
       );
 
       navigationBypassRef.current = true;

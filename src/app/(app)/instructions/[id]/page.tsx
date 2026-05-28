@@ -32,6 +32,7 @@ import {
   type InstructionUpdateSourcePayload,
   InstructionUpdatesPanel,
 } from "@/components/instructions/instruction-updates-panel";
+import { InstructionApprovalControls } from "@/components/instructions/instruction-approval-controls";
 import { LocalDateTime } from "@/components/ui/local-date-time";
 import { requireAuthenticatedUser } from "@/lib/auth";
 import {
@@ -41,7 +42,7 @@ import {
   rewriteLoopbackMediaUrlsInHtml,
 } from "@/lib/media-url";
 import { canEditInstructions, hasFullAccess } from "@/lib/roles";
-import type { InstructionMedia } from "@/lib/types";
+import type { InstructionApprovalStatus, InstructionMedia } from "@/lib/types";
 import { inferVideoMimeType, normalizeVideoMarkupForPlayback } from "@/lib/video";
 
 interface InstructionPageProps {
@@ -65,6 +66,14 @@ interface InstructionRecord {
   acceptance_criteria: string | null;
   verification_records: string | null;
   risk_controls: string | null;
+  approval_status: InstructionApprovalStatus | null;
+  submitted_by: string | null;
+  submitted_at: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  rejected_by: string | null;
+  rejected_at: string | null;
+  approval_note: string | null;
   ai_assisted: boolean;
   ai_assisted_at: string | null;
   last_change_summary: string | null;
@@ -229,6 +238,34 @@ interface InstructionSuggestedToolLinkRow {
 }
 
 const DEFAULT_REVIEW_WINDOW_DAYS = 30;
+
+function getInstructionApprovalLabel(status: InstructionApprovalStatus | null | undefined) {
+  switch (status) {
+    case "draft":
+      return "Draft";
+    case "pending_review":
+      return "Pending Review";
+    case "rejected":
+      return "Rejected";
+    case "approved":
+    default:
+      return "Approved";
+  }
+}
+
+function getInstructionApprovalTone(status: InstructionApprovalStatus | null | undefined) {
+  switch (status) {
+    case "pending_review":
+      return "border-amber-500/45 bg-amber-500/15 text-amber-800 dark:text-amber-200";
+    case "rejected":
+      return "border-rose-500/45 bg-rose-500/15 text-rose-800 dark:text-rose-200";
+    case "draft":
+      return "border-slate-500/45 bg-slate-500/15 text-slate-700 dark:text-slate-300";
+    case "approved":
+    default:
+      return "border-emerald-500/45 bg-emerald-500/15 text-emerald-800 dark:text-emerald-200";
+  }
+}
 
 function normalizeReviewWindowDays(value: unknown) {
   if (!Number.isInteger(value)) {
@@ -741,7 +778,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, work_item_id, fork_root_instruction_id, fork_number, merged_into_root_at, merge_count, is_archived, body_markdown, uncommon_tools, iso_clause_refs, process_scope, acceptance_criteria, verification_records, risk_controls, ai_assisted, ai_assisted_at, last_change_summary, revision, created_at, updated_at, created_by, updated_by, work_items(id, department_id, part_id, item_title, departments(name)), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
+      "id, work_item_id, fork_root_instruction_id, fork_number, merged_into_root_at, merge_count, is_archived, body_markdown, uncommon_tools, iso_clause_refs, process_scope, acceptance_criteria, verification_records, risk_controls, approval_status, submitted_by, submitted_at, approved_by, approved_at, rejected_by, rejected_at, approval_note, ai_assisted, ai_assisted_at, last_change_summary, revision, created_at, updated_at, created_by, updated_by, work_items(id, department_id, part_id, item_title, departments(name)), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -942,7 +979,13 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const rawInstructionChangeEvents =
     (instructionChangeEventsData ?? []) as InstructionChangeEventRow[];
 
-  const profileIds = new Set<string>([instruction.created_by, instruction.updated_by]);
+  const profileIds = new Set<string>([
+    instruction.created_by,
+    instruction.updated_by,
+    instruction.submitted_by ?? "",
+    instruction.approved_by ?? "",
+    instruction.rejected_by ?? "",
+  ].filter(Boolean));
   for (const revisionHistoryRow of dedupedRevisionHistoryRows) {
     profileIds.add(revisionHistoryRow.updated_by);
   }
@@ -1185,8 +1228,15 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const showReviewIndicator =
     reviewStatus.status === "needs_review" || reviewIsOutOfRange;
   const instructionIsArchived = instruction.is_archived;
+  const approvalStatus = instruction.approval_status ?? "approved";
+  const canEditOwnPendingInstruction =
+    instruction.created_by === profile.id &&
+    (approvalStatus === "draft" ||
+      approvalStatus === "pending_review" ||
+      approvalStatus === "rejected");
   const showCompactEditorInstructionActions =
-    canEditInstructions(profile.role) && !instructionIsArchived;
+    (canEditInstructions(profile.role) || canEditOwnPendingInstruction) &&
+    !instructionIsArchived;
   const canPromoteArchivedRevision = canEditInstructions(profile.role);
   const printToolNamesByKey = new Map<string, string>();
 
@@ -1405,6 +1455,22 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
         />
 
         <header className="relative z-20 min-w-0 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+        {!instructionIsArchived && approvalStatus !== "approved" ? (
+          <div
+            className={`mb-4 rounded-2xl border px-4 py-3 ${getInstructionApprovalTone(
+              approvalStatus,
+            )}`}
+          >
+            <p className="text-sm font-bold">
+              {getInstructionApprovalLabel(approvalStatus)}
+            </p>
+            <p className="text-xs">
+              {approvalStatus === "rejected"
+                ? instruction.approval_note || "This instruction was returned for revision."
+                : "This instruction is controlled but not approved for general release yet."}
+            </p>
+          </div>
+        ) : null}
         {!instructionIsArchived && showReviewIndicator ? (
           <div
             className={`mb-4 rounded-2xl border px-4 py-3 ${
@@ -1481,6 +1547,13 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
                   Original | {forkCount} Fork{forkCount === 1 ? "" : "s"}
                 </span>
               ) : null}
+              <span
+                className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${getInstructionApprovalTone(
+                  approvalStatus,
+                )}`}
+              >
+                {getInstructionApprovalLabel(approvalStatus)}
+              </span>
             </div>
             <p className="text-sm text-slate-600 dark:text-slate-300">
               Part ID: <strong>{workItem.part_id}</strong> | Department:{" "}
@@ -1517,6 +1590,14 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
           </div>
           <div className="grid gap-2 md:justify-items-end">
             <div className="flex flex-wrap items-center justify-end gap-2">
+              {!instructionIsArchived ? (
+                <InstructionApprovalControls
+                  instructionId={instruction.id}
+                  initialStatus={approvalStatus}
+                  canApprove={hasFullAccess(profile.role)}
+                  className="shrink-0"
+                />
+              ) : null}
               {!instructionIsArchived ? (
                 <InstructionReviewControls
                   instructionId={instruction.id}

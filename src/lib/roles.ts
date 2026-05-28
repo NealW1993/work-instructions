@@ -6,6 +6,18 @@ export function canEditInstructions(role: AppRole): boolean {
   return hasFullAccess(role);
 }
 
+export function canCreateInstructions(role: AppRole): boolean {
+  return role === "user" || hasFullAccess(role);
+}
+
+export function canCreateControlledDocuments(role: AppRole): boolean {
+  return role === "user" || hasFullAccess(role);
+}
+
+export function canApproveControlledDocuments(role: AppRole): boolean {
+  return hasFullAccess(role);
+}
+
 export function hasFullAccess(role: AppRole): boolean {
   return FULL_ACCESS_ROLES.includes(role);
 }
