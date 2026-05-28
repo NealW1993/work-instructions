@@ -1,6 +1,7 @@
 import { AccountSettingsPanel } from "@/components/account/account-settings-panel";
 import { InstructionBackButton } from "@/components/instructions/instruction-back-button";
 import { requireAuthenticatedUser } from "@/lib/auth";
+import { getNotificationSettingsFromUserSettings } from "@/lib/notification-settings";
 
 export default async function AccountSettingsPage() {
   const { profile } = await requireAuthenticatedUser();
@@ -22,6 +23,7 @@ export default async function AccountSettingsPage() {
         initialThemePreference={profile.theme_preference ?? "dark"}
         initialIconColor={profile.icon_color ?? "#0EA5E9"}
         initialFontColor={profile.font_color ?? "#FFFFFF"}
+        initialNotificationSettings={getNotificationSettingsFromUserSettings(profile.user_settings)}
         initialTotalSignedInSeconds={profile.total_signed_in_seconds ?? 0}
         initialActiveSessionStartedAt={profile.active_session_started_at ?? null}
       />

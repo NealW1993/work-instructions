@@ -187,16 +187,16 @@ export function GroupsClient({
         </p>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
-        <section className="grid gap-3 rounded-2xl border border-slate-300/70 bg-white/85 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/75">
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(20rem,26rem)]">
+        <section className="grid content-start gap-3 rounded-2xl border border-slate-300/70 bg-white/85 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/75">
           <h2 className="text-lg font-extrabold text-slate-950 dark:text-slate-50">
             Available Groups
           </h2>
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid items-start gap-3 md:grid-cols-2">
             {groups.map((group) => (
               <article
                 key={group.id}
-                className="grid gap-3 rounded-xl border border-slate-300/70 bg-white/75 p-4 dark:border-slate-700 dark:bg-slate-900/50"
+                className="grid content-start gap-3 rounded-xl border border-slate-300/70 bg-white/75 p-4 dark:border-slate-700 dark:bg-slate-900/50"
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">

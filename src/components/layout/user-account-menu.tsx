@@ -3,9 +3,12 @@
 import Link from "next/link";
 import {
   BarChart3,
+  Bell,
   CircleHelp,
   ChevronDown,
   Clock3,
+  FileText,
+  Inbox,
   LogOut,
   Moon,
   Settings,
@@ -36,12 +39,29 @@ interface UserAccountMenuProps {
   profile: Profile;
 }
 
+interface UserNotification {
+  id: string;
+  eventType: string;
+  title: string;
+  body: string;
+  href: string | null;
+  readAt: string | null;
+  createdAt: string;
+  actorName: string;
+}
+
+interface NotificationsResponse {
+  notifications?: UserNotification[];
+  unreadCount?: number;
+  error?: string;
+}
+
 const ICON_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 const DEFAULT_ICON_COLOR = "#0EA5E9";
 const FONT_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 const DEFAULT_FONT_COLOR = "#FFFFFF";
 const ACCOUNT_MENU_ANIMATION_MS = 260;
-const ACCOUNT_MENU_MIN_WIDTH_PX = 270;
+const ACCOUNT_MENU_MIN_WIDTH_PX = 360;
 
 function resolveIconColor(value: string | undefined) {
   if (!value) {
@@ -87,6 +107,20 @@ function toTimestampMs(value: string | null | undefined) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function formatNotificationTime(value: string) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  return parsed.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 export function UserAccountMenu({ profile }: UserAccountMenuProps) {
   const router = useRouter();
   const posthog = usePostHog();
@@ -109,6 +143,11 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
   const [helpBusy, setHelpBusy] = useState(false);
   const [helpStatus, setHelpStatus] = useState<string | null>(null);
   const [helpError, setHelpError] = useState<string | null>(null);
+  const [notifications, setNotifications] = useState<UserNotification[]>([]);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notificationsBusy, setNotificationsBusy] = useState(false);
+  const [notificationsError, setNotificationsError] = useState<string | null>(null);
   const synchronizedNowMs = useSynchronizedNowMs();
   const serverSessionStartMs = useMemo(
     () => toTimestampMs(profile.active_session_started_at),
@@ -122,6 +161,8 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
   const fontColor = useMemo(() => resolveFontColor(profile.font_color), [profile.font_color]);
   const isDarkTheme = themePreference === "dark";
   const canUsePortal = typeof document !== "undefined";
+  const unreadNotificationLabel =
+    unreadNotificationCount > 99 ? "99+" : String(unreadNotificationCount);
   const sessionElapsedLabel = useMemo(() => {
     if (sessionStartedAtMs === null) {
       return "00:00:00";
@@ -133,6 +174,86 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
   useEffect(() => {
     setThemePreference(profile.theme_preference ?? "dark");
   }, [profile.theme_preference]);
+
+  const loadNotifications = useCallback(async () => {
+    setNotificationsBusy(true);
+    setNotificationsError(null);
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        return;
+      }
+
+      const response = await fetch("/api/notifications?limit=40", {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+      const payload = (await response.json().catch(() => ({}))) as NotificationsResponse;
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to load notifications.");
+      }
+
+      setNotifications(payload.notifications ?? []);
+      setUnreadNotificationCount(payload.unreadCount ?? 0);
+    } catch (caughtError) {
+      setNotificationsError(
+        caughtError instanceof Error ? caughtError.message : "Unable to load notifications.",
+      );
+    } finally {
+      setNotificationsBusy(false);
+    }
+  }, [supabase]);
+
+  useEffect(() => {
+    void loadNotifications();
+    const intervalId = window.setInterval(() => {
+      void loadNotifications();
+    }, 45_000);
+
+    return () => window.clearInterval(intervalId);
+  }, [loadNotifications]);
+
+  async function markNotificationsRead(notificationIds?: string[]) {
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        return;
+      }
+
+      const response = await fetch("/api/notifications", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify(
+          notificationIds ? { notificationIds } : { markAllRead: true },
+        ),
+      });
+      if (!response.ok) {
+        return;
+      }
+
+      setNotifications((current) =>
+        current.map((notification) =>
+          !notificationIds || notificationIds.includes(notification.id)
+            ? { ...notification, readAt: notification.readAt ?? new Date().toISOString() }
+            : notification,
+        ),
+      );
+      setUnreadNotificationCount((current) =>
+        notificationIds ? Math.max(0, current - notificationIds.length) : 0,
+      );
+    } catch {
+      // Marking read is best-effort from the menu.
+    }
+  }
 
   const syncMenuWidth = useCallback(() => {
     const triggerWidth = triggerButtonRef.current?.getBoundingClientRect().width ?? 0;
@@ -584,6 +705,11 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
           {initials}
         </span>
         <span className="max-w-[150px] truncate">{profile.full_name}</span>
+        {unreadNotificationCount > 0 ? (
+          <span className="rounded-full bg-rose-600 px-1.5 py-0.5 text-[10px] font-extrabold leading-none text-white">
+            {unreadNotificationLabel}
+          </span>
+        ) : null}
         <ChevronDown size={14} className={open ? "rotate-180 transition" : "transition"} />
       </button>
 
@@ -641,6 +767,124 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
             </span>
           </button>
 
+          <section className="grid overflow-hidden rounded-xl border border-white/15 bg-white/5">
+            <button
+              type="button"
+              onClick={() => {
+                setNotificationsOpen((current) => !current);
+                if (!notificationsOpen) {
+                  void loadNotifications();
+                }
+              }}
+              className="flex items-center justify-between gap-3 px-3 py-2 text-left text-sm font-semibold text-slate-100 transition hover:bg-white/10"
+            >
+              <span className="inline-flex min-w-0 items-center gap-2">
+                <Bell size={15} />
+                <span>Notifications</span>
+              </span>
+              <span className="inline-flex items-center gap-2">
+                {unreadNotificationCount > 0 ? (
+                  <span className="rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-extrabold leading-none text-white">
+                    {unreadNotificationLabel}
+                  </span>
+                ) : null}
+                <ChevronDown
+                  size={14}
+                  className={notificationsOpen ? "rotate-180 transition" : "transition"}
+                />
+              </span>
+            </button>
+            {notificationsOpen ? (
+              <div className="grid gap-2 border-t border-white/10 p-2">
+                <div className="flex items-center justify-between gap-2 px-1">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                    Recent activity
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void markNotificationsRead()}
+                    disabled={unreadNotificationCount === 0}
+                    className="text-[11px] font-semibold text-cyan-200 transition hover:text-cyan-100 disabled:cursor-not-allowed disabled:text-slate-500"
+                  >
+                    Mark all read
+                  </button>
+                </div>
+                {notificationsError ? (
+                  <p className="rounded-lg border border-rose-400/35 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
+                    {notificationsError}
+                  </p>
+                ) : null}
+                <div className="grid max-h-[22rem] gap-2 overflow-y-auto pr-1">
+                  {notifications.length === 0 && !notificationsBusy ? (
+                    <div className="grid place-items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-5 text-center text-xs text-slate-300">
+                      <Inbox size={18} />
+                      No notifications yet.
+                    </div>
+                  ) : null}
+                  {notifications.map((notification) => {
+                    const isUnread = !notification.readAt;
+                    const content = (
+                      <div
+                        className={cn(
+                          "grid gap-1 rounded-lg border px-3 py-2 text-left transition",
+                          isUnread
+                            ? "border-cyan-300/45 bg-cyan-500/15"
+                            : "border-white/10 bg-black/20 hover:bg-white/10",
+                        )}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="min-w-0 text-xs font-extrabold text-slate-100">
+                            {notification.title}
+                          </p>
+                          {isUnread ? (
+                            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-cyan-300" />
+                          ) : null}
+                        </div>
+                        <p className="text-xs leading-snug text-slate-300">
+                          {notification.body}
+                        </p>
+                        <p className="text-[11px] text-slate-500">
+                          {notification.actorName} | {formatNotificationTime(notification.createdAt)}
+                        </p>
+                      </div>
+                    );
+
+                    if (notification.href) {
+                      return (
+                        <Link
+                          key={notification.id}
+                          href={notification.href}
+                          onClick={() => {
+                            void markNotificationsRead([notification.id]);
+                            closeMenu();
+                          }}
+                          className="block"
+                        >
+                          {content}
+                        </Link>
+                      );
+                    }
+
+                    return (
+                      <button
+                        key={notification.id}
+                        type="button"
+                        onClick={() => void markNotificationsRead([notification.id])}
+                      >
+                        {content}
+                      </button>
+                    );
+                  })}
+                  {notificationsBusy ? (
+                    <p className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-300">
+                      Loading notifications...
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+          </section>
+
           <Link
             href="/account"
             onClick={() => closeMenu()}
@@ -648,6 +892,15 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
           >
             <Settings size={15} />
             Account Settings
+          </Link>
+
+          <Link
+            href="/drafts"
+            onClick={() => closeMenu()}
+            className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
+          >
+            <FileText size={15} />
+            My Drafts
           </Link>
 
           {hasFullAccess(profile.role) ? (

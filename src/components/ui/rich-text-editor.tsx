@@ -370,6 +370,7 @@ function MediaNodeView({ node, selected, updateAttributes, deleteNode }: NodeVie
             playsInline
             contentEditable={false}
             preload="metadata"
+            src={src}
             className="block h-auto w-full bg-black"
           >
             <source src={src} type={inferredVideoMimeType ?? undefined} />
@@ -741,6 +742,7 @@ const ResizableVideo = Node.create({
           controls: "true",
           playsinline: "true",
           preload: "metadata",
+          src,
           style: "display:block;width:100%;height:auto;",
         },
         ["source", {

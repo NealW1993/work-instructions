@@ -63,6 +63,7 @@ export function sanitizeRichHtml(value: string): string {
       "figure",
       "img",
       "video",
+      "source",
       "label",
       "input",
       "table",
@@ -87,7 +88,8 @@ export function sanitizeRichHtml(value: string): string {
     allowedAttributes: {
       figure: ["data-type", "data-align", "data-width", "data-document-cover", "style", "class"],
       img: ["src", "alt", "title", "width", "height", "style", "class"],
-      video: ["src", "controls", "width", "height", "style", "class"],
+      video: ["src", "controls", "width", "height", "style", "class", "playsinline", "preload", "data-mime-type"],
+      source: ["src", "type"],
       span: ["style"],
       div: ["style", "data-type"],
       section: ["data-document-header", "data-document-footer", "style", "class"],
@@ -136,6 +138,7 @@ export function sanitizeRichHtml(value: string): string {
     allowedSchemesByTag: {
       img: ["http", "https", "data"],
       video: ["http", "https", "data"],
+      source: ["http", "https", "data"],
     },
     allowedStyles: {
       "*": {

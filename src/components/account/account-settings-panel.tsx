@@ -21,6 +21,7 @@ import {
 } from "@/lib/session-timer";
 import { useSynchronizedNowMs } from "@/lib/second-ticker";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
+import type { NotificationSettings } from "@/lib/notification-settings";
 import type { ThemePreference } from "@/lib/types";
 
 const ACCOUNT_HISTORY_GUARD_STATE_KEY = "__accountSettingsUnsavedGuard";
@@ -52,6 +53,42 @@ const FONT_COLOR_OPTIONS = [
   "#EA580C",
   "#16A34A",
 ] as const;
+const NOTIFICATION_SETTING_FIELDS: Array<{
+  key: keyof NotificationSettings;
+  label: string;
+  description: string;
+}> = [
+  {
+    key: "newInstructions",
+    label: "New instructions",
+    description: "Created work instructions and document-center additions.",
+  },
+  {
+    key: "instructionApprovals",
+    label: "My WI decisions",
+    description: "Approved or denied work instructions you submitted.",
+  },
+  {
+    key: "pendingApprovals",
+    label: "Pending approvals",
+    description: "Items waiting for reviewer action.",
+  },
+  {
+    key: "documentApprovals",
+    label: "Document decisions",
+    description: "Approved or obsolete controlled documents you own.",
+  },
+  {
+    key: "groupRequests",
+    label: "Group requests",
+    description: "Join requests and group access decisions.",
+  },
+  {
+    key: "formulaApprovals",
+    label: "Formula decisions",
+    description: "Approved or denied formula drafts.",
+  },
+];
 
 function normalizeIconColor(value: string) {
   return value.trim().toUpperCase();
@@ -78,6 +115,13 @@ function getInitials(value: string) {
   return `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase();
 }
 
+function notificationSettingsEqual(
+  first: NotificationSettings,
+  second: NotificationSettings,
+) {
+  return NOTIFICATION_SETTING_FIELDS.every(({ key }) => first[key] === second[key]);
+}
+
 type PendingNavigation =
   | {
       kind: "history-back";
@@ -98,6 +142,7 @@ interface AccountSettingsPanelProps {
   initialThemePreference: ThemePreference;
   initialIconColor: string;
   initialFontColor: string;
+  initialNotificationSettings: NotificationSettings;
   initialTotalSignedInSeconds: number;
   initialActiveSessionStartedAt: string | null;
 }
@@ -118,6 +163,7 @@ export function AccountSettingsPanel({
   initialThemePreference,
   initialIconColor,
   initialFontColor,
+  initialNotificationSettings,
   initialTotalSignedInSeconds,
   initialActiveSessionStartedAt,
 }: AccountSettingsPanelProps) {
@@ -136,6 +182,8 @@ export function AccountSettingsPanel({
   const [savedFontColor, setSavedFontColor] = useState(
     normalizeFontColor(initialFontColor || DEFAULT_FONT_COLOR),
   );
+  const [savedNotificationSettings, setSavedNotificationSettings] =
+    useState(initialNotificationSettings);
 
   const [fullName, setFullName] = useState(initialFullName);
   const [email, setEmail] = useState(initialEmail);
@@ -147,6 +195,8 @@ export function AccountSettingsPanel({
   const [fontColor, setFontColor] = useState(
     normalizeFontColor(initialFontColor || DEFAULT_FONT_COLOR),
   );
+  const [notificationSettings, setNotificationSettings] =
+    useState(initialNotificationSettings);
   const [wantsPinChange, setWantsPinChange] = useState(false);
   const [pin, setPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
@@ -181,6 +231,10 @@ export function AccountSettingsPanel({
   const themeChanged = themePreference !== savedThemePreference;
   const iconColorChanged = normalizedIconColor !== savedIconColor;
   const fontColorChanged = normalizedFontColor !== savedFontColor;
+  const notificationSettingsChanged = !notificationSettingsEqual(
+    notificationSettings,
+    savedNotificationSettings,
+  );
   const pinChanged = wantsPinChange && pin.length > 0;
 
   const hasChanges =
@@ -189,6 +243,7 @@ export function AccountSettingsPanel({
     themeChanged ||
     iconColorChanged ||
     fontColorChanged ||
+    notificationSettingsChanged ||
     pinChanged;
   const saveDisabled = busy || pinMismatch || !hasChanges;
   const iconInitials = getInitials(normalizedFullName || savedFullName);
@@ -500,6 +555,7 @@ export function AccountSettingsPanel({
         themePreference?: ThemePreference;
         iconColor?: string;
         fontColor?: string;
+        notificationSettings?: NotificationSettings;
       } = {};
       let accountUpdated = false;
 
@@ -521,6 +577,10 @@ export function AccountSettingsPanel({
 
       if (fontColorChanged) {
         payload.fontColor = normalizedFontColor;
+      }
+
+      if (notificationSettingsChanged) {
+        payload.notificationSettings = notificationSettings;
       }
 
       if (Object.keys(payload).length > 0) {
@@ -562,6 +622,7 @@ export function AccountSettingsPanel({
       setSavedThemePreference(themePreference);
       setSavedIconColor(normalizedIconColor);
       setSavedFontColor(normalizedFontColor);
+      setSavedNotificationSettings(notificationSettings);
 
       if (accountUpdated && pinChanged) {
         setMessage("Account and PIN updated.");
@@ -740,6 +801,61 @@ export function AccountSettingsPanel({
             </fieldset>
           </div>
 
+          <fieldset className="grid gap-3 rounded-xl border border-slate-300/80 bg-white/60 p-3 dark:border-slate-700 dark:bg-slate-950/50">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-sm font-bold text-slate-800 dark:text-slate-100">
+                Notifications
+              </div>
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                Account specific
+              </span>
+            </div>
+            <div className="grid gap-2 md:grid-cols-2">
+              {NOTIFICATION_SETTING_FIELDS.map((setting) => {
+                const enabled = notificationSettings[setting.key];
+                return (
+                  <label
+                    key={setting.key}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900/60"
+                  >
+                    <span className="grid gap-0.5">
+                      <span className="font-semibold text-slate-800 dark:text-slate-100">
+                        {setting.label}
+                      </span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400">
+                        {setting.description}
+                      </span>
+                    </span>
+                    <span
+                      className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border transition ${
+                        enabled
+                          ? "border-cyan-500/45 bg-cyan-500/45"
+                          : "border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-800"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={enabled}
+                        onChange={(event) =>
+                          setNotificationSettings((current) => ({
+                            ...current,
+                            [setting.key]: event.target.checked,
+                          }))
+                        }
+                        className="sr-only"
+                      />
+                      <span
+                        className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${
+                          enabled ? "translate-x-5" : "translate-x-0"
+                        }`}
+                      />
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+
           {/* Row 3: Actions */}
           <div className="flex flex-wrap items-center gap-2 border-t border-slate-200/70 pt-3 dark:border-white/10">
             <button
@@ -866,4 +982,3 @@ export function AccountSettingsPanel({
     </>
   );
 }
-

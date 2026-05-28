@@ -366,6 +366,7 @@ function sanitizeRichHtml(value: string): string {
     allowedSchemesByTag: {
       img: ["http", "https", "data"],
       video: ["http", "https", "data"],
+      source: ["http", "https", "data"],
     },
     allowedStyles: {
       "*": {
@@ -594,7 +595,11 @@ function collectPrintMediaFromHtmlSnippet(
   let videoMatch: RegExpExecArray | null = videoTagPattern.exec(snippet);
   while (videoMatch) {
     const tagMarkup = videoMatch[0];
-    const source = readHtmlAttribute(tagMarkup, "src");
+    const closingIndex = snippet.toLowerCase().indexOf("</video>", videoTagPattern.lastIndex);
+    const videoInnerMarkup =
+      closingIndex >= 0 ? snippet.slice(videoTagPattern.lastIndex, closingIndex) : "";
+    const sourceMarkup = videoInnerMarkup.match(/<source\b[^>]*>/i)?.[0] ?? "";
+    const source = readHtmlAttribute(tagMarkup, "src") || readHtmlAttribute(sourceMarkup, "src");
     if (source) {
       const dedupeKey = `video|${source}`;
       if (!dedupeKeys.has(dedupeKey)) {

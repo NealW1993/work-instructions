@@ -119,6 +119,7 @@ export function normalizeVideoMarkupForPlayback(value: string) {
       normalizedAttributes = ensureBooleanAttribute(normalizedAttributes, "controls");
       normalizedAttributes = ensureBooleanAttribute(normalizedAttributes, "playsinline");
       normalizedAttributes = ensureValueAttribute(normalizedAttributes, "preload", "metadata");
+      normalizedAttributes = ensureValueAttribute(normalizedAttributes, "src", resolvedSource);
 
       const normalizedInnerMarkup = rawInnerMarkup.replace(/<source\b[^>]*>\s*/gi, "").trim();
       const fallbackMarkup =

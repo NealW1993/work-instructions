@@ -24,6 +24,7 @@ interface FormulaRequestBody {
 interface FormulaRow {
   id: string;
   owner_user_id: string;
+  updated_by?: string | null;
   name: string;
   formula_type: FormulaType;
   payload: unknown;
@@ -172,7 +173,7 @@ export async function PATCH(
   }
 
   const body = (await request.json().catch(() => ({}))) as FormulaRequestBody;
-  const updates: Record<string, unknown> = {};
+  const updates: Record<string, unknown> = { updated_by: existing.requester.id };
   let nextFormulaType = existing.formula.formula_type;
 
   if (body.name !== undefined) {

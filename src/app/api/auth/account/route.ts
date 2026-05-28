@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
+import { normalizeNotificationSettings } from "@/lib/notification-settings";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { Profile, ThemePreference } from "@/lib/types";
 
@@ -10,6 +11,7 @@ interface UpdateAccountBody {
   themePreference?: ThemePreference;
   iconColor?: string;
   fontColor?: string;
+  notificationSettings?: unknown;
 }
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -53,18 +55,20 @@ export async function PATCH(request: NextRequest) {
   const includeThemePreference = hasOwn(body, "themePreference");
   const includeIconColor = hasOwn(body, "iconColor");
   const includeFontColor = hasOwn(body, "fontColor");
+  const includeNotificationSettings = hasOwn(body, "notificationSettings");
 
   if (
     !includeFullName &&
     !includeEmail &&
     !includeThemePreference &&
     !includeIconColor &&
-    !includeFontColor
+    !includeFontColor &&
+    !includeNotificationSettings
   ) {
     return NextResponse.json(
       {
         error:
-          "fullName, email, themePreference, iconColor, or fontColor is required.",
+          "fullName, email, themePreference, iconColor, fontColor, or notificationSettings is required.",
       },
       { status: 400 },
     );
@@ -75,6 +79,9 @@ export async function PATCH(request: NextRequest) {
   const themePreference = body.themePreference;
   const normalizedIconColor = normalizeIconColor(body.iconColor);
   const normalizedFontColor = normalizeFontColor(body.fontColor);
+  const notificationSettings = includeNotificationSettings
+    ? normalizeNotificationSettings(body.notificationSettings)
+    : null;
 
   if (includeFullName && !fullName) {
     return NextResponse.json(
@@ -155,7 +162,7 @@ export async function PATCH(request: NextRequest) {
       Profile,
       "full_name" | "email" | "theme_preference" | "icon_color" | "font_color"
     >
-  > = {};
+  > & { user_settings?: Record<string, unknown> } = {};
 
   if (fullName && fullName !== requester.full_name) {
     authMetadata.full_name = fullName;
@@ -196,6 +203,19 @@ export async function PATCH(request: NextRequest) {
     profileUpdate.font_color = normalizedFontColor;
   }
 
+  if (notificationSettings) {
+    const currentUserSettings =
+      requester.user_settings &&
+      typeof requester.user_settings === "object" &&
+      !Array.isArray(requester.user_settings)
+        ? (requester.user_settings as Record<string, unknown>)
+        : {};
+    profileUpdate.user_settings = {
+      ...currentUserSettings,
+      notifications: notificationSettings,
+    };
+  }
+
   if (Object.keys(authUpdate).length > 0) {
     const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(
       requester.id,
@@ -221,7 +241,7 @@ export async function PATCH(request: NextRequest) {
   const { data: profile, error: readError } = await supabaseAdmin
     .from("profiles")
     .select(
-      "id, email, employee_id, full_name, role, is_active, theme_preference, icon_color, font_color, created_at, updated_at",
+      "id, email, employee_id, full_name, role, is_active, theme_preference, icon_color, font_color, user_settings, created_at, updated_at",
     )
     .eq("id", requester.id)
     .maybeSingle<Profile>();

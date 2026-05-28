@@ -24,6 +24,7 @@ interface FormulaRequestBody {
 interface FormulaRow {
   id: string;
   owner_user_id: string;
+  updated_by?: string | null;
   name: string;
   formula_type: FormulaType;
   payload: unknown;
@@ -164,6 +165,7 @@ export async function POST(request: NextRequest) {
     .from("process_map_formulas")
     .insert({
       owner_user_id: requester.id,
+      updated_by: requester.id,
       name,
       formula_type: formulaType,
       payload: normalizedPayload,
