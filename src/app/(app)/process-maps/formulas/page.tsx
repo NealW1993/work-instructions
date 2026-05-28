@@ -1,8 +1,9 @@
 import { FormulaLabClient } from "@/components/process-maps/formula-lab-client";
 import { requireAuthenticatedUser } from "@/lib/auth";
+import { hasFullAccess } from "@/lib/roles";
 
 export default async function ProcessMapFormulasPage() {
-  await requireAuthenticatedUser();
+  const { profile } = await requireAuthenticatedUser();
 
-  return <FormulaLabClient />;
+  return <FormulaLabClient canApproveCustomFormulas={hasFullAccess(profile.role)} />;
 }

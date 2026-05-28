@@ -12,7 +12,8 @@ type FormulaType =
   | "yield"
   | "little_law"
   | "normal_curve"
-  | "control_limits";
+  | "control_limits"
+  | "custom";
 
 interface FormulaRequestBody {
   name?: unknown;
@@ -39,7 +40,8 @@ function isFormulaType(value: unknown): value is FormulaType {
     value === "yield" ||
     value === "little_law" ||
     value === "normal_curve" ||
-    value === "control_limits"
+    value === "control_limits" ||
+    value === "custom"
   );
 }
 
@@ -53,6 +55,37 @@ function normalizePayload(value: unknown) {
   }
 
   return value as Record<string, unknown>;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeFormulaPayloadForRequester(
+  formulaType: FormulaType,
+  payload: Record<string, unknown>,
+  canApprove: boolean,
+) {
+  if (formulaType !== "custom") {
+    return payload;
+  }
+
+  const customFormula = isRecord(payload.customFormula) ? payload.customFormula : {};
+  const requestedStatus = customFormula.approvalStatus;
+  if ((requestedStatus === "approved" || requestedStatus === "rejected") && !canApprove) {
+    return null;
+  }
+
+  return {
+    ...payload,
+    customFormula: {
+      ...customFormula,
+      approvalStatus:
+        requestedStatus === "approved" || requestedStatus === "rejected"
+          ? requestedStatus
+          : "pending_review",
+    },
+  };
 }
 
 function toFormula(row: FormulaRow) {
@@ -140,6 +173,7 @@ export async function PATCH(
 
   const body = (await request.json().catch(() => ({}))) as FormulaRequestBody;
   const updates: Record<string, unknown> = {};
+  let nextFormulaType = existing.formula.formula_type;
 
   if (body.name !== undefined) {
     const name = normalizeName(body.name);
@@ -154,6 +188,7 @@ export async function PATCH(
       return NextResponse.json({ error: "Valid formulaType is required." }, { status: 400 });
     }
     updates.formula_type = body.formulaType;
+    nextFormulaType = body.formulaType;
   }
 
   if (body.payload !== undefined) {
@@ -161,7 +196,18 @@ export async function PATCH(
     if (!payload) {
       return NextResponse.json({ error: "Formula payload is required." }, { status: 400 });
     }
-    updates.payload = payload;
+    const normalizedPayload = normalizeFormulaPayloadForRequester(
+      nextFormulaType,
+      payload,
+      hasFullAccess(existing.requester.role),
+    );
+    if (!normalizedPayload) {
+      return NextResponse.json(
+        { error: "Only reviewers can approve or reject custom formulas." },
+        { status: 403 },
+      );
+    }
+    updates.payload = normalizedPayload;
   }
 
   if (Object.keys(updates).length === 0) {

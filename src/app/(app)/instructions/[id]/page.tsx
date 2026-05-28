@@ -174,6 +174,14 @@ interface InstructionChangeEventRow {
   source_payload: unknown;
 }
 
+interface ImportedInstructionFileRow {
+  id: string;
+  file_name: string;
+  content_type: string;
+  file_size: number;
+  created_at: string;
+}
+
 interface InstructionRevisionHistoryRow {
   id: string;
   revision: number;
@@ -714,6 +722,40 @@ function normalizeInstructionUpdateSourcePayload(
       })
       .filter((entry): entry is { type: "image" | "video"; src: string } => entry !== null);
   };
+  const normalizeFieldChanges = (fieldChangesValue: unknown) => {
+    if (!Array.isArray(fieldChangesValue)) {
+      return [];
+    }
+
+    return fieldChangesValue
+      .map((entry) => {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+          return null;
+        }
+
+        const fieldChange = entry as Record<string, unknown>;
+        const label = typeof fieldChange.label === "string" ? fieldChange.label.trim() : "";
+        const previousValue =
+          typeof fieldChange.previousValue === "string" ? fieldChange.previousValue : "";
+        const nextValue = typeof fieldChange.nextValue === "string" ? fieldChange.nextValue : "";
+
+        if (!label || previousValue === nextValue) {
+          return null;
+        }
+
+        return {
+          label,
+          previousValue: previousValue || "Blank",
+          nextValue: nextValue || "Blank",
+        };
+      })
+      .filter(
+        (
+          entry,
+        ): entry is { label: string; previousValue: string; nextValue: string } =>
+          entry !== null,
+      );
+  };
 
   const reviewStateChange =
     candidate.kind === "instruction_review_state" && isReviewState(candidate.nextStatus)
@@ -754,6 +796,7 @@ function normalizeInstructionUpdateSourcePayload(
         ? candidate.mediaFormattingUpdated
         : undefined,
     reviewStateChange,
+    fieldChanges: normalizeFieldChanges(candidate.fieldChanges),
   };
 
   const hasPayloadData =
@@ -761,12 +804,100 @@ function normalizeInstructionUpdateSourcePayload(
     Boolean(normalizedPayload.removedTextSnippet) ||
     (normalizedPayload.addedMedia?.length ?? 0) > 0 ||
     (normalizedPayload.removedMedia?.length ?? 0) > 0 ||
+    (normalizedPayload.fieldChanges?.length ?? 0) > 0 ||
     normalizedPayload.mediaFormattingUpdated === true ||
     normalizedPayload.previousRevision !== undefined ||
     normalizedPayload.nextRevision !== undefined ||
     normalizedPayload.reviewStateChange !== undefined;
 
   return hasPayloadData ? normalizedPayload : null;
+}
+
+function formatFileSize(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "Unknown size";
+  }
+
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${value.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function canInlineImportedFile(contentType: string) {
+  return (
+    contentType.startsWith("application/pdf") ||
+    contentType.startsWith("image/") ||
+    contentType.startsWith("text/") ||
+    contentType.includes("csv")
+  );
+}
+
+function ImportedInstructionFilesSection({ files }: { files: ImportedInstructionFileRow[] }) {
+  if (files.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="grid min-w-0 gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+      <div className="grid gap-1">
+        <h2 className="text-xl font-bold">Imported Source</h2>
+        <p className="text-sm text-slate-600 dark:text-slate-300">
+          Original imported files are retained and served without converting their format.
+        </p>
+      </div>
+      <div className="grid gap-3">
+        {files.map((file) => {
+          const fileUrl = `/api/instructions/import-files/${file.id}`;
+          const canPreview = canInlineImportedFile(file.content_type);
+          return (
+            <article
+              key={file.id}
+              className="grid gap-3 rounded-2xl border border-slate-300/70 bg-white/75 p-4 dark:border-slate-700 dark:bg-slate-950/55"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="grid gap-1">
+                  <h3 className="font-bold text-slate-900 dark:text-slate-100">
+                    {file.file_name}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {file.content_type || "application/octet-stream"} |{" "}
+                    {formatFileSize(file.file_size)} | Imported{" "}
+                    <LocalDateTime value={file.created_at} mode="dateTime" />
+                  </p>
+                </div>
+                <a
+                  href={fileUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 dark:text-cyan-100"
+                >
+                  Open original
+                </a>
+              </div>
+              {canPreview ? (
+                <iframe
+                  src={fileUrl}
+                  title={file.file_name}
+                  className="h-[32rem] w-full rounded-xl border border-slate-300 bg-white dark:border-slate-700"
+                />
+              ) : (
+                <p className="rounded-xl border border-slate-300/70 bg-slate-50 px-3 py-2 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/55 dark:text-slate-300">
+                  This file type is stored in its original format. Use Open original to view it in
+                  the application registered for that document type.
+                </p>
+              )}
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
 }
 
 export default async function InstructionDetailsPage({ params }: InstructionPageProps) {
@@ -845,6 +976,12 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
     ...mediaItem,
     public_url: resolveAccessibleMediaUrl(mediaItem.public_url, mediaUrlRuntime),
   }));
+  const { data: importedInstructionFileData } = await supabase
+    .from("work_instruction_import_files")
+    .select("id, file_name, content_type, file_size, created_at")
+    .eq("instruction_id", instruction.id)
+    .order("created_at", { ascending: false });
+  const importedInstructionFiles = (importedInstructionFileData ?? []) as ImportedInstructionFileRow[];
   const forkRootWorkItem = normalizeForkRootWorkItem(forkRootLookup?.work_items ?? null);
   const forkRootMedia = normalizeMergePreviewMediaRows(
     forkRootLookup?.instruction_media ?? null,
@@ -1706,6 +1843,8 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
             </dl>
           </section>
         ) : null}
+
+        <ImportedInstructionFilesSection files={importedInstructionFiles} />
 
         <section className="grid min-w-0 gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
           <h2 className="text-xl font-bold">Work Instructions</h2>

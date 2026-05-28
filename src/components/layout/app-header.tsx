@@ -220,8 +220,10 @@ export function AppHeader({ profile }: { profile: Profile }) {
     isProcessMapsActive ||
     isFormulaToolsActive;
   const isNewInstructionActive = isActivePath(pathname, "/instructions/new");
+  const isImportInstructionActive = isActivePath(pathname, "/instructions/import");
   const isArchivedInstructionActive = isActivePath(pathname, "/instructions/archived");
-  const instructionControlActive = isNewInstructionActive || isArchivedInstructionActive;
+  const instructionControlActive =
+    isNewInstructionActive || isImportInstructionActive || isArchivedInstructionActive;
   const dashboardControlHref = isDocCenterActive
     ? "/doc-center"
     : isGroupsActive
@@ -251,7 +253,6 @@ export function AppHeader({ profile }: { profile: Profile }) {
     dashboardMenuOpen && dashboardMenuPathname === pathname;
   const studioMenuVisible = studioMenuOpen && studioMenuPathname === pathname;
   const instructionMenuVisible =
-    canViewArchivedInstructions &&
     instructionMenuOpen &&
     instructionMenuPathname === pathname;
   const canSendDashboardLayoutActions =
@@ -1387,27 +1388,6 @@ export function AppHeader({ profile }: { profile: Profile }) {
       return null;
     }
 
-    if (!canViewArchivedInstructions) {
-      return (
-        <Link
-          href="/instructions/new"
-          onClick={() => {
-            closeDashboardMenu();
-            closeStudioMenu();
-            closeInstructionMenu();
-          }}
-          className={cn(
-            "inline-flex items-center rounded-xl border px-4 py-2 text-sm font-semibold transition",
-            isNewInstructionActive
-              ? "border-cyan-700 bg-cyan-600 text-white shadow-sm dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900"
-              : "border-slate-300/70 bg-white/80 text-slate-700 hover:border-slate-400 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-800",
-          )}
-        >
-          New Instruction
-        </Link>
-      );
-    }
-
     return (
       <div
         data-instruction-menu-root="true"
@@ -1473,7 +1453,7 @@ export function AppHeader({ profile }: { profile: Profile }) {
             }}
           >
             <Link
-              href="/instructions/archived"
+              href="/instructions/import"
               onClick={() => {
                 closeDashboardMenu();
                 closeStudioMenu();
@@ -1481,13 +1461,31 @@ export function AppHeader({ profile }: { profile: Profile }) {
               }}
               className={cn(
                 "inline-flex items-center rounded-xl border px-3 py-2 text-sm font-semibold transition",
-                isArchivedInstructionActive
+                isImportInstructionActive
                   ? "border-cyan-500/45 bg-cyan-500/20 text-cyan-100"
                   : "border-white/20 bg-white/10 text-slate-100 hover:bg-white/20",
               )}
             >
-              Archived
+              Import
             </Link>
+            {canViewArchivedInstructions ? (
+              <Link
+                href="/instructions/archived"
+                onClick={() => {
+                  closeDashboardMenu();
+                  closeStudioMenu();
+                  closeInstructionMenu();
+                }}
+                className={cn(
+                  "inline-flex items-center rounded-xl border px-3 py-2 text-sm font-semibold transition",
+                  isArchivedInstructionActive
+                    ? "border-cyan-500/45 bg-cyan-500/20 text-cyan-100"
+                    : "border-white/20 bg-white/10 text-slate-100 hover:bg-white/20",
+                )}
+              >
+                Archived
+              </Link>
+            ) : null}
           </div>
         ) : null}
       </div>

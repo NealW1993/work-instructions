@@ -89,6 +89,12 @@ interface InstructionChangeSourceMedia {
   src: string;
 }
 
+interface InstructionChangeSourceFieldChange {
+  label: string;
+  previousValue: string;
+  nextValue: string;
+}
+
 interface InstructionChangeSourcePayload {
   addedTextSnippet?: string;
   removedTextSnippet?: string;
@@ -97,6 +103,7 @@ interface InstructionChangeSourcePayload {
   previousRevision?: number;
   nextRevision?: number;
   mediaFormattingUpdated?: boolean;
+  fieldChanges?: InstructionChangeSourceFieldChange[];
 }
 
 interface InstructionChangeComputation {
@@ -628,6 +635,7 @@ function hasSourcePayloadData(sourcePayload: InstructionChangeSourcePayload) {
       sourcePayload.removedTextSnippet ||
       (sourcePayload.addedMedia?.length ?? 0) > 0 ||
       (sourcePayload.removedMedia?.length ?? 0) > 0 ||
+      (sourcePayload.fieldChanges?.length ?? 0) > 0 ||
       sourcePayload.mediaFormattingUpdated ||
       sourcePayload.previousRevision !== undefined ||
       sourcePayload.nextRevision !== undefined,
@@ -654,11 +662,58 @@ function countRemovedMedia(previousSources: Set<string>, nextSources: Set<string
   return count;
 }
 
+function summarizeListForAudit(values: string[]) {
+  return values.map((value) => value.trim()).filter(Boolean).join(", ") || "None";
+}
+
+function summarizeValueForAudit(value: string) {
+  return value.trim() || "Blank";
+}
+
+function addFieldChange(
+  fieldChanges: InstructionChangeSourceFieldChange[],
+  label: string,
+  previousValue: string,
+  nextValue: string,
+) {
+  const normalizedPrevious = previousValue.trim().replace(/\s+/g, " ");
+  const normalizedNext = nextValue.trim().replace(/\s+/g, " ");
+  if (normalizedPrevious === normalizedNext) {
+    return;
+  }
+
+  fieldChanges.push({
+    label,
+    previousValue: summarizeValueForAudit(previousValue),
+    nextValue: summarizeValueForAudit(nextValue),
+  });
+}
+
 function buildInstructionUpdateSummary(params: {
   previousBody: string;
   nextBody: string;
   previousRevision: number;
   nextRevision: number;
+  previousDepartmentId: string;
+  nextDepartmentId: string;
+  previousPartId: string;
+  nextPartId: string;
+  previousItemTitle: string;
+  nextItemTitle: string;
+  previousIsoClauseRefs: string[];
+  nextIsoClauseRefs: string[];
+  previousProcessScope: string;
+  nextProcessScope: string;
+  previousAcceptanceCriteria: string;
+  nextAcceptanceCriteria: string;
+  previousVerificationRecords: string;
+  nextVerificationRecords: string;
+  previousRiskControls: string;
+  nextRiskControls: string;
+  previousSuggestedToolIds: string[];
+  nextSuggestedToolIds: string[];
+  previousUncommonTools: string;
+  nextUncommonTools: string;
 }): InstructionChangeComputation {
   const previousNormalized = normalizeEditorContent(params.previousBody);
   const nextNormalized = normalizeEditorContent(params.nextBody);
@@ -746,6 +801,60 @@ function buildInstructionUpdateSummary(params: {
   ) {
     summaryParts.push("Media formatting updated");
     sourcePayload.mediaFormattingUpdated = true;
+  }
+
+  const fieldChanges: InstructionChangeSourceFieldChange[] = [];
+  addFieldChange(
+    fieldChanges,
+    "Department",
+    params.previousDepartmentId,
+    params.nextDepartmentId,
+  );
+  addFieldChange(fieldChanges, "Part ID", params.previousPartId, params.nextPartId);
+  addFieldChange(fieldChanges, "Work Item Title", params.previousItemTitle, params.nextItemTitle);
+  addFieldChange(
+    fieldChanges,
+    "ISO 9001 clauses",
+    summarizeListForAudit(normalizeInstructionIsoClauseRefs(params.previousIsoClauseRefs)),
+    summarizeListForAudit(normalizeInstructionIsoClauseRefs(params.nextIsoClauseRefs)),
+  );
+  addFieldChange(
+    fieldChanges,
+    "Process scope / applicability",
+    params.previousProcessScope,
+    params.nextProcessScope,
+  );
+  addFieldChange(
+    fieldChanges,
+    "Acceptance criteria",
+    params.previousAcceptanceCriteria,
+    params.nextAcceptanceCriteria,
+  );
+  addFieldChange(
+    fieldChanges,
+    "Verification records",
+    params.previousVerificationRecords,
+    params.nextVerificationRecords,
+  );
+  addFieldChange(fieldChanges, "Risk controls", params.previousRiskControls, params.nextRiskControls);
+  addFieldChange(
+    fieldChanges,
+    "Suggested tools",
+    summarizeListForAudit(params.previousSuggestedToolIds),
+    summarizeListForAudit(params.nextSuggestedToolIds),
+  );
+  addFieldChange(
+    fieldChanges,
+    "Uncommon tools",
+    params.previousUncommonTools,
+    params.nextUncommonTools,
+  );
+
+  if (fieldChanges.length > 0) {
+    sourcePayload.fieldChanges = fieldChanges;
+    summaryParts.push(
+      `${fieldChanges.length} instruction detail${fieldChanges.length === 1 ? "" : "s"} updated`,
+    );
   }
 
   if (params.previousRevision !== params.nextRevision) {
@@ -2388,6 +2497,34 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
               nextBody: bodyMarkdown,
               previousRevision: previousRevisionForSummary,
               nextRevision: revision,
+              previousDepartmentId:
+                departments.find((department) => department.id === initialData?.departmentId)
+                  ?.name ??
+                initialData?.departmentId ??
+                "",
+              nextDepartmentId: selectedDepartmentName,
+              previousPartId: initialData?.partId ?? "",
+              nextPartId: normalizedPartId,
+              previousItemTitle: initialData?.itemTitle ?? "",
+              nextItemTitle: itemTitle.trim(),
+              previousIsoClauseRefs: normalizeInstructionIsoClauseRefsOrDefault(
+                initialData?.isoClauseRefs,
+              ),
+              nextIsoClauseRefs: isoClauseRefs,
+              previousProcessScope: initialData?.processScope ?? "",
+              nextProcessScope: processScope.trim(),
+              previousAcceptanceCriteria: initialData?.acceptanceCriteria ?? "",
+              nextAcceptanceCriteria: acceptanceCriteria.trim(),
+              previousVerificationRecords: initialData?.verificationRecords ?? "",
+              nextVerificationRecords: verificationRecords.trim(),
+              previousRiskControls: initialData?.riskControls ?? "",
+              nextRiskControls: riskControls.trim(),
+              previousSuggestedToolIds: initialData?.suggestedToolIds ?? [],
+              nextSuggestedToolIds: selectedToolIds,
+              previousUncommonTools: serializeToolNameList(
+                parseToolNameList(initialData?.uncommonTools ?? ""),
+              ),
+              nextUncommonTools: serializeToolNameList(uncommonToolList),
             })
           : {
               summary: buildInstructionCreateSummary(bodyMarkdown, revision),

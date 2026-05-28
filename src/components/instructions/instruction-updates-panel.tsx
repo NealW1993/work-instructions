@@ -19,6 +19,12 @@ interface InstructionUpdateReviewStateChange {
   note?: string;
 }
 
+interface InstructionUpdateFieldChange {
+  label: string;
+  previousValue: string;
+  nextValue: string;
+}
+
 export interface InstructionUpdateSourcePayload {
   addedTextSnippet?: string;
   removedTextSnippet?: string;
@@ -28,6 +34,7 @@ export interface InstructionUpdateSourcePayload {
   nextRevision?: number;
   mediaFormattingUpdated?: boolean;
   reviewStateChange?: InstructionUpdateReviewStateChange;
+  fieldChanges?: InstructionUpdateFieldChange[];
 }
 
 export interface InstructionUpdateEvent {
@@ -54,6 +61,7 @@ function hasSourcePayloadData(sourcePayload: InstructionUpdateSourcePayload | nu
       sourcePayload.removedTextSnippet ||
       (sourcePayload.addedMedia?.length ?? 0) > 0 ||
       (sourcePayload.removedMedia?.length ?? 0) > 0 ||
+      (sourcePayload.fieldChanges?.length ?? 0) > 0 ||
       sourcePayload.mediaFormattingUpdated ||
       sourcePayload.previousRevision !== undefined ||
       sourcePayload.nextRevision !== undefined ||
@@ -379,6 +387,44 @@ export function InstructionUpdatesPanel({ events, className }: InstructionUpdate
                       System counter marked this instruction as Needs Review.
                     </p>
                   ) : null}
+                </div>
+              ) : null}
+
+              {(selectedSourceEvent.sourcePayload?.fieldChanges?.length ?? 0) > 0 ? (
+                <div className="grid gap-1.5">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-300">
+                    Detail Changes
+                  </p>
+                  <div className="grid gap-2">
+                    {selectedSourceEvent.sourcePayload?.fieldChanges?.map((fieldChange, index) => (
+                      <div
+                        key={`${fieldChange.label}:${index}`}
+                        className="grid gap-2 rounded-lg border border-cyan-500/25 bg-cyan-50/80 p-3 text-sm dark:bg-cyan-500/10"
+                      >
+                        <p className="font-semibold text-cyan-900 dark:text-cyan-100">
+                          {fieldChange.label}
+                        </p>
+                        <div className="grid gap-2 md:grid-cols-2">
+                          <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                              Previous
+                            </p>
+                            <p className="whitespace-pre-wrap text-slate-700 dark:text-slate-200">
+                              {fieldChange.previousValue}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                              Updated
+                            </p>
+                            <p className="whitespace-pre-wrap text-slate-900 dark:text-slate-50">
+                              {fieldChange.nextValue}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ) : null}
 

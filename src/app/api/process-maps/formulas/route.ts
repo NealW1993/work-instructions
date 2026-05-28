@@ -12,7 +12,8 @@ type FormulaType =
   | "yield"
   | "little_law"
   | "normal_curve"
-  | "control_limits";
+  | "control_limits"
+  | "custom";
 
 interface FormulaRequestBody {
   name?: unknown;
@@ -39,7 +40,8 @@ function isFormulaType(value: unknown): value is FormulaType {
     value === "yield" ||
     value === "little_law" ||
     value === "normal_curve" ||
-    value === "control_limits"
+    value === "control_limits" ||
+    value === "custom"
   );
 }
 
@@ -53,6 +55,37 @@ function normalizePayload(value: unknown) {
   }
 
   return value as Record<string, unknown>;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeCustomApprovalStatus(value: unknown, canApprove: boolean) {
+  if (canApprove && (value === "approved" || value === "rejected")) {
+    return value;
+  }
+
+  return "pending_review";
+}
+
+function normalizeFormulaPayloadForRequester(
+  formulaType: FormulaType,
+  payload: Record<string, unknown>,
+  canApprove: boolean,
+) {
+  if (formulaType !== "custom") {
+    return payload;
+  }
+
+  const customFormula = isRecord(payload.customFormula) ? payload.customFormula : {};
+  return {
+    ...payload,
+    customFormula: {
+      ...customFormula,
+      approvalStatus: normalizeCustomApprovalStatus(customFormula.approvalStatus, canApprove),
+    },
+  };
 }
 
 function toFormula(row: FormulaRow) {
@@ -120,6 +153,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Formula payload is required." }, { status: 400 });
   }
 
+  const normalizedPayload = normalizeFormulaPayloadForRequester(
+    formulaType,
+    payload,
+    hasFullAccess(requester.role),
+  );
+
   const supabaseAdmin = getSupabaseAdminClient();
   const { data, error } = await supabaseAdmin
     .from("process_map_formulas")
@@ -127,7 +166,7 @@ export async function POST(request: NextRequest) {
       owner_user_id: requester.id,
       name,
       formula_type: formulaType,
-      payload,
+      payload: normalizedPayload,
     })
     .select("id, owner_user_id, name, formula_type, payload, created_at, updated_at")
     .maybeSingle<FormulaRow>();
