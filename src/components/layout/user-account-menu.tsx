@@ -21,6 +21,7 @@ import { usePostHog } from "posthog-js/react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { FloatingStatusNotices } from "@/components/ui/floating-status-notices";
 import { canViewKpis, hasFullAccess } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
@@ -590,31 +591,6 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
           </p>
         </div>
 
-        {helpStatus ? (
-          <p
-            className={cn(
-              "rounded-xl border p-2 text-sm",
-              isDarkTheme
-                ? "border-emerald-400/45 bg-emerald-500/15 text-emerald-100"
-                : "border-emerald-500/40 bg-emerald-500/10 text-emerald-700",
-            )}
-          >
-            {helpStatus}
-          </p>
-        ) : null}
-        {helpError ? (
-          <p
-            className={cn(
-              "rounded-xl border p-2 text-sm",
-              isDarkTheme
-                ? "border-rose-400/45 bg-rose-500/15 text-rose-100"
-                : "border-rose-500/40 bg-rose-500/10 text-rose-700",
-            )}
-          >
-            {helpError}
-          </p>
-        ) : null}
-
         <form className="grid min-h-0 gap-3" onSubmit={handleSubmitHelpRequest}>
           <div className="grid gap-1">
             <span
@@ -691,6 +667,22 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
 
   return (
     <div ref={rootRef} className="relative">
+      <FloatingStatusNotices
+        notices={[
+          helpStatus && {
+            id: "account-menu-help-status",
+            tone: "success",
+            message: helpStatus,
+            onDismiss: () => setHelpStatus(null),
+          },
+          helpError && {
+            id: "account-menu-help-error",
+            tone: "error",
+            message: helpError,
+            onDismiss: () => setHelpError(null),
+          },
+        ]}
+      />
       <button
         ref={triggerButtonRef}
         type="button"

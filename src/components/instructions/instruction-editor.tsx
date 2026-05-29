@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { createPortal } from "react-dom";
 
+import { FloatingStatusNotices } from "@/components/ui/floating-status-notices";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { registerArchivedInstructionRedirect } from "@/components/instructions/instruction-archived-redirect-state";
 import { ISO_9001_CLAUSE_OPTIONS } from "@/lib/process-documents";
@@ -2983,16 +2984,22 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
   return (
     <div className="grid min-w-0 gap-5">
-      {message ? (
-        <p className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-200">
-          {message}
-        </p>
-      ) : null}
-      {error ? (
-        <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-200">
-          {error}
-        </p>
-      ) : null}
+      <FloatingStatusNotices
+        notices={[
+          message && {
+            id: "instruction-editor-message",
+            tone: "success",
+            message,
+            onDismiss: () => setMessage(null),
+          },
+          error && {
+            id: "instruction-editor-error",
+            tone: "error",
+            message: error,
+            onDismiss: () => setError(null),
+          },
+        ]}
+      />
 
       <form
         ref={formRef}

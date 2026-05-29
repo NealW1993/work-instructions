@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 
+import { FloatingStatusNotices } from "@/components/ui/floating-status-notices";
 import { LocalDateTime } from "@/components/ui/local-date-time";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { cn } from "@/lib/utils";
@@ -353,6 +354,22 @@ export function InstructionReviewControls({
 
   return (
     <>
+      <FloatingStatusNotices
+        notices={[
+          message && {
+            id: "instruction-review-message",
+            tone: "success",
+            message,
+            onDismiss: () => setMessage(null),
+          },
+          error && {
+            id: "instruction-review-error",
+            tone: "error",
+            message: error,
+            onDismiss: () => setError(null),
+          },
+        ]}
+      />
       <div ref={menuRootRef} className={cn("relative inline-flex", className)}>
         <div
           className={cn(
@@ -451,12 +468,6 @@ export function InstructionReviewControls({
 
             {statusSummary ? (
               <p className="text-[11px] font-semibold text-slate-300">{statusSummary}</p>
-            ) : null}
-            {message ? (
-              <p className="text-[11px] font-semibold text-emerald-300">{message}</p>
-            ) : null}
-            {error ? (
-              <p className="text-[11px] font-semibold text-rose-300">{error}</p>
             ) : null}
           </div>
         ) : null}

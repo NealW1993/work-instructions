@@ -65,16 +65,21 @@ function getInstructionStatusLabel(status: InstructionApprovalStatus | null | un
 
 function getFormulaApprovalStatus(payload: unknown) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return "pending_review";
+    return "draft";
   }
 
   const customFormula = (payload as Record<string, unknown>).customFormula;
   if (!customFormula || typeof customFormula !== "object" || Array.isArray(customFormula)) {
-    return "pending_review";
+    return "draft";
   }
 
   const status = (customFormula as Record<string, unknown>).approvalStatus;
-  return status === "approved" || status === "rejected" ? status : "pending_review";
+  return status === "pending_review" ||
+    status === "approved" ||
+    status === "rejected" ||
+    status === "draft"
+    ? status
+    : "draft";
 }
 
 function DraftCard({

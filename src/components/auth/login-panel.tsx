@@ -4,6 +4,7 @@ import { CircleHelp } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useEffect, useRef, useState } from "react";
 
+import { FloatingStatusNotices } from "@/components/ui/floating-status-notices";
 import { PinInput } from "@/components/ui/pin-input";
 import {
   popAutoLogoutRouteForUser,
@@ -420,6 +421,46 @@ export function LoginPanel() {
 
   return (
     <>
+      <FloatingStatusNotices
+        notices={[
+          message && {
+            id: "login-message",
+            tone: "success",
+            message,
+            onDismiss: () => setMessage(null),
+          },
+          error && {
+            id: "login-error",
+            tone: "error",
+            message: error,
+            onDismiss: () => setError(null),
+          },
+          feedbackError && {
+            id: "login-feedback-error",
+            tone: "error",
+            message: feedbackError,
+            onDismiss: () => setFeedbackError(null),
+          },
+          feedbackStatus && {
+            id: "login-feedback-status",
+            tone: "success",
+            message: feedbackStatus,
+            onDismiss: () => setFeedbackStatus(null),
+          },
+          helpError && {
+            id: "login-help-error",
+            tone: "error",
+            message: helpError,
+            onDismiss: () => setHelpError(null),
+          },
+          helpStatus && {
+            id: "login-help-status",
+            tone: "success",
+            message: helpStatus,
+            onDismiss: () => setHelpStatus(null),
+          },
+        ]}
+      />
       <div className="pointer-events-none fixed inset-0 -z-20 overflow-hidden">
         <video
           ref={backgroundVideoRef}
@@ -448,17 +489,6 @@ export function LoginPanel() {
         {searchParams.get("error") === "missing_profile" ? (
           <p className="mt-4 rounded-2xl border border-amber-400/40 bg-amber-500/15 p-3 text-sm text-amber-100">
             Account is missing a profile row. Run the SQL migration and try again.
-          </p>
-        ) : null}
-
-        {message ? (
-          <p className="mt-4 rounded-2xl border border-emerald-400/45 bg-emerald-500/15 p-3 text-sm text-emerald-100">
-            {message}
-          </p>
-        ) : null}
-        {error ? (
-          <p className="mt-4 rounded-2xl border border-rose-400/45 bg-rose-500/15 p-3 text-sm text-rose-100">
-            {error}
           </p>
         ) : null}
 
@@ -621,17 +651,6 @@ export function LoginPanel() {
               </p>
             </div>
 
-            {feedbackStatus ? (
-              <p className="rounded-xl border border-emerald-400/45 bg-emerald-500/15 p-2 text-sm text-emerald-100">
-                {feedbackStatus}
-              </p>
-            ) : null}
-            {feedbackError ? (
-              <p className="rounded-xl border border-rose-400/45 bg-rose-500/15 p-2 text-sm text-rose-100">
-                {feedbackError}
-              </p>
-            ) : null}
-
             <form className="grid gap-3" onSubmit={handleSubmitFeedback}>
               <label className="grid gap-1 text-sm text-slate-200">
                 <span>Feedback</span>
@@ -675,17 +694,6 @@ export function LoginPanel() {
                 Send your name and a short message to the system admin.
               </p>
             </div>
-
-            {helpStatus ? (
-              <p className="rounded-xl border border-emerald-400/45 bg-emerald-500/15 p-2 text-sm text-emerald-100">
-                {helpStatus}
-              </p>
-            ) : null}
-            {helpError ? (
-              <p className="rounded-xl border border-rose-400/45 bg-rose-500/15 p-2 text-sm text-rose-100">
-                {helpError}
-              </p>
-            ) : null}
 
             <form className="grid gap-3" onSubmit={handleSubmitHelpRequest}>
               <label className="grid gap-1 text-sm text-slate-200">

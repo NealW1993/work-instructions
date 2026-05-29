@@ -3,6 +3,7 @@
 import { Download, Loader2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { FloatingStatusNotices } from "@/components/ui/floating-status-notices";
 import {
   EXPORT_DATASET_OPTIONS,
   EXPORT_FORMAT_OPTIONS,
@@ -122,24 +123,28 @@ export function ExportDataPanel() {
 
   return (
     <div className="grid gap-4 rounded-3xl border border-white/20 bg-white/70 p-5 shadow-xl backdrop-blur-sm dark:border-white/10 dark:bg-slate-900/55">
+      <FloatingStatusNotices
+        notices={[
+          statusMessage && {
+            id: "export-data-message",
+            tone: "success",
+            message: statusMessage,
+            onDismiss: () => setStatusMessage(null),
+          },
+          errorMessage && {
+            id: "export-data-error",
+            tone: "error",
+            message: errorMessage,
+            onDismiss: () => setErrorMessage(null),
+          },
+        ]}
+      />
       <header className="grid gap-1">
         <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">Export Data</h2>
         <p className="text-sm text-slate-600 dark:text-slate-300">
           Select datasets and format, then export selected data or a full export package.
         </p>
       </header>
-
-      {errorMessage ? (
-        <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-700 dark:text-rose-200">
-          {errorMessage}
-        </p>
-      ) : null}
-
-      {statusMessage ? (
-        <p className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-200">
-          {statusMessage}
-        </p>
-      ) : null}
 
       <section className="grid gap-2">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">

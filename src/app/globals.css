@@ -124,6 +124,28 @@ body {
   font-family: var(--font-body), "Segoe UI", sans-serif;
 }
 
+@keyframes system-status-toast-life {
+  0% {
+    opacity: 0;
+    transform: translateY(-0.6rem) scale(0.98);
+  }
+
+  10%,
+  84% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(-0.35rem) scale(0.98);
+  }
+}
+
+.system-status-toast {
+  animation: system-status-toast-life 4.2s ease-in-out forwards;
+}
+
 .dark body {
   background:
     radial-gradient(circle at 10% 15%, rgba(255, 255, 255, 0.045) 0%, transparent 42%),

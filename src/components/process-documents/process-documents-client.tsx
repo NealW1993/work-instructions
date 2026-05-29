@@ -37,6 +37,7 @@ import {
 } from "react";
 
 import { LocalDateTime } from "@/components/ui/local-date-time";
+import { FloatingStatusNotices } from "@/components/ui/floating-status-notices";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import {
   ISO_9001_CLAUSE_OPTIONS,
@@ -1258,6 +1259,28 @@ export function ProcessDocumentsClient({
 
   return (
     <div className="process-workspace-shell process-documents-shell relative left-1/2 grid w-screen max-w-[1500px] -translate-x-1/2 gap-3 px-4 py-2 md:px-6">
+      <FloatingStatusNotices
+        notices={[
+          message && {
+            id: "process-doc-message",
+            tone: "success",
+            message,
+            onDismiss: () => setMessage(null),
+          },
+          error && {
+            id: "process-doc-error",
+            tone: "error",
+            message: error,
+            onDismiss: () => setError(null),
+          },
+          pageExplainError && {
+            id: "process-doc-explain-error",
+            tone: "error",
+            message: pageExplainError,
+            onDismiss: () => setPageExplainError(null),
+          },
+        ]}
+      />
       <div className="process-workbench-card overflow-hidden rounded-2xl p-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -1293,11 +1316,6 @@ export function ProcessDocumentsClient({
         </div>
       </div>
 
-      {pageExplainError ? (
-        <p className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-800 dark:text-rose-200">
-          {pageExplainError}
-        </p>
-      ) : null}
       {pageExplanation ? (
         <section className="rounded-2xl border border-fuchsia-500/25 bg-fuchsia-500/10 p-4 text-sm text-slate-700 shadow-sm dark:text-slate-200">
           <div className="mb-2 flex items-center gap-2 font-extrabold text-slate-950 dark:text-slate-50">
@@ -1550,17 +1568,6 @@ export function ProcessDocumentsClient({
         </aside>
 
         <main className="grid min-w-0 gap-3">
-          {message ? (
-            <p className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-200">
-              {message}
-            </p>
-          ) : null}
-          {error ? (
-            <p className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-800 dark:text-rose-200">
-              {error}
-            </p>
-          ) : null}
-
           {selectedDocument ? (
             <section id="doc-dashboard" className="process-workbench-card grid scroll-mt-24 gap-3 rounded-2xl p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">

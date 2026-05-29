@@ -12,6 +12,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import { FloatingStatusNotices } from "@/components/ui/floating-status-notices";
 import { PinInput } from "@/components/ui/pin-input";
 import {
   ensureSessionStartTime,
@@ -648,6 +649,22 @@ export function AccountSettingsPanel({
 
   return (
     <>
+      <FloatingStatusNotices
+        notices={[
+          message && {
+            id: "account-settings-message",
+            tone: "success",
+            message,
+            onDismiss: () => setMessage(null),
+          },
+          error && {
+            id: "account-settings-error",
+            tone: "error",
+            message: error,
+            onDismiss: () => setError(null),
+          },
+        ]}
+      />
       <section className="grid gap-3 rounded-2xl border border-white/30 bg-white/80 p-4 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-5">
         {/* Header row: usage stat */}
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/70 pb-3 dark:border-white/10">
@@ -660,17 +677,6 @@ export function AccountSettingsPanel({
             </span>
           </div>
         </div>
-
-        {message ? (
-          <p className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-200">
-            {message}
-          </p>
-        ) : null}
-        {error ? (
-          <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-700 dark:text-rose-200">
-            {error}
-          </p>
-        ) : null}
 
         <form className="grid gap-3 md:max-w-5xl" onSubmit={handleSubmit}>
           {/* Row 1: Identity fields */}

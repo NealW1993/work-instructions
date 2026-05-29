@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { InstructionReviewActivityChart } from "@/components/admin/instruction-review-activity-chart";
+import { FloatingStatusNotices } from "@/components/ui/floating-status-notices";
 import { LocalDateTime } from "@/components/ui/local-date-time";
 import { PinInput } from "@/components/ui/pin-input";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -1899,16 +1900,22 @@ export function UserAdminPanel() {
 
   return (
     <div className="grid gap-5">
-      {message ? (
-        <p className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-200">
-          {message}
-        </p>
-      ) : null}
-      {error ? (
-        <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-200">
-          {error}
-        </p>
-      ) : null}
+      <FloatingStatusNotices
+        notices={[
+          message && {
+            id: "admin-message",
+            tone: "success",
+            message,
+            onDismiss: () => setMessage(null),
+          },
+          error && {
+            id: "admin-error",
+            tone: "error",
+            message: error,
+            onDismiss: () => setError(null),
+          },
+        ]}
+      />
 
       <div className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
         <div className="flex flex-wrap items-center justify-between gap-2">

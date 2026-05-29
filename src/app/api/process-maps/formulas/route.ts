@@ -15,6 +15,8 @@ type FormulaType =
   | "control_limits"
   | "custom";
 
+type CustomFormulaApprovalStatus = "draft" | "pending_review" | "approved" | "rejected";
+
 interface FormulaRequestBody {
   name?: unknown;
   formulaType?: unknown;
@@ -62,12 +64,43 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function normalizeCustomApprovalStatus(value: unknown, canApprove: boolean) {
+function normalizeCustomApprovalStatus(
+  value: unknown,
+  canApprove: boolean,
+): CustomFormulaApprovalStatus {
+  if (value === "draft" || value === "pending_review") {
+    return value;
+  }
+
   if (canApprove && (value === "approved" || value === "rejected")) {
     return value;
   }
 
-  return "pending_review";
+  return "draft";
+}
+
+function getCustomApprovalStatus(payload: unknown): CustomFormulaApprovalStatus {
+  if (!isRecord(payload)) {
+    return "draft";
+  }
+
+  const customFormula = isRecord(payload.customFormula) ? payload.customFormula : {};
+  const status = customFormula.approvalStatus;
+
+  return status === "pending_review" ||
+    status === "approved" ||
+    status === "rejected" ||
+    status === "draft"
+    ? status
+    : "draft";
+}
+
+function requesterCanSeeFormula(row: FormulaRow, requesterId: string, canApprove: boolean) {
+  if (canApprove || row.owner_user_id === requesterId) {
+    return true;
+  }
+
+  return row.formula_type === "custom" && getCustomApprovalStatus(row.payload) === "approved";
 }
 
 function normalizeFormulaPayloadForRequester(
@@ -107,19 +140,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  const includeAll =
-    request.nextUrl.searchParams.get("includeAll") === "true" &&
-    hasFullAccess(requester.role);
+  const canApprove = hasFullAccess(requester.role);
   const supabaseAdmin = getSupabaseAdminClient();
-  let query = supabaseAdmin
+  const query = supabaseAdmin
     .from("process_map_formulas")
     .select("id, owner_user_id, name, formula_type, payload, created_at, updated_at")
     .order("updated_at", { ascending: false })
-    .limit(100);
-
-  if (!includeAll) {
-    query = query.eq("owner_user_id", requester.id);
-  }
+    .limit(250);
 
   const { data, error } = await query;
   if (error) {
@@ -127,7 +154,9 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.json({
-    formulas: ((data ?? []) as FormulaRow[]).map(toFormula),
+    formulas: ((data ?? []) as FormulaRow[])
+      .filter((row) => requesterCanSeeFormula(row, requester.id, canApprove))
+      .map(toFormula),
   });
 }
 

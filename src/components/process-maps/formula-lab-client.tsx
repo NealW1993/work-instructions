@@ -16,15 +16,18 @@ import {
   Download,
   FileSpreadsheet,
   Loader2,
+  PencilLine,
   Plus,
   Printer,
   RefreshCw,
   Save,
+  Send,
   Sparkles,
   Trash2,
   XCircle,
 } from "lucide-react";
 
+import { FloatingStatusNotices } from "@/components/ui/floating-status-notices";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { cn } from "@/lib/utils";
 
@@ -54,7 +57,7 @@ type FormulaTab =
   | "control_limits"
   | "custom";
 
-type CustomFormulaApprovalStatus = "pending_review" | "approved" | "rejected";
+type CustomFormulaApprovalStatus = "draft" | "pending_review" | "approved" | "rejected";
 
 interface CustomFormulaInput {
   id: string;
@@ -202,6 +205,32 @@ const DEFAULT_FORMULA_NAMES: Record<FormulaTab, string> = {
   control_limits: "Control limits calculator",
   custom: "Formula draft",
 };
+
+const SYSTEM_FORMULA_TABS: Array<Exclude<FormulaTab, "custom">> = [
+  "oee",
+  "capability",
+  "dpmo",
+  "takt",
+  "yield",
+  "little_law",
+  "normal_curve",
+  "control_limits",
+];
+
+function getSystemFormulaId(tab: Exclude<FormulaTab, "custom">) {
+  return `system:${tab}`;
+}
+
+function getSystemFormulaTab(value: string): Exclude<FormulaTab, "custom"> | null {
+  if (!value.startsWith("system:")) {
+    return null;
+  }
+
+  const tab = value.slice("system:".length);
+  return SYSTEM_FORMULA_TABS.includes(tab as Exclude<FormulaTab, "custom">)
+    ? (tab as Exclude<FormulaTab, "custom">)
+    : null;
+}
 
 const DEFAULT_CUSTOM_INPUTS: CustomFormulaInput[] = [
   {
@@ -476,7 +505,7 @@ const FORMULA_GUIDES: Record<FormulaTab, FormulaGuide> = {
     inputHints: [
       "Use simple variable names such as total_count, good_count, or cycle_seconds.",
       "Expressions can reference any input variable by name.",
-      "Saved formula drafts are marked pending review until an authorized reviewer approves them.",
+      "Save keeps a formula private as a draft; publish sends it to managers for approval.",
     ],
     resultHints: {
       "Status": "Approval state for the saved formula draft.",
@@ -822,7 +851,12 @@ function normalizeCustomExpressionSyntax(value: string) {
 }
 
 function getCustomApprovalStatus(value: unknown): CustomFormulaApprovalStatus {
-  return value === "approved" || value === "rejected" ? value : "pending_review";
+  return value === "pending_review" ||
+    value === "approved" ||
+    value === "rejected" ||
+    value === "draft"
+    ? value
+    : "draft";
 }
 
 function getSavedFormulaApprovalStatus(formula: SavedFormula | null | undefined) {
@@ -1059,8 +1093,9 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
   const [formulaName, setFormulaName] = useState("OEE calculator");
   const [savedFormulas, setSavedFormulas] = useState<SavedFormula[]>([]);
   const [selectedFormulaId, setSelectedFormulaId] = useState("");
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [savedFormulaFilter, setSavedFormulaFilter] = useState<
-    "all" | "system" | "user" | "pending"
+    "all" | "system" | "custom" | "drafts" | "pending"
   >("all");
   const [libraryBusy, setLibraryBusy] = useState(false);
   const [libraryMessage, setLibraryMessage] = useState<string | null>(null);
@@ -1140,6 +1175,12 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
     [savedFormulas, selectedFormulaId],
   );
   const selectedCustomApprovalStatus = getSavedFormulaApprovalStatus(selectedFormula);
+  const selectedSystemFormulaTab = getSystemFormulaTab(selectedFormulaId);
+  const canModifySelectedFormula = Boolean(
+    selectedFormula &&
+      (canApproveCustomFormulas ||
+        (currentUserId && selectedFormula.ownerUserId === currentUserId)),
+  );
   const filteredSavedFormulas = useMemo(
     () =>
       savedFormulas.filter((formula) => {
@@ -1147,18 +1188,41 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
           return formula.formulaType !== "custom";
         }
 
-        if (savedFormulaFilter === "user") {
+        if (savedFormulaFilter === "custom") {
           return formula.formulaType === "custom";
         }
 
+        if (savedFormulaFilter === "drafts") {
+          return (
+            formula.formulaType === "custom" &&
+            getSavedFormulaApprovalStatus(formula) === "draft"
+          );
+        }
+
         if (savedFormulaFilter === "pending") {
-          return getSavedFormulaApprovalStatus(formula) === "pending_review";
+          return (
+            formula.formulaType === "custom" &&
+            getSavedFormulaApprovalStatus(formula) === "pending_review"
+          );
         }
 
         return true;
       }),
     [savedFormulaFilter, savedFormulas],
   );
+  const systemFormulaOptions = useMemo(
+    () =>
+      SYSTEM_FORMULA_TABS.map((tab) => ({
+        id: getSystemFormulaId(tab),
+        name: DEFAULT_FORMULA_NAMES[tab],
+        formulaType: tab,
+      })),
+    [],
+  );
+  const visibleSystemFormulaOptions =
+    savedFormulaFilter === "all" || savedFormulaFilter === "system"
+      ? systemFormulaOptions
+      : [];
 
   async function getAccessToken() {
     const {
@@ -1169,6 +1233,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
       throw new Error("Missing session token. Please sign in again.");
     }
 
+    setCurrentUserId(session.user.id);
     return session.access_token;
   }
 
@@ -1510,7 +1575,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
     }
   }
 
-  function buildFormulaPayload(customApprovalStatus: CustomFormulaApprovalStatus = "pending_review") {
+  function buildFormulaPayload(customApprovalStatus: CustomFormulaApprovalStatus = "draft") {
     return {
       version: 2,
       oeeGroups,
@@ -1547,6 +1612,15 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
         approvalStatus: customApprovalStatus,
       },
     };
+  }
+
+  function applySystemFormula(tab: Exclude<FormulaTab, "custom">) {
+    setSelectedFormulaId(getSystemFormulaId(tab));
+    setFormulaName(DEFAULT_FORMULA_NAMES[tab]);
+    setActiveTab(tab);
+    resetFormulaInputs(tab);
+    setLibraryError(null);
+    setLibraryMessage(`Loaded ${DEFAULT_FORMULA_NAMES[tab]}.`);
   }
 
   function applySavedFormula(formula: SavedFormula) {
@@ -1667,6 +1741,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
         setCustomOutputs(nextOutputs.length > 0 ? nextOutputs : cloneDefaultCustomOutputs());
       }
     }
+    setLibraryError(null);
     setLibraryMessage(`Loaded ${formula.name}.`);
   }
 
@@ -1683,7 +1758,10 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
 
     try {
       const token = await getAccessToken();
-      const existingId = selectedFormulaId.trim();
+      const selectedSystemTab = getSystemFormulaTab(selectedFormulaId);
+      const selectedId = selectedSystemTab ? "" : selectedFormulaId.trim();
+      const existingId =
+        selectedId && (activeTab !== "custom" || canModifySelectedFormula) ? selectedId : "";
       const response = await fetch(
         existingId ? `/api/process-maps/formulas/${existingId}` : "/api/process-maps/formulas",
         {
@@ -1697,7 +1775,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
             formulaType: activeTab,
             payload: buildFormulaPayload(
               activeTab === "custom"
-                ? "pending_review"
+                ? "draft"
                 : getSavedFormulaApprovalStatus(selectedFormula) ?? "approved",
             ),
           }),
@@ -1715,11 +1793,65 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
         const others = current.filter((entry) => entry.id !== payload.formula?.id);
         return [payload.formula as SavedFormula, ...others];
       });
-      setLibraryMessage(
-        activeTab === "custom" ? "Formula draft saved for approval." : "Formula saved.",
-      );
+      setLibraryMessage(activeTab === "custom" ? "Formula draft saved." : "Formula saved.");
     } catch (caughtError) {
       setLibraryError(caughtError instanceof Error ? caughtError.message : "Unable to save formula.");
+    } finally {
+      setLibraryBusy(false);
+    }
+  }
+
+  async function publishFormulaForReview() {
+    if (activeTab !== "custom") {
+      return;
+    }
+
+    const normalizedName = formulaName.trim();
+    if (!normalizedName) {
+      setLibraryError("Formula name is required.");
+      return;
+    }
+
+    setLibraryBusy(true);
+    setLibraryError(null);
+    setLibraryMessage(null);
+
+    try {
+      const token = await getAccessToken();
+      const selectedId = getSystemFormulaTab(selectedFormulaId) ? "" : selectedFormulaId.trim();
+      const existingId = selectedId && canModifySelectedFormula ? selectedId : "";
+      const response = await fetch(
+        existingId ? `/api/process-maps/formulas/${existingId}` : "/api/process-maps/formulas",
+        {
+          method: existingId ? "PATCH" : "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            name: normalizedName,
+            formulaType: "custom",
+            payload: buildFormulaPayload("pending_review"),
+          }),
+        },
+      );
+      const payload = (await response.json().catch(() => ({}))) as FormulaApiResponse;
+
+      if (!response.ok || !payload.formula) {
+        throw new Error(payload.error ?? "Unable to publish formula.");
+      }
+
+      setSelectedFormulaId(payload.formula.id);
+      setFormulaName(payload.formula.name);
+      setSavedFormulas((current) => {
+        const others = current.filter((entry) => entry.id !== payload.formula?.id);
+        return [payload.formula as SavedFormula, ...others];
+      });
+      setLibraryMessage("Formula published for manager approval.");
+    } catch (caughtError) {
+      setLibraryError(
+        caughtError instanceof Error ? caughtError.message : "Unable to publish formula.",
+      );
     } finally {
       setLibraryBusy(false);
     }
@@ -1771,7 +1903,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
 
   async function deleteSelectedFormula() {
     const existingId = selectedFormulaId.trim();
-    if (!existingId) {
+    if (!existingId || getSystemFormulaTab(existingId) || !canModifySelectedFormula) {
       return;
     }
 
@@ -1861,9 +1993,8 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
 
   function selectFormulaTab(tab: FormulaTab) {
     setActiveTab(tab);
-    if (!selectedFormulaId) {
-      setFormulaName(DEFAULT_FORMULA_NAMES[tab]);
-    }
+    setSelectedFormulaId("");
+    setFormulaName(DEFAULT_FORMULA_NAMES[tab]);
   }
 
   function exportOeeCsv() {
@@ -2075,7 +2206,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
       return [
         ["Metric", "Value"],
         ["Description", customDescription.trim() || "N/A"],
-        ["Approval status", selectedCustomApprovalStatus ?? "pending_review"],
+        ["Approval status", selectedCustomApprovalStatus ?? "draft"],
         ...customInputs.map((input, index) => [
           input.label.trim() || `Input ${index + 1}`,
           input.value.trim() || "0",
@@ -2202,6 +2333,34 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
 
   return (
     <div className="grid gap-5">
+      <FloatingStatusNotices
+        notices={[
+          libraryMessage && {
+            id: "formula-library-message",
+            tone: "success",
+            message: libraryMessage,
+            onDismiss: () => setLibraryMessage(null),
+          },
+          libraryError && {
+            id: "formula-library-error",
+            tone: "error",
+            message: libraryError,
+            onDismiss: () => setLibraryError(null),
+          },
+          formulaAnalysisNote && {
+            id: "formula-analysis-note",
+            tone: "info",
+            message: formulaAnalysisNote,
+            onDismiss: () => setFormulaAnalysisNote(null),
+          },
+          formulaAnalysisError && {
+            id: "formula-analysis-error",
+            tone: "error",
+            message: formulaAnalysisError,
+            onDismiss: () => setFormulaAnalysisError(null),
+          },
+        ]}
+      />
       <style>{`
         @media screen {
           .formula-print-page {
@@ -2300,7 +2459,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
               className="rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
             />
           </label>
-          <div className="flex items-end gap-2">
+          <div className="flex flex-wrap items-end gap-2">
             <button
               type="button"
               onClick={() => void saveFormula()}
@@ -2308,8 +2467,19 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
               className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/45 bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-emerald-200"
             >
               {libraryBusy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              Save
+              {activeTab === "custom" ? "Save Draft" : "Save"}
             </button>
+            {activeTab === "custom" ? (
+              <button
+                type="button"
+                onClick={() => void publishFormulaForReview()}
+                disabled={libraryBusy}
+                className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-100"
+              >
+                {libraryBusy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                Publish Formula
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={startFormulaDraft}
@@ -2333,12 +2503,13 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
               Refresh
             </button>
           </div>
-          <div className="grid grid-cols-4 gap-1 rounded-lg border border-slate-300/70 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-900/50">
+          <div className="grid grid-cols-5 gap-1 rounded-lg border border-slate-300/70 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-900/50">
             {(
               [
                 ["all", "All"],
                 ["system", "System"],
-                ["user", "Drafts"],
+                ["custom", "Custom"],
+                ["drafts", "Drafts"],
                 ["pending", "Pending"],
               ] as const
             ).map(([filter, label]) => (
@@ -2361,6 +2532,12 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
             <select
               value={selectedFormulaId}
               onChange={(event) => {
+                const systemTab = getSystemFormulaTab(event.target.value);
+                if (systemTab) {
+                  applySystemFormula(systemTab);
+                  return;
+                }
+
                 const formula = savedFormulas.find((entry) => entry.id === event.target.value);
                 if (formula) {
                   applySavedFormula(formula);
@@ -2371,9 +2548,14 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
               className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
             >
               <option value="">Select saved formula</option>
+              {visibleSystemFormulaOptions.map((formula) => (
+                <option key={formula.id} value={formula.id}>
+                  {formula.name} (SYSTEM)
+                </option>
+              ))}
               {filteredSavedFormulas.map((formula) => (
                 <option key={formula.id} value={formula.id}>
-                  {formula.name} ({formula.formulaType === "custom" ? "DRAFT" : "SYSTEM"}
+                  {formula.name} ({formula.formulaType === "custom" ? "CUSTOM" : "SAVED"}
                   {formula.formulaType === "custom"
                     ? `, ${getSavedFormulaApprovalStatus(formula)?.replace("_", " ").toUpperCase()}`
                     : ""}
@@ -2384,29 +2566,57 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
             <button
               type="button"
               onClick={() => void deleteSelectedFormula()}
-              disabled={!selectedFormulaId || libraryBusy}
+              disabled={
+                !selectedFormulaId ||
+                Boolean(selectedSystemFormulaTab) ||
+                !canModifySelectedFormula ||
+                libraryBusy
+              }
               className="inline-flex items-center gap-2 rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-50 dark:text-rose-200"
             >
               <Trash2 size={14} />
               Delete
             </button>
           </div>
-          {libraryMessage ? (
-            <p className="rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-800 dark:text-emerald-200">
-              {libraryMessage}
-            </p>
-          ) : null}
-          {libraryError ? (
-            <p className="rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs text-rose-800 dark:text-rose-200">
-              {libraryError}
-            </p>
-          ) : null}
           {activeTab === "custom" ? (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-300/70 bg-slate-50 px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900/50">
               <span className="font-semibold text-slate-600 dark:text-slate-300">
-                Status: {(selectedCustomApprovalStatus ?? "pending_review").replace("_", " ")}
+                Status: {(selectedCustomApprovalStatus ?? "draft").replace("_", " ")}
               </span>
-              {canApproveCustomFormulas && selectedFormulaId ? (
+              <div className="flex flex-wrap gap-2">
+                {selectedFormula?.formulaType === "custom" ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab("custom");
+                      if (canModifySelectedFormula) {
+                        setLibraryMessage(`Editing ${selectedFormula.name}.`);
+                        return;
+                      }
+
+                      setSelectedFormulaId("");
+                      setFormulaName(`${selectedFormula.name} copy`);
+                      setLibraryMessage(`Editing a draft copy of ${selectedFormula.name}.`);
+                    }}
+                    className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-1 font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                  >
+                    <PencilLine size={12} />
+                    Edit Formula
+                  </button>
+                ) : null}
+                {selectedCustomApprovalStatus !== "pending_review" ? (
+                  <button
+                    type="button"
+                    onClick={() => void publishFormulaForReview()}
+                    disabled={libraryBusy}
+                    className="inline-flex items-center gap-1 rounded-md border border-cyan-500/40 bg-cyan-500/15 px-2 py-1 font-semibold text-cyan-800 transition hover:bg-cyan-500/25 disabled:opacity-60 dark:text-cyan-100"
+                  >
+                    <Send size={12} />
+                    Publish
+                  </button>
+                ) : null}
+              </div>
+              {canApproveCustomFormulas && selectedFormulaId && selectedCustomApprovalStatus === "pending_review" ? (
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -2883,16 +3093,6 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
                 className="min-h-28 resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
               />
               <FormulaSymbolPalette onInsert={insertLonghandSymbol} />
-              {formulaAnalysisNote ? (
-                <p className="rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-800 dark:text-emerald-200">
-                  {formulaAnalysisNote}
-                </p>
-              ) : null}
-              {formulaAnalysisError ? (
-                <p className="rounded-lg border border-rose-500/35 bg-rose-500/10 px-3 py-2 text-xs text-rose-800 dark:text-rose-200">
-                  {formulaAnalysisError}
-                </p>
-              ) : null}
             </section>
 
             <div className="grid gap-2">
@@ -2911,31 +3111,31 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
                 {customInputs.map((input) => (
                   <div
                     key={input.id}
-                    className="grid gap-2 rounded-xl border border-slate-300/70 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-900/45 md:grid-cols-[minmax(12rem,1fr)_minmax(8rem,12rem)_minmax(8rem,10rem)_auto]"
+                    className="grid gap-2 rounded-xl border border-slate-300/70 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-900/45 md:grid-cols-[minmax(0,1.15fr)_minmax(0,0.6fr)_minmax(0,0.65fr)_2.75rem]"
                   >
-                    <label className="grid gap-1 text-xs">
+                    <label className="grid min-w-0 gap-1 text-xs">
                       <span className="font-semibold">Label</span>
                       <input
                         value={input.label}
                         onChange={(event) => updateCustomInput(input.id, "label", event.target.value)}
-                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                        className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
                       />
                     </label>
-                    <label className="grid gap-1 text-xs">
+                    <label className="grid min-w-0 gap-1 text-xs">
                       <span className="font-semibold">Variable</span>
                       <input
                         value={input.name}
                         onChange={(event) => updateCustomInput(input.id, "name", event.target.value)}
-                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                        className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
                       />
                     </label>
-                    <label className="grid gap-1 text-xs">
+                    <label className="grid min-w-0 gap-1 text-xs">
                       <span className="font-semibold">Value</span>
                       <input
                         value={input.value}
                         inputMode="decimal"
                         onChange={(event) => updateCustomInput(input.id, "value", event.target.value)}
-                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                        className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
                       />
                     </label>
                     <button
@@ -2970,30 +3170,30 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
                   return (
                     <div
                       key={output.id}
-                      className="grid gap-2 rounded-xl border border-slate-300/70 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-900/45 md:grid-cols-[minmax(10rem,1fr)_minmax(8rem,12rem)_minmax(14rem,1.4fr)_auto]"
+                      className="grid gap-2 rounded-xl border border-slate-300/70 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-900/45 md:grid-cols-[minmax(0,0.9fr)_minmax(0,0.65fr)_minmax(0,1.15fr)_2.75rem]"
                     >
-                      <label className="grid gap-1 text-xs">
+                      <label className="grid min-w-0 gap-1 text-xs">
                         <span className="font-semibold">Label</span>
                         <input
                           value={output.label}
                           onChange={(event) => updateCustomOutput(output.id, "label", event.target.value)}
-                          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                          className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
                         />
                       </label>
-                      <label className="grid gap-1 text-xs">
+                      <label className="grid min-w-0 gap-1 text-xs">
                         <span className="font-semibold">Name</span>
                         <input
                           value={output.name}
                           onChange={(event) => updateCustomOutput(output.id, "name", event.target.value)}
-                          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                          className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
                         />
                       </label>
-                      <label className="grid gap-1 text-xs">
+                      <label className="grid min-w-0 gap-1 text-xs">
                         <span className="font-semibold">Expression</span>
                         <input
                           value={output.expression}
                           onChange={(event) => updateCustomOutput(output.id, "expression", event.target.value)}
-                          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                          className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
                         />
                       </label>
                       <button
@@ -3018,7 +3218,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
           <FormulaResults
             hints={FORMULA_GUIDES.custom.resultHints}
             rows={[
-              ["Status", (selectedCustomApprovalStatus ?? "pending_review").replace("_", " ")],
+              ["Status", (selectedCustomApprovalStatus ?? "draft").replace("_", " ")],
               ...customFormulaResults.map((output, index) => [
                 output.label.trim() || `Output ${index + 1}`,
                 output.error ?? formatNumber(output.value, 4),

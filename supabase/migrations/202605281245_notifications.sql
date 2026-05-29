@@ -419,7 +419,7 @@ begin
   else
     old_status := null;
   end if;
-  new_status := coalesce(new.payload #>> '{customFormula,approvalStatus}', 'pending_review');
+  new_status := coalesce(new.payload #>> '{customFormula,approvalStatus}', 'draft');
 
   if new_status = 'pending_review'
     and (tg_op = 'INSERT' or old_status is distinct from new_status)

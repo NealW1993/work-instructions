@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { InstructionBackButton } from "@/components/instructions/instruction-back-button";
+import { FloatingStatusNotices } from "@/components/ui/floating-status-notices";
 import { LocalDateTime } from "@/components/ui/local-date-time";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 
@@ -267,6 +268,22 @@ export function ArchivedInstructionsPanel({
 
   return (
     <div className="grid gap-5">
+      <FloatingStatusNotices
+        notices={[
+          message && {
+            id: "archived-instructions-message",
+            tone: "success",
+            message,
+            onDismiss: () => setMessage(null),
+          },
+          error && {
+            id: "archived-instructions-error",
+            tone: "error",
+            message: error,
+            onDismiss: () => setError(null),
+          },
+        ]}
+      />
       <section className="grid gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
         <header className="flex flex-wrap items-start gap-3">
           <InstructionBackButton fallbackHref="/dashboard" />
@@ -313,17 +330,6 @@ export function ArchivedInstructionsPanel({
           </label>
         </div>
       </section>
-
-      {message ? (
-        <p className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-200">
-          {message}
-        </p>
-      ) : null}
-      {error ? (
-        <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-700 dark:text-rose-200">
-          {error}
-        </p>
-      ) : null}
 
       <section className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/30 bg-white/75 p-3 shadow-lg backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70">
         <div className="flex flex-wrap items-center gap-2 text-sm">

@@ -15,6 +15,8 @@ type FormulaType =
   | "control_limits"
   | "custom";
 
+type CustomFormulaApprovalStatus = "draft" | "pending_review" | "approved" | "rejected";
+
 interface FormulaRequestBody {
   name?: unknown;
   formulaType?: unknown;
@@ -62,6 +64,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function normalizeCustomApprovalStatus(
+  value: unknown,
+  canApprove: boolean,
+): CustomFormulaApprovalStatus | null {
+  if (value === "draft" || value === "pending_review") {
+    return value;
+  }
+
+  if (value === "approved" || value === "rejected") {
+    return canApprove ? value : null;
+  }
+
+  return "draft";
+}
+
 function normalizeFormulaPayloadForRequester(
   formulaType: FormulaType,
   payload: Record<string, unknown>,
@@ -72,8 +89,12 @@ function normalizeFormulaPayloadForRequester(
   }
 
   const customFormula = isRecord(payload.customFormula) ? payload.customFormula : {};
-  const requestedStatus = customFormula.approvalStatus;
-  if ((requestedStatus === "approved" || requestedStatus === "rejected") && !canApprove) {
+  const approvalStatus = normalizeCustomApprovalStatus(
+    customFormula.approvalStatus,
+    canApprove,
+  );
+
+  if (!approvalStatus) {
     return null;
   }
 
@@ -81,10 +102,7 @@ function normalizeFormulaPayloadForRequester(
     ...payload,
     customFormula: {
       ...customFormula,
-      approvalStatus:
-        requestedStatus === "approved" || requestedStatus === "rejected"
-          ? requestedStatus
-          : "pending_review",
+      approvalStatus,
     },
   };
 }

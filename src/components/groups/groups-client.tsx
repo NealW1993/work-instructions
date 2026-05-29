@@ -4,6 +4,7 @@ import { CheckCircle2, Loader2, Plus, UserPlus, UsersRound, XCircle } from "luci
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
+import { FloatingStatusNotices } from "@/components/ui/floating-status-notices";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { cn } from "@/lib/utils";
 
@@ -159,6 +160,22 @@ export function GroupsClient({
 
   return (
     <div className="grid gap-4">
+      <FloatingStatusNotices
+        notices={[
+          message && {
+            id: "groups-message",
+            tone: "success",
+            message,
+            onDismiss: () => setMessage(null),
+          },
+          error && {
+            id: "groups-error",
+            tone: "error",
+            message: error,
+            onDismiss: () => setError(null),
+          },
+        ]}
+      />
       <header className="rounded-2xl border border-white/30 bg-white/80 p-5 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -175,17 +192,6 @@ export function GroupsClient({
           </span>
         </div>
       </header>
-
-      {message ? (
-        <p className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-200">
-          {message}
-        </p>
-      ) : null}
-      {error ? (
-        <p className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-800 dark:text-rose-200">
-          {error}
-        </p>
-      ) : null}
 
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(20rem,26rem)]">
         <section className="grid content-start gap-3 rounded-2xl border border-slate-300/70 bg-white/85 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/75">

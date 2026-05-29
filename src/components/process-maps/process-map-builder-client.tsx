@@ -54,6 +54,7 @@ import {
   getDmaicPhaseOption,
   splitListInput,
 } from "@/lib/process-map-tools";
+import { FloatingStatusNotices } from "@/components/ui/floating-status-notices";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { cn } from "@/lib/utils";
 
@@ -6400,6 +6401,28 @@ export function ProcessMapBuilderClient({
 
   return (
     <div className="process-workspace-shell process-map-builder-shell relative left-1/2 grid w-screen max-w-[1760px] -translate-x-1/2 gap-4 px-4 py-2 md:px-6">
+      <FloatingStatusNotices
+        notices={[
+          message && {
+            id: "process-map-message",
+            tone: "success",
+            message,
+            onDismiss: () => setMessage(null),
+          },
+          error && {
+            id: "process-map-error",
+            tone: "error",
+            message: error,
+            onDismiss: () => setError(null),
+          },
+          pageExplainError && {
+            id: "process-map-explain-error",
+            tone: "error",
+            message: pageExplainError,
+            onDismiss: () => setPageExplainError(null),
+          },
+        ]}
+      />
       <header className="process-workbench-card overflow-hidden rounded-2xl p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="grid gap-1">
@@ -6436,21 +6459,6 @@ export function ProcessMapBuilderClient({
         </div>
       </header>
 
-      {message ? (
-        <p className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-200">
-          {message}
-        </p>
-      ) : null}
-      {error ? (
-        <p className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-800 dark:text-rose-200">
-          {error}
-        </p>
-      ) : null}
-      {pageExplainError ? (
-        <p className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-800 dark:text-rose-200">
-          {pageExplainError}
-        </p>
-      ) : null}
       {pageExplanation ? (
         <section className="rounded-2xl border border-fuchsia-500/25 bg-fuchsia-500/10 p-4 text-sm text-slate-700 shadow-sm dark:text-slate-200">
           <div className="mb-2 flex items-center gap-2 font-extrabold text-slate-950 dark:text-slate-50">
