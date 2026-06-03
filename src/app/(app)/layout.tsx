@@ -21,7 +21,10 @@ export default async function AppLayout({
         role={profile.role}
       />
       <ThemePreferenceSync themePreference={profile.theme_preference ?? "dark"} />
-      <InactivitySignOut inactivityTimeoutMinutes={profile.inactivity_timeout_minutes} />
+      <InactivitySignOut
+        userId={profile.id}
+        inactivityTimeoutMinutes={profile.inactivity_timeout_minutes}
+      />
       <PostLoginScrollRestore />
       <AppHeader profile={profile} />
       <main className="mx-auto w-full min-w-0 max-w-7xl px-4 py-6 md:px-8 md:py-8">

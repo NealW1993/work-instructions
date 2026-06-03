@@ -8,6 +8,11 @@ import {
   getCurrentBrowserPathWithSearch,
   saveAutoLogoutRouteForUser,
 } from "@/lib/last-route-restore";
+import {
+  clearBrowserExitSignOutPending,
+  consumeBrowserExitSignOutPending,
+  markBrowserExitSignOutPending,
+} from "@/lib/session-exit";
 import { clearSessionStart, getSessionStartTime } from "@/lib/session-timer";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { persistActiveThemePreference } from "@/lib/theme-client";
@@ -25,6 +30,7 @@ const ACTIVITY_EVENTS = [
 ] as const;
 
 interface InactivitySignOutProps {
+  userId: string;
   inactivityTimeoutMinutes?: number | null;
 }
 
@@ -45,7 +51,7 @@ function normalizeInactivityTimeoutMinutes(value: number | null | undefined) {
   return parsed;
 }
 
-export function InactivitySignOut({ inactivityTimeoutMinutes }: InactivitySignOutProps) {
+export function InactivitySignOut({ userId, inactivityTimeoutMinutes }: InactivitySignOutProps) {
   const router = useRouter();
   const posthog = usePostHog();
 
@@ -54,21 +60,61 @@ export function InactivitySignOut({ inactivityTimeoutMinutes }: InactivitySignOu
       inactivityTimeoutMinutes,
     );
 
-    if (resolvedTimeoutMinutes === null) {
-      return;
-    }
-
-    const timeoutMs = resolvedTimeoutMinutes * 60 * 1000;
+    const timeoutMs =
+      resolvedTimeoutMinutes === null ? null : resolvedTimeoutMinutes * 60 * 1000;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let lastActivityAt = Date.now();
+    let signingOut = false;
+    let exitBeaconSent = false;
 
-    async function handleSignOut() {
-      const supabase = getSupabaseBrowserClient();
+    function getSessionEndPayload() {
       const sessionStartedAtMs = getSessionStartTime();
       const clientElapsedSeconds =
         sessionStartedAtMs !== null
           ? Math.max(0, Math.floor((Date.now() - sessionStartedAtMs) / 1000))
           : null;
+
+      return { sessionStartedAtMs, clientElapsedSeconds };
+    }
+
+    function sendSessionEndBeacon() {
+      if (exitBeaconSent) {
+        return;
+      }
+
+      exitBeaconSent = true;
+      const body = JSON.stringify(getSessionEndPayload());
+
+      try {
+        if (navigator.sendBeacon) {
+          const blob = new Blob([body], { type: "application/json" });
+          if (navigator.sendBeacon("/api/auth/session/end", blob)) {
+            return;
+          }
+        }
+      } catch {
+        // Fall through to keepalive fetch.
+      }
+
+      void fetch("/api/auth/session/end", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        keepalive: true,
+        body,
+      }).catch(() => {
+        // Browser-exit telemetry is best effort.
+      });
+    }
+
+    async function handleSignOut() {
+      if (signingOut) {
+        return;
+      }
+
+      signingOut = true;
+      const supabase = getSupabaseBrowserClient();
+      const { sessionStartedAtMs, clientElapsedSeconds } = getSessionEndPayload();
 
       try {
         const {
@@ -101,13 +147,23 @@ export function InactivitySignOut({ inactivityTimeoutMinutes }: InactivitySignOu
 
       await supabase.auth.signOut();
       clearSessionStart();
+      clearBrowserExitSignOutPending(userId);
       posthog?.reset();
       persistActiveThemePreference();
       router.push("/login");
       router.refresh();
     }
 
+    if (consumeBrowserExitSignOutPending(userId)) {
+      void handleSignOut();
+      return;
+    }
+
     function resetTimer() {
+      if (timeoutMs === null) {
+        return;
+      }
+
       lastActivityAt = Date.now();
       if (timeoutId !== null) {
         clearTimeout(timeoutId);
@@ -122,6 +178,9 @@ export function InactivitySignOut({ inactivityTimeoutMinutes }: InactivitySignOu
       if (document.visibilityState !== "visible") {
         return;
       }
+      if (timeoutMs === null) {
+        return;
+      }
       const elapsed = Date.now() - lastActivityAt;
       if (elapsed >= timeoutMs) {
         void handleSignOut();
@@ -134,23 +193,35 @@ export function InactivitySignOut({ inactivityTimeoutMinutes }: InactivitySignOu
       }
     }
 
-    // Start the timer and listen for activity
-    resetTimer();
-    for (const event of ACTIVITY_EVENTS) {
-      window.addEventListener(event, resetTimer, { passive: true });
+    function handleBrowserExit() {
+      markBrowserExitSignOutPending(userId);
+      sendSessionEndBeacon();
     }
-    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    if (timeoutMs !== null) {
+      resetTimer();
+      for (const event of ACTIVITY_EVENTS) {
+        window.addEventListener(event, resetTimer, { passive: true });
+      }
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+    }
+    window.addEventListener("pagehide", handleBrowserExit);
+    window.addEventListener("beforeunload", handleBrowserExit);
 
     return () => {
       if (timeoutId !== null) {
         clearTimeout(timeoutId);
       }
-      for (const event of ACTIVITY_EVENTS) {
-        window.removeEventListener(event, resetTimer);
+      if (timeoutMs !== null) {
+        for (const event of ACTIVITY_EVENTS) {
+          window.removeEventListener(event, resetTimer);
+        }
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
       }
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", handleBrowserExit);
+      window.removeEventListener("beforeunload", handleBrowserExit);
     };
-  }, [inactivityTimeoutMinutes, posthog, router]);
+  }, [inactivityTimeoutMinutes, posthog, router, userId]);
 
   return null;
 }

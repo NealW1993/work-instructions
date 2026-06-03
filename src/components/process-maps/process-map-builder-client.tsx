@@ -145,6 +145,19 @@ interface DiagramTextStyle {
   underline: boolean;
 }
 
+type ChartTextRole =
+  | "title"
+  | "xAxisTitle"
+  | "yAxisTitle"
+  | "metricLabel"
+  | "metricValue"
+  | "shapeText";
+
+interface ChartAxisTitles {
+  x: string;
+  y: string;
+}
+
 type DrawingMode = "select" | "process" | "decision" | "terminator" | "connector" | "custom";
 
 interface DiagramElementStyle {
@@ -230,6 +243,8 @@ interface ValueStreamNote {
 
 type InlineChartEditTarget =
   | { kind: "title"; value: string }
+  | { kind: "xAxisTitle"; value: string }
+  | { kind: "yAxisTitle"; value: string }
   | { kind: "purpose"; value: string }
   | { kind: "item"; index: number; value: string }
   | { kind: "lane"; index: number; value: string }
@@ -326,6 +341,31 @@ const DEFAULT_DIAGRAM_TEXT_STYLE: DiagramTextStyle = {
   bold: true,
   italic: false,
   underline: false,
+};
+
+const DEFAULT_CHART_TEXT_STYLES: Record<ChartTextRole, DiagramTextStyle> = {
+  title: DEFAULT_DIAGRAM_TEXT_STYLE,
+  xAxisTitle: {
+    ...DEFAULT_DIAGRAM_TEXT_STYLE,
+    color: "#475569",
+    fontScale: 0.92,
+  },
+  yAxisTitle: {
+    ...DEFAULT_DIAGRAM_TEXT_STYLE,
+    color: "#475569",
+    fontScale: 0.92,
+  },
+  metricLabel: {
+    ...DEFAULT_DIAGRAM_TEXT_STYLE,
+    color: "#475569",
+    fontScale: 0.86,
+  },
+  metricValue: {
+    ...DEFAULT_DIAGRAM_TEXT_STYLE,
+    color: "#0f172a",
+    fontScale: 0.86,
+  },
+  shapeText: DEFAULT_DIAGRAM_TEXT_STYLE,
 };
 
 const DEFAULT_PROMPT =
@@ -877,13 +917,35 @@ function svgText(
   x: number,
   y: number,
   text: string,
-  options: { anchor?: "start" | "middle" | "end"; size?: number; weight?: number; color?: string } = {},
+  options: {
+    anchor?: "start" | "middle" | "end";
+    size?: number;
+    weight?: number;
+    color?: string;
+    role?: ChartTextRole;
+    style?: DiagramTextStyle;
+  } = {},
 ) {
   const anchor = options.anchor ?? "middle";
-  const size = options.size ?? 13;
-  const weight = options.weight ?? 700;
-  const color = options.color ?? "#0f172a";
-  return `<text x="${x}" y="${y}" text-anchor="${anchor}" font-family="Inter, Arial, sans-serif" font-size="${size}" font-weight="${weight}" fill="${color}">${escapeHtml(
+  const baseSize = options.size ?? 13;
+  const size = options.style
+    ? clampNumber(baseSize * options.style.fontScale, 8, 30)
+    : baseSize;
+  const weight = options.style ? (options.style.bold ? 800 : 500) : options.weight ?? 700;
+  const color = options.style?.color ?? options.color ?? "#0f172a";
+  const fontFamily = options.style?.fontFamily ?? "Inter, Arial, sans-serif";
+  const roleAttribute = options.role ? ` data-chart-text-role="${options.role}"` : "";
+  const styleAttributes = [
+    options.style?.italic ? 'font-style="italic"' : "",
+    options.style?.underline ? 'text-decoration="underline"' : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return `<text x="${x}" y="${y}" text-anchor="${anchor}"${roleAttribute} font-family="${escapeHtml(
+    fontFamily,
+  )}" font-size="${size.toFixed(size >= 10 ? 1 : 2)}" font-weight="${weight}" fill="${color}"${
+    styleAttributes ? ` ${styleAttributes}` : ""
+  }>${escapeHtml(
     truncate(text, 28),
   )}</text>`;
 }
@@ -929,6 +991,34 @@ function getAxisTicks(minValue: number, maxValue: number, tickCount = 5) {
   const step = range / Math.max(1, tickCount - 1);
 
   return Array.from({ length: tickCount }, (_, index) => low + step * index);
+}
+
+function getDefaultChartAxisTitles(diagramType: DiagramType): ChartAxisTitles {
+  if (diagramType === "scatter_plot") {
+    return {
+      x: "X: Factor value",
+      y: "Y: Outcome value",
+    };
+  }
+
+  if (diagramType === "run_chart" || diagramType === "control_chart") {
+    return {
+      x: "X: Time / sample / date",
+      y: "Y: Process value",
+    };
+  }
+
+  if (diagramType === "histogram") {
+    return {
+      x: "X: Category / date label",
+      y: "Y: Value",
+    };
+  }
+
+  return {
+    x: "X: Category / date label",
+    y: "Y: Count / impact",
+  };
 }
 
 function applySvgTheme(svg: string, style: DiagramStyle, layerSettings: LayerSettings) {
@@ -1303,7 +1393,13 @@ function buildCtqSvg(title: string, items: string[]) {
   return svgShell(width, height, body);
 }
 
-function buildBarSvg(title: string, metrics: MetricPoint[], pareto: boolean) {
+function buildBarSvg(
+  title: string,
+  metrics: MetricPoint[],
+  pareto: boolean,
+  axisTitles: ChartAxisTitles = getDefaultChartAxisTitles(pareto ? "pareto" : "histogram"),
+  textStyles: Record<ChartTextRole, DiagramTextStyle> = DEFAULT_CHART_TEXT_STYLES,
+) {
   const width = 960;
   const height = 420;
   const chartTop = 82;
@@ -1315,11 +1411,18 @@ function buildBarSvg(title: string, metrics: MetricPoint[], pareto: boolean) {
   const barWidth = Math.max(18, Math.min(82, barSlotWidth - 22));
   let cumulative = 0;
   const total = metrics.reduce((sum, metric) => sum + metric.value, 0) || 1;
-  let body = svgText(width / 2, 38, title, { size: 20, color: "#111827" });
-  body += svgText(chartLeft, 64, pareto ? "Y: Count / impact" : "Y: Value", {
+  let body = svgText(width / 2, 38, title, {
+    size: 20,
+    color: "#111827",
+    role: "title",
+    style: textStyles.title,
+  });
+  body += svgText(chartLeft, 64, axisTitles.y, {
     anchor: "start",
     size: 11,
     color: "#475569",
+    role: "yAxisTitle",
+    style: textStyles.yAxisTitle,
   });
   body += `<line x1="${chartLeft}" y1="${chartTop + chartHeight}" x2="${
     chartLeft + chartWidth
@@ -1334,6 +1437,8 @@ function buildBarSvg(title: string, metrics: MetricPoint[], pareto: boolean) {
       anchor: "end",
       size: 10,
       color: "#475569",
+      role: "metricValue",
+      style: textStyles.metricValue,
     });
   });
 
@@ -1348,10 +1453,14 @@ function buildBarSvg(title: string, metrics: MetricPoint[], pareto: boolean) {
     body += svgText(x + barWidth / 2, y - 8, String(Math.round(metric.value)), {
       size: 11,
       color: "#0f172a",
+      role: "metricValue",
+      style: textStyles.metricValue,
     });
     body += svgText(x + barWidth / 2, chartTop + chartHeight + 24, metric.label, {
       size: 10,
       color: "#475569",
+      role: "metricLabel",
+      style: textStyles.metricLabel,
     });
 
     if (pareto) {
@@ -1374,9 +1483,11 @@ function buildBarSvg(title: string, metrics: MetricPoint[], pareto: boolean) {
     }
   });
 
-  body += svgText(chartLeft + chartWidth / 2, height - 24, "X: Category / date label", {
+  body += svgText(chartLeft + chartWidth / 2, height - 24, axisTitles.x, {
     size: 12,
     color: "#475569",
+    role: "xAxisTitle",
+    style: textStyles.xAxisTitle,
   });
 
   return svgShell(width, height, body);
@@ -1506,7 +1617,13 @@ function buildOeeSvg(title: string, stats: OeeStats) {
   return svgShell(width, height, body);
 }
 
-function buildLineSvg(title: string, metrics: MetricPoint[], control: boolean) {
+function buildLineSvg(
+  title: string,
+  metrics: MetricPoint[],
+  control: boolean,
+  axisTitles: ChartAxisTitles = getDefaultChartAxisTitles(control ? "control_chart" : "run_chart"),
+  textStyles: Record<ChartTextRole, DiagramTextStyle> = DEFAULT_CHART_TEXT_STYLES,
+) {
   const width = 960;
   const height = 420;
   const chartTop = 78;
@@ -1530,12 +1647,19 @@ function buildLineSvg(title: string, metrics: MetricPoint[], control: boolean) {
     return { x, y };
   };
   const yFor = (value: number) => chartTop + chartHeight - ((value - minValue) / range) * chartHeight;
-  let body = svgText(width / 2, 38, title, { size: 20, color: "#111827" });
+  let body = svgText(width / 2, 38, title, {
+    size: 20,
+    color: "#111827",
+    role: "title",
+    style: textStyles.title,
+  });
   body += `<rect x="${chartLeft}" y="${chartTop}" width="${chartWidth}" height="${chartHeight}" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"></rect>`;
-  body += svgText(chartLeft, 62, "Y: Process value", {
+  body += svgText(chartLeft, 62, axisTitles.y, {
     anchor: "start",
     size: 11,
     color: "#475569",
+    role: "yAxisTitle",
+    style: textStyles.yAxisTitle,
   });
   getAxisTicks(minValue, maxValue, 5).forEach((tick) => {
     const y = yFor(tick);
@@ -1544,6 +1668,8 @@ function buildLineSvg(title: string, metrics: MetricPoint[], control: boolean) {
       anchor: "end",
       size: 10,
       color: "#475569",
+      role: "metricValue",
+      style: textStyles.metricValue,
     });
   });
 
@@ -1583,22 +1709,33 @@ function buildLineSvg(title: string, metrics: MetricPoint[], control: boolean) {
     body += svgText(point.x, point.y - 12, formatAxisNumber(metrics[index]?.value ?? 0), {
       size: 10,
       color: "#0f172a",
+      role: "metricValue",
+      style: textStyles.metricValue,
     });
     body += svgText(point.x, chartTop + chartHeight + 24, metrics[index]?.label ?? "", {
       size: 10,
       color: "#475569",
+      role: "metricLabel",
+      style: textStyles.metricLabel,
     });
   });
 
-  body += svgText(chartLeft + chartWidth / 2, height - 24, "X: Time / sample / date", {
+  body += svgText(chartLeft + chartWidth / 2, height - 24, axisTitles.x, {
     size: 12,
     color: "#475569",
+    role: "xAxisTitle",
+    style: textStyles.xAxisTitle,
   });
 
   return svgShell(width, height, body);
 }
 
-function buildScatterSvg(title: string, metrics: MetricPoint[]) {
+function buildScatterSvg(
+  title: string,
+  metrics: MetricPoint[],
+  axisTitles: ChartAxisTitles = getDefaultChartAxisTitles("scatter_plot"),
+  textStyles: Record<ChartTextRole, DiagramTextStyle> = DEFAULT_CHART_TEXT_STYLES,
+) {
   const width = 960;
   const height = 420;
   const chartTop = 78;
@@ -1607,7 +1744,12 @@ function buildScatterSvg(title: string, metrics: MetricPoint[]) {
   const chartHeight = 248;
   const maxX = Math.max(...metrics.map((metric) => metric.value), 1);
   const maxY = Math.max(...metrics.map((metric) => metric.value2), 1);
-  let body = svgText(width / 2, 38, title, { size: 20, color: "#111827" });
+  let body = svgText(width / 2, 38, title, {
+    size: 20,
+    color: "#111827",
+    role: "title",
+    style: textStyles.title,
+  });
   body += `<rect x="${chartLeft}" y="${chartTop}" width="${chartWidth}" height="${chartHeight}" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"></rect>`;
   getAxisTicks(0, maxY, 5).forEach((tick) => {
     const y = chartTop + chartHeight - (tick / maxY) * chartHeight;
@@ -1616,6 +1758,8 @@ function buildScatterSvg(title: string, metrics: MetricPoint[]) {
       anchor: "end",
       size: 10,
       color: "#475569",
+      role: "metricValue",
+      style: textStyles.metricValue,
     });
   });
   getAxisTicks(0, maxX, 5).forEach((tick) => {
@@ -1624,6 +1768,8 @@ function buildScatterSvg(title: string, metrics: MetricPoint[]) {
     body += svgText(x, chartTop + chartHeight + 22, formatAxisNumber(tick), {
       size: 10,
       color: "#475569",
+      role: "metricValue",
+      style: textStyles.metricValue,
     });
   });
   metrics.forEach((metric) => {
@@ -1632,16 +1778,25 @@ function buildScatterSvg(title: string, metrics: MetricPoint[]) {
     body += `<circle cx="${x}" cy="${y}" r="7" fill="#8b5cf6" fill-opacity="0.86"><title>${escapeHtml(
       `${metric.label}: X ${metric.value}, Y ${metric.value2}`,
     )}</title></circle>`;
-    body += svgText(x, y - 12, metric.label, { size: 10, color: "#475569" });
+    body += svgText(x, y - 12, metric.label, {
+      size: 10,
+      color: "#475569",
+      role: "metricLabel",
+      style: textStyles.metricLabel,
+    });
   });
-  body += svgText(chartLeft + chartWidth / 2, height - 24, "X: Factor value", {
+  body += svgText(chartLeft + chartWidth / 2, height - 24, axisTitles.x, {
     size: 12,
     color: "#475569",
+    role: "xAxisTitle",
+    style: textStyles.xAxisTitle,
   });
-  body += svgText(chartLeft, 62, "Y: Outcome value", {
+  body += svgText(chartLeft, 62, axisTitles.y, {
     anchor: "start",
     size: 11,
     color: "#475569",
+    role: "yAxisTitle",
+    style: textStyles.yAxisTitle,
   });
   return svgShell(width, height, body);
 }
@@ -1654,6 +1809,8 @@ function buildDiagramSvg(input: {
   metrics: MetricPoint[];
   fishboneEffect?: string;
   fishboneCauseSlots?: number;
+  chartAxisTitles?: ChartAxisTitles;
+  chartTextStyles?: Record<ChartTextRole, DiagramTextStyle>;
 }) {
   switch (input.diagramType) {
     case "swimlane":
@@ -1668,15 +1825,15 @@ function buildDiagramSvg(input: {
     case "ctq_tree":
       return buildCtqSvg(input.title, input.items);
     case "pareto":
-      return buildBarSvg(input.title, input.metrics, true);
+      return buildBarSvg(input.title, input.metrics, true, input.chartAxisTitles, input.chartTextStyles);
     case "histogram":
-      return buildBarSvg(input.title, input.metrics, false);
+      return buildBarSvg(input.title, input.metrics, false, input.chartAxisTitles, input.chartTextStyles);
     case "run_chart":
-      return buildLineSvg(input.title, input.metrics, false);
+      return buildLineSvg(input.title, input.metrics, false, input.chartAxisTitles, input.chartTextStyles);
     case "control_chart":
-      return buildLineSvg(input.title, input.metrics, true);
+      return buildLineSvg(input.title, input.metrics, true, input.chartAxisTitles, input.chartTextStyles);
     case "scatter_plot":
-      return buildScatterSvg(input.title, input.metrics);
+      return buildScatterSvg(input.title, input.metrics, input.chartAxisTitles, input.chartTextStyles);
     default:
       return buildFlowSvg(input.title, input.items);
   }
@@ -2087,6 +2244,12 @@ export function ProcessMapBuilderClient({
   const [diagramTextStyle, setDiagramTextStyle] = useState<DiagramTextStyle>(
     DEFAULT_DIAGRAM_TEXT_STYLE,
   );
+  const [chartAxisTitlesByDiagramType, setChartAxisTitlesByDiagramType] = useState<
+    Partial<Record<DiagramType, ChartAxisTitles>>
+  >({});
+  const [chartTextStylesByDiagramType, setChartTextStylesByDiagramType] = useState<
+    Partial<Record<DiagramType, Partial<Record<ChartTextRole, DiagramTextStyle>>>>
+  >({});
   const [previewRevision, setPreviewRevision] = useState(1);
   const [recommendation, setRecommendation] = useState<DiagramRecommendation | null>(null);
   const [recommendBusy, setRecommendBusy] = useState(false);
@@ -2219,6 +2382,12 @@ export function ProcessMapBuilderClient({
       : 1;
   const lanes = splitListInput(lanesText, ["Operations", "Quality", "Supervisor"]);
   const metrics = parseMetricRows(metricsText, definition.starterItems);
+  const chartAxisTitles =
+    chartAxisTitlesByDiagramType[diagramType] ?? getDefaultChartAxisTitles(diagramType);
+  const chartTextStyles: Record<ChartTextRole, DiagramTextStyle> = {
+    ...DEFAULT_CHART_TEXT_STYLES,
+    ...(chartTextStylesByDiagramType[diagramType] ?? {}),
+  };
   const capabilityValues = parseMeasurementValues(capabilityDataText);
   const normalizedSpecLower = specLower.trim() ? Number.parseFloat(specLower) : null;
   const normalizedSpecUpper = specUpper.trim() ? Number.parseFloat(specUpper) : null;
@@ -2277,15 +2446,19 @@ export function ProcessMapBuilderClient({
           diagramType,
           title: layerSettings.showTitle ? title : "",
           items,
-          lanes,
-          metrics,
-          fishboneEffect,
-          fishboneCauseSlots,
-        });
-  const svg = applySvgTextStyle(
-    applySvgTheme(rawSvg, diagramStyle, layerSettings),
-    diagramTextStyle,
-  );
+        lanes,
+        metrics,
+        fishboneEffect,
+        fishboneCauseSlots,
+        chartAxisTitles,
+        chartTextStyles,
+      });
+  const themedSvg = applySvgTheme(rawSvg, diagramStyle, layerSettings);
+  const usesRoleBasedChartText =
+    formulaTool === "none" && CHART_DATA_DIAGRAM_TYPES.has(diagramType);
+  const svg = usesRoleBasedChartText
+    ? themedSvg
+    : applySvgTextStyle(themedSvg, diagramTextStyle);
   const selectedCustomNode =
     customFlowNodes.find((node) => node.id === selectedCustomNodeId) ?? null;
   const canUndoCustomFlow = customFlowUndoStack.length > 0;
@@ -2444,6 +2617,14 @@ export function ProcessMapBuilderClient({
       return { kind: "title", value: title };
     }
 
+    if (usesRoleBasedChartText && matchesRenderedText(chartAxisTitles.x)) {
+      return { kind: "xAxisTitle", value: chartAxisTitles.x };
+    }
+
+    if (usesRoleBasedChartText && matchesRenderedText(chartAxisTitles.y)) {
+      return { kind: "yAxisTitle", value: chartAxisTitles.y };
+    }
+
     if (matchesRenderedText(fishboneEffect)) {
       return { kind: "fishboneEffect", value: fishboneEffect };
     }
@@ -2586,6 +2767,10 @@ export function ProcessMapBuilderClient({
 
     if (inlineChartEditor.kind === "title") {
       setTitle(value || "Untitled Process Map");
+    } else if (inlineChartEditor.kind === "xAxisTitle") {
+      updateChartAxisTitle("x", value);
+    } else if (inlineChartEditor.kind === "yAxisTitle") {
+      updateChartAxisTitle("y", value);
     } else if (inlineChartEditor.kind === "purpose") {
       setPurpose(value);
     } else if (inlineChartEditor.kind === "item") {
@@ -2704,6 +2889,41 @@ export function ProcessMapBuilderClient({
     value: DiagramTextStyle[K],
   ) {
     setDiagramTextStyle((current) => ({ ...current, [key]: value }));
+    setPreviewRevision((current) => current + 1);
+  }
+
+  function updateChartTextStyle<K extends keyof DiagramTextStyle>(
+    role: ChartTextRole,
+    key: K,
+    value: DiagramTextStyle[K],
+  ) {
+    setChartTextStylesByDiagramType((current) => {
+      const existingStyles = current[diagramType] ?? {};
+      const currentRoleStyle = existingStyles[role] ?? DEFAULT_CHART_TEXT_STYLES[role];
+
+      return {
+        ...current,
+        [diagramType]: {
+          ...existingStyles,
+          [role]: {
+            ...currentRoleStyle,
+            [key]: value,
+          },
+        },
+      };
+    });
+    setPreviewRevision((current) => current + 1);
+  }
+
+  function updateChartAxisTitle(axis: keyof ChartAxisTitles, value: string) {
+    const fallback = getDefaultChartAxisTitles(diagramType)[axis];
+    setChartAxisTitlesByDiagramType((current) => ({
+      ...current,
+      [diagramType]: {
+        ...(current[diagramType] ?? getDefaultChartAxisTitles(diagramType)),
+        [axis]: value || fallback,
+      },
+    }));
     setPreviewRevision((current) => current + 1);
   }
 
@@ -5011,7 +5231,42 @@ export function ProcessMapBuilderClient({
             ? "Purpose"
             : inlineChartEditor?.kind === "title"
               ? "Title"
+              : inlineChartEditor?.kind === "xAxisTitle"
+                ? "X title"
+                : inlineChartEditor?.kind === "yAxisTitle"
+                  ? "Y title"
               : "Text";
+
+  const inlineChartTextRole = (() => {
+    if (!inlineChartEditor || !usesRoleBasedChartText) {
+      return null;
+    }
+
+    if (inlineChartEditor.kind === "title") {
+      return "title";
+    }
+
+    if (inlineChartEditor.kind === "xAxisTitle") {
+      return "xAxisTitle";
+    }
+
+    if (inlineChartEditor.kind === "yAxisTitle") {
+      return "yAxisTitle";
+    }
+
+    if (inlineChartEditor.kind === "metric") {
+      return inlineChartEditor.field === "label" ? "metricLabel" : "metricValue";
+    }
+
+    if (inlineChartEditor.kind === "item" || inlineChartEditor.kind === "fishboneEffect") {
+      return "shapeText";
+    }
+
+    return null;
+  })() satisfies ChartTextRole | null;
+  const activeInlineTextStyle = inlineChartTextRole
+    ? chartTextStyles[inlineChartTextRole]
+    : diagramTextStyle;
 
   const inlineStyleTarget = (() => {
     if (!inlineChartEditor) {
@@ -5059,6 +5314,9 @@ export function ProcessMapBuilderClient({
 
   function applyQuickColor(color: string) {
     if (!inlineStyleTarget) {
+      if (inlineChartTextRole) {
+        updateChartTextStyle(inlineChartTextRole, "color", color);
+      }
       return;
     }
 
@@ -5070,13 +5328,32 @@ export function ProcessMapBuilderClient({
     updateInlineElementStyle({ strokeColor: color });
   }
 
+  function updateActiveInlineTextStyle<K extends keyof DiagramTextStyle>(
+    key: K,
+    value: DiagramTextStyle[K],
+  ) {
+    if (inlineChartTextRole) {
+      updateChartTextStyle(inlineChartTextRole, key, value);
+      return;
+    }
+
+    updateDiagramTextStyle(key, value);
+  }
+
   const canAddFromEditTarget = Boolean(
     inlineChartEditor &&
       ["item", "lane", "metric", "swimlaneStep", "valueStreamNote"].includes(inlineChartEditor.kind),
   );
   const canDeleteFromEditTarget = Boolean(
     inlineChartEditor &&
-      !["title", "purpose", "fishboneEffect", "valueStreamTimeline"].includes(inlineChartEditor.kind),
+      ![
+        "title",
+        "purpose",
+        "fishboneEffect",
+        "valueStreamTimeline",
+        "xAxisTitle",
+        "yAxisTitle",
+      ].includes(inlineChartEditor.kind),
   );
 
   const canvasQuickControls = (() => {
@@ -5224,7 +5501,7 @@ export function ProcessMapBuilderClient({
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
-        {inlineStyleTarget ? (
+        {inlineStyleTarget || inlineChartTextRole ? (
           <>
             {QUICK_COLOR_SWATCHES.map((color) => (
               <button
@@ -5233,9 +5510,11 @@ export function ProcessMapBuilderClient({
                 onClick={() => applyQuickColor(color)}
                 className={cn(
                   "inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white p-1 transition hover:scale-105 dark:border-slate-700 dark:bg-slate-950",
-                  (inlineStyleTarget.supportsFill
-                    ? inlineStyleTarget.style.fillColor
-                    : inlineStyleTarget.style.strokeColor) === color
+                  (inlineStyleTarget
+                    ? inlineStyleTarget.supportsFill
+                      ? inlineStyleTarget.style.fillColor
+                      : inlineStyleTarget.style.strokeColor
+                    : activeInlineTextStyle.color) === color
                     ? "ring-2 ring-cyan-500/45"
                     : "",
                 )}
@@ -5268,43 +5547,52 @@ export function ProcessMapBuilderClient({
             </button>
           </>
         ) : null}
-        {showAdvancedColors && inlineStyleTarget ? (
+        {showAdvancedColors && (inlineStyleTarget || inlineChartTextRole) ? (
           <div className="grid basis-full gap-1.5 rounded-md border border-slate-300/80 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900/70">
             <div className="grid grid-cols-3 gap-1.5">
+              {inlineStyleTarget ? (
+                <>
+                  <label
+                    className={cn(
+                      "grid gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400",
+                      inlineStyleTarget?.supportsFill === false ? "opacity-45" : "",
+                    )}
+                  >
+                    Fill
+                    <input
+                      type="color"
+                      disabled={inlineStyleTarget?.supportsFill === false}
+                      value={inlineStyleTarget?.style.fillColor ?? diagramStyle.secondaryColor}
+                      onChange={(event) => updateInlineElementStyle({ fillColor: event.target.value })}
+                      className="h-7 w-full cursor-pointer rounded border border-slate-300 bg-transparent p-0 disabled:cursor-not-allowed dark:border-slate-700"
+                    />
+                  </label>
+                  <label className="grid gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Line
+                    <input
+                      type="color"
+                      value={inlineStyleTarget?.style.strokeColor ?? diagramStyle.primaryColor}
+                      onChange={(event) => updateInlineElementStyle({ strokeColor: event.target.value })}
+                      className="h-7 w-full cursor-pointer rounded border border-slate-300 bg-transparent p-0 dark:border-slate-700"
+                    />
+                  </label>
+                </>
+              ) : null}
               <label
                 className={cn(
                   "grid gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400",
-                  inlineStyleTarget?.supportsFill === false ? "opacity-45" : "",
+                  inlineStyleTarget ? "" : "col-span-3",
                 )}
               >
-                Fill
-                <input
-                  type="color"
-                  disabled={inlineStyleTarget?.supportsFill === false}
-                  value={inlineStyleTarget?.style.fillColor ?? diagramStyle.secondaryColor}
-                  onChange={(event) => updateInlineElementStyle({ fillColor: event.target.value })}
-                  className="h-7 w-full cursor-pointer rounded border border-slate-300 bg-transparent p-0 disabled:cursor-not-allowed dark:border-slate-700"
-                />
-              </label>
-              <label className="grid gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                Line
-                <input
-                  type="color"
-                  value={inlineStyleTarget?.style.strokeColor ?? diagramStyle.primaryColor}
-                  onChange={(event) => updateInlineElementStyle({ strokeColor: event.target.value })}
-                  className="h-7 w-full cursor-pointer rounded border border-slate-300 bg-transparent p-0 dark:border-slate-700"
-                />
-              </label>
-              <label className="grid gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                 Text
                 <input
                   type="color"
-                  value={inlineStyleTarget?.style.textColor ?? diagramTextStyle.color}
+                  value={inlineStyleTarget?.style.textColor ?? activeInlineTextStyle.color}
                   onChange={(event) => {
                     if (inlineStyleTarget) {
                       updateInlineElementStyle({ textColor: event.target.value });
                     } else {
-                      updateDiagramTextStyle("color", event.target.value);
+                      updateActiveInlineTextStyle("color", event.target.value);
                     }
                   }}
                   className="h-7 w-full cursor-pointer rounded border border-slate-300 bg-transparent p-0 dark:border-slate-700"
@@ -5315,8 +5603,8 @@ export function ProcessMapBuilderClient({
         ) : null}
         <select
           aria-label="Font"
-          value={diagramTextStyle.fontFamily}
-          onChange={(event) => updateDiagramTextStyle("fontFamily", event.target.value)}
+          value={activeInlineTextStyle.fontFamily}
+          onChange={(event) => updateActiveInlineTextStyle("fontFamily", event.target.value)}
           className="h-7 min-w-[7rem] rounded-md border border-slate-300 bg-white px-1.5 text-[11px] font-semibold outline-none focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
         >
           <option value="Inter, Arial, sans-serif">Inter</option>
@@ -5326,10 +5614,10 @@ export function ProcessMapBuilderClient({
         </select>
         <button
           type="button"
-          onClick={() => updateDiagramTextStyle("bold", !diagramTextStyle.bold)}
+          onClick={() => updateActiveInlineTextStyle("bold", !activeInlineTextStyle.bold)}
           className={cn(
             "inline-flex h-7 w-7 items-center justify-center rounded-md border transition",
-            diagramTextStyle.bold
+            activeInlineTextStyle.bold
               ? "border-cyan-500/45 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
               : "border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300",
           )}
@@ -5340,10 +5628,10 @@ export function ProcessMapBuilderClient({
         </button>
         <button
           type="button"
-          onClick={() => updateDiagramTextStyle("italic", !diagramTextStyle.italic)}
+          onClick={() => updateActiveInlineTextStyle("italic", !activeInlineTextStyle.italic)}
           className={cn(
             "inline-flex h-7 w-7 items-center justify-center rounded-md border transition",
-            diagramTextStyle.italic
+            activeInlineTextStyle.italic
               ? "border-cyan-500/45 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
               : "border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300",
           )}
@@ -5354,10 +5642,10 @@ export function ProcessMapBuilderClient({
         </button>
         <button
           type="button"
-          onClick={() => updateDiagramTextStyle("underline", !diagramTextStyle.underline)}
+          onClick={() => updateActiveInlineTextStyle("underline", !activeInlineTextStyle.underline)}
           className={cn(
             "inline-flex h-7 w-7 items-center justify-center rounded-md border transition",
-            diagramTextStyle.underline
+            activeInlineTextStyle.underline
               ? "border-cyan-500/45 bg-cyan-500/15 text-cyan-900 dark:text-cyan-100"
               : "border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300",
           )}
@@ -5369,9 +5657,9 @@ export function ProcessMapBuilderClient({
         <button
           type="button"
           onClick={() =>
-            updateDiagramTextStyle(
+            updateActiveInlineTextStyle(
               "fontScale",
-              clampNumber(diagramTextStyle.fontScale - 0.08, 0.78, 1.5),
+              clampNumber(activeInlineTextStyle.fontScale - 0.08, 0.78, 1.5),
             )
           }
           className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300"
@@ -5383,9 +5671,9 @@ export function ProcessMapBuilderClient({
         <button
           type="button"
           onClick={() =>
-            updateDiagramTextStyle(
+            updateActiveInlineTextStyle(
               "fontScale",
-              clampNumber(diagramTextStyle.fontScale + 0.08, 0.78, 1.5),
+              clampNumber(activeInlineTextStyle.fontScale + 0.08, 0.78, 1.5),
             )
           }
           className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300"
@@ -6315,12 +6603,6 @@ export function ProcessMapBuilderClient({
     </div>
   );
 
-  const executiveStats = [
-    ["Method", `DMAIC ${phase.label}`],
-    ["Diagram", definition.shortLabel],
-    ["X/Y Data Rows", String(metrics.length)],
-    ["Flow Sketch", isCustomFlowDiagram ? "Editable" : "Not used"],
-  ];
   const previewActionControls = (
     <div className="flex flex-wrap gap-1.5">
       <button
@@ -6468,21 +6750,6 @@ export function ProcessMapBuilderClient({
           <p>{pageExplanation}</p>
         </section>
       ) : null}
-
-      <section className="process-workbench-card grid gap-3 rounded-2xl p-4">
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          {executiveStats.map(([label, value]) => (
-            <div key={label} className="min-w-0 border-l-2 border-cyan-500/45 pl-3">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                {label}
-              </p>
-              <p className="truncate text-sm font-extrabold text-slate-950 dark:text-slate-50">
-                {value}
-              </p>
-            </div>
-          ))}
-        </div>
-      </section>
 
       <section className="process-workbench-card grid gap-4 rounded-2xl p-4 lg:grid-cols-[minmax(0,1fr)_16rem]">
         <div className="grid gap-3">
@@ -6700,16 +6967,6 @@ export function ProcessMapBuilderClient({
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <span className="inline-flex items-center gap-2 rounded-full border border-slate-300/70 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:border-slate-700 dark:text-slate-300">
-                    <ChartIcon diagramType={diagramType} />
-                    {definition.category}
-                  </span>
-                  <span className="inline-flex items-center gap-2 rounded-full border border-cyan-500/35 bg-cyan-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-cyan-800 dark:text-cyan-100">
-                    DMAIC:{" "}
-                    {definition.dmaicPhases
-                      .map((phaseId) => getDmaicPhaseOption(phaseId).label)
-                      .join(", ")}
-                  </span>
                   {isCustomFlowDiagram ? previewActionControls : null}
                 </div>
               </div>
@@ -6729,6 +6986,30 @@ export function ProcessMapBuilderClient({
                 </label>
                 {previewActionControls}
               </div>
+              ) : null}
+              {usesRoleBasedChartText ? (
+                <div className="grid gap-2 md:grid-cols-2">
+                  <label className="grid gap-1 text-xs">
+                    <span className="font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                      X title
+                    </span>
+                    <input
+                      value={chartAxisTitles.x}
+                      onChange={(event) => updateChartAxisTitle("x", event.target.value)}
+                      className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                    />
+                  </label>
+                  <label className="grid gap-1 text-xs">
+                    <span className="font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                      Y title
+                    </span>
+                    <input
+                      value={chartAxisTitles.y}
+                      onChange={(event) => updateChartAxisTitle("y", event.target.value)}
+                      className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                    />
+                  </label>
+                </div>
               ) : null}
             </div>
 

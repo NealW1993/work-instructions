@@ -3,6 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getRequestProfile } from "@/lib/api-auth";
 import { recordAiUsageEvent } from "@/lib/ai-usage";
 import {
+  sendNotificationEmailsToRoles,
+  sendNotificationEmailsToUsers,
+} from "@/lib/notification-email.server";
+import {
   type ProcessDocumentSourceType,
   type ProcessDocumentStatus,
   type ProcessDocumentType,
@@ -569,6 +573,35 @@ export async function PATCH(
 
   if (groupAccessError) {
     return NextResponse.json({ error: groupAccessError }, { status: 500 });
+  }
+
+  if (existingDocument.status !== requestedStatus) {
+    if (requestedStatus === "in_review") {
+      await sendNotificationEmailsToRoles(supabaseAdmin, {
+        roles: ["admin", "system_admin"],
+        settingKey: "pendingApprovals",
+        title: "Document pending approval",
+        body: `${documentNumber} | ${title} was submitted for review.`,
+        href: `/process-documents?doc=${documentId}`,
+        actorName: requester.full_name || requester.email,
+      });
+    }
+
+    if (requestedStatus === "approved" || requestedStatus === "obsolete") {
+      await sendNotificationEmailsToUsers(supabaseAdmin, {
+        recipientUserIds: [
+          existingDocument.created_by,
+          existingDocument.owner_user_id ?? "",
+        ],
+        settingKey: "documentApprovals",
+        title: `Document ${requestedStatus}`,
+        body: `${documentNumber} | ${title} was ${requestedStatus} by ${
+          requester.full_name || requester.email
+        }.`,
+        href: `/process-documents?doc=${documentId}`,
+        actorName: requester.full_name || requester.email,
+      });
+    }
   }
 
   const usageMetadata = {

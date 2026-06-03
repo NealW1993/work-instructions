@@ -2957,6 +2957,25 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
       await syncPendingCommonToolChanges();
 
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (session?.access_token) {
+          await fetch("/api/notifications/work-instruction-submitted", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({ instructionId }),
+          });
+        }
+      } catch {
+        // Email notification delivery is best-effort and should not block saves.
+      }
+
       setMessage(
         isEditRevisionBump
           ? "New revision submitted for review."
@@ -3155,72 +3174,83 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           </label>
         </div>
 
-        <section className="grid gap-3 rounded-2xl border border-slate-300/70 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-900/50">
-          <div>
-            <h2 className="text-base font-extrabold text-slate-900 dark:text-slate-100">
-              ISO / Control Context
-            </h2>
-            <p className="text-xs text-slate-600 dark:text-slate-300">
-              Capture the audit-sensitive scope, acceptance criteria, records, and reaction controls for this instruction.
-            </p>
-          </div>
-
-          <fieldset className="grid gap-2">
-            <legend className="text-sm font-semibold">ISO 9001 Clauses</legend>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {ISO_9001_CLAUSE_OPTIONS.map((clause) => (
-                <label key={clause} className="flex items-start gap-2 text-xs text-slate-700 dark:text-slate-200">
-                  <input
-                    type="checkbox"
-                    checked={isoClauseRefs.includes(clause)}
-                    onChange={() => toggleIsoClauseRef(clause)}
-                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
-                  />
-                  <span>{clause}</span>
-                </label>
-              ))}
+        <details
+          open
+          className="group rounded-2xl border border-slate-300/70 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-900/50"
+        >
+          <summary className="flex cursor-pointer list-none items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-extrabold text-slate-900 dark:text-slate-100">
+                ISO / Control Context
+              </h2>
+              <p className="text-xs text-slate-600 dark:text-slate-300">
+                Capture the audit-sensitive scope, acceptance criteria, records, and reaction controls for this instruction.
+              </p>
             </div>
-          </fieldset>
+            <ChevronDown
+              size={18}
+              className="mt-1 shrink-0 text-slate-500 transition group-open:rotate-180"
+            />
+          </summary>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="grid gap-1.5 text-sm">
-              <span className="font-semibold">Process scope / applicability</span>
-              <textarea
-                value={processScope}
-                onChange={(event) => setProcessScope(event.target.value)}
-                rows={3}
-                className="resize-y rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-              />
-            </label>
-            <label className="grid gap-1.5 text-sm">
-              <span className="font-semibold">Acceptance criteria</span>
-              <textarea
-                value={acceptanceCriteria}
-                onChange={(event) => setAcceptanceCriteria(event.target.value)}
-                rows={3}
-                className="resize-y rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-              />
-            </label>
-            <label className="grid gap-1.5 text-sm">
-              <span className="font-semibold">Verification records</span>
-              <textarea
-                value={verificationRecords}
-                onChange={(event) => setVerificationRecords(event.target.value)}
-                rows={3}
-                className="resize-y rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-              />
-            </label>
-            <label className="grid gap-1.5 text-sm">
-              <span className="font-semibold">Risks, controls, and reaction plan</span>
-              <textarea
-                value={riskControls}
-                onChange={(event) => setRiskControls(event.target.value)}
-                rows={3}
-                className="resize-y rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-              />
-            </label>
+          <div className="mt-3 grid gap-3">
+            <fieldset className="grid gap-2">
+              <legend className="text-sm font-semibold">ISO 9001 Clauses</legend>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {ISO_9001_CLAUSE_OPTIONS.map((clause) => (
+                  <label key={clause} className="flex items-start gap-2 text-xs text-slate-700 dark:text-slate-200">
+                    <input
+                      type="checkbox"
+                      checked={isoClauseRefs.includes(clause)}
+                      onChange={() => toggleIsoClauseRef(clause)}
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
+                    />
+                    <span>{clause}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="grid gap-1.5 text-sm">
+                <span className="font-semibold">Process scope / applicability</span>
+                <textarea
+                  value={processScope}
+                  onChange={(event) => setProcessScope(event.target.value)}
+                  rows={3}
+                  className="resize-y rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                />
+              </label>
+              <label className="grid gap-1.5 text-sm">
+                <span className="font-semibold">Acceptance criteria</span>
+                <textarea
+                  value={acceptanceCriteria}
+                  onChange={(event) => setAcceptanceCriteria(event.target.value)}
+                  rows={3}
+                  className="resize-y rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                />
+              </label>
+              <label className="grid gap-1.5 text-sm">
+                <span className="font-semibold">Verification records</span>
+                <textarea
+                  value={verificationRecords}
+                  onChange={(event) => setVerificationRecords(event.target.value)}
+                  rows={3}
+                  className="resize-y rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                />
+              </label>
+              <label className="grid gap-1.5 text-sm">
+                <span className="font-semibold">Risks, controls, and reaction plan</span>
+                <textarea
+                  value={riskControls}
+                  onChange={(event) => setRiskControls(event.target.value)}
+                  rows={3}
+                  className="resize-y rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                />
+              </label>
+            </div>
           </div>
-        </section>
+        </details>
 
         <RichTextEditor
           label="Work Instructions"

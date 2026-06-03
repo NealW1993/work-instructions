@@ -4,6 +4,12 @@ import { Extension, mergeAttributes, Node } from "@tiptap/core";
 import Color from "@tiptap/extension-color";
 import Highlight from "@tiptap/extension-highlight";
 import Placeholder from "@tiptap/extension-placeholder";
+import {
+  Table as TableExtension,
+  TableCell,
+  TableHeader,
+  TableRow,
+} from "@tiptap/extension-table";
 import TaskItem from "@tiptap/extension-task-item";
 import TaskList from "@tiptap/extension-task-list";
 import TextAlign from "@tiptap/extension-text-align";
@@ -24,6 +30,7 @@ import {
   AlignRight,
   Bold,
   CheckSquare,
+  Columns3,
   Eraser,
   GripVertical,
   Heading1,
@@ -37,7 +44,10 @@ import {
   Pilcrow,
   Quote,
   Redo2,
+  Rows3,
   Strikethrough,
+  Table2,
+  Trash2,
   Underline as UnderlineIcon,
   Undo2,
   Video,
@@ -831,6 +841,12 @@ export function RichTextEditor({
       FontSize,
       ResizableImage,
       ResizableVideo,
+      TableExtension.configure({
+        resizable: true,
+      }),
+      TableRow,
+      TableHeader,
+      TableCell,
     ],
     [placeholder],
   );
@@ -1249,6 +1265,42 @@ export function RichTextEditor({
           onClick={() => videoInputRef.current?.click()}
         >
           <Video size={14} />
+        </ToolbarButton>
+        <ToolbarButton
+          ariaLabel="Insert Table"
+          onClick={() =>
+            runAndRefresh(() =>
+              editor
+                .chain()
+                .focus()
+                .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+                .run(),
+            )
+          }
+          isActive={editor.isActive("table")}
+        >
+          <Table2 size={14} />
+        </ToolbarButton>
+        <ToolbarButton
+          ariaLabel="Add Table Row"
+          onClick={() => runAndRefresh(() => editor.chain().focus().addRowAfter().run())}
+          disabled={!editor.isActive("table")}
+        >
+          <Rows3 size={14} />
+        </ToolbarButton>
+        <ToolbarButton
+          ariaLabel="Add Table Column"
+          onClick={() => runAndRefresh(() => editor.chain().focus().addColumnAfter().run())}
+          disabled={!editor.isActive("table")}
+        >
+          <Columns3 size={14} />
+        </ToolbarButton>
+        <ToolbarButton
+          ariaLabel="Delete Table"
+          onClick={() => runAndRefresh(() => editor.chain().focus().deleteTable().run())}
+          disabled={!editor.isActive("table")}
+        >
+          <Trash2 size={14} />
         </ToolbarButton>
 
         <ToolbarButton

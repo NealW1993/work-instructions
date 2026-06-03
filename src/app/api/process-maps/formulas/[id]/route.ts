@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
+import {
+  sendNotificationEmailsToRoles,
+  sendNotificationEmailsToUsers,
+} from "@/lib/notification-email.server";
 import { hasFullAccess } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -107,6 +111,22 @@ function normalizeFormulaPayloadForRequester(
   };
 }
 
+function getCustomApprovalStatus(payload: unknown): CustomFormulaApprovalStatus {
+  if (!isRecord(payload)) {
+    return "draft";
+  }
+
+  const customFormula = isRecord(payload.customFormula) ? payload.customFormula : {};
+  const status = customFormula.approvalStatus;
+
+  return status === "pending_review" ||
+    status === "approved" ||
+    status === "rejected" ||
+    status === "draft"
+    ? status
+    : "draft";
+}
+
 function toFormula(row: FormulaRow) {
   return {
     id: row.id,
@@ -125,6 +145,48 @@ function normalizeUuid(value: string) {
   )
     ? value
     : null;
+}
+
+async function sendFormulaStatusEmails(
+  supabaseAdmin: ReturnType<typeof getSupabaseAdminClient>,
+  options: {
+    formula: FormulaRow;
+    previousStatus: CustomFormulaApprovalStatus | null;
+    actorName: string;
+  },
+) {
+  if (options.formula.formula_type !== "custom") {
+    return;
+  }
+
+  const nextStatus = getCustomApprovalStatus(options.formula.payload);
+  if (options.previousStatus === nextStatus) {
+    return;
+  }
+
+  if (nextStatus === "pending_review") {
+    await sendNotificationEmailsToRoles(supabaseAdmin, {
+      roles: ["admin", "system_admin"],
+      settingKey: "pendingApprovals",
+      title: "Formula draft pending approval",
+      body: `${options.formula.name} was saved for review.`,
+      href: `/process-maps/formulas?formula=${options.formula.id}`,
+      actorName: options.actorName,
+    });
+    return;
+  }
+
+  if (nextStatus === "approved" || nextStatus === "rejected") {
+    const decisionLabel = nextStatus === "approved" ? "approved" : "denied";
+    await sendNotificationEmailsToUsers(supabaseAdmin, {
+      recipientUserIds: [options.formula.owner_user_id],
+      settingKey: "formulaApprovals",
+      title: `Formula ${decisionLabel}`,
+      body: `${options.formula.name} was ${decisionLabel} by ${options.actorName}.`,
+      href: `/process-maps/formulas?formula=${options.formula.id}`,
+      actorName: options.actorName,
+    });
+  }
 }
 
 async function readFormulaForRequester(id: string, request: NextRequest) {
@@ -193,6 +255,10 @@ export async function PATCH(
   const body = (await request.json().catch(() => ({}))) as FormulaRequestBody;
   const updates: Record<string, unknown> = { updated_by: existing.requester.id };
   let nextFormulaType = existing.formula.formula_type;
+  const previousCustomStatus =
+    existing.formula.formula_type === "custom"
+      ? getCustomApprovalStatus(existing.formula.payload)
+      : null;
 
   if (body.name !== undefined) {
     const name = normalizeName(body.name);
@@ -243,6 +309,14 @@ export async function PATCH(
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  if (data) {
+    await sendFormulaStatusEmails(supabaseAdmin, {
+      formula: data,
+      previousStatus: previousCustomStatus,
+      actorName: existing.requester.full_name || existing.requester.email,
+    });
   }
 
   return NextResponse.json({ formula: data ? toFormula(data) : null });

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
+import { sendNotificationEmailsToUsers } from "@/lib/notification-email.server";
 import { isSystemAdmin } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -48,6 +49,11 @@ export async function POST(
 
   const nowIso = new Date().toISOString();
   const supabaseAdmin = getSupabaseAdminClient();
+  const { data: group } = await supabaseAdmin
+    .from("access_groups")
+    .select("name")
+    .eq("id", id)
+    .maybeSingle<{ name: string }>();
   const { error } = await supabaseAdmin.from("access_group_memberships").upsert(
     {
       group_id: id,
@@ -61,6 +67,17 @@ export async function POST(
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  await sendNotificationEmailsToUsers(supabaseAdmin, {
+    recipientUserIds: [userId],
+    settingKey: "groupRequests",
+    title: "Group access assigned",
+    body: `You were assigned to ${group?.name ?? "a group"} by ${
+      requester.full_name || requester.email
+    }.`,
+    href: "/groups",
+    actorName: requester.full_name || requester.email,
+  });
 
   return NextResponse.json({ assigned: true });
 }

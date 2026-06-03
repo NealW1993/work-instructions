@@ -4,6 +4,9 @@ export type DashboardWidgetId =
   | "newest"
   | "department_activity"
   | "review_queue"
+  | "formula_snapshot"
+  | "formula_review_queue"
+  | "formula_library"
   | "recent_updates"
   | "my_impact"
   | "system_history"
@@ -37,6 +40,9 @@ export const DASHBOARD_WIDGET_IDS: DashboardWidgetId[] = [
   "newest",
   "department_activity",
   "review_queue",
+  "formula_snapshot",
+  "formula_review_queue",
+  "formula_library",
   "recent_updates",
   "my_impact",
   "system_history",
@@ -69,6 +75,9 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
       { id: "my_impact", visible: true, size: "compact" },
       { id: "newest", visible: true, size: "standard" },
       { id: "pinned", visible: true, size: "standard" },
+      { id: "formula_snapshot", visible: true, size: "compact" },
+      { id: "formula_review_queue", visible: true, size: "standard" },
+      { id: "formula_library", visible: false, size: "wide" },
       { id: "department_activity", visible: true, size: "standard" },
       { id: "review_queue", visible: true, size: "standard" },
       { id: "recent_updates", visible: true, size: "wide" },
@@ -94,6 +103,9 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
       { id: "department_activity", visible: true, size: "standard" },
       { id: "newest", visible: true, size: "standard" },
       { id: "review_queue", visible: true, size: "compact" },
+      { id: "formula_review_queue", visible: true, size: "compact" },
+      { id: "formula_snapshot", visible: true, size: "compact" },
+      { id: "formula_library", visible: false, size: "wide" },
       { id: "pinned", visible: true, size: "compact" },
       { id: "my_impact", visible: true, size: "compact" },
       { id: "kpi_throughput", visible: false, size: "wide" },
@@ -116,6 +128,9 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
       { id: "recent_updates", visible: true, size: "wide" },
       { id: "system_history", visible: true, size: "wide" },
       { id: "review_queue", visible: true, size: "standard" },
+      { id: "formula_review_queue", visible: true, size: "standard" },
+      { id: "formula_snapshot", visible: true, size: "compact" },
+      { id: "formula_library", visible: false, size: "wide" },
       { id: "newest", visible: true, size: "standard" },
       { id: "pinned", visible: true, size: "standard" },
       { id: "my_impact", visible: true, size: "compact" },
@@ -139,6 +154,9 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
       { id: "newest", visible: true, size: "standard" },
       { id: "finder", visible: true, size: "full" },
       { id: "recent_updates", visible: true, size: "standard" },
+      { id: "formula_snapshot", visible: true, size: "compact" },
+      { id: "formula_library", visible: true, size: "standard" },
+      { id: "formula_review_queue", visible: false, size: "compact" },
       { id: "review_queue", visible: true, size: "compact" },
       { id: "system_history", visible: true, size: "wide" },
       { id: "department_activity", visible: true, size: "compact" },
@@ -164,6 +182,9 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
       { id: "department_activity", visible: true, size: "standard" },
       { id: "recent_updates", visible: true, size: "wide" },
       { id: "review_queue", visible: true, size: "compact" },
+      { id: "formula_review_queue", visible: true, size: "compact" },
+      { id: "formula_snapshot", visible: true, size: "compact" },
+      { id: "formula_library", visible: false, size: "standard" },
       { id: "system_history", visible: true, size: "full" },
       { id: "kpi_throughput", visible: false, size: "wide" },
       { id: "kpi_creation_velocity", visible: false, size: "wide" },
@@ -185,6 +206,9 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
       { id: "department_activity", visible: true, size: "standard" },
       { id: "newest", visible: true, size: "standard" },
       { id: "review_queue", visible: true, size: "compact" },
+      { id: "formula_review_queue", visible: true, size: "compact" },
+      { id: "formula_snapshot", visible: true, size: "compact" },
+      { id: "formula_library", visible: false, size: "wide" },
       { id: "finder", visible: true, size: "wide" },
       { id: "pinned", visible: true, size: "standard" },
       { id: "my_impact", visible: true, size: "compact" },

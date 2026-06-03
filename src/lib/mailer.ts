@@ -34,6 +34,70 @@ function escapeHtml(value: string) {
     .replaceAll("'", "&#39;");
 }
 
+function resolveAppUrl(href: string | null | undefined) {
+  if (!href) {
+    return null;
+  }
+
+  try {
+    return new URL(href, serverEnv.NEXT_PUBLIC_APP_URL || "http://localhost:3000").toString();
+  } catch {
+    return null;
+  }
+}
+
+export async function sendUserNotificationEmail(options: {
+  to: string;
+  recipientName?: string | null;
+  title: string;
+  body: string;
+  href?: string | null;
+  actorName?: string | null;
+}) {
+  const mailer = getTransporter();
+  const safeTitle = escapeHtml(options.title);
+  const safeBody = escapeHtml(options.body);
+  const safeRecipientName = escapeHtml(options.recipientName?.trim() || "there");
+  const safeActorName = escapeHtml(options.actorName?.trim() || "Work Instructions");
+  const actionUrl = resolveAppUrl(options.href);
+  const safeActionUrl = actionUrl ? escapeHtml(actionUrl) : null;
+
+  await mailer.sendMail({
+    from: serverEnv.SMTP_FROM,
+    to: options.to,
+    subject: options.title,
+    text:
+      `${options.title}\n\n` +
+      `${options.body}\n\n` +
+      `From: ${options.actorName?.trim() || "Work Instructions"}\n` +
+      (actionUrl ? `Open: ${actionUrl}\n` : ""),
+    html: `
+      <div style="margin:0;background:#f3f6fb;padding:24px;font-family:Arial,sans-serif;color:#111827;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;margin:0 auto;border-collapse:collapse;">
+          <tr>
+            <td style="padding:0 0 12px 0;">
+              <div style="font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#0e7490;">Work Instructions</div>
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#ffffff;border:1px solid #d8dee9;border-radius:14px;padding:26px;box-shadow:0 16px 36px rgba(15,23,42,0.10);">
+              <p style="margin:0 0 14px 0;font-size:15px;line-height:1.45;color:#475569;">Hi ${safeRecipientName},</p>
+              <h1 style="margin:0 0 12px 0;font-size:24px;line-height:1.2;color:#0f172a;">${safeTitle}</h1>
+              <p style="margin:0 0 20px 0;font-size:16px;line-height:1.55;color:#334155;">${safeBody}</p>
+              ${
+                safeActionUrl
+                  ? `<a href="${safeActionUrl}" style="display:inline-block;border-radius:10px;background:#0891b2;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 18px;">Open in system</a>`
+                  : ""
+              }
+              <p style="margin:22px 0 0 0;font-size:12px;line-height:1.45;color:#64748b;">Notification from ${safeActorName}. Change delivery preferences anytime in Account Settings.</p>
+            </td>
+          </tr>
+        </table>
+      </div>
+    `,
+  });
+}
+
 export async function sendAnonymousFeedbackEmail(options: {
   to: string;
   message: string;

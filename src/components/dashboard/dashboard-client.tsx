@@ -150,9 +150,30 @@ export interface DashboardProcessDocumentData {
   updated_at: string;
 }
 
+export type DashboardFormulaApprovalStatus =
+  | "system"
+  | "draft"
+  | "pending_review"
+  | "approved"
+  | "rejected";
+
+export interface DashboardFormulaData {
+  id: string;
+  ownerUserId: string;
+  ownerName: string;
+  name: string;
+  formulaType: string;
+  approvalStatus: DashboardFormulaApprovalStatus;
+  description: string;
+  inputCount: number;
+  outputCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface DashboardSmartSuggestion {
   id: string;
-  type: "instruction" | "process_document" | "event";
+  type: "instruction" | "process_document" | "formula" | "event";
   title: string;
   subtitle: string;
   href: string;
@@ -224,6 +245,7 @@ interface DashboardClientProps {
   newestInstructions: DashboardInstructionCardData[];
   items: DashboardWorkItemData[];
   processDocuments: DashboardProcessDocumentData[];
+  formulas: DashboardFormulaData[];
   systemHistoryEvents: DashboardSystemHistoryEventData[];
   departmentOptions: DashboardDepartmentOption[];
   currentUserId: string;
@@ -311,8 +333,8 @@ interface DashboardSavedLayoutSnapshot {
 const WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
   {
     id: "finder",
-    title: "Find Work Instructions",
-    description: "Search and filter active work instructions across departments.",
+    title: "Search Entire System",
+    description: "Search work instructions, documents, formulas, and recent activity.",
     category: "core",
   },
   {
@@ -337,6 +359,24 @@ const WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
     id: "review_queue",
     title: "Needs Review Queue",
     description: "Instructions flagged or out of calibration window.",
+    category: "core",
+  },
+  {
+    id: "formula_snapshot",
+    title: "Formula Snapshot",
+    description: "Saved formula totals, review status, and personal formula activity.",
+    category: "core",
+  },
+  {
+    id: "formula_review_queue",
+    title: "Formula Review Queue",
+    description: "Custom formulas waiting for approval.",
+    category: "core",
+  },
+  {
+    id: "formula_library",
+    title: "Formula Library",
+    description: "Recently updated saved formulas and approval state.",
     category: "core",
   },
   {
@@ -426,6 +466,9 @@ const RESET_DEFAULT_WIDGET_SIZE_BY_ID: Record<DashboardWidgetId, DashboardWidget
   newest: "standard",
   department_activity: "standard",
   review_queue: "standard",
+  formula_snapshot: "compact",
+  formula_review_queue: "standard",
+  formula_library: "wide",
   recent_updates: "wide",
   my_impact: "standard",
   system_history: "full",
@@ -723,6 +766,63 @@ function PartDepartmentHeading({ workItem }: { workItem: DashboardWorkItemSummar
       </span>
     </span>
   );
+}
+
+function getFormulaTypeLabel(formulaType: string) {
+  switch (formulaType) {
+    case "oee":
+      return "OEE";
+    case "capability":
+      return "Capability";
+    case "dpmo":
+      return "DPMO";
+    case "takt":
+      return "Takt Time";
+    case "yield":
+      return "Yield";
+    case "little_law":
+      return "Little's Law";
+    case "normal_curve":
+      return "Normal Curve";
+    case "control_limits":
+      return "Control Limits";
+    case "custom":
+      return "Custom";
+    default:
+      return "Formula";
+  }
+}
+
+function getFormulaStatusLabel(status: DashboardFormulaApprovalStatus) {
+  switch (status) {
+    case "system":
+      return "System";
+    case "pending_review":
+      return "Pending Review";
+    case "approved":
+      return "Approved";
+    case "rejected":
+      return "Rejected";
+    case "draft":
+    default:
+      return "Draft";
+  }
+}
+
+function getFormulaStatusClass(status: DashboardFormulaApprovalStatus) {
+  switch (status) {
+    case "approved":
+      return "border-emerald-500/45 bg-emerald-500/15 text-emerald-700 dark:text-emerald-200";
+    case "pending_review":
+      return "border-amber-500/45 bg-amber-500/15 text-amber-700 dark:text-amber-200";
+    case "rejected":
+      return "border-rose-500/45 bg-rose-500/15 text-rose-700 dark:text-rose-200";
+    case "system":
+      return "border-cyan-500/45 bg-cyan-500/15 text-cyan-700 dark:text-cyan-200";
+    case "draft":
+    default:
+      return "border-slate-400/45 bg-slate-900/10 text-slate-700 dark:bg-slate-100/10 dark:text-slate-200";
+  }
 }
 
 function cloneWidgetLayout(layout: DashboardWidgetLayoutItem[]) {
@@ -2319,6 +2419,7 @@ export function DashboardClient({
   newestInstructions,
   items,
   processDocuments,
+  formulas,
   systemHistoryEvents,
   departmentOptions,
   currentUserId,
@@ -3261,6 +3362,11 @@ export function DashboardClient({
       )
       .on(
         "postgres_changes",
+        { event: "*", schema: "public", table: "process_map_formulas" },
+        () => scheduleRealtimeRefresh(),
+      )
+      .on(
+        "postgres_changes",
         { event: "*", schema: "public", table: "departments" },
         () => scheduleRealtimeRefresh(),
       )
@@ -3766,6 +3872,57 @@ export function DashboardClient({
     [items],
   );
 
+  const filteredFormulas = useMemo(() => {
+    const sortedFormulas = [...formulas].sort(
+      (a, b) => toSortableTimestamp(b.updatedAt) - toSortableTimestamp(a.updatedAt),
+    );
+
+    if (!normalizedQuery) {
+      return sortedFormulas;
+    }
+
+    return sortedFormulas.filter(
+      (formula) =>
+        scoreSmartTextMatch(normalizedQuery, [
+          formula.name,
+          formula.description,
+          formula.ownerName,
+          getFormulaTypeLabel(formula.formulaType),
+          getFormulaStatusLabel(formula.approvalStatus),
+          `${formula.inputCount} inputs`,
+          `${formula.outputCount} outputs`,
+          formatDateForSearch(formula.updatedAt),
+        ]) > 0,
+    );
+  }, [formulas, normalizedQuery]);
+
+  const formulaStats = useMemo(() => {
+    const customFormulas = formulas.filter((formula) => formula.formulaType === "custom");
+    return {
+      total: formulas.length,
+      custom: customFormulas.length,
+      approved: formulas.filter(
+        (formula) =>
+          formula.approvalStatus === "approved" || formula.approvalStatus === "system",
+      ).length,
+      pending: formulas.filter((formula) => formula.approvalStatus === "pending_review").length,
+      mine: formulas.filter((formula) => formula.ownerUserId === currentUserId).length,
+    };
+  }, [currentUserId, formulas]);
+
+  const pendingFormulaReviewEntries = useMemo(
+    () =>
+      filteredFormulas
+        .filter((formula) => formula.approvalStatus === "pending_review")
+        .slice(0, 8),
+    [filteredFormulas],
+  );
+
+  const recentFormulaEntries = useMemo(
+    () => filteredFormulas.slice(0, 8),
+    [filteredFormulas],
+  );
+
   const smartSuggestions = useMemo<DashboardSmartSuggestion[]>(() => {
     if (!normalizedQuery) {
       return [];
@@ -3846,6 +4003,33 @@ export function DashboardClient({
       });
     }
 
+    for (const formula of formulas) {
+      const score = scoreSmartTextMatch(normalizedQuery, [
+        formula.name,
+        formula.description,
+        formula.ownerName,
+        getFormulaTypeLabel(formula.formulaType),
+        getFormulaStatusLabel(formula.approvalStatus),
+        formatDateForSearch(formula.updatedAt),
+      ]);
+
+      if (score <= 0) {
+        continue;
+      }
+
+      suggestions.push({
+        id: `formula:${formula.id}`,
+        type: "formula",
+        title: formula.name,
+        subtitle: `${getFormulaTypeLabel(formula.formulaType)} | ${getFormulaStatusLabel(
+          formula.approvalStatus,
+        )}`,
+        href: `/process-maps/formulas?formula=${formula.id}`,
+        score: score + 6,
+        reason: formula.description || `Formula maintained by ${formula.ownerName}`,
+      });
+    }
+
     for (const event of systemHistoryEvents.slice(0, 80)) {
       if (
         selectedDepartmentId !== "all" &&
@@ -3884,6 +4068,7 @@ export function DashboardClient({
       .slice(0, 8);
   }, [
     flattenedInstructionEntries,
+    formulas,
     normalizedQuery,
     processDocuments,
     selectedDepartmentId,
@@ -5201,6 +5386,8 @@ export function DashboardClient({
                         <span className="inline-flex items-center gap-1 rounded-full border border-cyan-500/40 bg-cyan-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-800 dark:text-cyan-200">
                           {result.type === "process_document" ? (
                             <FileText size={10} />
+                          ) : result.type === "formula" ? (
+                            <Info size={10} />
                           ) : result.type === "event" ? (
                             <Info size={10} />
                           ) : (
@@ -5208,6 +5395,8 @@ export function DashboardClient({
                           )}
                           {result.type === "process_document"
                             ? "Process Doc"
+                            : result.type === "formula"
+                              ? "Formula"
                             : result.type === "event"
                               ? "System Event"
                               : "Instruction"}
@@ -5380,7 +5569,7 @@ export function DashboardClient({
           ) : (
             <p className="rounded-xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
               Searching in {selectedDepartmentName}. Start typing above to search instructions,
-              controlled process documents, and recent system updates instantly.
+              controlled process documents, formulas, and recent system updates instantly.
             </p>
           )}
         </div>
@@ -5697,6 +5886,140 @@ export function DashboardClient({
               </Link>
             );
           })}
+        </div>
+      );
+    }
+
+    if (widgetId === "formula_snapshot") {
+      const formulaStatCards = [
+        ["Total Formulas", formulaStats.total],
+        ["Approved/System", formulaStats.approved],
+        ["Pending Review", formulaStats.pending],
+        ["My Formulas", formulaStats.mine],
+      ] as const;
+
+      return (
+        <div className="grid gap-3">
+          <div className="grid grid-cols-2 gap-2">
+            {formulaStatCards.map(([label, value]) => (
+              <Link
+                key={label}
+                href="/process-maps/formulas"
+                className="grid gap-1 rounded-xl border border-slate-300/70 bg-white/70 p-3 transition hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/50 dark:hover:border-cyan-500/50"
+              >
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  {label}
+                </span>
+                <span className="text-2xl font-extrabold text-slate-900 dark:text-slate-100">
+                  {value}
+                </span>
+              </Link>
+            ))}
+          </div>
+          <div className="rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                Custom Formula Coverage
+              </p>
+              <p className="text-xs font-bold text-cyan-700 dark:text-cyan-300">
+                {formulaStats.custom} custom
+              </p>
+            </div>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {formulaStats.pending > 0
+                ? `${formulaStats.pending} custom formula${
+                    formulaStats.pending === 1 ? "" : "s"
+                  } waiting for approval.`
+                : "No custom formulas are waiting for approval."}
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    if (widgetId === "formula_review_queue") {
+      return pendingFormulaReviewEntries.length === 0 ? (
+        <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+          No custom formulas are pending review.
+        </p>
+      ) : (
+        <div className="grid gap-2">
+          {pendingFormulaReviewEntries.map((formula) => (
+            <Link
+              key={formula.id}
+              href={`/process-maps/formulas?formula=${formula.id}`}
+              className="grid gap-1.5 rounded-xl border border-amber-500/35 bg-amber-500/10 p-3 transition hover:border-amber-500/55 hover:bg-amber-500/15"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="min-w-0 break-words text-sm font-bold text-slate-900 dark:text-slate-100">
+                  {formula.name}
+                </p>
+                <span
+                  className={cn(
+                    "rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                    getFormulaStatusClass(formula.approvalStatus),
+                  )}
+                >
+                  {getFormulaStatusLabel(formula.approvalStatus)}
+                </span>
+              </div>
+              <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                {getFormulaTypeLabel(formula.formulaType)} | {formula.inputCount} input
+                {formula.inputCount === 1 ? "" : "s"} | {formula.outputCount} output
+                {formula.outputCount === 1 ? "" : "s"}
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Submitted by {formula.ownerName} | Updated{" "}
+                <LocalDateTime value={formula.updatedAt} mode="dateTime" />
+              </p>
+            </Link>
+          ))}
+        </div>
+      );
+    }
+
+    if (widgetId === "formula_library") {
+      return recentFormulaEntries.length === 0 ? (
+        <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+          No saved formulas match the current search.
+        </p>
+      ) : (
+        <div className="grid gap-2">
+          {recentFormulaEntries.map((formula) => (
+            <Link
+              key={formula.id}
+              href={`/process-maps/formulas?formula=${formula.id}`}
+              className="grid gap-1.5 rounded-xl border border-slate-300/70 bg-white/70 p-3 transition hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/50 dark:hover:border-cyan-500/50"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="min-w-0 break-words text-sm font-bold text-slate-900 dark:text-slate-100">
+                  {formula.name}
+                </p>
+                <span className="rounded-full border border-slate-400/45 bg-slate-900/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-700 dark:bg-slate-100/10 dark:text-slate-200">
+                  {getFormulaTypeLabel(formula.formulaType)}
+                </span>
+                <span
+                  className={cn(
+                    "rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                    getFormulaStatusClass(formula.approvalStatus),
+                  )}
+                >
+                  {getFormulaStatusLabel(formula.approvalStatus)}
+                </span>
+              </div>
+              {formula.description ? (
+                <p className="text-xs text-slate-600 dark:text-slate-300">
+                  {formula.description}
+                </p>
+              ) : null}
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Owner {formula.ownerName} | {formula.inputCount} input
+                {formula.inputCount === 1 ? "" : "s"} | {formula.outputCount} output
+                {formula.outputCount === 1 ? "" : "s"} | Updated{" "}
+                <LocalDateTime value={formula.updatedAt} mode="date" />
+              </p>
+            </Link>
+          ))}
         </div>
       );
     }

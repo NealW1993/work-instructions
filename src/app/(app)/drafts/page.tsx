@@ -98,16 +98,18 @@ function DraftCard({
   return (
     <Link
       href={href}
-      className="grid gap-2 rounded-xl border border-slate-300/70 bg-white/85 p-4 shadow-sm transition hover:border-cyan-500/50 hover:bg-cyan-500/5 dark:border-slate-700 dark:bg-slate-950/70 dark:hover:border-cyan-400/45"
+      className="grid min-w-0 gap-2 overflow-hidden rounded-xl border border-slate-300/70 bg-white/85 p-4 shadow-sm transition hover:border-cyan-500/50 hover:bg-cyan-500/5 dark:border-slate-700 dark:bg-slate-950/70 dark:hover:border-cyan-400/45"
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
-          <h2 className="truncate text-base font-extrabold text-slate-950 dark:text-slate-50">
+          <h2 className="text-base font-extrabold leading-snug text-slate-950 [overflow-wrap:anywhere] dark:text-slate-50">
             {title}
           </h2>
-          <p className="text-sm text-slate-600 dark:text-slate-300">{subtitle}</p>
+          <p className="text-sm text-slate-600 [overflow-wrap:anywhere] dark:text-slate-300">
+            {subtitle}
+          </p>
         </div>
-        <span className="rounded-full border border-cyan-500/35 bg-cyan-500/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-cyan-800 dark:text-cyan-100">
+        <span className="shrink-0 rounded-full border border-cyan-500/35 bg-cyan-500/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-cyan-800 dark:text-cyan-100">
           {status}
         </span>
       </div>
@@ -124,6 +126,8 @@ export default async function DraftsPage() {
     { data: instructionRows },
     { data: documentRows },
     { data: formulaRows },
+    { data: publishedInstructionRows },
+    { data: publishedDocumentRows },
   ] = await Promise.all([
     supabase
       .from("work_instructions")
@@ -145,6 +149,21 @@ export default async function DraftsPage() {
       .select("id, name, payload, updated_at")
       .eq("owner_user_id", profile.id)
       .eq("formula_type", "custom")
+      .order("updated_at", { ascending: false })
+      .range(0, 99),
+    supabase
+      .from("work_instructions")
+      .select("id, revision, approval_status, approved_at, updated_at, work_items(part_id, item_title, departments(name))")
+      .eq("is_archived", false)
+      .eq("approval_status", "approved")
+      .or(`created_by.eq.${profile.id},updated_by.eq.${profile.id},submitted_by.eq.${profile.id},approved_by.eq.${profile.id}`)
+      .order("updated_at", { ascending: false })
+      .range(0, 99),
+    supabase
+      .from("process_documents")
+      .select("id, document_number, title, document_type, status, approved_at, updated_at")
+      .eq("status", "approved")
+      .or(`created_by.eq.${profile.id},owner_user_id.eq.${profile.id},updated_by.eq.${profile.id},approved_by.eq.${profile.id}`)
       .order("updated_at", { ascending: false })
       .range(0, 99),
   ]);
@@ -179,7 +198,39 @@ export default async function DraftsPage() {
       updatedAt: row.updated_at,
       href: `/process-maps/formulas?formula=${row.id}`,
     }));
+  const publishedInstructions = ((publishedInstructionRows ?? []) as WorkInstructionDraftRow[]).map((row) => {
+    const workItem = normalizeRelation(row.work_items);
+    const department = normalizeRelation(workItem?.departments);
+    return {
+      id: row.id,
+      title: workItem?.item_title ?? "Untitled instruction",
+      subtitle: `${workItem?.part_id || "No Part ID"} | ${department?.name ?? "Unknown Department"} | Rev ${row.revision}`,
+      status: "Published",
+      updatedAt: row.updated_at,
+      href: `/instructions/${row.id}`,
+    };
+  });
+  const publishedDocuments = ((publishedDocumentRows ?? []) as ProcessDocumentDraftRow[]).map((row) => ({
+    id: row.id,
+    title: `${row.document_number} | ${row.title}`,
+    subtitle: getProcessDocumentTypeLabel(row.document_type),
+    status: "Published",
+    updatedAt: row.updated_at,
+    href: `/process-documents?doc=${row.id}`,
+  }));
+  const publishedFormulas = ((formulaRows ?? []) as FormulaDraftRow[])
+    .filter((row) => getFormulaApprovalStatus(row.payload) === "approved")
+    .map((row) => ({
+      id: row.id,
+      title: row.name,
+      subtitle: "Formula",
+      status: "Published",
+      updatedAt: row.updated_at,
+      href: `/process-maps/formulas?formula=${row.id}`,
+    }));
   const totalDrafts = instructionDrafts.length + documentDrafts.length + formulaDrafts.length;
+  const totalPublished =
+    publishedInstructions.length + publishedDocuments.length + publishedFormulas.length;
 
   return (
     <div className="grid gap-4">
@@ -201,8 +252,8 @@ export default async function DraftsPage() {
         </p>
       </section>
 
-      <div className="grid gap-4 xl:grid-cols-3">
-        <section className="grid content-start gap-3">
+      <div className="grid min-w-0 gap-4 xl:grid-cols-[repeat(3,minmax(0,1fr))]">
+        <section className="grid min-w-0 content-start gap-3">
           <h2 className="text-lg font-extrabold text-slate-950 dark:text-slate-50">
             Work Instructions
           </h2>
@@ -214,7 +265,7 @@ export default async function DraftsPage() {
             </p>
           )}
         </section>
-        <section className="grid content-start gap-3">
+        <section className="grid min-w-0 content-start gap-3">
           <h2 className="text-lg font-extrabold text-slate-950 dark:text-slate-50">
             Documents
           </h2>
@@ -226,7 +277,7 @@ export default async function DraftsPage() {
             </p>
           )}
         </section>
-        <section className="grid content-start gap-3">
+        <section className="grid min-w-0 content-start gap-3">
           <h2 className="text-lg font-extrabold text-slate-950 dark:text-slate-50">
             Formulas
           </h2>
@@ -239,6 +290,61 @@ export default async function DraftsPage() {
           )}
         </section>
       </div>
+
+      <section className="mt-4 grid gap-4">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="grid gap-1">
+            <h2 className="text-2xl font-extrabold text-slate-900 dark:text-slate-100">
+              My Published
+            </h2>
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              Approved work instructions, controlled documents, and formulas published by your account.
+            </p>
+          </div>
+          <span className="rounded-full border border-emerald-500/35 bg-emerald-500/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-emerald-800 dark:text-emerald-100">
+            {totalPublished} published
+          </span>
+        </div>
+
+        <div className="grid min-w-0 gap-4 xl:grid-cols-[repeat(3,minmax(0,1fr))]">
+          <section className="grid min-w-0 content-start gap-3">
+            <h3 className="text-lg font-extrabold text-slate-950 dark:text-slate-50">
+              Work Instructions
+            </h3>
+            {publishedInstructions.length > 0 ? (
+              publishedInstructions.map((item) => <DraftCard key={item.id} {...item} />)
+            ) : (
+              <p className="min-w-0 rounded-xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-400">
+                No published work instructions.
+              </p>
+            )}
+          </section>
+          <section className="grid min-w-0 content-start gap-3">
+            <h3 className="text-lg font-extrabold text-slate-950 dark:text-slate-50">
+              Documents
+            </h3>
+            {publishedDocuments.length > 0 ? (
+              publishedDocuments.map((item) => <DraftCard key={item.id} {...item} />)
+            ) : (
+              <p className="min-w-0 rounded-xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-400">
+                No published documents.
+              </p>
+            )}
+          </section>
+          <section className="grid min-w-0 content-start gap-3">
+            <h3 className="text-lg font-extrabold text-slate-950 dark:text-slate-50">
+              Formulas
+            </h3>
+            {publishedFormulas.length > 0 ? (
+              publishedFormulas.map((item) => <DraftCard key={item.id} {...item} />)
+            ) : (
+              <p className="min-w-0 rounded-xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-400">
+                No published formulas.
+              </p>
+            )}
+          </section>
+        </div>
+      </section>
     </div>
   );
 }

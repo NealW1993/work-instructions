@@ -1,6 +1,8 @@
 import { DashboardClient } from "@/components/dashboard/dashboard-client";
 import type {
   DashboardInstructionCardData,
+  DashboardFormulaApprovalStatus,
+  DashboardFormulaData,
   DashboardInstructionReviewStatusData,
   DashboardLikeCelebrationData,
   DashboardLikedInstructionCardData,
@@ -16,6 +18,7 @@ import {
   getProcessDocumentTypeLabel,
 } from "@/lib/process-documents";
 import { canEditInstructions, hasFullAccess } from "@/lib/roles";
+import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 interface DashboardPageProps {
   searchParams: Promise<{
@@ -130,6 +133,16 @@ interface DashboardProcessDocumentRow {
   current_revision: number;
   updated_at: string;
   departments: DashboardDepartmentRelation | DashboardDepartmentRelation[] | null;
+}
+
+interface DashboardFormulaRow {
+  id: string;
+  owner_user_id: string;
+  name: string;
+  formula_type: string;
+  payload: unknown;
+  created_at: string;
+  updated_at: string;
 }
 
 interface DashboardReviewStateSourcePayload {
@@ -248,6 +261,78 @@ function normalizeDepartmentColor(
   const department = Array.isArray(relation) ? (relation[0] ?? null) : relation;
   const normalized = (department?.color_hex ?? "").trim().toUpperCase();
   return /^#[0-9A-F]{6}$/.test(normalized) ? normalized : DEFAULT_DEPARTMENT_COLOR;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function getCustomFormulaApprovalStatus(
+  payload: unknown,
+): Exclude<DashboardFormulaApprovalStatus, "system"> {
+  if (!isRecord(payload)) {
+    return "draft";
+  }
+
+  const customFormula = isRecord(payload.customFormula) ? payload.customFormula : {};
+  const status = customFormula.approvalStatus;
+
+  return status === "pending_review" ||
+    status === "approved" ||
+    status === "rejected" ||
+    status === "draft"
+    ? status
+    : "draft";
+}
+
+function getFormulaApprovalStatus(row: DashboardFormulaRow): DashboardFormulaApprovalStatus {
+  if (row.formula_type !== "custom") {
+    return "system";
+  }
+
+  return getCustomFormulaApprovalStatus(row.payload);
+}
+
+function requesterCanSeeFormula(
+  row: DashboardFormulaRow,
+  requesterId: string,
+  canApprove: boolean,
+) {
+  if (canApprove || row.owner_user_id === requesterId) {
+    return true;
+  }
+
+  return row.formula_type === "custom" && getCustomFormulaApprovalStatus(row.payload) === "approved";
+}
+
+function getFormulaDescription(payload: unknown) {
+  if (!isRecord(payload)) {
+    return "";
+  }
+
+  const customFormula = isRecord(payload.customFormula) ? payload.customFormula : null;
+  const description =
+    (typeof customFormula?.description === "string" && customFormula.description) ||
+    (typeof payload.description === "string" && payload.description) ||
+    (typeof payload.summary === "string" && payload.summary) ||
+    "";
+
+  return description.trim().slice(0, 240);
+}
+
+function getFormulaCollectionCount(payload: unknown, key: "inputs" | "outputs") {
+  if (!isRecord(payload)) {
+    return 0;
+  }
+
+  const customFormula = isRecord(payload.customFormula) ? payload.customFormula : null;
+  const collection = Array.isArray(customFormula?.[key])
+    ? customFormula[key]
+    : Array.isArray(payload[key])
+      ? payload[key]
+      : null;
+
+  return collection?.length ?? 0;
 }
 
 function normalizeInstruction(
@@ -400,6 +485,7 @@ function normalizeNeedsReviewMetadata(
 
 export default async function DashboardPage({ searchParams }: DashboardPageProps) {
   const { supabase, profile } = await requireAuthenticatedUser();
+  const supabaseAdmin = getSupabaseAdminClient();
   const params = await searchParams;
   const initialQuery = params.q?.trim() ?? "";
 
@@ -474,6 +560,12 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     .order("updated_at", { ascending: false })
     .limit(200);
 
+  const formulasRequest = supabaseAdmin
+    .from("process_map_formulas")
+    .select("id, owner_user_id, name, formula_type, payload, created_at, updated_at")
+    .order("updated_at", { ascending: false })
+    .limit(250);
+
   const reviewSettingsRequest = supabase
     .from("instruction_review_settings")
     .select("review_window_days")
@@ -489,6 +581,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     { data: historyEventsData },
     { data: departmentsData },
     { data: processDocumentsData },
+    { data: formulasData },
     { data: reviewSettingsData, error: reviewSettingsError },
   ] = await Promise.all([
     runDashboardQuery(
@@ -524,6 +617,10 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       "Process documents query timed out.",
     ),
     runDashboardQuery(
+      formulasRequest,
+      "Formula library query timed out.",
+    ),
+    runDashboardQuery(
       reviewSettingsRequest,
       "Review settings query timed out.",
     ),
@@ -537,6 +634,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const rawHistoryEvents =
     (historyEventsData ?? []) as DashboardInstructionChangeEventRow[];
   const rawProcessDocuments = (processDocumentsData ?? []) as DashboardProcessDocumentRow[];
+  const rawFormulas = ((formulasData ?? []) as DashboardFormulaRow[]).filter((row) =>
+    requesterCanSeeFormula(row, profile.id, hasFullAccess(profile.role)),
+  );
   const instructionReviewWindowDays =
     !reviewSettingsError
       ? normalizeReviewWindowDays(reviewSettingsData?.review_window_days) ??
@@ -697,6 +797,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   }
   for (const historyEvent of rawHistoryEvents) {
     profileIds.add(historyEvent.actor_user_id);
+  }
+  for (const formula of rawFormulas) {
+    profileIds.add(formula.owner_user_id);
   }
 
   const profileIdList = Array.from(profileIds);
@@ -968,6 +1071,20 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     }),
   );
 
+  const formulas: DashboardFormulaData[] = rawFormulas.map((formula) => ({
+    id: formula.id,
+    ownerUserId: formula.owner_user_id,
+    ownerName: profileNameMap.get(formula.owner_user_id) ?? "Unknown",
+    name: formula.name,
+    formulaType: formula.formula_type,
+    approvalStatus: getFormulaApprovalStatus(formula),
+    description: getFormulaDescription(formula.payload),
+    inputCount: getFormulaCollectionCount(formula.payload, "inputs"),
+    outputCount: getFormulaCollectionCount(formula.payload, "outputs"),
+    createdAt: formula.created_at,
+    updatedAt: formula.updated_at,
+  }));
+
   const seenLikesAtTimestamp = toTimestamp(profile.authored_likes_seen_at ?? null);
   const newLikeRows =
     seenLikesAtTimestamp === null
@@ -1057,6 +1174,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       newestInstructions={newestInstructions}
       items={items}
       processDocuments={processDocuments}
+      formulas={formulas}
       systemHistoryEvents={systemHistoryEvents.slice(0, 240)}
       currentUserId={profile.id}
       initialDashboardLayout={profile.dashboard_layout ?? null}

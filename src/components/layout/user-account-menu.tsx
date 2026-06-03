@@ -24,6 +24,7 @@ import { createPortal } from "react-dom";
 import { FloatingStatusNotices } from "@/components/ui/floating-status-notices";
 import { canViewKpis, hasFullAccess } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { clearBrowserExitSignOutPending } from "@/lib/session-exit";
 import {
   clearSessionStart,
   ensureSessionStartTime,
@@ -461,6 +462,7 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
 
     await supabase.auth.signOut();
     clearSessionStart();
+    clearBrowserExitSignOutPending(profile.id);
     posthog?.reset();
     persistActiveThemePreference();
     closeMenu();
@@ -759,7 +761,7 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
             </span>
           </button>
 
-          <section className="grid overflow-hidden rounded-xl border border-white/15 bg-white/5">
+          <section className="relative">
             <button
               type="button"
               onClick={() => {
@@ -768,7 +770,10 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
                   void loadNotifications();
                 }
               }}
-              className="flex items-center justify-between gap-3 px-3 py-2 text-left text-sm font-semibold text-slate-100 transition hover:bg-white/10"
+              className={cn(
+                "flex w-full items-center justify-between gap-3 rounded-xl border border-white/15 px-3 py-2 text-left text-sm font-semibold text-slate-100 transition hover:bg-white/10",
+                notificationsOpen ? "bg-white/10" : "bg-white/5",
+              )}
             >
               <span className="inline-flex min-w-0 items-center gap-2">
                 <Bell size={15} />
@@ -787,7 +792,7 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
               </span>
             </button>
             {notificationsOpen ? (
-              <div className="grid gap-2 border-t border-white/10 p-2">
+              <div className="absolute right-0 top-full z-[95] mt-2 grid w-[28rem] max-w-[calc(100vw-2rem)] gap-2 rounded-xl border border-white/15 bg-slate-950/98 p-3 shadow-2xl backdrop-blur-xl lg:right-full lg:top-0 lg:mr-3 lg:mt-0">
                 <div className="flex items-center justify-between gap-2 px-1">
                   <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                     Recent activity
@@ -806,7 +811,7 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
                     {notificationsError}
                   </p>
                 ) : null}
-                <div className="grid max-h-[22rem] gap-2 overflow-y-auto pr-1">
+                <div className="grid max-h-[28rem] gap-2 overflow-y-auto pr-1">
                   {notifications.length === 0 && !notificationsBusy ? (
                     <div className="grid place-items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-5 text-center text-xs text-slate-300">
                       <Inbox size={18} />

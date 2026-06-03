@@ -402,12 +402,22 @@ h6 {
   max-width: 100%;
   overflow-x: auto;
   border-collapse: collapse;
+  margin: 0.85rem 0;
+  width: 100%;
 }
 
 .prose-markdown th,
 .prose-markdown td {
+  border: 1px solid color-mix(in oklab, var(--foreground) 20%, transparent);
+  padding: 0.5rem 0.6rem;
   overflow-wrap: anywhere;
   word-break: break-word;
+  vertical-align: top;
+}
+
+.prose-markdown th {
+  background: color-mix(in oklab, var(--foreground) 7%, transparent);
+  font-weight: 700;
 }
 
 html:not(.dark) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]),
@@ -708,6 +718,47 @@ html:not(.dark) .review-note-modal-shell textarea:focus {
   border-radius: 0.75rem;
   background: color-mix(in oklab, var(--foreground) 10%, transparent);
   padding: 0.9rem;
+}
+
+.tiptap-editor-content table {
+  table-layout: fixed;
+  width: 100%;
+  max-width: 100%;
+  margin: 0.85rem 0;
+  border-collapse: collapse;
+}
+
+.tiptap-editor-content th,
+.tiptap-editor-content td {
+  position: relative;
+  min-width: 4rem;
+  border: 1px solid color-mix(in oklab, var(--foreground) 20%, transparent);
+  padding: 0.45rem 0.55rem;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+
+.tiptap-editor-content th {
+  background: color-mix(in oklab, var(--foreground) 7%, transparent);
+  font-weight: 700;
+}
+
+.tiptap-editor-content .selectedCell::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  background: color-mix(in oklab, var(--ring) 18%, transparent);
+}
+
+.tiptap-editor-content .column-resize-handle {
+  pointer-events: none;
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: -2px;
+  width: 4px;
+  background: color-mix(in oklab, var(--ring) 75%, transparent);
 }
 
 .tiptap-editor-content p.is-editor-empty:first-child::before {

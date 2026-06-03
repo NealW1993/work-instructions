@@ -119,6 +119,12 @@ function sanitizeRichHtml(value: string): string {
       "source",
       "label",
       "input",
+      "table",
+      "thead",
+      "tbody",
+      "tr",
+      "th",
+      "td",
     ],
     allowedAttributes: {
       figure: ["data-type", "data-align", "data-width", "style", "class"],
@@ -136,6 +142,9 @@ function sanitizeRichHtml(value: string): string {
       label: ["contenteditable"],
       input: ["type", "checked", "disabled"],
       mark: ["style", "data-color"],
+      table: ["style"],
+      th: ["style", "colspan", "rowspan"],
+      td: ["style", "colspan", "rowspan"],
       "*": ["class", "style"],
     },
     allowedSchemes: ["http", "https", "data"],
@@ -147,12 +156,15 @@ function sanitizeRichHtml(value: string): string {
     allowedStyles: {
       "*": {
         "text-align": [/^left$/, /^right$/, /^center$/, /^justify$/],
-        display: [/^block$/, /^inline-block$/],
+        display: [/^block$/, /^inline-block$/, /^table$/, /^table-row$/, /^table-cell$/],
         width: [/^[0-9.]+(px|%)$/],
         height: [/^[0-9.]+(px|%)$/, /^auto$/],
         "max-width": [/^[0-9.]+(px|%)$/],
         "margin-left": [/^auto$/, /^[0-9.]+(px|%)$/],
         "margin-right": [/^auto$/, /^[0-9.]+(px|%)$/],
+        "border-collapse": [/^collapse$/],
+        border: [/^[0-9.]+px\s+solid\s+#[0-9a-fA-F]{3,8}$/],
+        padding: [/^[0-9.]+(px|rem|em)$/],
       },
       span: {
         color: [/^#[0-9a-fA-F]{3,8}$/, /^rgb\([0-9,\s.]+\)$/],
@@ -168,7 +180,7 @@ function sanitizeRichHtml(value: string): string {
 function extractTextFromHtml(value: string): string {
   return value
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|li|h1|h2|h3|h4|h5|h6|blockquote|pre)>/gi, "\n")
+    .replace(/<\/(p|div|li|h1|h2|h3|h4|h5|h6|blockquote|pre|tr)>/gi, "\n")
     .replace(/<[^>]*>/g, " ")
     .replace(/&nbsp;/g, " ")
     .replace(/\s+/g, " ")
@@ -191,12 +203,14 @@ function buildSystemPrompt() {
     "Return only JSON with keys: enhanced_html and enhancement_notes.",
     "Requirements for enhanced_html:",
     "- Output valid HTML only (no markdown fences).",
-    "- Use structured formatting: h1/h2 sections, paragraph intros, ordered procedure steps, and bullet lists where useful.",
+    "- Use structured, left-aligned formatting: one clear h1, h2 sections, short paragraph intros, ordered procedure steps, and bullet lists where useful.",
+    "- Use tables only when they improve scanability for tools, checks, acceptance criteria, records, responsibilities, or control plans. Tables must include a header row and concise cell text.",
+    "- Keep spacing clean: no empty paragraphs, no decorative divs, no centered blocks, no all-caps paragraphs, and no inline widths except preserved media.",
     "- Keep important facts accurate. Do not invent missing measurements, part numbers, tools, or safety details.",
     "- Use any provided ISO/control context to preserve scope, acceptance criteria, verification records, and reaction controls without inventing missing criteria.",
     "- Preserve the instruction's intent and sequence while improving clarity and readability.",
     "- Preserve any existing image/video/figure tags when present, and keep them as indented standalone blocks.",
-    "- Use only tags that are typical in rich text instruction editors: h1, h2, h3, p, ul, ol, li, blockquote, strong, em, u, s, mark, code, pre, figure, img, video, span, div, br.",
+    "- Use only tags that are typical in rich text instruction editors: h1, h2, h3, p, ul, ol, li, blockquote, strong, em, u, s, mark, code, pre, figure, img, video, span, div, br, table, thead, tbody, tr, th, td.",
     "Requirements for enhancement_notes:",
     "- 1-2 concise sentences summarizing what improved.",
   ].join("\n");

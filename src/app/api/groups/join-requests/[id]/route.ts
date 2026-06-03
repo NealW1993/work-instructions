@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
+import { sendNotificationEmailsToUsers } from "@/lib/notification-email.server";
 import { hasFullAccess } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -76,6 +77,11 @@ export async function PATCH(
   }
 
   const nowIso = new Date().toISOString();
+  const { data: group } = await supabaseAdmin
+    .from("access_groups")
+    .select("name")
+    .eq("id", joinRequest.group_id)
+    .maybeSingle<{ name: string }>();
   const { error: updateError } = await supabaseAdmin
     .from("access_group_join_requests")
     .update({
@@ -106,6 +112,20 @@ export async function PATCH(
     if (membershipError) {
       return NextResponse.json({ error: membershipError.message }, { status: 500 });
     }
+  }
+
+  if (body.status === "approved" || body.status === "rejected") {
+    const decisionLabel = body.status === "approved" ? "approved" : "denied";
+    await sendNotificationEmailsToUsers(supabaseAdmin, {
+      recipientUserIds: [joinRequest.requester_user_id],
+      settingKey: "groupRequests",
+      title: `Group request ${decisionLabel}`,
+      body: `Access to ${group?.name ?? "the group"} was ${decisionLabel} by ${
+        requester.full_name || requester.email
+      }.`,
+      href: "/groups",
+      actorName: requester.full_name || requester.email,
+    });
   }
 
   return NextResponse.json({ status: body.status });

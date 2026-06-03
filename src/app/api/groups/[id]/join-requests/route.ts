@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
+import { sendNotificationEmailsToRoles } from "@/lib/notification-email.server";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 interface JoinRequestBody {
@@ -24,6 +25,11 @@ export async function POST(
   const { id } = await context.params;
   const body = (await request.json().catch(() => ({}))) as JoinRequestBody;
   const supabaseAdmin = getSupabaseAdminClient();
+  const { data: group } = await supabaseAdmin
+    .from("access_groups")
+    .select("name")
+    .eq("id", id)
+    .maybeSingle<{ name: string }>();
 
   const { data: existingMembership, error: membershipError } = await supabaseAdmin
     .from("access_group_memberships")
@@ -49,6 +55,17 @@ export async function POST(
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  await sendNotificationEmailsToRoles(supabaseAdmin, {
+    roles: ["admin", "system_admin"],
+    settingKey: "groupRequests",
+    title: "Group join request pending",
+    body: `${requester.full_name || requester.email} requested access to ${
+      group?.name ?? "a group"
+    }.`,
+    href: "/groups",
+    actorName: requester.full_name || requester.email,
+  });
 
   return NextResponse.json({ requested: true });
 }

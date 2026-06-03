@@ -22,7 +22,10 @@ import {
 } from "@/lib/session-timer";
 import { useSynchronizedNowMs } from "@/lib/second-ticker";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
-import type { NotificationSettings } from "@/lib/notification-settings";
+import type {
+  NotificationDeliveryPreference,
+  NotificationSettings,
+} from "@/lib/notification-settings";
 import type { ThemePreference } from "@/lib/types";
 
 const ACCOUNT_HISTORY_GUARD_STATE_KEY = "__accountSettingsUnsavedGuard";
@@ -89,6 +92,14 @@ const NOTIFICATION_SETTING_FIELDS: Array<{
     label: "Formula decisions",
     description: "Approved or denied formula drafts.",
   },
+];
+const NOTIFICATION_DELIVERY_OPTIONS: Array<{
+  value: NotificationDeliveryPreference;
+  label: string;
+}> = [
+  { value: "system", label: "System" },
+  { value: "email", label: "Email" },
+  { value: "both", label: "Both" },
 ];
 
 function normalizeIconColor(value: string) {
@@ -818,45 +829,47 @@ export function AccountSettingsPanel({
             </div>
             <div className="grid gap-2 md:grid-cols-2">
               {NOTIFICATION_SETTING_FIELDS.map((setting) => {
-                const enabled = notificationSettings[setting.key];
+                const deliveryPreference = notificationSettings[setting.key];
                 return (
-                  <label
+                  <div
                     key={setting.key}
-                    className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900/60"
+                    className="grid gap-2 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900/60"
                   >
-                    <span className="grid gap-0.5">
+                    <div className="grid gap-0.5">
                       <span className="font-semibold text-slate-800 dark:text-slate-100">
                         {setting.label}
                       </span>
                       <span className="text-xs text-slate-500 dark:text-slate-400">
                         {setting.description}
                       </span>
-                    </span>
-                    <span
-                      className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border transition ${
-                        enabled
-                          ? "border-cyan-500/45 bg-cyan-500/45"
-                          : "border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-800"
-                      }`}
+                    </div>
+                    <div
+                      role="group"
+                      aria-label={`${setting.label} notification delivery`}
+                      className="grid grid-cols-3 gap-1 rounded-xl border border-slate-200 bg-slate-100/70 p-1 dark:border-slate-700 dark:bg-slate-950/70"
                     >
-                      <input
-                        type="checkbox"
-                        checked={enabled}
-                        onChange={(event) =>
-                          setNotificationSettings((current) => ({
-                            ...current,
-                            [setting.key]: event.target.checked,
-                          }))
-                        }
-                        className="sr-only"
-                      />
-                      <span
-                        className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${
-                          enabled ? "translate-x-5" : "translate-x-0"
-                        }`}
-                      />
-                    </span>
-                  </label>
+                      {NOTIFICATION_DELIVERY_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() =>
+                            setNotificationSettings((current) => ({
+                              ...current,
+                              [setting.key]: option.value,
+                            }))
+                          }
+                          aria-pressed={deliveryPreference === option.value}
+                          className={`min-w-0 rounded-lg px-2 py-1 text-xs font-semibold transition ${
+                            deliveryPreference === option.value
+                              ? "bg-cyan-500/20 text-cyan-900 shadow-sm dark:text-cyan-100"
+                              : "text-slate-600 hover:bg-white/80 dark:text-slate-300 dark:hover:bg-slate-900"
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 );
               })}
             </div>

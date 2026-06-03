@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
+import { sendNotificationEmailsToRoles } from "@/lib/notification-email.server";
 import { hasFullAccess } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -134,6 +135,21 @@ function toFormula(row: FormulaRow) {
   };
 }
 
+async function sendPendingFormulaReviewEmails(
+  supabaseAdmin: ReturnType<typeof getSupabaseAdminClient>,
+  formula: FormulaRow,
+  actorName: string,
+) {
+  await sendNotificationEmailsToRoles(supabaseAdmin, {
+    roles: ["admin", "system_admin"],
+    settingKey: "pendingApprovals",
+    title: "Formula draft pending approval",
+    body: `${formula.name} was saved for review.`,
+    href: `/process-maps/formulas?formula=${formula.id}`,
+    actorName,
+  });
+}
+
 export async function GET(request: NextRequest) {
   const requester = await getRequestProfile(request);
   if (!requester) {
@@ -204,6 +220,18 @@ export async function POST(request: NextRequest) {
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  if (
+    data &&
+    data.formula_type === "custom" &&
+    getCustomApprovalStatus(data.payload) === "pending_review"
+  ) {
+    await sendPendingFormulaReviewEmails(
+      supabaseAdmin,
+      data,
+      requester.full_name || requester.email,
+    );
   }
 
   return NextResponse.json({ formula: data ? toFormula(data) : null });

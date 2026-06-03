@@ -194,7 +194,9 @@ interface ProcessDocumentFormState {
   bodyHtml: string;
   documentCoverImageDataUrl: string;
   documentCoverImageName: string;
+  documentHeaderEnabled: boolean;
   documentHeader: string;
+  documentFooterEnabled: boolean;
   documentFooter: string;
   changeSummary: string;
   sourceType: ProcessDocumentSourceType;
@@ -246,7 +248,9 @@ const EMPTY_FORM: ProcessDocumentFormState = {
   bodyHtml: "",
   documentCoverImageDataUrl: "",
   documentCoverImageName: "",
+  documentHeaderEnabled: false,
   documentHeader: "",
+  documentFooterEnabled: false,
   documentFooter: "",
   changeSummary: "",
   sourceType: "manual",
@@ -398,16 +402,56 @@ function escapeHtml(value: string) {
     .replaceAll("'", "&#039;");
 }
 
-function buildDocumentChrome(kind: "header" | "footer", text: string) {
-  const trimmed = text.trim();
-  if (!trimmed) {
+function hasMeaningfulEditorHtml(html: string) {
+  return extractVisibleText(html).length > 0 || /<(img|video|table)\b/i.test(html);
+}
+
+function stripLegacyDocumentChromeLabel(kind: "header" | "footer", html: string) {
+  const label = kind === "header" ? "Document Header" : "Document Footer";
+  return html
+    .replace(
+      new RegExp(
+        `^\\s*<strong>\\s*${label.replace(/\s+/g, "\\s+")}\\s*:?\\s*</strong>\\s*`,
+        "i",
+      ),
+      "",
+    )
+    .trim();
+}
+
+function extractDocumentChromeHtml(html: string, kind: "header" | "footer") {
+  const fallbackMatch = html.match(
+    new RegExp(
+      `<section\\b[^>]*data-document-${kind}=["']true["'][^>]*>([\\s\\S]*?)<\\/section>`,
+      "i",
+    ),
+  );
+  const fallbackValue = stripLegacyDocumentChromeLabel(kind, fallbackMatch?.[1] ?? "");
+
+  if (typeof DOMParser === "undefined") {
+    return fallbackValue;
+  }
+
+  try {
+    const parser = new DOMParser();
+    const parsed = parser.parseFromString(`<article>${html}</article>`, "text/html");
+    const section = parsed.querySelector(`[data-document-${kind}="true"]`);
+    return stripLegacyDocumentChromeLabel(kind, section?.innerHTML ?? fallbackValue);
+  } catch {
+    return fallbackValue;
+  }
+}
+
+function buildDocumentChrome(kind: "header" | "footer", enabled: boolean, html: string) {
+  const trimmed = html.trim();
+  if (!enabled || !hasMeaningfulEditorHtml(trimmed)) {
     return "";
   }
 
-  const label = kind === "header" ? "Document Header" : "Document Footer";
-  const borderClass = kind === "header" ? "border-bottom:1px solid #cbd5e1;" : "border-top:1px solid #cbd5e1;";
+  const borderClass =
+    kind === "header" ? "border-bottom:1px solid #cbd5e1;" : "border-top:1px solid #cbd5e1;";
 
-  return `<section data-document-${kind}="true" style="${borderClass}margin:${kind === "header" ? "0 0 16px" : "16px 0 0"};padding:${kind === "header" ? "0 0 10px" : "10px 0 0"};color:#475569;font-size:12px;"><strong>${label}:</strong> ${escapeHtml(trimmed).replace(/\n/g, "<br />")}</section>`;
+  return `<section data-document-${kind}="true" style="${borderClass}margin:${kind === "header" ? "0 0 16px" : "16px 0 0"};padding:${kind === "header" ? "0 0 10px" : "10px 0 0"};color:#475569;font-size:12px;">${trimmed}</section>`;
 }
 
 function buildDocumentCoverImage(imageSrc: string) {
@@ -430,9 +474,9 @@ function stripDocumentBuilderChrome(html: string) {
 function composeDocumentBodyHtml(form: ProcessDocumentFormState) {
   return [
     buildDocumentCoverImage(form.documentCoverImageDataUrl),
-    buildDocumentChrome("header", form.documentHeader),
+    buildDocumentChrome("header", form.documentHeaderEnabled, form.documentHeader),
     form.bodyHtml,
-    buildDocumentChrome("footer", form.documentFooter),
+    buildDocumentChrome("footer", form.documentFooterEnabled, form.documentFooter),
   ]
     .filter(Boolean)
     .join("\n");
@@ -793,6 +837,10 @@ export function ProcessDocumentsClient({
       return;
     }
 
+    const selectedBodyHtml = selectedRevision?.body_html ?? "";
+    const documentHeader = extractDocumentChromeHtml(selectedBodyHtml, "header");
+    const documentFooter = extractDocumentChromeHtml(selectedBodyHtml, "footer");
+
     setForm({
       documentNumber: selectedDocument.document_number,
       title: selectedDocument.title,
@@ -808,11 +856,13 @@ export function ProcessDocumentsClient({
       processControls: selectedDocument.process_controls,
       relatedInstructionIds: selectedDocument.related_instruction_ids ?? [],
       isoClauseRefs: selectedDocument.iso_clause_refs ?? [],
-      bodyHtml: stripDocumentBuilderChrome(selectedRevision?.body_html ?? ""),
+      bodyHtml: stripDocumentBuilderChrome(selectedBodyHtml),
       documentCoverImageDataUrl: selectedDocument.document_cover_image_data_url ?? "",
       documentCoverImageName: selectedDocument.document_cover_image_name ?? "",
-      documentHeader: "",
-      documentFooter: "",
+      documentHeaderEnabled: hasMeaningfulEditorHtml(documentHeader),
+      documentHeader,
+      documentFooterEnabled: hasMeaningfulEditorHtml(documentFooter),
+      documentFooter,
       changeSummary: "",
       sourceType: "manual",
       templateId: null,
@@ -1979,13 +2029,73 @@ export function ProcessDocumentsClient({
                 </label>
               </div>
 
-              <RichTextEditor
-                label="Document Body"
-                value={form.bodyHtml}
-                onChange={(value) => updateForm("bodyHtml", value)}
-                placeholder="Write the controlled document..."
-                minHeightClassName="min-h-[34rem]"
-              />
+              <section className="grid gap-3 rounded-2xl border border-slate-300/70 bg-slate-100/70 p-3 dark:border-slate-700 dark:bg-slate-900/45">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="grid gap-0.5">
+                    <h2 className="text-sm font-extrabold text-slate-950 dark:text-slate-50">
+                      Document Page
+                    </h2>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <label className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">
+                      <input
+                        type="checkbox"
+                        checked={form.documentHeaderEnabled}
+                        onChange={(event) =>
+                          updateForm("documentHeaderEnabled", event.target.checked)
+                        }
+                        className="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
+                      />
+                      Header
+                    </label>
+                    <label className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">
+                      <input
+                        type="checkbox"
+                        checked={form.documentFooterEnabled}
+                        onChange={(event) =>
+                          updateForm("documentFooterEnabled", event.target.checked)
+                        }
+                        className="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
+                      />
+                      Footer
+                    </label>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 rounded-xl border border-slate-300 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
+                  {form.documentHeaderEnabled ? (
+                    <div className="border-b border-dashed border-slate-300 pb-4 dark:border-slate-700">
+                      <RichTextEditor
+                        label="Header"
+                        value={form.documentHeader}
+                        onChange={(value) => updateForm("documentHeader", value)}
+                        placeholder="Add document number, owner, site, release note, logo, or header table..."
+                        minHeightClassName="min-h-28"
+                      />
+                    </div>
+                  ) : null}
+
+                  <RichTextEditor
+                    label="Document Body"
+                    value={form.bodyHtml}
+                    onChange={(value) => updateForm("bodyHtml", value)}
+                    placeholder="Write the controlled document..."
+                    minHeightClassName="min-h-[34rem]"
+                  />
+
+                  {form.documentFooterEnabled ? (
+                    <div className="border-t border-dashed border-slate-300 pt-4 dark:border-slate-700">
+                      <RichTextEditor
+                        label="Footer"
+                        value={form.documentFooter}
+                        onChange={(value) => updateForm("documentFooter", value)}
+                        placeholder="Add retention, printed-copy warning, revision, page note, image, or footer table..."
+                        minHeightClassName="min-h-28"
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              </section>
 
               <details className="rounded-xl border border-slate-300/70 bg-white/80 p-4 dark:border-slate-700 dark:bg-slate-950/55">
                 <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3">
@@ -2101,22 +2211,24 @@ export function ProcessDocumentsClient({
                       AI search
                     </button>
                   </div>
-                  <label className="relative block">
+                  <label className="grid gap-1">
                     <span className="sr-only">Search related work instructions</span>
-                    <Search
-                      size={15}
-                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                    />
-                    <input
-                      value={instructionSearchQuery}
-                      onChange={(event) => setInstructionSearchQuery(event.target.value)}
-                      placeholder={
-                        instructionAiSearchEnabled
-                          ? "AI search from this document context..."
-                          : "Search part, title, or department..."
-                      }
-                      className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                    />
+                    <div className="relative flex min-w-0 items-center">
+                      <Search
+                        size={15}
+                        className="pointer-events-none absolute left-3 text-slate-400"
+                      />
+                      <input
+                        value={instructionSearchQuery}
+                        onChange={(event) => setInstructionSearchQuery(event.target.value)}
+                        placeholder={
+                          instructionAiSearchEnabled
+                            ? "AI search from this document context..."
+                            : "Search part, title, or department..."
+                        }
+                        className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                      />
+                    </div>
                   </label>
                   {form.relatedInstructionIds.length > 0 ? (
                     <div className="flex flex-wrap gap-1.5">
@@ -2301,38 +2413,6 @@ export function ProcessDocumentsClient({
                 </div>
               </details>
 
-              <details className="rounded-lg border border-slate-300/70 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-900/45">
-                <summary className="cursor-pointer list-none">
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
-                    Header and Footer
-                  </h3>
-                  <p className="text-xs text-slate-600 dark:text-slate-300">
-                    Optional saved revision and export context.
-                  </p>
-                </summary>
-                <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                  <label className="grid gap-1 text-sm">
-                    <span className="font-semibold">Header</span>
-                    <textarea
-                      value={form.documentHeader}
-                      onChange={(event) => updateForm("documentHeader", event.target.value)}
-                      rows={2}
-                      placeholder="Company, document owner, site, confidentiality, or release note"
-                      className="min-w-0 resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                    />
-                  </label>
-                  <label className="grid gap-1 text-sm">
-                    <span className="font-semibold">Footer</span>
-                    <textarea
-                      value={form.documentFooter}
-                      onChange={(event) => updateForm("documentFooter", event.target.value)}
-                      rows={2}
-                      placeholder="Retention rule, approval note, printed-copy warning, or revision reminder"
-                      className="min-w-0 resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                    />
-                  </label>
-                </div>
-              </details>
                 </div>
               </details>
 

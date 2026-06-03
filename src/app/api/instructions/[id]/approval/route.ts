@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
+import { sendNotificationEmailsToUsers } from "@/lib/notification-email.server";
 import { hasFullAccess } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { InstructionApprovalStatus } from "@/lib/types";
@@ -15,6 +16,19 @@ interface InstructionRecord {
   revision: number;
   approval_status: InstructionApprovalStatus | null;
   is_archived: boolean;
+  created_by: string;
+  submitted_by: string | null;
+  updated_by: string;
+  work_items:
+    | {
+        part_id: string;
+        item_title: string;
+      }
+    | Array<{
+        part_id: string;
+        item_title: string;
+      }>
+    | null;
 }
 
 const MAX_APPROVAL_NOTE_LENGTH = 1200;
@@ -25,6 +39,16 @@ function isApprovalDecision(value: unknown): value is "approved" | "rejected" {
 
 function normalizeNote(value: unknown) {
   return typeof value === "string" ? value.trim().slice(0, MAX_APPROVAL_NOTE_LENGTH) : "";
+}
+
+function normalizeWorkItem(
+  relation: InstructionRecord["work_items"],
+) {
+  if (!relation) {
+    return null;
+  }
+
+  return Array.isArray(relation) ? relation[0] ?? null : relation;
 }
 
 export async function PATCH(
@@ -58,7 +82,7 @@ export async function PATCH(
   const supabaseAdmin = getSupabaseAdminClient();
   const { data: instruction, error: instructionError } = await supabaseAdmin
     .from("work_instructions")
-    .select("id, revision, approval_status, is_archived")
+    .select("id, revision, approval_status, is_archived, created_by, submitted_by, updated_by, work_items(part_id, item_title)")
     .eq("id", id)
     .maybeSingle<InstructionRecord>();
 
@@ -139,6 +163,26 @@ export async function PATCH(
       { onConflict: "instruction_id" },
     );
   }
+
+  const decisionLabel = body.status === "approved" ? "approved" : "denied";
+  const workItem = normalizeWorkItem(instruction.work_items);
+  const instructionLabel = workItem
+    ? `${workItem.part_id} | ${workItem.item_title}`
+    : "A work instruction";
+  await sendNotificationEmailsToUsers(supabaseAdmin, {
+    recipientUserIds: [
+      instruction.created_by,
+      instruction.submitted_by ?? "",
+      instruction.updated_by,
+    ],
+    settingKey: "instructionApprovals",
+    title: `Work instruction ${decisionLabel}`,
+    body: `${instructionLabel} was ${decisionLabel} by ${
+      requester.full_name || requester.email
+    }.`,
+    href: `/instructions/${instruction.id}`,
+    actorName: requester.full_name || requester.email,
+  });
 
   return NextResponse.json({ status: body.status });
 }

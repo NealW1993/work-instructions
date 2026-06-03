@@ -83,6 +83,13 @@ interface SavedFormula {
   updatedAt: string;
 }
 
+interface FormulaRevisionHistoryEntry {
+  revision: number;
+  approvalStatus: CustomFormulaApprovalStatus;
+  savedAt: string;
+  name: string;
+}
+
 interface FormulaApiResponse {
   formulas?: SavedFormula[];
   formula?: SavedFormula | null;
@@ -870,6 +877,48 @@ function getSavedFormulaApprovalStatus(formula: SavedFormula | null | undefined)
   return getCustomApprovalStatus(customFormula.approvalStatus);
 }
 
+function getSavedFormulaRevision(formula: SavedFormula | null | undefined) {
+  if (!formula || formula.formulaType !== "custom" || !isRecord(formula.payload)) {
+    return 1;
+  }
+
+  const customFormula = isRecord(formula.payload.customFormula)
+    ? formula.payload.customFormula
+    : {};
+  const revision = typeof customFormula.revision === "number" ? customFormula.revision : 1;
+  return Number.isFinite(revision) && revision > 0 ? Math.floor(revision) : 1;
+}
+
+function getSavedFormulaRevisionHistory(
+  formula: SavedFormula | null | undefined,
+): FormulaRevisionHistoryEntry[] {
+  if (!formula || formula.formulaType !== "custom" || !isRecord(formula.payload)) {
+    return [];
+  }
+
+  const customFormula = isRecord(formula.payload.customFormula)
+    ? formula.payload.customFormula
+    : {};
+  if (!Array.isArray(customFormula.revisionHistory)) {
+    return [];
+  }
+
+  return customFormula.revisionHistory
+    .filter(isRecord)
+    .map((entry) => ({
+      revision: typeof entry.revision === "number" ? Math.max(1, Math.floor(entry.revision)) : 1,
+      approvalStatus: getCustomApprovalStatus(entry.approvalStatus),
+      savedAt:
+        typeof entry.savedAt === "string" && entry.savedAt.trim()
+          ? entry.savedAt
+          : formula.updatedAt,
+      name:
+        typeof entry.name === "string" && entry.name.trim()
+          ? entry.name.trim()
+          : formula.name,
+    }));
+}
+
 const CUSTOM_FORMULA_HELPERS: Record<string, (...values: number[]) => number> = {
   abs: Math.abs,
   acos: Math.acos,
@@ -1093,6 +1142,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
   const [formulaName, setFormulaName] = useState("OEE calculator");
   const [savedFormulas, setSavedFormulas] = useState<SavedFormula[]>([]);
   const [selectedFormulaId, setSelectedFormulaId] = useState("");
+  const [formulaEditMode, setFormulaEditMode] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [savedFormulaFilter, setSavedFormulaFilter] = useState<
     "all" | "system" | "custom" | "drafts" | "pending"
@@ -1181,6 +1231,13 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
       (canApproveCustomFormulas ||
         (currentUserId && selectedFormula.ownerUserId === currentUserId)),
   );
+  const savedFormulaIsLocked = Boolean(selectedFormula && !formulaEditMode);
+  const formulaEditingEnabled = !savedFormulaIsLocked;
+  const formulaControlsDisabled = libraryBusy || !formulaEditingEnabled;
+  const isEditingSelectedCustomFormula = Boolean(
+    selectedFormula?.formulaType === "custom" && formulaEditMode && canModifySelectedFormula,
+  );
+  const selectedCustomRevision = getSavedFormulaRevision(selectedFormula);
   const filteredSavedFormulas = useMemo(
     () =>
       savedFormulas.filter((formula) => {
@@ -1575,7 +1632,14 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
     }
   }
 
-  function buildFormulaPayload(customApprovalStatus: CustomFormulaApprovalStatus = "draft") {
+  function buildFormulaPayload(
+    customApprovalStatus: CustomFormulaApprovalStatus = "draft",
+    revisionOptions: {
+      revision?: number;
+      revisionHistory?: FormulaRevisionHistoryEntry[];
+    } = {},
+  ) {
+    const revision = revisionOptions.revision ?? getSavedFormulaRevision(selectedFormula);
     return {
       version: 2,
       oeeGroups,
@@ -1610,6 +1674,9 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
           name: normalizeCustomVariableName(output.name, `output_${index + 1}`),
         })),
         approvalStatus: customApprovalStatus,
+        revision,
+        revisionHistory: revisionOptions.revisionHistory ?? getSavedFormulaRevisionHistory(selectedFormula),
+        revisionSavedAt: new Date().toISOString(),
       },
     };
   }
@@ -1619,6 +1686,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
     setFormulaName(DEFAULT_FORMULA_NAMES[tab]);
     setActiveTab(tab);
     resetFormulaInputs(tab);
+    setFormulaEditMode(true);
     setLibraryError(null);
     setLibraryMessage(`Loaded ${DEFAULT_FORMULA_NAMES[tab]}.`);
   }
@@ -1743,12 +1811,36 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
     }
     setLibraryError(null);
     setLibraryMessage(`Loaded ${formula.name}.`);
+    setFormulaEditMode(false);
+  }
+
+  function buildRevisionHistoryForEdit(formula: SavedFormula) {
+    const previousRevision = getSavedFormulaRevision(formula);
+    const previousStatus = getSavedFormulaApprovalStatus(formula) ?? "draft";
+    const previousHistory = getSavedFormulaRevisionHistory(formula).filter(
+      (entry) => entry.revision !== previousRevision,
+    );
+
+    return [
+      ...previousHistory,
+      {
+        revision: previousRevision,
+        approvalStatus: previousStatus,
+        savedAt: formula.updatedAt,
+        name: formula.name,
+      },
+    ].slice(-24);
   }
 
   async function saveFormula() {
     const normalizedName = formulaName.trim();
     if (!normalizedName) {
       setLibraryError("Formula name is required.");
+      return;
+    }
+
+    if (!formulaEditingEnabled) {
+      setLibraryError("Select Edit Formula before saving changes.");
       return;
     }
 
@@ -1762,6 +1854,27 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
       const selectedId = selectedSystemTab ? "" : selectedFormulaId.trim();
       const existingId =
         selectedId && (activeTab !== "custom" || canModifySelectedFormula) ? selectedId : "";
+      const saveAsRevision = Boolean(
+        activeTab === "custom" && existingId && selectedFormula && formulaEditMode,
+      );
+      const revisionOptions =
+        saveAsRevision && selectedFormula
+          ? {
+              revision: getSavedFormulaRevision(selectedFormula) + 1,
+              revisionHistory: buildRevisionHistoryForEdit(selectedFormula),
+            }
+          : {
+              revision: selectedFormula ? getSavedFormulaRevision(selectedFormula) : 1,
+              revisionHistory: selectedFormula
+                ? getSavedFormulaRevisionHistory(selectedFormula)
+                : [],
+            };
+      const nextApprovalStatus =
+        activeTab === "custom"
+          ? saveAsRevision
+            ? "pending_review"
+            : "draft"
+          : getSavedFormulaApprovalStatus(selectedFormula) ?? "approved";
       const response = await fetch(
         existingId ? `/api/process-maps/formulas/${existingId}` : "/api/process-maps/formulas",
         {
@@ -1773,11 +1886,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
           body: JSON.stringify({
             name: normalizedName,
             formulaType: activeTab,
-            payload: buildFormulaPayload(
-              activeTab === "custom"
-                ? "draft"
-                : getSavedFormulaApprovalStatus(selectedFormula) ?? "approved",
-            ),
+            payload: buildFormulaPayload(nextApprovalStatus, revisionOptions),
           }),
         },
       );
@@ -1793,7 +1902,14 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
         const others = current.filter((entry) => entry.id !== payload.formula?.id);
         return [payload.formula as SavedFormula, ...others];
       });
-      setLibraryMessage(activeTab === "custom" ? "Formula draft saved." : "Formula saved.");
+      setFormulaEditMode(false);
+      setLibraryMessage(
+        saveAsRevision
+          ? "Formula revision saved for manager approval."
+          : activeTab === "custom"
+            ? "Formula draft saved."
+            : "Formula saved.",
+      );
     } catch (caughtError) {
       setLibraryError(caughtError instanceof Error ? caughtError.message : "Unable to save formula.");
     } finally {
@@ -1847,6 +1963,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
         const others = current.filter((entry) => entry.id !== payload.formula?.id);
         return [payload.formula as SavedFormula, ...others];
       });
+      setFormulaEditMode(false);
       setLibraryMessage("Formula published for manager approval.");
     } catch (caughtError) {
       setLibraryError(
@@ -1891,6 +2008,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
         const others = current.filter((entry) => entry.id !== payload.formula?.id);
         return [payload.formula as SavedFormula, ...others];
       });
+      setFormulaEditMode(false);
       setLibraryMessage(status === "approved" ? "Formula draft approved." : "Formula draft rejected.");
     } catch (caughtError) {
       setLibraryError(
@@ -1928,6 +2046,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
       setSavedFormulas((current) => current.filter((entry) => entry.id !== existingId));
       setSelectedFormulaId("");
       setFormulaName(DEFAULT_FORMULA_NAMES[activeTab]);
+      setFormulaEditMode(true);
       setLibraryMessage("Formula deleted.");
     } catch (caughtError) {
       setLibraryError(
@@ -1982,6 +2101,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
     setFormulaName(DEFAULT_FORMULA_NAMES[tab]);
     setActiveTab(tab);
     resetFormulaInputs(tab);
+    setFormulaEditMode(true);
     setLibraryMessage(`New ${DEFAULT_FORMULA_NAMES[tab]} started.`);
     setLibraryError(null);
   }
@@ -1995,6 +2115,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
     setActiveTab(tab);
     setSelectedFormulaId("");
     setFormulaName(DEFAULT_FORMULA_NAMES[tab]);
+    setFormulaEditMode(true);
   }
 
   function exportOeeCsv() {
@@ -2456,24 +2577,31 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
             <input
               value={formulaName}
               onChange={(event) => setFormulaName(event.target.value)}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+              disabled={formulaControlsDisabled}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:disabled:bg-slate-900"
             />
           </label>
           <div className="flex flex-wrap items-end gap-2">
-            <button
-              type="button"
-              onClick={() => void saveFormula()}
-              disabled={libraryBusy}
-              className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/45 bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-emerald-200"
-            >
-              {libraryBusy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              {activeTab === "custom" ? "Save Draft" : "Save"}
-            </button>
-            {activeTab === "custom" ? (
+            {formulaEditingEnabled ? (
+              <button
+                type="button"
+                onClick={() => void saveFormula()}
+                disabled={formulaControlsDisabled}
+                className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/45 bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-emerald-200"
+              >
+                {libraryBusy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                {isEditingSelectedCustomFormula
+                  ? "Save Revision"
+                  : activeTab === "custom"
+                    ? "Save Draft"
+                    : "Save"}
+              </button>
+            ) : null}
+            {activeTab === "custom" && formulaEditingEnabled && !isEditingSelectedCustomFormula ? (
               <button
                 type="button"
                 onClick={() => void publishFormulaForReview()}
-                disabled={libraryBusy}
+                disabled={formulaControlsDisabled}
                 className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-100"
               >
                 {libraryBusy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
@@ -2543,6 +2671,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
                   applySavedFormula(formula);
                 } else {
                   setSelectedFormulaId("");
+                  setFormulaEditMode(true);
                 }
               }}
               className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
@@ -2582,6 +2711,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-300/70 bg-slate-50 px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900/50">
               <span className="font-semibold text-slate-600 dark:text-slate-300">
                 Status: {(selectedCustomApprovalStatus ?? "draft").replace("_", " ")}
+                {selectedFormula ? ` | Rev ${selectedCustomRevision}` : ""}
               </span>
               <div className="flex flex-wrap gap-2">
                 {selectedFormula?.formulaType === "custom" ? (
@@ -2590,21 +2720,30 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
                     onClick={() => {
                       setActiveTab("custom");
                       if (canModifySelectedFormula) {
-                        setLibraryMessage(`Editing ${selectedFormula.name}.`);
+                        setFormulaEditMode(true);
+                        setLibraryMessage(
+                          `Editing ${selectedFormula.name}. Saving will create rev ${
+                            selectedCustomRevision + 1
+                          } for approval.`,
+                        );
                         return;
                       }
 
                       setSelectedFormulaId("");
                       setFormulaName(`${selectedFormula.name} copy`);
+                      setFormulaEditMode(true);
                       setLibraryMessage(`Editing a draft copy of ${selectedFormula.name}.`);
                     }}
-                    className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-1 font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                    disabled={libraryBusy || (canModifySelectedFormula && formulaEditMode)}
+                    className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-1 font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-55 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
                   >
                     <PencilLine size={12} />
                     Edit Formula
                   </button>
                 ) : null}
-                {selectedCustomApprovalStatus !== "pending_review" ? (
+                {selectedFormula &&
+                selectedCustomApprovalStatus !== "pending_review" &&
+                selectedCustomApprovalStatus !== "approved" ? (
                   <button
                     type="button"
                     onClick={() => void publishFormulaForReview()}
@@ -2643,6 +2782,13 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
         </div>
       </section>
 
+      {!formulaEditingEnabled ? (
+        <div className="rounded-xl border border-amber-500/35 bg-amber-500/10 px-4 py-3 text-sm font-semibold text-amber-900 dark:text-amber-100">
+          This saved formula is locked. Select Edit Formula to make changes; saving edits creates a
+          new revision that must be approved.
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-300/70 bg-white/90 p-2 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
         {(
           [
@@ -2674,6 +2820,13 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
 
       <FormulaGuidePanel guide={FORMULA_GUIDES[activeTab]} />
 
+      <fieldset
+        disabled={formulaControlsDisabled}
+        className={cn(
+          "m-0 grid gap-4 border-0 p-0",
+          formulaControlsDisabled ? "opacity-70" : "",
+        )}
+      >
       {activeTab === "oee" ? (
         <section className="grid gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -3228,6 +3381,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
           {renderActiveFormulaChart()}
         </section>
       ) : null}
+      </fieldset>
     </div>
   );
 }

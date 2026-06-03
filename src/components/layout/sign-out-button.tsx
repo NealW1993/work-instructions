@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { usePostHog } from "posthog-js/react";
 
 import { clearSessionStart, getSessionStartTime } from "@/lib/session-timer";
+import { clearBrowserExitSignOutPending } from "@/lib/session-exit";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { persistActiveThemePreference } from "@/lib/theme-client";
 
@@ -14,6 +15,9 @@ export function SignOutButton() {
 
   async function handleSignOut() {
     const supabase = getSupabaseBrowserClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     const sessionStartedAtMs = getSessionStartTime();
     const clientElapsedSeconds =
       sessionStartedAtMs !== null
@@ -48,6 +52,9 @@ export function SignOutButton() {
 
     await supabase.auth.signOut();
     clearSessionStart();
+    if (user?.id) {
+      clearBrowserExitSignOutPending(user.id);
+    }
     posthog?.reset();
     persistActiveThemePreference();
     router.push("/login");
