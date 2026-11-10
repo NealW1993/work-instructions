@@ -6,6 +6,7 @@ const configDirectory = path.dirname(fileURLToPath(import.meta.url));
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  distDir: process.env.NEXT_BUILD_DIR || ".next",
   turbopack: {
     root: configDirectory,
   },

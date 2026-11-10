@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
-import { hasFullAccess } from "@/lib/roles";
+import { ACCOUNT_MANAGEMENT_DENIED, canManageAccounts } from "@/lib/user-management";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import { authorizeAccountChange } from "@/lib/user-management.server";
 
 export async function DELETE(
   request: NextRequest,
@@ -15,9 +16,9 @@ export async function DELETE(
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  if (!hasFullAccess(requester.role)) {
+  if (!canManageAccounts(requester.role)) {
     return NextResponse.json(
-      { error: "Admin privileges required." },
+      { error: ACCOUNT_MANAGEMENT_DENIED },
       { status: 403 },
     );
   }
@@ -31,19 +32,11 @@ export async function DELETE(
     );
   }
 
-  const { data: targetProfile, error: targetProfileError } = await supabaseAdmin
-    .from("profiles")
-    .select("id, role")
-    .eq("id", id)
-    .maybeSingle<{ id: string; role: "system_admin" | "admin" | "user" }>();
-
-  if (targetProfileError) {
-    return NextResponse.json({ error: targetProfileError.message }, { status: 500 });
+  const authorization = await authorizeAccountChange(requester.role, id);
+  if (authorization.response) {
+    return authorization.response;
   }
-
-  if (!targetProfile) {
-    return NextResponse.json({ error: "User not found." }, { status: 404 });
-  }
+  const targetProfile = authorization.target;
 
   if (targetProfile.role === "system_admin") {
     const { count, error: adminCountError } = await supabaseAdmin
@@ -70,6 +63,13 @@ export async function DELETE(
     const normalizedErrorMessage = deleteError.message.toLowerCase();
     if (normalizedErrorMessage.includes("not found")) {
       return NextResponse.json({ error: "User not found." }, { status: 404 });
+    }
+    // Controlled records (revisions, approvals, audit events) keep a reference to their author.
+    if (normalizedErrorMessage.includes("foreign key") || normalizedErrorMessage.includes("database error")) {
+      return NextResponse.json(
+        { error: "This user has instruction or document history that must be retained, so the account cannot be deleted. Deactivate it instead." },
+        { status: 409 },
+      );
     }
 
     return NextResponse.json({ error: deleteError.message }, { status: 500 });

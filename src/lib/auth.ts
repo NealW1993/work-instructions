@@ -68,7 +68,7 @@ export async function getCurrentUserWithProfile() {
   );
   const profile = profileResult.data;
 
-  return { supabase, user, profile: profile ?? null };
+  return { supabase, user, profile: profile?.is_active ? profile : null };
 }
 
 export async function requireAuthenticatedUser() {

@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
 import { getRequestProfile } from "@/lib/api-auth";
+import { type AiConfig, getAiConfig, requestStructuredJson } from "@/lib/ai-provider.server";
 import {
   getDashboardAiSearchEnabled,
   normalizeOpenAiTokenUsage,
   recordAiUsageEvent,
-  type OpenAiTokenUsage,
 } from "@/lib/ai-usage";
 import { serverEnv } from "@/lib/env.server";
 import {
@@ -14,9 +15,9 @@ import {
   getProcessDocumentStatusLabel,
   getProcessDocumentTypeLabel,
 } from "@/lib/process-documents";
-import { canEditInstructions } from "@/lib/roles";
-import { extractTextFromHtml } from "@/lib/rich-text.server";
+import { extractTextFromContent } from "@/lib/rich-text.server";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import { readAllRows } from "@/lib/supabase/read-all-rows";
 
 interface AiSearchRequestBody {
   query?: unknown;
@@ -88,18 +89,6 @@ interface OpenAIRankedResult {
   type?: "instruction" | "process_document";
   score?: number;
   reason?: string;
-}
-
-interface OpenAICompletionResponse {
-  choices?: Array<{
-    message?: {
-      content?: string | null;
-    };
-  }>;
-  usage?: OpenAiTokenUsage;
-  error?: {
-    message?: string;
-  };
 }
 
 const MAX_QUERY_LENGTH = 240;
@@ -240,68 +229,47 @@ function parseOpenAIRanking(rawContent: string): OpenAIRankedResult[] {
   }
 }
 
-async function rankWithOpenAI(query: string, candidates: RankedCandidate[]) {
-  const openAiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${serverEnv.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: serverEnv.OPENAI_SEARCH_MODEL,
-      temperature: 0.1,
-      messages: [
-        {
-          role: "system",
-          content: buildOpenAISystemPrompt(),
-        },
-        {
-          role: "user",
-          content: buildOpenAIUserPrompt(query, candidates),
-        },
-      ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "document_search_results",
-          schema: {
+async function rankWithAi(aiConfig: AiConfig, query: string, candidates: RankedCandidate[]) {
+  const result = await requestStructuredJson(aiConfig, {
+    system: buildOpenAISystemPrompt(),
+    user: buildOpenAIUserPrompt(query, candidates),
+    schemaName: "document_search_results",
+    schema: {
+      type: "object",
+      properties: {
+        results: {
+          type: "array",
+          items: {
             type: "object",
             properties: {
-              results: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    id: { type: "string" },
-                    type: {
-                      type: "string",
-                      enum: ["instruction", "process_document"],
-                    },
-                    score: { type: "number" },
-                    reason: { type: "string" },
-                  },
-                  required: ["id", "type", "score", "reason"],
-                  additionalProperties: false,
-                },
+              id: { type: "string" },
+              type: {
+                type: "string",
+                enum: ["instruction", "process_document"],
               },
+              score: { type: "number" },
+              reason: { type: "string" },
             },
-            required: ["results"],
+            required: ["id", "type", "score", "reason"],
             additionalProperties: false,
           },
         },
       },
-    }),
+      required: ["results"],
+      additionalProperties: false,
+    },
+    temperature: 0.1,
+    maxTokens: 4096,
   });
 
-  const payload = (await openAiResponse.json().catch(() => ({}))) as OpenAICompletionResponse;
-
-  if (!openAiResponse.ok) {
-    throw new Error(payload.error?.message ?? "AI search ranking failed.");
+  if (!result.ok) {
+    throw new Error(result.error);
   }
 
   return {
-    ranking: parseOpenAIRanking(payload.choices?.[0]?.message?.content ?? ""),
-    usage: payload.usage ?? null,
+    ranking: parseOpenAIRanking(result.content),
+    usage: result.usage,
+    model: result.model,
   };
 }
 
@@ -313,8 +281,8 @@ export async function POST(request: NextRequest) {
   }
 
   const requestBody = (await request.json().catch(() => ({}))) as AiSearchRequestBody;
-  const query = normalizeString(requestBody.query);
-  const departmentId = normalizeDepartmentId(requestBody.departmentId);
+  const query = normalizeString(requestBody?.query);
+  const departmentId = normalizeDepartmentId(requestBody?.departmentId);
 
   if (query.length < 2) {
     return NextResponse.json(
@@ -324,34 +292,41 @@ export async function POST(request: NextRequest) {
   }
 
   const supabaseAdmin = getSupabaseAdminClient();
-  const canSeeDraftDocuments = canEditInstructions(requester.role);
+  // Search has the same row-level visibility as opening a document. Never pass
+  // unreleased or group-restricted text into a ranking model via the service role.
+  const scopedClient = createClient(
+    serverEnv.SUPABASE_URL_INTERNAL || serverEnv.NEXT_PUBLIC_SUPABASE_URL,
+    serverEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    {
+      global: { headers: { Authorization: request.headers.get("authorization") ?? "" } },
+      auth: { autoRefreshToken: false, persistSession: false },
+    },
+  );
   const dashboardAiSearchEnabled = await getDashboardAiSearchEnabled(supabaseAdmin);
 
   const [
     { data: instructionRows, error: instructionError },
     { data: documentRows, error: documentError },
   ] = await Promise.all([
-    supabaseAdmin
+    readAllRows((from, to) => scopedClient
       .from("work_instructions")
       .select(
         "id, revision, body_markdown, notes_markdown, updated_at, work_items(department_id, part_id, item_title, departments(name))",
       )
       .eq("is_archived", false)
-      .order("updated_at", { ascending: false })
-      .range(0, 499),
-    supabaseAdmin
-      .from("process_documents")
+      .order("id", { ascending: true })
+      .range(from, to)),
+    readAllRows<ProcessDocumentRow>(async (from, to) => {
+      const response = await supabaseAdmin
+      .rpc("list_process_documents_controlled", { p_actor_user_id: requester.id })
       .select(
         "id, document_number, title, document_type, status, department_id, process_name, process_scope, process_inputs, process_outputs, process_risks, process_controls, iso_clause_refs, current_revision, updated_at, departments(name)",
       )
-      .in(
-        "status",
-        canSeeDraftDocuments
-          ? ["draft", "in_review", "approved", "obsolete"]
-          : ["approved"],
-      )
-      .order("updated_at", { ascending: false })
-      .range(0, 499),
+      .neq("status", "obsolete")
+      .order("id", { ascending: true })
+      .range(from, to);
+      return { data: response.data as unknown as ProcessDocumentRow[] | null, error: response.error };
+    }),
   ]);
 
   if (instructionError) {
@@ -364,25 +339,24 @@ export async function POST(request: NextRequest) {
 
   const processDocuments = (documentRows ?? []) as ProcessDocumentRow[];
   const processDocumentIds = processDocuments.map((document) => document.id);
-  const { data: revisionRows } =
-    processDocumentIds.length > 0
-      ? await supabaseAdmin
-          .from("process_document_revisions")
-          .select("document_id, revision, body_html")
-          .in("document_id", processDocumentIds)
-          .order("revision", { ascending: false })
-      : { data: [] };
+  const visibleRevisionByDocumentId = new Map(processDocuments.map((document) => [document.id, document.current_revision]));
   const latestRevisionTextByDocumentId = new Map<string, string>();
-
-  for (const revision of (revisionRows ?? []) as ProcessDocumentRevisionRow[]) {
-    if (latestRevisionTextByDocumentId.has(revision.document_id)) {
-      continue;
+  for (let offset = 0; offset < processDocumentIds.length; offset += 100) {
+    const ids = processDocumentIds.slice(offset, offset + 100);
+    const { data: revisionRows, error: revisionError } = await readAllRows((from, to) => scopedClient
+      .from("process_document_revisions")
+      .select("document_id, revision, body_html")
+      .in("document_id", ids)
+      .order("document_id", { ascending: true })
+      .order("revision", { ascending: true })
+      .range(from, to));
+    if (revisionError) {
+      return NextResponse.json({ error: "Unable to read controlled revision content." }, { status: 500 });
     }
-
-    latestRevisionTextByDocumentId.set(
-      revision.document_id,
-      extractTextFromHtml(revision.body_html ?? ""),
-    );
+    for (const revision of (revisionRows ?? []) as ProcessDocumentRevisionRow[]) {
+      if (revision.revision !== visibleRevisionByDocumentId.get(revision.document_id)) continue;
+      latestRevisionTextByDocumentId.set(revision.document_id, extractTextFromContent(revision.body_html ?? ""));
+    }
   }
 
   const candidates: Array<Omit<RankedCandidate, "score" | "reason">> = [];
@@ -399,9 +373,7 @@ export async function POST(request: NextRequest) {
       continue;
     }
 
-    const bodyText = extractTextFromHtml(
-      `${instruction.body_markdown ?? ""} ${instruction.notes_markdown ?? ""}`,
-    );
+    const bodyText = `${extractTextFromContent(instruction.body_markdown ?? "")} ${extractTextFromContent(instruction.notes_markdown ?? "")}`.trim();
     const title = workItem.item_title || "Untitled Work Instruction";
     const subtitle = `${workItem.part_id || "N/A"} | ${department?.name ?? "Unknown"} | Rev ${
       instruction.revision
@@ -458,16 +430,19 @@ export async function POST(request: NextRequest) {
   let mode: "ai" | "lexical" = "lexical";
   let warning: string | null = null;
   let tokenUsage = normalizeOpenAiTokenUsage(null);
+  let aiModel = "";
+  const aiConfig = await getAiConfig("search");
 
-  if (dashboardAiSearchEnabled && serverEnv.OPENAI_API_KEY && lexicalCandidates.length > 0) {
+  if (dashboardAiSearchEnabled && aiConfig && lexicalCandidates.length > 0) {
     try {
       const candidatesForAi = lexicalCandidates.slice(0, MAX_CANDIDATES_FOR_AI);
       const candidateByKey = new Map(
         candidatesForAi.map((candidate) => [`${candidate.type}:${candidate.id}`, candidate]),
       );
-      const aiResult = await rankWithOpenAI(query, candidatesForAi);
+      const aiResult = await rankWithAi(aiConfig, query, candidatesForAi);
       const aiRanking = aiResult.ranking;
       tokenUsage = normalizeOpenAiTokenUsage(aiResult.usage);
+      aiModel = aiResult.model;
       const rankedByAi = aiRanking
         .map((rankedResult) => {
           const candidate = candidateByKey.get(`${rankedResult.type}:${rankedResult.id}`);
@@ -516,7 +491,7 @@ export async function POST(request: NextRequest) {
     feature: "dashboard_search",
     action: "query",
     mode,
-    model: mode === "ai" ? serverEnv.OPENAI_SEARCH_MODEL : "",
+    model: mode === "ai" ? aiModel : "",
     tokenInput: tokenUsage.tokenInput,
     tokenOutput: tokenUsage.tokenOutput,
     tokenTotal: tokenUsage.tokenTotal,
@@ -526,7 +501,8 @@ export async function POST(request: NextRequest) {
       resultCount: results.length,
       candidateCount: candidates.length,
       searchEventId: insertedSearchEvent?.id ?? null,
-      openAiConfigured: Boolean(serverEnv.OPENAI_API_KEY),
+      openAiConfigured: Boolean(aiConfig),
+      aiProvider: aiConfig?.provider ?? null,
       dashboardAiSearchEnabled,
     },
     createdAt: insertedSearchEvent?.created_at,
@@ -535,7 +511,7 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     mode,
     warning,
-    openAiConfigured: Boolean(serverEnv.OPENAI_API_KEY),
+    openAiConfigured: Boolean(aiConfig),
     dashboardAiSearchEnabled,
     results: results.map((result) => ({
       id: result.id,

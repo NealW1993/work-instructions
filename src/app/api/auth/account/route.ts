@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
+import { serverEnv } from "@/lib/env.server";
 import { normalizeNotificationSettings } from "@/lib/notification-settings";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { Profile, ThemePreference } from "@/lib/types";
@@ -107,6 +108,13 @@ export async function PATCH(request: NextRequest) {
 
     if (!EMAIL_PATTERN.test(normalizedEmail)) {
       return NextResponse.json({ error: "Enter a valid email." }, { status: 400 });
+    }
+    if (normalizedEmail !== requester.email.trim().toLowerCase() &&
+        normalizedEmail === serverEnv.SYSTEM_ADMIN_EMAIL.trim().toLowerCase()) {
+      return NextResponse.json(
+        { error: "The configured administrator email can only be assigned by a trusted system administrator." },
+        { status: 403 },
+      );
     }
   }
 

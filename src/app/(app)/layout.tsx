@@ -13,7 +13,8 @@ export default async function AppLayout({
   const { profile } = await requireAuthenticatedUser();
 
   return (
-    <div className="min-h-screen overflow-x-hidden">
+    <div className="app-workspace min-h-screen">
+      <a href="#main-content" className="skip-to-content">Skip to main content</a>
       <PostHogIdentify
         id={profile.id}
         email={profile.email}
@@ -27,7 +28,7 @@ export default async function AppLayout({
       />
       <PostLoginScrollRestore />
       <AppHeader profile={profile} />
-      <main className="mx-auto w-full min-w-0 max-w-7xl px-4 py-6 md:px-8 md:py-8">
+      <main id="main-content" tabIndex={-1} className="mx-auto w-full min-w-0 max-w-[1600px] px-4 py-6 outline-none md:px-8 md:py-8">
         {children}
       </main>
     </div>

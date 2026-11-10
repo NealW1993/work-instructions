@@ -10,6 +10,8 @@ import type {
   ProcessDocumentTemplateItem,
 } from "@/components/process-documents/process-documents-client";
 import { requireAuthenticatedUser } from "@/lib/auth";
+import { readAllRows } from "@/lib/supabase/read-all-rows";
+import { sanitizeRichHtml } from "@/lib/rich-text.server";
 import type {
   ProcessDocumentStatus,
   ProcessDocumentType,
@@ -29,6 +31,8 @@ interface ProcessDocumentsPageProps {
 
 interface ProcessDocumentRow {
   id: string;
+  released_revision: number | null;
+  released_snapshot: Record<string, unknown> | null;
   document_number: string;
   title: string;
   document_type: ProcessDocumentType;
@@ -36,6 +40,8 @@ interface ProcessDocumentRow {
   department_id: string | null;
   owner_user_id: string | null;
   process_name: string | null;
+  process_purpose: string | null;
+  process_map_payload: Record<string, unknown> | null;
   process_scope: string | null;
   process_inputs: string | null;
   process_outputs: string | null;
@@ -74,6 +80,7 @@ interface ProcessDocumentRevisionRow {
   approved_by: string | null;
   approved_at: string | null;
   created_at: string;
+  metadata_snapshot: Record<string, unknown> | null;
 }
 
 interface ProcessDocumentImportFileRow {
@@ -160,68 +167,87 @@ export default async function ProcessDocumentsPage({
   const canApprove = canApproveControlledDocuments(profile.role);
 
   const [
-    { data: documentRows },
-    { data: revisionRows },
-    { data: importFileRows },
-    { data: auditRows },
-    { data: templateRows },
-    { data: departmentRows },
-    { data: profileRows },
-    { data: instructionRows },
-    { data: accessGroupRows },
-    { data: documentGroupAccessRows },
+    { data: documentRows, error: documentError },
+    { data: revisionRows, error: revisionError },
+    { data: importFileRows, error: importFileError },
+    { data: auditRows, error: auditError },
+    { data: templateRows, error: templateError },
+    { data: departmentRows, error: departmentError },
+    { data: profileRows, error: profileError },
+    { data: instructionRows, error: instructionError },
+    { data: accessGroupRows, error: accessGroupError },
+    { data: documentGroupAccessRows, error: documentGroupAccessError },
   ] = await Promise.all([
-    supabase
-      .from("process_documents")
+    readAllRows<ProcessDocumentRow>((from, to) => supabase
+      .rpc("list_process_documents_controlled")
       .select("*")
       .order("updated_at", { ascending: false })
-      .range(0, 999),
-    supabase
+      .order("id", { ascending: true })
+      .range(from, to)),
+    readAllRows<ProcessDocumentRevisionRow>((from, to) => supabase
       .from("process_document_revisions")
       .select("*")
       .order("revision", { ascending: false })
-      .range(0, 2999),
-    supabase
+      .order("id", { ascending: true })
+      .range(from, to)),
+    readAllRows<ProcessDocumentImportFileRow>((from, to) => supabase
       .from("process_document_import_files")
       .select("id, revision_id, file_sha256")
       .order("created_at", { ascending: false })
-      .range(0, 2999),
-    supabase
+      .order("id", { ascending: true })
+      .range(from, to)),
+    readAllRows<ProcessDocumentAuditRow>((from, to) => supabase
       .from("process_document_audit_events")
       .select("*")
       .order("occurred_at", { ascending: false })
-      .range(0, 3999),
-    supabase
+      .order("id", { ascending: true })
+      .range(from, to)),
+    readAllRows<ProcessDocumentTemplateRow>((from, to) => supabase
       .from("process_document_templates")
       .select("id, slug, name, document_type, description, body_html")
       .eq("is_active", true)
-      .order("sort_order", { ascending: true }),
-    supabase
+      .order("sort_order", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to)),
+    readAllRows<DepartmentRow>((from, to) => supabase
       .from("departments")
       .select("id, name, color_hex")
       .order("sort_order", { ascending: true })
-      .order("name", { ascending: true }),
-    supabase
+      .order("name", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to)),
+    readAllRows<ProfileRow>((from, to) => supabase
       .from("profiles")
       .select("id, full_name, email")
       .eq("is_active", true)
-      .order("full_name", { ascending: true }),
-    supabase
+      .order("full_name", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to)),
+    readAllRows<InstructionOptionRow>((from, to) => supabase
       .from("work_instructions")
       .select("id, revision, work_items(part_id, item_title, departments(name))")
       .eq("is_archived", false)
       .order("updated_at", { ascending: false })
-      .range(0, 499),
-    supabase
+      .order("id", { ascending: true })
+      .range(from, to)),
+    readAllRows<AccessGroupRow>((from, to) => supabase
       .from("access_groups")
       .select("id, name, slug")
       .eq("is_active", true)
-      .order("name", { ascending: true }),
-    supabase
+      .order("name", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to)),
+    readAllRows<ProcessDocumentGroupAccessRow>((from, to) => supabase
       .from("process_document_group_access")
       .select("document_id, group_id")
-      .range(0, 9999),
+      .order("document_id", { ascending: true })
+      .order("group_id", { ascending: true })
+      .range(from, to)),
   ]);
+
+  if ([documentError, revisionError, importFileError, auditError, templateError, departmentError, profileError, instructionError, accessGroupError, documentGroupAccessError].some(Boolean)) {
+    throw new Error("Controlled document records could not be loaded. Refresh the page or contact your administrator.");
+  }
 
   const departments = ((departmentRows ?? []) as DepartmentRow[]).map(
     (department): ProcessDocumentDepartmentOption => ({
@@ -272,10 +298,14 @@ export default async function ProcessDocumentsPage({
       const department = document.department_id
         ? departmentById.get(document.department_id) ?? null
         : null;
-      const accessGroupIds = groupIdsByDocumentId.get(document.id) ?? [];
+      const releasedGroups = document.released_snapshot?.access_group_ids;
+      const accessGroupIds = document.status === "approved" && Array.isArray(releasedGroups)
+        ? releasedGroups.filter((id): id is string => typeof id === "string")
+        : groupIdsByDocumentId.get(document.id) ?? [];
 
       return {
         id: document.id,
+        released_revision: document.released_revision,
         document_number: document.document_number,
         title: document.title,
         document_type: document.document_type,
@@ -283,6 +313,8 @@ export default async function ProcessDocumentsPage({
         department_id: document.department_id,
         owner_user_id: document.owner_user_id,
         process_name: document.process_name ?? "",
+        process_purpose: document.process_purpose ?? "",
+        process_map_payload: document.process_map_payload ?? {},
         process_scope: document.process_scope ?? "",
         process_inputs: document.process_inputs ?? "",
         process_outputs: document.process_outputs ?? "",
@@ -329,7 +361,7 @@ export default async function ProcessDocumentsPage({
         document_id: revision.document_id,
         revision: revision.revision,
         title: revision.title,
-        body_html: revision.body_html,
+        body_html: sanitizeRichHtml(revision.body_html),
         change_summary: revision.change_summary ?? "",
         source_type: revision.source_type,
         template_id: revision.template_id,
@@ -346,6 +378,7 @@ export default async function ProcessDocumentsPage({
           : null,
         import_file_id: importFile?.id ?? null,
         import_file_sha256: importFile?.file_sha256 ?? "",
+        metadata_snapshot: revision.metadata_snapshot ?? {},
       };
     },
   );
@@ -372,7 +405,7 @@ export default async function ProcessDocumentsPage({
       name: template.name,
       document_type: template.document_type,
       description: template.description ?? "",
-      body_html: template.body_html,
+      body_html: sanitizeRichHtml(template.body_html),
     }),
   );
 

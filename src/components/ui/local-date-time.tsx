@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useHydrated } from "@/lib/use-hydrated";
 
 interface LocalDateTimeProps {
   value: string | Date;
@@ -44,11 +44,8 @@ export function LocalDateTime({
   className,
   fallback = "--",
 }: LocalDateTimeProps) {
-  const [formatted, setFormatted] = useState("");
-
-  useEffect(() => {
-    setFormatted(formatLocalValue(value, mode));
-  }, [value, mode]);
+  const hydrated = useHydrated();
+  const formatted = hydrated ? formatLocalValue(value, mode) : "";
 
   const parsed = parseDate(value);
   const isoValue = parsed ? parsed.toISOString() : undefined;

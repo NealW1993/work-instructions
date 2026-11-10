@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 interface InstructionApprovalControlsProps {
   instructionId: string;
   initialStatus: InstructionApprovalStatus;
+  expectedUpdatedAt: string;
   canApprove: boolean;
   className?: string;
 }
@@ -46,24 +47,32 @@ function statusTone(status: InstructionApprovalStatus) {
 export function InstructionApprovalControls({
   instructionId,
   initialStatus,
+  expectedUpdatedAt,
   canApprove,
   className,
 }: InstructionApprovalControlsProps) {
   const router = useRouter();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
-  const [status, setStatus] = useState<InstructionApprovalStatus>(initialStatus);
+  const [decision, setDecision] = useState<{ version: string; status: InstructionApprovalStatus } | null>(null);
+  const status = decision?.version === expectedUpdatedAt ? decision.status : initialStatus;
   const [busyStatus, setBusyStatus] = useState<InstructionApprovalStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function updateApproval(nextStatus: "approved" | "rejected") {
-    if (!canApprove || busyStatus) {
+    if (!canApprove || busyStatus || status !== "pending_review") {
       return;
     }
 
-    const note =
+    const enteredNote =
       nextStatus === "rejected"
-        ? window.prompt("Reason for rejection or requested change?")?.trim() ?? ""
+        ? window.prompt("Reason for rejection or requested change?")
         : "";
+    if (enteredNote === null) return;
+    const note = enteredNote.trim();
+    if (nextStatus === "rejected" && !note) {
+      setError("Enter a rejection reason so the author knows what to change.");
+      return;
+    }
 
     setBusyStatus(nextStatus);
     setError(null);
@@ -83,7 +92,7 @@ export function InstructionApprovalControls({
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ status: nextStatus, note }),
+        body: JSON.stringify({ status: nextStatus, note, expectedUpdatedAt }),
       });
       const payload = (await response.json().catch(() => ({}))) as {
         error?: string;
@@ -94,7 +103,7 @@ export function InstructionApprovalControls({
         throw new Error(payload.error ?? "Unable to update approval.");
       }
 
-      setStatus(payload.status ?? nextStatus);
+      setDecision({ version: expectedUpdatedAt, status: payload.status ?? nextStatus });
       router.refresh();
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unable to update approval.");
@@ -115,11 +124,11 @@ export function InstructionApprovalControls({
           {status === "approved" ? <CheckCircle2 size={14} /> : <RotateCcw size={14} />}
           {statusLabel(status)}
         </span>
-        {canApprove ? (
+        {canApprove && status === "pending_review" ? (
           <>
             <button
               type="button"
-              disabled={busyStatus !== null || status === "approved"}
+              disabled={busyStatus !== null}
               onClick={() => void updateApproval("approved")}
               className="inline-flex items-center px-2.5 transition hover:bg-black/10 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/10"
               aria-label="Approve instruction"
@@ -133,7 +142,7 @@ export function InstructionApprovalControls({
             </button>
             <button
               type="button"
-              disabled={busyStatus !== null || status === "rejected"}
+              disabled={busyStatus !== null}
               onClick={() => void updateApproval("rejected")}
               className="inline-flex items-center px-2.5 transition hover:bg-black/10 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/10"
               aria-label="Reject instruction"
@@ -148,7 +157,7 @@ export function InstructionApprovalControls({
           </>
         ) : null}
       </div>
-      {error ? <p className="text-[11px] font-semibold text-rose-600 dark:text-rose-300">{error}</p> : null}
+      {error ? <p role="alert" className="max-w-sm text-xs font-semibold text-rose-600 dark:text-rose-300">{error}</p> : null}
     </div>
   );
 }

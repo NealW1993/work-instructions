@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
@@ -14,6 +14,7 @@ import { createPortal } from "react-dom";
 
 import { FloatingStatusNotices } from "@/components/ui/floating-status-notices";
 import { PinInput } from "@/components/ui/pin-input";
+import { isWeakPin, PIN_POLICY_MESSAGE } from "@/lib/pin-policy";
 import {
   ensureSessionStartTime,
   formatElapsedHhMmSs,
@@ -21,6 +22,7 @@ import {
   setSessionStartTime,
 } from "@/lib/session-timer";
 import { useSynchronizedNowMs } from "@/lib/second-ticker";
+import { useHydrated } from "@/lib/use-hydrated";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import type {
   NotificationDeliveryPreference,
@@ -182,6 +184,7 @@ export function AccountSettingsPanel({
   const router = useRouter();
   const { setTheme } = useTheme();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+  const portalReady = useHydrated();
 
   const [savedFullName, setSavedFullName] = useState(initialFullName);
   const [savedEmail, setSavedEmail] = useState(initialEmail.toLowerCase());
@@ -210,6 +213,7 @@ export function AccountSettingsPanel({
   const [notificationSettings, setNotificationSettings] =
     useState(initialNotificationSettings);
   const [wantsPinChange, setWantsPinChange] = useState(false);
+  const [currentPin, setCurrentPin] = useState("");
   const [pin, setPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
   const synchronizedNowMs = useSynchronizedNowMs();
@@ -217,13 +221,12 @@ export function AccountSettingsPanel({
     () => toTimestampMs(initialActiveSessionStartedAt),
     [initialActiveSessionStartedAt],
   );
-  const localSessionStartMs = getSessionStartTime();
+  const localSessionStartMs = portalReady ? getSessionStartTime() : null;
   const sessionStartedAtMs = serverSessionStartMs ?? localSessionStartMs;
 
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [portalReady, setPortalReady] = useState(false);
   const [navigationModalOpen, setNavigationModalOpen] = useState(false);
 
   const hasUnsavedChangesRef = useRef(false);
@@ -291,9 +294,10 @@ export function AccountSettingsPanel({
     [releaseHistoryGuard],
   );
 
-  useEffect(() => {
-    setPortalReady(true);
-  }, []);
+  function openNavigationModal(nextNavigation: PendingNavigation) {
+    pendingNavigationRef.current = nextNavigation;
+    setNavigationModalOpen(true);
+  }
 
   useEffect(() => {
     hasUnsavedChangesRef.current = hasChanges;
@@ -318,7 +322,6 @@ export function AccountSettingsPanel({
         releaseHistoryGuard();
       }
 
-      setNavigationModalOpen(false);
       pendingNavigationRef.current = null;
       navigationBypassRef.current = false;
       return;
@@ -463,10 +466,6 @@ export function AccountSettingsPanel({
     setNavigationModalOpen(false);
   }
 
-  function openNavigationModal(nextNavigation: PendingNavigation) {
-    pendingNavigationRef.current = nextNavigation;
-    setNavigationModalOpen(true);
-  }
 
   function handleCancelNavigationAway() {
     if (
@@ -544,8 +543,16 @@ export function AccountSettingsPanel({
       }
 
       if (wantsPinChange) {
+        if (!/^\d{6}$/.test(currentPin)) {
+          throw new Error("Enter your current 6-digit PIN to change it.");
+        }
+
         if (!/^\d{6}$/.test(pin)) {
           throw new Error("PIN must be exactly 6 digits.");
+        }
+
+        if (isWeakPin(pin)) {
+          throw new Error(PIN_POLICY_MESSAGE);
         }
 
         if (pinMismatch) {
@@ -617,15 +624,22 @@ export function AccountSettingsPanel({
       }
 
       if (pinChanged) {
-        const { error: pinError } = await supabase.rpc("set_my_pin", {
+        // The current PIN is required, so an unattended signed-in device cannot be used to take over the account.
+        const { data: pinUpdated, error: pinError } = await supabase.rpc("set_my_pin", {
+          current_pin: currentPin,
           new_pin: pin,
         });
 
         if (pinError) {
           throw new Error(pinError.message);
         }
+
+        if (pinUpdated !== true) {
+          throw new Error("Your current PIN is incorrect.");
+        }
       }
 
+      setCurrentPin("");
       setPin("");
       setConfirmPin("");
       setWantsPinChange(false);
@@ -676,7 +690,7 @@ export function AccountSettingsPanel({
           },
         ]}
       />
-      <section className="grid gap-3 rounded-2xl border border-white/30 bg-white/80 p-4 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-5">
+      <section className="grid gap-3 rounded-2xl border border-white/30 bg-white/80 p-4 shadow-sm backdrop-blur-sm dark:border-white/10 dark:bg-slate-900/70 md:p-5">
         {/* Header row: usage stat */}
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/70 pb-3 dark:border-white/10">
           <div className="flex items-center gap-2.5">
@@ -722,7 +736,10 @@ export function AccountSettingsPanel({
             </label>
           </div>
 
-          {/* Row 2: Color pickers + preview */}
+          <details className="workspace-disclosure rounded-xl border border-slate-200 dark:border-slate-800">
+            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-800 dark:text-slate-100">Profile appearance</summary>
+            <div className="border-t border-slate-200 p-4 dark:border-slate-800">
+          {/* Color pickers + preview */}
           <div className="grid gap-3 md:grid-cols-3 md:items-start">
             <fieldset className="grid gap-1.5 text-sm">
               <legend className="mb-0.5 font-medium text-slate-700 dark:text-slate-300">Icon Color</legend>
@@ -817,7 +834,12 @@ export function AccountSettingsPanel({
               </div>
             </fieldset>
           </div>
+            </div>
+          </details>
 
+          <details className="workspace-disclosure rounded-xl border border-slate-200 dark:border-slate-800">
+            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-800 dark:text-slate-100">Notification preferences</summary>
+            <div className="border-t border-slate-200 p-3 dark:border-slate-800">
           <fieldset className="grid gap-3 rounded-xl border border-slate-300/80 bg-white/60 p-3 dark:border-slate-700 dark:bg-slate-950/50">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-sm font-bold text-slate-800 dark:text-slate-100">
@@ -874,6 +896,8 @@ export function AccountSettingsPanel({
               })}
             </div>
           </fieldset>
+            </div>
+          </details>
 
           {/* Row 3: Actions */}
           <div className="flex flex-wrap items-center gap-2 border-t border-slate-200/70 pt-3 dark:border-white/10">
@@ -920,6 +944,7 @@ export function AccountSettingsPanel({
               onClick={() => {
                 if (wantsPinChange) {
                   setWantsPinChange(false);
+                  setCurrentPin("");
                   setPin("");
                   setConfirmPin("");
                   return;
@@ -938,7 +963,15 @@ export function AccountSettingsPanel({
           </div>
 
           {wantsPinChange ? (
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-3 md:grid-cols-3">
+              <label className="grid gap-1 text-sm">
+                <span className="font-medium text-slate-700 dark:text-slate-300">Current PIN</span>
+                <PinInput
+                  value={currentPin}
+                  onChange={setCurrentPin}
+                  className="tracking-[0.3em]"
+                />
+              </label>
               <label className="grid gap-1 text-sm">
                 <span className="font-medium text-slate-700 dark:text-slate-300">New 6-Digit PIN</span>
                 <PinInput
@@ -966,7 +999,7 @@ export function AccountSettingsPanel({
         </form>
       </section>
 
-      {navigationModalOpen && portalReady
+      {navigationModalOpen && hasChanges && portalReady
         ? createPortal(
             <div className="app-modal-shell fixed inset-0 z-[111] flex items-center justify-center overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
               <div className="grid w-full max-w-md gap-4 rounded-2xl border border-amber-500/45 bg-slate-950/95 p-5 shadow-2xl">

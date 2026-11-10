@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { LocalDateTime } from "@/components/ui/local-date-time";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -465,7 +465,7 @@ export function InstructionReviewActivityChart({
 }: InstructionReviewActivityChartProps) {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [period, setPeriod] = useState<ReviewPeriod>("year");
-  const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear());
+  const [requestedYear, setSelectedYear] = useState(() => new Date().getFullYear());
   const [selectedPeriodMonth, setSelectedPeriodMonth] = useState(
     () => new Date().getMonth() + 1,
   );
@@ -479,12 +479,16 @@ export function InstructionReviewActivityChart({
   const [error, setError] = useState<string | null>(null);
   const [filtersHydrated, setFiltersHydrated] = useState(false);
 
+  const selectedYear = period === "week"
+    ? parseDateKey(selectedPeriodWeekStart)?.getFullYear() ?? requestedYear
+    : period === "day" ? parseDateKey(selectedPeriodDay)?.getFullYear() ?? requestedYear : requestedYear;
+
   // Unified bucket selection
-  const [selectedBucketKey, setSelectedBucketKey] = useState<string | null>(() =>
+  const [requestedBucketKey, setSelectedBucketKey] = useState<string | null>(() =>
     String(new Date().getMonth()),
   );
   // Year-view week sub-navigation
-  const [selectedWeekKey, setSelectedWeekKey] = useState<string | null>(null);
+  const [requestedWeekKey, setSelectedWeekKey] = useState<string | null>(null);
 
   const yearOptions = useMemo(() => {
     const currentYear = new Date().getFullYear();
@@ -572,10 +576,12 @@ export function InstructionReviewActivityChart({
   ]);
 
   const fetchActivityEvents = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+
+
     try {
       const headers = await getAuthHeaders();
+      setLoading(true);
+      setError(null);
       const response = await fetch(`/api/instruction-review/activity?year=${selectedYear}`, {
         method: "GET",
         headers,
@@ -601,21 +607,9 @@ export function InstructionReviewActivityChart({
       return;
     }
 
-    void fetchActivityEvents();
+    const timer = window.setTimeout(() => { void fetchActivityEvents(); }, 0);
+    return () => window.clearTimeout(timer);
   }, [fetchActivityEvents, filtersHydrated, reloadToken]);
-
-  // Keep year synced when navigating week/day into a different year
-  useEffect(() => {
-    if (period === "week") {
-      const weekStartDate = parseDateKey(selectedPeriodWeekStart);
-      const y = weekStartDate?.getFullYear();
-      if (y && y !== selectedYear) setSelectedYear(y);
-    } else if (period === "day") {
-      const dayDate = parseDateKey(selectedPeriodDay);
-      const y = dayDate?.getFullYear();
-      if (y && y !== selectedYear) setSelectedYear(y);
-    }
-  }, [period, selectedPeriodWeekStart, selectedPeriodDay, selectedYear]);
 
   const filteredEvents = useMemo(() => {
     if (statusFilter === "all") return events;
@@ -685,29 +679,10 @@ export function InstructionReviewActivityChart({
   const labelStep =
     period === "year" || period === "week" ? 1 : period === "month" ? 4 : 4;
 
-  // Keep selectedBucketKey valid when period or buckets change
-  // Use a ref to avoid selectedBucketKey as a dep (prevents render loops)
-  const selectedBucketKeyRef = useRef(selectedBucketKey);
-  selectedBucketKeyRef.current = selectedBucketKey;
-
-  useEffect(() => {
-    if (activeBuckets.length === 0) {
-      setSelectedBucketKey(null);
-      return;
-    }
-    if (
-      selectedBucketKeyRef.current &&
-      activeBuckets.some((b) => b.key === selectedBucketKeyRef.current)
-    ) {
-      return;
-    }
-    if (period === "year") {
-      setSelectedBucketKey(String(new Date().getMonth()));
-    } else {
-      const first = activeBuckets.find((b) => b.events.length > 0) ?? activeBuckets[0];
-      setSelectedBucketKey(first?.key ?? null);
-    }
-  }, [period, activeBuckets]);
+  const selectedBucketKey = activeBuckets.some((bucket) => bucket.key === requestedBucketKey)
+    ? requestedBucketKey
+    : period === "year" ? String(selectedPeriodMonth - 1)
+      : (activeBuckets.find((bucket) => bucket.events.length > 0) ?? activeBuckets[0])?.key ?? null;
 
   // Selected bucket
   const selectedBucket = useMemo(
@@ -725,14 +700,8 @@ export function InstructionReviewActivityChart({
     [period, selectedBucketEvents],
   );
 
-  useEffect(() => {
-    if (period !== "year") return;
-    setSelectedWeekKey((curr) => {
-      if (weekSubBuckets.length === 0) return null;
-      if (curr && weekSubBuckets.some((wb) => wb.key === curr)) return curr;
-      return weekSubBuckets[0]?.key ?? null;
-    });
-  }, [period, weekSubBuckets]);
+  const selectedWeekKey = weekSubBuckets.some((week) => week.key === requestedWeekKey)
+    ? requestedWeekKey : weekSubBuckets[0]?.key ?? null;
 
   const selectedWeekEvents = useMemo(() => {
     if (!selectedWeekKey || period !== "year") return [];
@@ -809,7 +778,11 @@ export function InstructionReviewActivityChart({
             </span>
             <select
               value={selectedYear}
-              onChange={(e) => setSelectedYear(Number.parseInt(e.target.value, 10))}
+              onChange={(event) => {
+                const nextYear = Number(event.target.value);
+                setSelectedYear(nextYear);
+                if (period === "week") setSelectedPeriodWeekStart(toDateKey(getWeekStart(new Date(nextYear, selectedPeriodMonth - 1, 1))));
+              }}
               className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
             >
               {yearOptions.map((y) => (

@@ -1,17 +1,13 @@
+import { BACKEND_GATEWAY_PATH, isLocalBackendHostname } from "@/lib/backend-url";
+import { clientEnv } from "@/lib/env.client";
+
 export interface MediaUrlRuntimeContext {
   hostname?: string | null;
   protocol?: string | null;
 }
 
 function isLoopbackOnlyHostname(hostname: string) {
-  return (
-    hostname === "localhost" ||
-    hostname === "127.0.0.1" ||
-    hostname === "0.0.0.0" ||
-    hostname === "::1" ||
-    hostname === "[::1]" ||
-    hostname === "host.docker.internal"
-  );
+  return isLocalBackendHostname(hostname);
 }
 
 function normalizeRuntimeHostname(value: string | null | undefined) {
@@ -83,6 +79,14 @@ export function resolveAccessibleMediaUrl(
   try {
     const parsedUrl = new URL(normalizedValue);
     const runtimeContext = getResolvedRuntimeContext(runtime);
+
+    let configuredHost = "";
+    try { configuredHost = new URL(clientEnv.NEXT_PUBLIC_SUPABASE_URL).hostname; } catch { /* Optional environment. */ }
+    if (parsedUrl.pathname.startsWith("/storage/v1/") &&
+      (isLocalBackendHostname(parsedUrl.hostname) ||
+        (runtimeContext.protocol === "https:" && parsedUrl.protocol === "http:" && parsedUrl.hostname === configuredHost))) {
+      return `${BACKEND_GATEWAY_PATH}${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}`;
+    }
 
     if (
       !isLoopbackOnlyHostname(parsedUrl.hostname) ||

@@ -1,8 +1,10 @@
 ﻿"use client";
 
+import { useHydrated } from "@/lib/use-hydrated";
+
 import { Loader2, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -19,14 +21,10 @@ export function DeleteInstructionButton({
 }: DeleteInstructionButtonProps) {
   const router = useRouter();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
-  const [portalReady, setPortalReady] = useState(false);
+  const portalReady = useHydrated();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setPortalReady(true);
-  }, []);
 
   async function handleDelete() {
     setBusy(true);

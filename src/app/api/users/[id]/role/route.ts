@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
-import { hasFullAccess } from "@/lib/roles";
 import type { AppRole } from "@/lib/types";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import { authorizeAccountChange } from "@/lib/user-management.server";
 
 interface UpdateRoleBody {
   role?: AppRole;
@@ -24,12 +24,13 @@ export async function PATCH(
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  if (!hasFullAccess(requester.role)) {
-    return NextResponse.json(
-      { error: "Admin privileges required." },
-      { status: 403 },
-    );
+  const { id } = await context.params;
+  // Only system admins change roles; this also loads the account being changed.
+  const authorization = await authorizeAccountChange(requester.role, id);
+  if (authorization.response) {
+    return authorization.response;
   }
+  const target = authorization.target;
 
   const body = (await request.json().catch(() => ({}))) as UpdateRoleBody;
   const role = body.role;
@@ -38,7 +39,22 @@ export async function PATCH(
     return NextResponse.json({ error: "Valid role is required." }, { status: 400 });
   }
 
-  const { id } = await context.params;
+  if (target.role === "system_admin" && target.is_active && role !== "system_admin") {
+    const { count, error: countError } = await supabaseAdmin
+      .from("profiles")
+      .select("id", { count: "exact", head: true })
+      .eq("role", "system_admin")
+      .eq("is_active", true);
+    if (countError) {
+      return NextResponse.json({ error: countError.message }, { status: 500 });
+    }
+    if ((count ?? 0) <= 1) {
+      return NextResponse.json(
+        { error: "You cannot demote the last active system admin." },
+        { status: 409 },
+      );
+    }
+  }
 
   const { error } = await supabaseAdmin.from("profiles").update({ role }).eq("id", id);
 

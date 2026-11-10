@@ -74,6 +74,16 @@ export const EXPORT_DATASET_OPTIONS = [
     label: "User Profiles",
     description: "Account users and role metadata.",
   },
+  {
+    id: "work_instruction_import_files",
+    label: "Instruction Source Files",
+    description: "Retained original instruction imports, including encoded source bytes.",
+  },
+  {
+    id: "process_document_import_files",
+    label: "Process Document Source Files",
+    description: "Retained original process document imports, including encoded source bytes.",
+  },
 ] as const;
 
 export type ExportDatasetId = (typeof EXPORT_DATASET_OPTIONS)[number]["id"];

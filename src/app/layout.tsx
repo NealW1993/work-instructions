@@ -1,18 +1,24 @@
 import type { Metadata } from "next";
-import { Space_Grotesk, Source_Sans_3 } from "next/font/google";
+import localFont from "next/font/local";
 
 import { Providers } from "@/components/providers";
 
 import "./globals.css";
 
-const headingFont = Space_Grotesk({
+const headingFont = localFont({
+  src: "./fonts/SpaceGrotesk-Variable.ttf",
+  weight: "300 700",
   variable: "--font-heading",
-  subsets: ["latin"],
+  display: "swap",
 });
 
-const bodyFont = Source_Sans_3({
+const bodyFont = localFont({
+  src: [
+    { path: "./fonts/SourceSans3-Variable.ttf", weight: "200 900", style: "normal" },
+    { path: "./fonts/SourceSans3-Italic-Variable.ttf", weight: "200 900", style: "italic" },
+  ],
   variable: "--font-body",
-  subsets: ["latin"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {

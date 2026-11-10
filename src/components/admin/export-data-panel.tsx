@@ -25,12 +25,16 @@ function parseFileNameFromDisposition(
 
   const utfMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
   if (utfMatch?.[1]) {
-    return decodeURIComponent(utfMatch[1]);
+    try {
+      return decodeURIComponent(utfMatch[1]).replace(/[/\\\u0000-\u001f]/g, "_");
+    } catch {
+      return fallbackName;
+    }
   }
 
-  const match = contentDisposition.match(/filename="?([^"]+)"?/i);
+  const match = contentDisposition.match(/filename="?([^";]+)"?/i);
   if (match?.[1]) {
-    return match[1];
+    return match[1].trim().replace(/[/\\\u0000-\u001f]/g, "_");
   }
 
   return fallbackName;
@@ -45,6 +49,8 @@ export function ExportDataPanel() {
   const [busyAction, setBusyAction] = useState<BusyAction>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [datasetQuery, setDatasetQuery] = useState("");
+  const visibleDatasets = EXPORT_DATASET_OPTIONS.filter((dataset) => `${dataset.label} ${dataset.description}`.toLowerCase().includes(datasetQuery.trim().toLowerCase()));
 
   function toggleDataset(datasetId: ExportDatasetId) {
     setSelectedDatasets((current) =>
@@ -122,7 +128,7 @@ export function ExportDataPanel() {
   }
 
   return (
-    <div className="grid gap-4 rounded-3xl border border-white/20 bg-white/70 p-5 shadow-xl backdrop-blur-sm dark:border-white/10 dark:bg-slate-900/55">
+    <div className="grid gap-4 rounded-3xl border border-white/20 bg-white/70 p-5 shadow-sm backdrop-blur-sm dark:border-white/10 dark:bg-slate-900/55">
       <FloatingStatusNotices
         notices={[
           statusMessage && {
@@ -147,11 +153,13 @@ export function ExportDataPanel() {
       </header>
 
       <section className="grid gap-2">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-          Data Sets
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">Datasets · {selectedDatasets.length} selected</p>
+          <button type="button" disabled={busyAction !== null} onClick={() => setSelectedDatasets(selectedDatasets.length === EXPORT_DATASET_OPTIONS.length ? [] : EXPORT_DATASET_OPTIONS.map((dataset) => dataset.id))} className="rounded-lg px-2 py-1 text-xs font-semibold text-cyan-800 hover:bg-cyan-500/10 disabled:opacity-50 dark:text-cyan-200">{selectedDatasets.length === EXPORT_DATASET_OPTIONS.length ? "Clear selection" : "Select all"}</button>
+        </div>
+        <input type="search" aria-label="Find export datasets" value={datasetQuery} onChange={(event) => setDatasetQuery(event.target.value)} placeholder="Find a dataset…" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950" />
         <div className="grid gap-2 sm:grid-cols-2">
-          {EXPORT_DATASET_OPTIONS.map((dataset) => {
+          {visibleDatasets.map((dataset) => {
             const selected = selectedDatasets.includes(dataset.id);
             return (
               <label
@@ -166,6 +174,7 @@ export function ExportDataPanel() {
                 <span className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
                   <input
                     type="checkbox"
+                    disabled={busyAction !== null}
                     checked={selected}
                     onChange={() => toggleDataset(dataset.id)}
                     className="h-4 w-4 rounded border-slate-400 accent-cyan-600"
@@ -179,6 +188,7 @@ export function ExportDataPanel() {
             );
           })}
         </div>
+        {visibleDatasets.length === 0 ? <p className="py-4 text-sm text-slate-500">No matching datasets. Try another search.</p> : null}
       </section>
 
       <section className="grid gap-2">
@@ -190,6 +200,8 @@ export function ExportDataPanel() {
             <button
               key={option.id}
               type="button"
+              aria-pressed={format === option.id}
+              disabled={busyAction !== null}
               onClick={() => setFormat(option.id)}
               className={cn(
                 "grid gap-0.5 rounded-xl border px-3 py-2 text-left transition",
@@ -208,7 +220,7 @@ export function ExportDataPanel() {
       <div className="grid gap-2 sm:grid-cols-2">
         <button
           type="button"
-          disabled={busyAction !== null}
+          disabled={busyAction !== null || selectedDatasets.length === 0}
           onClick={() => void downloadExport(false)}
           className="inline-flex items-center justify-center gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-4 py-2.5 text-sm font-semibold text-cyan-900 transition hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-100"
         >

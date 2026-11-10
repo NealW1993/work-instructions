@@ -31,6 +31,7 @@ export interface DashboardWidgetLayoutItem {
 export interface DashboardLayoutPreset {
   id: string;
   label: string;
+  description: string;
   layout: DashboardWidgetLayoutItem[];
 }
 
@@ -64,12 +65,40 @@ export const DASHBOARD_WIDGET_SIZES: DashboardWidgetSize[] = [
   "full",
 ];
 
-export const DEFAULT_DASHBOARD_LAYOUT_PRESET_ID = "balanced";
+export const DEFAULT_DASHBOARD_LAYOUT_PRESET_ID = "plant_floor";
 
 export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
   {
+    id: "plant_floor",
+    label: "Plant floor",
+    description: "Big search, pinned instructions, and what changed recently, for operators at the line.",
+    layout: [
+      { id: "finder", visible: true, size: "full" },
+      { id: "pinned", visible: true, size: "standard" },
+      { id: "recent_updates", visible: true, size: "standard" },
+      { id: "newest", visible: true, size: "standard" },
+      { id: "review_queue", visible: true, size: "standard" },
+      { id: "my_impact", visible: false, size: "compact" },
+      { id: "formula_snapshot", visible: false, size: "compact" },
+      { id: "formula_review_queue", visible: false, size: "standard" },
+      { id: "formula_library", visible: false, size: "wide" },
+      { id: "department_activity", visible: false, size: "standard" },
+      { id: "system_history", visible: false, size: "full" },
+      { id: "kpi_throughput", visible: false, size: "wide" },
+      { id: "kpi_creation_velocity", visible: false, size: "wide" },
+      { id: "kpi_department_workload", visible: false, size: "standard" },
+      { id: "kpi_review_health", visible: false, size: "wide" },
+      { id: "kpi_revision_cycle_time", visible: false, size: "wide" },
+      { id: "kpi_event_mix", visible: false, size: "standard" },
+      { id: "kpi_review_origin_mix", visible: false, size: "standard" },
+      { id: "kpi_department_event_share", visible: false, size: "wide" },
+      { id: "kpi_actor_activity_mix", visible: false, size: "standard" },
+    ],
+  },
+  {
     id: "balanced",
     label: "Balanced",
+    description: "Instruction search, personal shortcuts, current work, and review activity.",
     layout: [
       { id: "finder", visible: true, size: "full" },
       { id: "my_impact", visible: true, size: "compact" },
@@ -96,6 +125,7 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
   {
     id: "operations_live",
     label: "Operations Live",
+    description: "Recent changes and production activity for daily floor coordination.",
     layout: [
       { id: "system_history", visible: true, size: "full" },
       { id: "recent_updates", visible: true, size: "full" },
@@ -122,6 +152,7 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
   {
     id: "supervisor",
     label: "Supervisor",
+    description: "Department workload, pending reviews, and the latest controlled instructions.",
     layout: [
       { id: "finder", visible: true, size: "full" },
       { id: "department_activity", visible: true, size: "wide" },
@@ -148,6 +179,7 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
   {
     id: "personal_focus",
     label: "Personal Focus",
+    description: "Pinned instructions, personal contribution, and reusable manufacturing formulas.",
     layout: [
       { id: "my_impact", visible: true, size: "standard" },
       { id: "pinned", visible: true, size: "wide" },
@@ -174,6 +206,7 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
   {
     id: "compact_grid",
     label: "Compact Grid",
+    description: "A compact overview for tablet workstations and smaller screens.",
     layout: [
       { id: "finder", visible: true, size: "compact" },
       { id: "newest", visible: true, size: "compact" },
@@ -200,6 +233,7 @@ export const DASHBOARD_LAYOUT_PRESETS: DashboardLayoutPreset[] = [
   {
     id: "audit_review",
     label: "Audit Review",
+    description: "Traceable changes, revision activity, and the outstanding review workload.",
     layout: [
       { id: "system_history", visible: true, size: "full" },
       { id: "recent_updates", visible: true, size: "full" },
@@ -238,7 +272,7 @@ export function isDashboardWidgetSize(value: string): value is DashboardWidgetSi
 }
 
 export function parseDashboardLayout(value: unknown): DashboardWidgetLayoutItem[] | null {
-  if (!Array.isArray(value)) {
+  if (!Array.isArray(value) || value.length > DASHBOARD_WIDGET_IDS.length) {
     return null;
   }
 
@@ -246,7 +280,7 @@ export function parseDashboardLayout(value: unknown): DashboardWidgetLayoutItem[
   const seenIds = new Set<DashboardWidgetId>();
 
   for (const entry of value) {
-    if (!entry || typeof entry !== "object") {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
       return null;
     }
 
@@ -273,7 +307,8 @@ export function parseDashboardLayout(value: unknown): DashboardWidgetLayoutItem[
 function fillMissingWidgets(layout: DashboardWidgetLayoutItem[]) {
   const seen = new Set(layout.map((entry) => entry.id));
   const fallbackOrder = getDefaultDashboardLayout();
-  const missing = fallbackOrder.filter((entry) => !seen.has(entry.id));
+  // A personalized homepage must not gain visible widgets merely because the application was upgraded.
+  const missing = fallbackOrder.filter((entry) => !seen.has(entry.id)).map((entry) => ({ ...entry, visible: false }));
   return [...layout.map((entry) => ({ ...entry })), ...missing];
 }
 
@@ -303,7 +338,7 @@ export function isSameDashboardLayout(
 }
 
 export function findMatchingDashboardLayoutPreset(layout: DashboardWidgetLayoutItem[]) {
-  const completedLayout = fillMissingWidgets(layout);
+  const completedLayout = normalizeDashboardLayout(layout);
   return (
     DASHBOARD_LAYOUT_PRESETS.find((preset) =>
       isSameDashboardLayout(completedLayout, preset.layout),
@@ -321,10 +356,22 @@ export function getDefaultDashboardLayout() {
 }
 
 export function normalizeDashboardLayout(value: unknown) {
-  const parsed = parseDashboardLayout(value);
-  if (!parsed) {
+  // Historical profiles use [] for their first-use default. An intentionally empty homepage is
+  // represented by a complete list whose widgets are explicitly hidden.
+  if (!Array.isArray(value) || value.length === 0) {
     return getDefaultDashboardLayout();
   }
-
-  return fillMissingWidgets(parsed);
+  const recovered: DashboardWidgetLayoutItem[] = [];
+  const seen = new Set<DashboardWidgetId>();
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const candidate = entry as Record<string, unknown>;
+    const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
+    const size = typeof candidate.size === "string" ? candidate.size.trim() : "";
+    if (!isDashboardWidgetId(id) || seen.has(id) || typeof candidate.visible !== "boolean" || !isDashboardWidgetSize(size)) continue;
+    recovered.push({ id, size, visible: candidate.visible });
+    seen.add(id);
+  }
+  // Retired widget IDs and isolated malformed rows should not erase the remaining valid layout.
+  return recovered.length ? fillMissingWidgets(recovered) : getDefaultDashboardLayout();
 }

@@ -81,11 +81,13 @@ export function ReviewCoverageKpiPanel() {
   }, [supabase]);
 
   const fetchReviewCoverage = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+
+
 
     try {
       const headers = await getAuthHeaders();
+      setLoading(true);
+      setError(null);
       const response = await fetch("/api/kpis/review-coverage", {
         method: "GET",
         headers,
@@ -118,7 +120,8 @@ export function ReviewCoverageKpiPanel() {
   }, [getAuthHeaders]);
 
   useEffect(() => {
-    void fetchReviewCoverage();
+    const timer = window.setTimeout(() => { void fetchReviewCoverage(); }, 0);
+    return () => window.clearTimeout(timer);
   }, [fetchReviewCoverage]);
 
   const totalInstructions = payload?.totalInstructions ?? 0;

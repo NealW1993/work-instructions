@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
+import { getAiConfig, requestStructuredJson } from "@/lib/ai-provider.server";
 import {
   normalizeOpenAiTokenUsage,
   recordAiUsageEvent,
   type OpenAiTokenUsage,
 } from "@/lib/ai-usage";
-import { serverEnv } from "@/lib/env.server";
 import {
   DIAGRAM_DEFINITIONS,
   type DiagramRecommendation,
@@ -22,18 +22,6 @@ interface RecommendationRequestBody {
   dmaicPhase?: unknown;
   dmaicEnabled?: unknown;
   processArea?: unknown;
-}
-
-interface OpenAICompletionResponse {
-  choices?: Array<{
-    message?: {
-      content?: string;
-    };
-  }>;
-  usage?: OpenAiTokenUsage;
-  error?: {
-    message?: string;
-  };
 }
 
 interface OpenAIRecommendationPayload {
@@ -185,6 +173,7 @@ async function recordRecommendationUsage(input: {
   prompt: string;
   processArea: string;
   recommendation: DiagramRecommendation;
+  model?: string;
   usage?: OpenAiTokenUsage | null;
   warning?: string | null;
 }) {
@@ -195,7 +184,7 @@ async function recordRecommendationUsage(input: {
     feature: "process_map_recommendation",
     action: "recommend",
     mode: input.recommendation.mode,
-    model: input.recommendation.mode === "ai" ? serverEnv.OPENAI_DIAGRAM_MODEL : "",
+    model: input.recommendation.mode === "ai" ? input.model ?? "" : "",
     tokenInput: tokenUsage.tokenInput,
     tokenOutput: tokenUsage.tokenOutput,
     tokenTotal: tokenUsage.tokenTotal,
@@ -242,167 +231,105 @@ export async function POST(request: NextRequest) {
     dmaicEnabled,
   });
 
-  if (!serverEnv.OPENAI_API_KEY) {
+  const aiConfig = await getAiConfig("diagram");
+  if (!aiConfig) {
     await recordRecommendationUsage({
       requesterId: requester.id,
       prompt,
       processArea,
       recommendation: fallback,
-      warning: "OPENAI_API_KEY is not configured.",
+      warning: "AI is not configured.",
     });
 
     return NextResponse.json({
       ...fallback,
       openAiConfigured: false,
-      warning:
-        "OPENAI_API_KEY is not configured, so a rules-based chart recommendation was used.",
+      warning: "AI is not configured, so a rules-based chart recommendation was used.",
     });
   }
 
-  try {
-    const openAiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${serverEnv.OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: serverEnv.OPENAI_DIAGRAM_MODEL,
-        temperature: 0.1,
-        messages: [
-          {
-            role: "system",
-            content: buildSystemPrompt(),
-          },
-          {
-            role: "user",
-            content: buildUserPrompt({ prompt, processArea, dmaicPhase }),
-          },
-        ],
-        response_format: {
-          type: "json_schema",
-          json_schema: {
-            name: "diagram_recommendation",
-            schema: {
-              type: "object",
-              properties: {
-                diagramType: {
-                  type: "string",
-                  enum: DIAGRAM_DEFINITIONS.map((definition) => definition.id),
-                },
-                dmaicPhase: {
-                  type: "string",
-                  enum: ["define", "measure", "analyze", "improve", "control"],
-                },
-                confidence: {
-                  type: "number",
-                },
-                reason: {
-                  type: "string",
-                },
-                suggestedTitle: {
-                  type: "string",
-                },
-                starterItems: {
-                  type: "array",
-                  items: { type: "string" },
-                },
-                keyFields: {
-                  type: "array",
-                  items: { type: "string" },
-                },
-                setupSteps: {
-                  type: "array",
-                  items: { type: "string" },
-                },
-                formulaTool: {
-                  type: "string",
-                  enum: ["none", "capability", "dpmo", "takt_time", "control_limits", "oee"],
-                },
-                metricRows: {
-                  type: "array",
-                  items: { type: "string" },
-                },
-                specLower: {
-                  type: ["number", "null"],
-                },
-                specUpper: {
-                  type: ["number", "null"],
-                },
-                target: {
-                  type: ["number", "null"],
-                },
-                layerSuggestions: {
-                  type: "array",
-                  items: { type: "string" },
-                },
-              },
-              required: [
-                "diagramType",
-                "dmaicPhase",
-                "confidence",
-                "reason",
-                "suggestedTitle",
-                "starterItems",
-                "keyFields",
-                "setupSteps",
-                "formulaTool",
-                "metricRows",
-                "specLower",
-                "specUpper",
-                "target",
-                "layerSuggestions",
-              ],
-              additionalProperties: false,
-            },
-          },
+  const result = await requestStructuredJson(aiConfig, {
+    system: buildSystemPrompt(),
+    user: buildUserPrompt({ prompt, processArea, dmaicPhase }),
+    schemaName: "diagram_recommendation",
+    schema: {
+      type: "object",
+      properties: {
+        diagramType: {
+          type: "string",
+          enum: DIAGRAM_DEFINITIONS.map((definition) => definition.id),
         },
-      }),
-    });
+        dmaicPhase: {
+          type: "string",
+          enum: ["define", "measure", "analyze", "improve", "control"],
+        },
+        confidence: {
+          type: "number",
+        },
+        reason: {
+          type: "string",
+        },
+        suggestedTitle: {
+          type: "string",
+        },
+        starterItems: {
+          type: "array",
+          items: { type: "string" },
+        },
+        keyFields: {
+          type: "array",
+          items: { type: "string" },
+        },
+        setupSteps: {
+          type: "array",
+          items: { type: "string" },
+        },
+        formulaTool: {
+          type: "string",
+          enum: ["none", "capability", "dpmo", "takt_time", "control_limits", "oee"],
+        },
+        metricRows: {
+          type: "array",
+          items: { type: "string" },
+        },
+        specLower: {
+          type: ["number", "null"],
+        },
+        specUpper: {
+          type: ["number", "null"],
+        },
+        target: {
+          type: ["number", "null"],
+        },
+        layerSuggestions: {
+          type: "array",
+          items: { type: "string" },
+        },
+      },
+      required: [
+        "diagramType",
+        "dmaicPhase",
+        "confidence",
+        "reason",
+        "suggestedTitle",
+        "starterItems",
+        "keyFields",
+        "setupSteps",
+        "formulaTool",
+        "metricRows",
+        "specLower",
+        "specUpper",
+        "target",
+        "layerSuggestions",
+      ],
+      additionalProperties: false,
+    },
+    temperature: 0.1,
+    maxTokens: 4096,
+  });
 
-    const openAiPayload = (await openAiResponse.json().catch(() => ({}))) as OpenAICompletionResponse;
-
-    if (!openAiResponse.ok) {
-      const warning =
-        openAiPayload.error?.message ??
-        "OpenAI recommendation failed, so a rules-based recommendation was used.";
-
-      await recordRecommendationUsage({
-        requesterId: requester.id,
-        prompt,
-        processArea,
-        recommendation: fallback,
-        usage: openAiPayload.usage,
-        warning,
-      });
-
-      return NextResponse.json({
-        ...fallback,
-        openAiConfigured: true,
-        warning,
-      });
-    }
-
-    const parsed = parseOpenAIRecommendation(
-      openAiPayload.choices?.[0]?.message?.content?.trim() ?? "",
-    );
-
-    const recommendation = normalizeOpenAIRecommendation(parsed, fallback);
-
-    await recordRecommendationUsage({
-      requesterId: requester.id,
-      prompt,
-      processArea,
-      recommendation,
-      usage: openAiPayload.usage,
-    });
-
-    return NextResponse.json(recommendation);
-  } catch (caughtError) {
-    const warning =
-      caughtError instanceof Error
-        ? caughtError.message
-        : "OpenAI recommendation failed, so a rules-based recommendation was used.";
+  if (!result.ok) {
+    const warning = `${result.error} A rules-based recommendation was used.`;
 
     await recordRecommendationUsage({
       requesterId: requester.id,
@@ -418,4 +345,18 @@ export async function POST(request: NextRequest) {
       warning,
     });
   }
+
+  const parsed = parseOpenAIRecommendation(result.content);
+  const recommendation = normalizeOpenAIRecommendation(parsed, fallback);
+
+  await recordRecommendationUsage({
+    requesterId: requester.id,
+    prompt,
+    processArea,
+    recommendation,
+    model: result.model,
+    usage: result.usage,
+  });
+
+  return NextResponse.json(recommendation);
 }

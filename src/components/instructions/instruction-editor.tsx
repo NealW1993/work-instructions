@@ -1,5 +1,7 @@
 ﻿"use client";
 
+import { useHydrated } from "@/lib/use-hydrated";
+
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -12,16 +14,21 @@ import {
 import { createPortal } from "react-dom";
 
 import { FloatingStatusNotices } from "@/components/ui/floating-status-notices";
-import { RichTextEditor } from "@/components/ui/rich-text-editor";
+import { hasMeaningfulContent, isHtmlContent, normalizeEditorContent, toMarkdownSource } from "@/lib/editor-content";
+import { sanitizeRichHtml } from "@/lib/rich-text-html";
+import { MarkdownEditor } from "@/components/ui/markdown-editor";
+import { EditorDialog } from "@/components/ui/editor-blocks";
 import { registerArchivedInstructionRedirect } from "@/components/instructions/instruction-archived-redirect-state";
 import { ISO_9001_CLAUSE_OPTIONS } from "@/lib/process-documents";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
-import { cn, escapeLikeQuery } from "@/lib/utils";
+import { cn, drainResponse, escapeLikeQuery } from "@/lib/utils";
 
 interface InstructionEditorProps {
   mode: "create" | "edit" | "fork";
   initialData?: {
     instructionId?: string;
+    updatedAt?: string;
+    approvalStatus?: string;
     sourceInstructionId?: string;
     forkRootInstructionId?: string | null;
     forkNumber?: number | null;
@@ -125,11 +132,6 @@ type PendingNavigation =
       href: string;
     };
 
-interface ActiveInstructionConflict {
-  id: string;
-  revision: number;
-}
-
 interface RevisionConflictModalState {
   existingInstructionId: string;
   existingRevision: number;
@@ -165,6 +167,7 @@ interface EnhancementComparisonState {
   originalContent: string;
   enhancedContent: string;
   enhancementNotes: string;
+  sourceSnapshot: string;
 }
 
 type PendingCommonToolChange = "save" | "remove";
@@ -188,43 +191,6 @@ const DEFAULT_INSTRUCTION_ISO_CLAUSES = [
 ];
 
 const HISTORY_GUARD_STATE_KEY = "__instructionEditorUnsavedGuard";
-
-function looksLikeHtml(value: string): boolean {
-  return /<\/?[a-z][\s\S]*>/i.test(value);
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function plainTextToHtml(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return "";
-  }
-
-  return trimmed
-    .split(/\n{2,}/)
-    .map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, "<br>")}</p>`)
-    .join("");
-}
-
-function normalizeEditorContent(value: string): string {
-  if (!value.trim()) {
-    return "";
-  }
-
-  if (looksLikeHtml(value)) {
-    return value;
-  }
-
-  return plainTextToHtml(value);
-}
 
 function richTextToPlain(value: string): string {
   return value
@@ -460,7 +426,7 @@ function buildSnapshot(data: {
     departmentId: normalizeSnapshotValue(data.departmentId),
     partId: normalizeSnapshotValue(data.partId),
     itemTitle: normalizeSnapshotValue(data.itemTitle),
-    bodyMarkdown: normalizeEditorContent(data.bodyMarkdown),
+    bodyMarkdown: toMarkdownSource(data.bodyMarkdown).trimEnd(),
     revision: data.revision,
     selectedToolIds: normalizedToolIds,
     uncommonTools: normalizeSnapshotValue(data.uncommonTools),
@@ -918,36 +884,6 @@ function snapshotsAreEqual(a: EditorSnapshot, b: EditorSnapshot) {
   );
 }
 
-function normalizeOptionalUuid(value: string | null | undefined) {
-  const trimmed = value?.trim() ?? "";
-  if (!trimmed) {
-    return null;
-  }
-
-  if (
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-      trimmed,
-    )
-  ) {
-    return null;
-  }
-
-  return trimmed;
-}
-
-function normalizePositiveInteger(value: unknown) {
-  if (!Number.isInteger(value)) {
-    return null;
-  }
-
-  const parsed = Number(value);
-  if (parsed < 1) {
-    return null;
-  }
-
-  return parsed;
-}
-
 function getDepartmentNameFromRelation(
   relation: WorkItemSearchResult["departments"],
 ): string {
@@ -976,13 +912,16 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   const [partSearchBusy, setPartSearchBusy] = useState(false);
   const [partSearchOpen, setPartSearchOpen] = useState(false);
 
-  const [workItemId, setWorkItemId] = useState<string | null>(
+  const [, setWorkItemId] = useState<string | null>(
     mode === "edit" ? (initialData?.workItemId ?? null) : null,
   );
   const [itemTitle, setItemTitle] = useState(initialData?.itemTitle ?? "");
   const [bodyMarkdown, setBodyMarkdown] = useState(
-    normalizeEditorContent(initialData?.bodyMarkdown ?? ""),
+    toMarkdownSource(initialData?.bodyMarkdown ?? ""),
   );
+  const [legacyBodyConverted] = useState(() => isHtmlContent(initialData?.bodyMarkdown ?? ""));
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [revisionReason, setRevisionReason] = useState("");
   const [revision, setRevision] = useState(initialData?.revision ?? 1);
   const [isoClauseRefs, setIsoClauseRefs] = useState<string[]>(() =>
     normalizeInstructionIsoClauseRefsOrDefault(initialData?.isoClauseRefs),
@@ -1019,7 +958,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [portalReady, setPortalReady] = useState(false);
+  const portalReady = useHydrated();
   const [navigationModalOpen, setNavigationModalOpen] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null);
   const [revisionConflictModal, setRevisionConflictModal] =
@@ -1042,6 +981,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   const hasUnsavedChangesRef = useRef(false);
   const navigationModalOpenRef = useRef(false);
   const historyGuardActiveRef = useRef(false);
+  const historyGuardReleaseRef = useRef<Promise<void> | null>(null);
   const suppressNextPopStateRef = useRef(false);
   const pendingNavigationRef = useRef<PendingNavigation | null>(null);
   const navigationBypassRef = useRef(false);
@@ -1119,7 +1059,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       hasIsoContextChanges ||
       uncommonToolsInput.trim().length > 0 ||
       hasPendingCommonToolChanges ||
-      richTextToPlain(currentSnapshot.bodyMarkdown).length > 0;
+      currentSnapshot.bodyMarkdown.trim().length > 0;
 
     const hasDepartmentChange = departmentTouched
       ? currentSnapshot.departmentId !== initialSnapshot.departmentId
@@ -1135,7 +1075,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   ]);
 
   const hasUnsavedChanges = useMemo(() => {
-    if (hasPendingCommonToolChanges) {
+    if (hasPendingCommonToolChanges || uploadBusy || revisionReason.trim()) {
       return true;
     }
 
@@ -1144,7 +1084,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     }
 
     return !snapshotsAreEqual(currentSnapshot, initialSnapshot);
-  }, [createModeHasMeaningfulChanges, currentSnapshot, hasPendingCommonToolChanges, initialSnapshot, mode]);
+  }, [createModeHasMeaningfulChanges, currentSnapshot, hasPendingCommonToolChanges, initialSnapshot, mode, uploadBusy, revisionReason]);
 
   const selectedDepartmentName = useMemo(
     () => departments.find((department) => department.id === departmentId)?.name ?? "Unknown",
@@ -1224,10 +1164,6 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     return parseToolNameList(uncommonToolsInput);
   }, [uncommonToolsInput]);
 
-  useEffect(() => {
-    setPortalReady(true);
-  }, []);
-
   useEffect(
     () => () => {
       if (duplicateToolNoticeTimeoutRef.current !== null) {
@@ -1237,6 +1173,13 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     [],
   );
 
+  function openNavigationModal(nextNavigation: PendingNavigation) {
+    pendingNavigationRef.current = nextNavigation;
+    setPendingNavigation(nextNavigation);
+    setNavigationModalOpen(true);
+  }
+
+
   useEffect(() => {
     if (mode === "create") {
       void router.prefetch("/dashboard");
@@ -1244,26 +1187,30 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   }, [mode, router]);
 
   const releaseHistoryGuard = useCallback(() => {
+    if (historyGuardReleaseRef.current) {
+      return historyGuardReleaseRef.current;
+    }
     if (!historyGuardActiveRef.current) {
-      return;
+      return Promise.resolve();
     }
 
     suppressNextPopStateRef.current = true;
     historyGuardActiveRef.current = false;
+    // History traversal completes asynchronously. Wait for the router to restore
+    // that entry before starting a new navigation, or popstate can undo the save redirect.
+    const released = new Promise<void>((resolve) => {
+      window.addEventListener("popstate", () => {
+        window.setTimeout(() => { historyGuardReleaseRef.current = null; resolve(); }, 0);
+      }, { once: true });
+    });
+    historyGuardReleaseRef.current = released;
     window.history.back();
+    return released;
   }, []);
 
   const navigateWithGuardReleased = useCallback(
     (navigate: () => void) => {
-      if (historyGuardActiveRef.current) {
-        releaseHistoryGuard();
-        window.setTimeout(() => {
-          navigate();
-        }, 0);
-        return;
-      }
-
-      navigate();
+      void releaseHistoryGuard().then(navigate);
     },
     [releaseHistoryGuard],
   );
@@ -1317,10 +1264,12 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         releaseHistoryGuard();
       }
 
-      setNavigationModalOpen(false);
       pendingNavigationRef.current = null;
-      setPendingNavigation(null);
-      return;
+      const timer = window.setTimeout(() => {
+        setNavigationModalOpen(false);
+        setPendingNavigation(null);
+      }, 0);
+      return () => window.clearTimeout(timer);
     }
 
     if (!historyGuardActiveRef.current) {
@@ -1430,7 +1379,6 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
   useEffect(() => {
     let isActive = true;
-    setDepartmentsBusy(true);
 
     void (async () => {
       try {
@@ -1450,6 +1398,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
         const resolvedDepartments = (data ?? []) as DepartmentOption[];
         setDepartments(resolvedDepartments);
+        setDepartmentId((current) => current || resolvedDepartments[0]?.id || "");
       } catch {
         if (!isActive) {
           return;
@@ -1467,13 +1416,6 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     };
   }, [supabase]);
 
-  useEffect(() => {
-    if (departmentId || departments.length === 0) {
-      return;
-    }
-
-    setDepartmentId(departments[0].id);
-  }, [departmentId, departments]);
 
   const loadSuggestedTools = useCallback(
     async (preservedToolIds: string[] = []) => {
@@ -1554,10 +1496,11 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
   useEffect(() => {
     let isActive = true;
-    setToolCatalogBusy(true);
-    setToolCatalogError(null);
-
     void (async () => {
+      await Promise.resolve();
+      if (!isActive) return;
+      setToolCatalogBusy(true);
+      setToolCatalogError(null);
       try {
         const nextTools = await loadSuggestedTools(initialData?.suggestedToolIds ?? []);
         if (!isActive) {
@@ -1586,15 +1529,6 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     };
   }, [initialData?.suggestedToolIds, loadSuggestedTools]);
 
-  useEffect(() => {
-    if (!toolPickerToolId) {
-      return;
-    }
-
-    if (!commonToolOptions.some((tool) => tool.id === toolPickerToolId)) {
-      setToolPickerToolId("");
-    }
-  }, [commonToolOptions, toolPickerToolId]);
 
   useEffect(() => {
     if (!commonToolSelectOpen || commonToolInputMode !== "select") {
@@ -1625,17 +1559,10 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     };
   }, [commonToolInputMode, commonToolSelectOpen]);
 
-  useEffect(() => {
-    if (commonToolInputMode !== "select" && commonToolSelectOpen) {
-      setCommonToolSelectOpen(false);
-    }
-  }, [commonToolInputMode, commonToolSelectOpen]);
 
   useEffect(() => {
     const query = partId.trim();
     if (query.length < 2) {
-      setPartSuggestions([]);
-      setPartSearchBusy(false);
       return;
     }
 
@@ -2002,11 +1929,6 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     setPendingNavigation(null);
   }
 
-  function openNavigationModal(nextNavigation: PendingNavigation) {
-    pendingNavigationRef.current = nextNavigation;
-    setPendingNavigation(nextNavigation);
-    setNavigationModalOpen(true);
-  }
 
   function handleCancelNavigationAway() {
     if (
@@ -2116,13 +2038,17 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     if (!enhancementComparison) {
       return;
     }
+    if (enhancementComparison.sourceSnapshot !== JSON.stringify(currentSnapshot)) {
+      setEnhanceError("Your draft changed while AI was preparing its suggestion. Your edits are preserved. Run AI Enhance again to use the latest draft.");
+      handleCloseEnhancementModal();
+      return;
+    }
 
-    const normalizedEnhancedContent = normalizeEditorContent(
-      enhancementComparison.enhancedContent,
-    );
-    setBodyMarkdown(normalizedEnhancedContent);
+    // Suggestions arrive as HTML; the editor keeps Markdown.
+    const enhancedMarkdown = toMarkdownSource(enhancementComparison.enhancedContent);
+    setBodyMarkdown(enhancedMarkdown);
     setEnhancementModalOpen(false);
-    if (richTextToPlain(normalizedEnhancedContent)) {
+    if (hasMeaningfulContent(enhancedMarkdown)) {
       setFieldErrors((current) => ({
         ...current,
         body: false,
@@ -2150,9 +2076,9 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   }
 
   async function handleEnhanceInstruction() {
-    const normalizedBody = normalizeEditorContent(bodyMarkdown);
+    const normalizedBody = bodyMarkdown;
 
-    if (!richTextToPlain(normalizedBody)) {
+    if (!hasMeaningfulContent(normalizedBody)) {
       setFieldErrors((current) => ({
         ...current,
         body: true,
@@ -2204,12 +2130,12 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         throw new Error(payload.error ?? "Unable to enhance instructions right now.");
       }
 
-      const nextEnhancedContent = normalizeEditorContent(payload.enhancedContent ?? "");
-      if (!richTextToPlain(nextEnhancedContent)) {
+      const nextEnhancedContent = sanitizeRichHtml(payload.enhancedContent ?? "");
+      if (!hasMeaningfulContent(nextEnhancedContent)) {
         throw new Error("AI enhancement returned empty content. Please try again.");
       }
 
-      const nextOriginalContent = normalizeEditorContent(
+      const nextOriginalContent = sanitizeRichHtml(
         payload.originalContent ?? normalizedBody,
       );
 
@@ -2218,6 +2144,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         originalContent: nextOriginalContent,
         enhancedContent: nextEnhancedContent,
         enhancementNotes: payload.enhancementNotes?.trim() ?? "",
+        sourceSnapshot: JSON.stringify(currentSnapshot),
       });
       setEnhancementModalOpen(true);
     } catch (caughtError) {
@@ -2234,6 +2161,11 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (busy) return;
+    if (uploadBusy) {
+      setError("Wait for the media upload to finish before submitting the instruction.");
+      return;
+    }
 
     setBusy(true);
     setMessage(null);
@@ -2279,17 +2211,17 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       return;
     }
 
-    if (!Number.isInteger(revision) || revision < 1) {
+    if (!Number.isSafeInteger(revision) || revision < 1 || (mode === "edit" && revision < (initialData?.revision ?? 1) + (initialData?.approvalStatus === "approved" ? 1 : 0))) {
       setFieldErrors((current) => ({
         ...current,
         revision: true,
       }));
-      setError("Revision must be a whole number greater than or equal to 1.");
+      setError(initialData?.approvalStatus === "approved" ? "Increase the revision number to revise a released instruction." : "Revision must be a whole number and cannot decrease.");
       setBusy(false);
       return;
     }
 
-    if (!richTextToPlain(bodyMarkdown)) {
+    if (!hasMeaningfulContent(bodyMarkdown)) {
       setFieldErrors((current) => ({
         ...current,
         body: true,
@@ -2319,6 +2251,11 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     }
 
     if (hasEditRevisionBump && !confirmedRevisionBumpRef.current) {
+      if (!revisionReason.trim()) {
+        setError("Describe what changed and why before creating the next controlled revision.");
+        setBusy(false);
+        return;
+      }
       setRevisionBumpConfirmationModal({
         currentRevision,
         nextRevision: revision,
@@ -2337,625 +2274,59 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         throw new Error("You must be signed in.");
       }
 
-      const normalizedItemTitle = itemTitle.trim();
-      const initialWorkItemStillMatches =
-        Boolean(workItemId) &&
-        normalizeSnapshotValue(initialData?.departmentId ?? "") === normalizedDepartmentId &&
-        normalizeSnapshotValue(initialData?.partId ?? "") === normalizedPartId &&
-        normalizeSnapshotValue(initialData?.itemTitle ?? "") === normalizedItemTitle;
-      let typedWorkItem: { id: string } | null =
-        initialWorkItemStillMatches && workItemId ? { id: workItemId } : null;
-
-      if (!typedWorkItem) {
-        const { data: existingWorkItem, error: existingWorkItemError } = await supabase
-          .from("work_items")
-          .select("id")
-          .eq("department_id", normalizedDepartmentId)
-          .eq("part_id", normalizedPartId)
-          .eq("item_title", normalizedItemTitle)
-          .maybeSingle();
-
-        if (existingWorkItemError) {
-          throw new Error(existingWorkItemError.message ?? "Unable to find work item.");
-        }
-
-        typedWorkItem = (existingWorkItem as { id: string } | null) ?? null;
-      }
-
-      if (!typedWorkItem) {
-        const { data: insertedWorkItem, error: insertWorkItemError } = await supabase
-          .from("work_items")
-          .insert({
-            department_id: normalizedDepartmentId,
-            part_id: normalizedPartId,
-            item_title: normalizedItemTitle,
-            created_by: user.id,
+      const isEditRevisionBump = mode === "edit" && revision > (initialData?.revision ?? revision);
+      const changeComputation = mode === "edit"
+        ? buildInstructionUpdateSummary({
+            previousBody: initialData?.bodyMarkdown ?? "", nextBody: bodyMarkdown,
+            previousRevision: initialData?.revision ?? revision, nextRevision: revision,
+            previousDepartmentId: initialData?.departmentId ?? "", nextDepartmentId: normalizedDepartmentId,
+            previousPartId: initialData?.partId ?? "", nextPartId: normalizedPartId,
+            previousItemTitle: initialData?.itemTitle ?? "", nextItemTitle: itemTitle.trim(),
+            previousIsoClauseRefs: normalizeInstructionIsoClauseRefsOrDefault(initialData?.isoClauseRefs), nextIsoClauseRefs: isoClauseRefs,
+            previousProcessScope: initialData?.processScope ?? "", nextProcessScope: processScope.trim(),
+            previousAcceptanceCriteria: initialData?.acceptanceCriteria ?? "", nextAcceptanceCriteria: acceptanceCriteria.trim(),
+            previousVerificationRecords: initialData?.verificationRecords ?? "", nextVerificationRecords: verificationRecords.trim(),
+            previousRiskControls: initialData?.riskControls ?? "", nextRiskControls: riskControls.trim(),
+            previousSuggestedToolIds: initialData?.suggestedToolIds ?? [], nextSuggestedToolIds: selectedToolIds,
+            previousUncommonTools: initialData?.uncommonTools ?? "", nextUncommonTools: serializeToolNameList(uncommonToolList),
           })
-          .select("id")
-          .single();
-
-        typedWorkItem = insertedWorkItem as { id: string } | null;
-
-        if (insertWorkItemError || !typedWorkItem) {
-          throw new Error(insertWorkItemError?.message ?? "Unable to save work item.");
-        }
+        : { summary: buildInstructionCreateSummary(bodyMarkdown, revision) };
+      const { data, error: saveError } = await supabase.rpc("save_work_instruction_controlled", {
+        p_payload: {
+          mode, instructionId: initialData?.instructionId ?? null,
+          sourceInstructionId: initialData?.sourceInstructionId ?? null,
+          expectedUpdatedAt: initialData?.updatedAt ?? null,
+          replacementInstructionId: confirmedReplacementInstructionIdRef.current,
+          departmentId: normalizedDepartmentId, partId: normalizedPartId, itemTitle: itemTitle.trim(),
+          bodyMarkdown, revision, isoClauseRefs, processScope: processScope.trim(),
+          acceptanceCriteria: acceptanceCriteria.trim(), verificationRecords: verificationRecords.trim(),
+          riskControls: riskControls.trim(), uncommonTools: serializeToolNameList(uncommonToolList),
+          suggestedToolIds: selectedToolIds, changeSummary: revisionReason.trim() || changeComputation.summary,
+          aiEnhancementId: pendingAiEnhancementId,
+        },
+      });
+      if (saveError) throw new Error(saveError.message);
+      const result = data as {
+        conflict?: boolean; existingInstructionId?: string; existingRevision?: number;
+        instructionId?: string; forkNumber?: number; archivedInstructionId?: string;
+      } | null;
+      if (result?.conflict && result.existingInstructionId) {
+        setRevisionConflictModal({
+          existingInstructionId: result.existingInstructionId,
+          existingRevision: result.existingRevision ?? revision, requestedRevision: revision,
+          partId: normalizedPartId, itemTitle: itemTitle.trim(), departmentName: selectedDepartmentName,
+        });
+        return;
       }
+      if (!result?.instructionId) throw new Error("The save did not return an instruction. Refresh before retrying.");
+      const instructionId = result.instructionId;
+      const createdForkNumber = result.forkNumber;
+      if (result.archivedInstructionId) registerArchivedInstructionRedirect(result.archivedInstructionId, instructionId);
+      confirmedReplacementInstructionIdRef.current = null;
+      setPendingAiEnhancementId(null);
 
-      const existingForkRootInstructionId = normalizeOptionalUuid(
-        initialData?.forkRootInstructionId,
-      );
-      const existingForkNumber = normalizePositiveInteger(initialData?.forkNumber);
-      const editingForkBranch =
-        mode === "edit" && Boolean(existingForkRootInstructionId && existingForkNumber);
-      let currentActiveInstruction: ActiveInstructionConflict | null = null;
-
-      {
-        let typedDuplicateInstruction: ActiveInstructionConflict | null = null;
-
-        if (mode !== "fork") {
-          const duplicateCheckRequest = editingForkBranch
-            ? supabase
-                .from("work_instructions")
-                .select("id, revision")
-                .eq("is_archived", false)
-                .eq("fork_root_instruction_id", existingForkRootInstructionId as string)
-                .eq("fork_number", existingForkNumber as number)
-                .limit(1)
-            : supabase
-                .from("work_instructions")
-                .select("id, revision")
-                .eq("is_archived", false)
-                .eq("work_item_id", typedWorkItem.id)
-                .is("fork_root_instruction_id", null)
-                .limit(1);
-
-          const adjustedDuplicateCheckRequest =
-            mode === "edit" && initialData?.instructionId
-              ? duplicateCheckRequest.neq("id", initialData.instructionId)
-              : duplicateCheckRequest;
-
-          const { data: duplicateInstruction, error: duplicateCheckError } =
-            await adjustedDuplicateCheckRequest.maybeSingle();
-
-          if (duplicateCheckError) {
-            throw new Error(duplicateCheckError.message);
-          }
-
-          typedDuplicateInstruction =
-            (duplicateInstruction as ActiveInstructionConflict | null) ?? null;
-        }
-
-        if (typedDuplicateInstruction) {
-          currentActiveInstruction = typedDuplicateInstruction;
-
-          if (mode === "edit" && editingForkBranch) {
-            throw new Error(
-              "Another active revision already exists for this fork branch. Refresh and retry.",
-            );
-          }
-
-          if (mode === "edit") {
-            setFieldErrors((current) => ({
-              ...current,
-              itemTitle: true,
-            }));
-            itemTitleInputRef.current?.focus();
-            throw new Error(
-              "A work instruction with this title already exists for this Part ID. Open the existing instruction to edit it.",
-            );
-          }
-
-          if (mode === "create") {
-            if (typedDuplicateInstruction.revision === revision) {
-              setFieldErrors((current) => ({
-                ...current,
-                revision: true,
-              }));
-              throw new Error(
-                `Revision ${revision} is already active for this work item. Open the existing instruction instead.`,
-              );
-            }
-
-            const replacementWasConfirmed =
-              confirmedReplacementInstructionIdRef.current === typedDuplicateInstruction.id;
-
-            if (!replacementWasConfirmed) {
-              setRevisionConflictModal({
-                existingInstructionId: typedDuplicateInstruction.id,
-                existingRevision: typedDuplicateInstruction.revision,
-                requestedRevision: revision,
-                partId: normalizedPartId,
-                itemTitle: itemTitle.trim(),
-                departmentName: selectedDepartmentName,
-              });
-              return;
-            }
-          }
-        }
-      }
-
-      if (mode !== "create" || !currentActiveInstruction) {
-        confirmedReplacementInstructionIdRef.current = null;
-      }
-
-      const isEditRevisionBump =
-        mode === "edit" &&
-        Boolean(initialData?.instructionId) &&
-        revision !== (initialData?.revision ?? revision);
-      const existingForkMergeCount = Math.max(
-        0,
-        normalizePositiveInteger(initialData?.mergeCount) ?? 0,
-      );
-      const aiEventIdForSave = pendingAiEnhancementId;
-      let instructionId = initialData?.instructionId ?? "";
-      let createdForkNumber: number | null = null;
-      const previousBodyForSummary = initialData?.bodyMarkdown ?? "";
-      const previousRevisionForSummary = initialData?.revision ?? revision;
-      const changeComputation =
-        mode === "edit"
-          ? buildInstructionUpdateSummary({
-              previousBody: previousBodyForSummary,
-              nextBody: bodyMarkdown,
-              previousRevision: previousRevisionForSummary,
-              nextRevision: revision,
-              previousDepartmentId:
-                departments.find((department) => department.id === initialData?.departmentId)
-                  ?.name ??
-                initialData?.departmentId ??
-                "",
-              nextDepartmentId: selectedDepartmentName,
-              previousPartId: initialData?.partId ?? "",
-              nextPartId: normalizedPartId,
-              previousItemTitle: initialData?.itemTitle ?? "",
-              nextItemTitle: itemTitle.trim(),
-              previousIsoClauseRefs: normalizeInstructionIsoClauseRefsOrDefault(
-                initialData?.isoClauseRefs,
-              ),
-              nextIsoClauseRefs: isoClauseRefs,
-              previousProcessScope: initialData?.processScope ?? "",
-              nextProcessScope: processScope.trim(),
-              previousAcceptanceCriteria: initialData?.acceptanceCriteria ?? "",
-              nextAcceptanceCriteria: acceptanceCriteria.trim(),
-              previousVerificationRecords: initialData?.verificationRecords ?? "",
-              nextVerificationRecords: verificationRecords.trim(),
-              previousRiskControls: initialData?.riskControls ?? "",
-              nextRiskControls: riskControls.trim(),
-              previousSuggestedToolIds: initialData?.suggestedToolIds ?? [],
-              nextSuggestedToolIds: selectedToolIds,
-              previousUncommonTools: serializeToolNameList(
-                parseToolNameList(initialData?.uncommonTools ?? ""),
-              ),
-              nextUncommonTools: serializeToolNameList(uncommonToolList),
-            })
-          : {
-              summary: buildInstructionCreateSummary(bodyMarkdown, revision),
-              sourcePayload: null,
-            };
-      const changeSummary = changeComputation.summary;
-      let changeOccurredAt: string | null = null;
-      let changeEventType: "created" | "updated" = "updated";
-
-      if (mode === "create" || mode === "fork" || isEditRevisionBump) {
-        const instructionToArchiveId =
-          mode === "create"
-            ? (currentActiveInstruction?.id ?? null)
-            : isEditRevisionBump
-              ? (initialData?.instructionId ?? null)
-              : null;
-        let archivedInstructionRollbackId: string | null = null;
-        let carriedPinCreatedAt: string | null = null;
-
-        if (instructionToArchiveId) {
-          const { data: existingPin, error: existingPinError } = await supabase
-            .from("user_pinned_instructions")
-            .select("created_at")
-            .eq("user_id", user.id)
-            .eq("instruction_id", instructionToArchiveId)
-            .maybeSingle();
-
-          if (existingPinError) {
-            throw new Error(existingPinError.message ?? "Unable to read pinned instruction state.");
-          }
-
-          const typedExistingPin = existingPin as { created_at: string } | null;
-          carriedPinCreatedAt = typedExistingPin?.created_at ?? null;
-        }
-
-        if (instructionToArchiveId) {
-          const { error: archiveCurrentInstructionError } = await supabase
-            .from("work_instructions")
-            .update({
-              is_archived: true,
-              updated_by: user.id,
-            })
-            .eq("id", instructionToArchiveId);
-
-          if (archiveCurrentInstructionError) {
-            throw new Error(
-              archiveCurrentInstructionError.message ??
-                "Unable to archive the previous active revision.",
-            );
-          }
-
-          archivedInstructionRollbackId = instructionToArchiveId;
-        }
-
-        let forkRootInstructionIdForInsert: string | null = null;
-        let forkNumberForInsert: number | null = null;
-        let mergeCountForInsert = 0;
-        let mergedIntoRootAtForInsert: string | null = null;
-
-        if (mode === "fork") {
-          const sourceRootInstructionId =
-            normalizeOptionalUuid(initialData?.forkRootInstructionId) ??
-            normalizeOptionalUuid(initialData?.sourceInstructionId);
-          if (!sourceRootInstructionId) {
-            throw new Error("Unable to determine the original instruction for this fork.");
-          }
-
-          const { data: latestForkBranch, error: latestForkBranchError } = await supabase
-            .from("work_instructions")
-            .select("fork_number")
-            .eq("fork_root_instruction_id", sourceRootInstructionId)
-            .order("fork_number", { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-          if (latestForkBranchError) {
-            throw new Error(latestForkBranchError.message);
-          }
-
-          const typedLatestForkBranch = latestForkBranch as { fork_number: number | null } | null;
-          const maxForkNumber = normalizePositiveInteger(
-            typedLatestForkBranch?.fork_number ?? null,
-          );
-
-          forkRootInstructionIdForInsert = sourceRootInstructionId;
-          forkNumberForInsert = (maxForkNumber ?? 0) + 1;
-          mergeCountForInsert = 0;
-          mergedIntoRootAtForInsert = null;
-        } else if (isEditRevisionBump && existingForkRootInstructionId && existingForkNumber) {
-          forkRootInstructionIdForInsert = existingForkRootInstructionId;
-          forkNumberForInsert = existingForkNumber;
-          mergeCountForInsert = existingForkMergeCount;
-          mergedIntoRootAtForInsert = initialData?.mergedIntoRootAt ?? null;
-        }
-
-        const insertPayload: {
-          work_item_id: string;
-          body_markdown: string;
-          notes_markdown: string;
-          uncommon_tools: string;
-          iso_clause_refs: string[];
-          process_scope: string;
-          acceptance_criteria: string;
-          verification_records: string;
-          risk_controls: string;
-          revision: number;
-          last_change_summary: string;
-          approval_status: "pending_review";
-          submitted_by: string;
-          submitted_at: string;
-          approved_by: null;
-          approved_at: null;
-          rejected_by: null;
-          rejected_at: null;
-          approval_note: string;
-          created_by: string;
-          updated_by: string;
-          fork_root_instruction_id?: string | null;
-          fork_number?: number | null;
-          merge_count?: number;
-          merged_into_root_at?: string | null;
-          ai_assisted?: boolean;
-          ai_assisted_at?: string;
-          ai_assistance_last_event_id?: string;
-        } = {
-          work_item_id: typedWorkItem.id,
-          body_markdown: bodyMarkdown,
-          notes_markdown: "",
-          uncommon_tools: serializeToolNameList(uncommonToolList),
-          iso_clause_refs: isoClauseRefs,
-          process_scope: processScope.trim(),
-          acceptance_criteria: acceptanceCriteria.trim(),
-          verification_records: verificationRecords.trim(),
-          risk_controls: riskControls.trim(),
-          revision,
-          last_change_summary: changeSummary,
-          approval_status: "pending_review",
-          submitted_by: user.id,
-          submitted_at: new Date().toISOString(),
-          approved_by: null,
-          approved_at: null,
-          rejected_by: null,
-          rejected_at: null,
-          approval_note: "",
-          created_by: user.id,
-          updated_by: user.id,
-        };
-
-        if (forkRootInstructionIdForInsert && forkNumberForInsert) {
-          insertPayload.fork_root_instruction_id = forkRootInstructionIdForInsert;
-          insertPayload.fork_number = forkNumberForInsert;
-          insertPayload.merge_count = mergeCountForInsert;
-          insertPayload.merged_into_root_at = mergedIntoRootAtForInsert;
-          createdForkNumber = forkNumberForInsert;
-        }
-
-        if (aiEventIdForSave) {
-          insertPayload.ai_assisted = true;
-          insertPayload.ai_assisted_at = new Date().toISOString();
-          insertPayload.ai_assistance_last_event_id = aiEventIdForSave;
-        }
-
-        const { data: insertedInstruction, error: insertInstructionError } = await supabase
-          .from("work_instructions")
-          .insert(insertPayload)
-          .select("id, created_at, fork_number")
-          .single();
-
-        const typedInstruction =
-          insertedInstruction as {
-            id: string;
-            created_at: string;
-            fork_number: number | null;
-          } | null;
-
-        if (insertInstructionError || !typedInstruction) {
-          if (archivedInstructionRollbackId) {
-            try {
-              await supabase
-                .from("work_instructions")
-                .update({
-                  is_archived: false,
-                  updated_by: user.id,
-                })
-                .eq("id", archivedInstructionRollbackId);
-            } catch {
-              // Rollback is best-effort when revision insert fails.
-            }
-          }
-
-          throw new Error(
-            insertInstructionError?.message ?? "Unable to create instruction.",
-          );
-        }
-
-        instructionId = typedInstruction.id;
-        if (mode === "fork") {
-          createdForkNumber =
-            normalizePositiveInteger(typedInstruction.fork_number) ?? createdForkNumber;
-        }
-        changeOccurredAt = typedInstruction.created_at ?? new Date().toISOString();
-        changeEventType = "created";
-        confirmedReplacementInstructionIdRef.current = null;
-
-        if (instructionToArchiveId) {
-          registerArchivedInstructionRedirect(instructionToArchiveId, instructionId);
-
-          if (carriedPinCreatedAt) {
-            const { error: pinCarryInsertError } = await supabase
-              .from("user_pinned_instructions")
-              .upsert(
-                {
-                  user_id: user.id,
-                  instruction_id: instructionId,
-                  created_at: carriedPinCreatedAt,
-                },
-                {
-                  onConflict: "user_id,instruction_id",
-                },
-              );
-
-            if (!pinCarryInsertError) {
-              await supabase
-                .from("user_pinned_instructions")
-                .delete()
-                .eq("user_id", user.id)
-                .eq("instruction_id", instructionToArchiveId);
-            }
-          }
-        }
-      } else {
-        const updatePayload: {
-          work_item_id: string;
-          body_markdown: string;
-          notes_markdown: string;
-          uncommon_tools: string;
-          iso_clause_refs: string[];
-          process_scope: string;
-          acceptance_criteria: string;
-          verification_records: string;
-          risk_controls: string;
-          revision: number;
-          last_change_summary: string;
-          approval_status: "pending_review";
-          submitted_by: string;
-          submitted_at: string;
-          approved_by: null;
-          approved_at: null;
-          rejected_by: null;
-          rejected_at: null;
-          approval_note: string;
-          updated_by: string;
-          ai_assisted?: boolean;
-          ai_assisted_at?: string;
-          ai_assistance_last_event_id?: string;
-        } = {
-          work_item_id: typedWorkItem.id,
-          body_markdown: bodyMarkdown,
-          notes_markdown: "",
-          uncommon_tools: serializeToolNameList(uncommonToolList),
-          iso_clause_refs: isoClauseRefs,
-          process_scope: processScope.trim(),
-          acceptance_criteria: acceptanceCriteria.trim(),
-          verification_records: verificationRecords.trim(),
-          risk_controls: riskControls.trim(),
-          revision,
-          last_change_summary: changeSummary,
-          approval_status: "pending_review",
-          submitted_by: user.id,
-          submitted_at: new Date().toISOString(),
-          approved_by: null,
-          approved_at: null,
-          rejected_by: null,
-          rejected_at: null,
-          approval_note: "",
-          updated_by: user.id,
-        };
-
-        if (aiEventIdForSave) {
-          updatePayload.ai_assisted = true;
-          updatePayload.ai_assisted_at = new Date().toISOString();
-          updatePayload.ai_assistance_last_event_id = aiEventIdForSave;
-        }
-
-        const { data: updatedInstruction, error: updateInstructionError } = await supabase
-          .from("work_instructions")
-          .update(updatePayload)
-          .eq("id", instructionId)
-          .select("updated_at")
-          .single();
-
-        if (updateInstructionError) {
-          throw new Error(updateInstructionError.message);
-        }
-
-        const typedUpdatedInstruction =
-          updatedInstruction as { updated_at: string } | null;
-        changeOccurredAt = typedUpdatedInstruction?.updated_at ?? new Date().toISOString();
-        changeEventType = "updated";
-      }
-
-      const normalizedSelectedToolIds = Array.from(
-        new Set(selectedToolIds.map((value) => value.trim()).filter(Boolean)),
-      );
-      const { data: existingInstructionTools, error: existingInstructionToolsError } =
-        await supabase
-          .from("instruction_suggested_tools")
-          .select("suggested_tool_id")
-          .eq("instruction_id", instructionId);
-
-      if (existingInstructionToolsError) {
-        throw new Error(
-          existingInstructionToolsError.message ?? "Unable to load linked suggested tools.",
-        );
-      }
-
-      const existingToolIds = new Set(
-        ((existingInstructionTools ?? []) as Array<{ suggested_tool_id: string }>).map(
-          (entry) => entry.suggested_tool_id,
-        ),
-      );
-      const selectedToolIdSet = new Set(normalizedSelectedToolIds);
-
-      const toolIdsToRemove = [...existingToolIds].filter(
-        (toolId) => !selectedToolIdSet.has(toolId),
-      );
-      const toolIdsToInsert = normalizedSelectedToolIds.filter(
-        (toolId) => !existingToolIds.has(toolId),
-      );
-
-      if (toolIdsToRemove.length > 0) {
-        const { error: removeToolsError } = await supabase
-          .from("instruction_suggested_tools")
-          .delete()
-          .eq("instruction_id", instructionId)
-          .in("suggested_tool_id", toolIdsToRemove);
-
-        if (removeToolsError) {
-          throw new Error(removeToolsError.message ?? "Unable to unlink removed suggested tools.");
-        }
-      }
-
-      if (toolIdsToInsert.length > 0) {
-        const { error: insertToolsError } = await supabase
-          .from("instruction_suggested_tools")
-          .upsert(
-            toolIdsToInsert.map((toolId) => ({
-              instruction_id: instructionId,
-              suggested_tool_id: toolId,
-              created_by: user.id,
-            })),
-            {
-              onConflict: "instruction_id,suggested_tool_id",
-            },
-          );
-
-        if (insertToolsError) {
-          throw new Error(insertToolsError.message ?? "Unable to link selected suggested tools.");
-        }
-      }
-
-      if (changeOccurredAt && changeComputation.sourcePayload) {
-        try {
-          await supabase.from("instruction_change_events").upsert(
-            {
-              instruction_id: instructionId,
-              actor_user_id: user.id,
-              event_type: changeEventType,
-              detail: changeSummary,
-              revision,
-              occurred_at: changeOccurredAt,
-              source_payload: changeComputation.sourcePayload,
-            },
-            {
-              onConflict: "instruction_id,event_type,actor_user_id,occurred_at",
-            },
-          );
-        } catch {
-          // Capturing source snippets is best-effort and should not block saves.
-        }
-      }
-
-      if (mode === "fork" && changeOccurredAt) {
-        try {
-          await supabase.from("instruction_change_events").upsert(
-            {
-              instruction_id: instructionId,
-              actor_user_id: user.id,
-              event_type: "created",
-              detail: `Fork ${createdForkNumber ?? "?"} created from original instruction.`,
-              revision,
-              occurred_at: changeOccurredAt,
-              source_payload: {
-                kind: "fork_created",
-                forkNumber: createdForkNumber,
-                sourceInstructionId: initialData?.sourceInstructionId ?? null,
-                rootInstructionId:
-                  initialData?.forkRootInstructionId ?? initialData?.sourceInstructionId ?? null,
-                partId: normalizedPartId,
-                itemTitle: itemTitle.trim(),
-                departmentName: selectedDepartmentName,
-              },
-            },
-            {
-              onConflict: "instruction_id,event_type,actor_user_id,occurred_at",
-            },
-          );
-        } catch {
-          // Fork tracking is best-effort and should not block saves.
-        }
-      }
-
-      if (aiEventIdForSave) {
-        try {
-          await supabase
-            .from("instruction_ai_enhancements")
-            .update({
-              outcome: "applied",
-              outcome_at: new Date().toISOString(),
-              instruction_id: instructionId,
-            })
-            .eq("id", aiEventIdForSave)
-            .eq("actor_user_id", user.id);
-        } catch {
-          // Capturing final instruction linkage for AI usage is best-effort.
-        }
-        setPendingAiEnhancementId(null);
-      }
-
-      await syncPendingCommonToolChanges();
+      // Optional tool preferences must not turn a committed save into a failed save.
+      await syncPendingCommonToolChanges().catch(() => undefined);
 
       try {
         const {
@@ -2963,14 +2334,14 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         } = await supabase.auth.getSession();
 
         if (session?.access_token) {
-          await fetch("/api/notifications/work-instruction-submitted", {
+          await drainResponse(await fetch("/api/notifications/work-instruction-submitted", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
               Authorization: `Bearer ${session.access_token}`,
             },
             body: JSON.stringify({ instructionId }),
-          });
+          }));
         }
       } catch {
         // Email notification delivery is best-effort and should not block saves.
@@ -3026,16 +2397,17 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         onSubmit={handleSubmit}
         className="grid min-w-0 gap-5 overflow-hidden rounded-3xl border border-white/30 bg-white/75 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7"
       >
-        <div className="grid gap-3 md:grid-cols-[220px_minmax(0,1fr)_220px_140px] md:items-end md:gap-4">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)_100px] md:items-end md:gap-4">
           <label className="grid min-w-0 gap-1.5 text-sm">
             <span className="font-semibold">Part ID</span>
             <div className="relative">
               <input
                 ref={partInputRef}
                 value={partId}
+                aria-invalid={fieldErrors.partId}
                 placeholder="Example: SK-12345"
                 onFocus={() => {
-                  if (partSuggestions.length > 0) {
+                  if (partId.trim().length >= 2 && partSuggestions.length > 0) {
                     setPartSearchOpen(true);
                   }
                 }}
@@ -3058,7 +2430,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                   fieldErrors.partId ? "border-rose-500 ring-2 ring-rose-500/30" : "",
                 )}
               />
-              {partSearchOpen ? (
+              {partSearchOpen && partId.trim().length >= 2 ? (
                 <div className="absolute left-0 right-0 top-[calc(100%+0.4rem)] z-20 max-h-60 overflow-auto rounded-xl border border-slate-300 bg-white/95 p-1 shadow-xl backdrop-blur dark:border-slate-700 dark:bg-slate-950/95">
                   {partSearchBusy ? (
                     <p className="px-2 py-2 text-xs text-slate-500 dark:text-slate-300">
@@ -3073,10 +2445,8 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                       <button
                         key={result.id}
                         type="button"
-                        onMouseDown={(event) => {
-                          event.preventDefault();
-                          applySuggestedWorkItem(result);
-                        }}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => applySuggestedWorkItem(result)}
                         className="grid w-full gap-0.5 rounded-lg px-2 py-1.5 text-left text-xs transition hover:bg-cyan-500/10"
                       >
                         <span className="font-semibold text-slate-800 dark:text-slate-100">
@@ -3099,6 +2469,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
               ref={itemTitleInputRef}
               placeholder="Example: Pouring Procedure"
               value={itemTitle}
+              aria-invalid={fieldErrors.itemTitle}
               onChange={(event) => {
                 setItemTitle(event.target.value);
                 setWorkItemId(null);
@@ -3120,6 +2491,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
             <span className="font-semibold">Department</span>
             <select
               value={departmentId}
+              aria-invalid={fieldErrors.department}
               onChange={(event) => {
                 setDepartmentTouched(true);
                 setDepartmentId(event.target.value);
@@ -3153,11 +2525,13 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           <label className="grid min-w-0 gap-1.5 text-sm">
             <span className="font-semibold">Revision</span>
             <input
-              min={1}
+              min={mode === "edit" ? (initialData?.revision ?? 1) + (initialData?.approvalStatus === "approved" ? 1 : 0) : 1}
+              step={1}
               type="number"
               value={revision}
+              aria-invalid={fieldErrors.revision}
               onChange={(event) => {
-                setRevision(Number.parseInt(event.target.value || "0", 10));
+                setRevision(Number(event.target.value));
                 confirmedRevisionBumpRef.current = false;
                 if (fieldErrors.revision) {
                   setFieldErrors((current) => ({
@@ -3173,6 +2547,14 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
             />
           </label>
         </div>
+
+        {mode === "edit" ? (
+          <label className="grid gap-1.5 text-sm">
+            <span className="font-semibold">Change summary {revision > (initialData?.revision ?? revision) ? "(required for a new revision)" : "(optional)"}</span>
+            <input value={revisionReason} onChange={(event) => setRevisionReason(event.target.value)} maxLength={1200} placeholder="What changed and why?" className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-950" />
+            <span className="text-xs text-slate-500 dark:text-slate-400">Retained in the revision history with your identity and the save time.</span>
+          </label>
+        ) : null}
 
         <details
           open
@@ -3252,37 +2634,45 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           </div>
         </details>
 
-        <RichTextEditor
+        <MarkdownEditor
+          onUploadStateChange={setUploadBusy}
           label="Work Instructions"
           value={bodyMarkdown}
           onChange={(nextValue) => {
             setBodyMarkdown(nextValue);
-            if (fieldErrors.body && richTextToPlain(nextValue)) {
+            if (fieldErrors.body && hasMeaningfulContent(nextValue)) {
               setFieldErrors((current) => ({
                 ...current,
                 body: false,
               }));
             }
           }}
-          placeholder=""
-          minHeightClassName="min-h-72"
+          minHeightClassName="min-h-80"
           hasError={fieldErrors.body}
           focusRequestKey={bodyFocusRequestKey}
+          notice={legacyBodyConverted ? (
+            <p>
+              <strong>Converted to Markdown.</strong> This instruction was written in the previous editor. Colours,
+              font sizes and alignment are not part of Markdown, so coloured or highlighted text is now <strong>bold</strong>.
+              Check the preview before saving.
+            </p>
+          ) : null}
           toolbarAfterRedoContent={
             <button
               type="button"
+              onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
                 void handleEnhanceInstruction();
               }}
               disabled={busy || enhanceBusy}
               aria-label={enhanceBusy ? "Enhancing instructions" : "Enhance instructions with AI"}
               title={enhanceBusy ? "Enhancing..." : "AI Enhance"}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-fuchsia-500/45 bg-fuchsia-500/20 text-fuchsia-800 transition hover:bg-fuchsia-500/30 dark:text-fuchsia-100 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-fuchsia-500/45 bg-fuchsia-500/15 text-fuchsia-800 transition hover:bg-fuchsia-500/25 dark:text-fuchsia-100 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {enhanceBusy ? (
-                <Loader2 size={14} className="animate-spin" />
+                <Loader2 size={16} className="animate-spin" />
               ) : (
-                <Sparkles size={14} />
+                <Sparkles size={16} />
               )}
             </button>
           }
@@ -3660,7 +3050,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
         <button
           type="submit"
-          disabled={busy}
+          disabled={busy || uploadBusy}
           className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
         >
           {busy ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />}
@@ -3672,79 +3062,27 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         </button>
       </form>
 
-      {enhancementModalOpen && enhancementComparison && portalReady
-        ? createPortal(
-            <div className="app-modal-shell fixed inset-0 z-[113] flex items-center justify-center overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
-              <div className="grid w-full max-w-6xl gap-4 rounded-2xl border border-cyan-500/40 bg-slate-950/95 p-4 shadow-2xl sm:p-5">
-                <div className="grid gap-1">
-                  <h3 className="text-lg font-bold text-slate-100">
-                    Compare Instruction Versions
-                  </h3>
-                  <p className="text-sm text-slate-300">
-                    Review both drafts and choose which version to continue editing.
-                  </p>
-                  {enhancementComparison.enhancementNotes ? (
-                    <p className="text-xs text-cyan-200">
-                      {enhancementComparison.enhancementNotes}
-                    </p>
-                  ) : null}
-                </div>
-
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="grid gap-2 rounded-xl border border-slate-700/70 bg-slate-900/70 p-3">
-                    <p className="text-sm font-semibold text-slate-100">Your Version</p>
-                    <div className="max-h-[52vh] overflow-auto rounded-lg border border-slate-700/80 bg-slate-950/65 p-3">
-                      <div
-                        className="prose-markdown text-sm text-slate-900 dark:text-slate-100"
-                        dangerouslySetInnerHTML={{
-                          __html: enhancementComparison.originalContent,
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/10 p-3">
-                    <p className="text-sm font-semibold text-cyan-100">AI Enhanced Version</p>
-                    <div className="max-h-[52vh] overflow-auto rounded-lg border border-cyan-500/40 bg-slate-950/65 p-3">
-                      <div
-                        className="prose-markdown text-sm text-slate-900 dark:text-slate-100"
-                        dangerouslySetInnerHTML={{
-                          __html: enhancementComparison.enhancedContent,
-                        }}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={handleKeepOriginalInstructions}
-                    className="rounded-xl border border-slate-600 bg-slate-900/70 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
-                  >
-                    Keep My Version
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleApplyEnhancedInstructions}
-                    className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/55 bg-cyan-500/20 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/30"
-                  >
-                    <Sparkles size={15} />
-                    Use AI Enhanced Version
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleCloseEnhancementModal}
-                    className="rounded-xl border border-slate-500/60 bg-slate-900/60 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-slate-800"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
+      {enhancementModalOpen && enhancementComparison && portalReady ? (
+        <EditorDialog title="Compare Instruction Versions" wide onClose={handleCloseEnhancementModal}>
+          <p className="text-sm text-slate-600 dark:text-slate-400">Review the suggestion against your draft. Verify all engineering requirements before applying or submitting for approval.</p>
+          {enhancementComparison.enhancementNotes ? <p className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-3 text-sm text-cyan-800 dark:text-cyan-200">{enhancementComparison.enhancementNotes}</p> : null}
+          {enhancementComparison.sourceSnapshot !== JSON.stringify(currentSnapshot) ? <p role="alert" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-200">Your draft changed while this suggestion was being prepared. Keep your current draft and run AI Enhance again to include those edits.</p> : null}
+          <div className="grid min-w-0 gap-4 md:grid-cols-2">
+            <section className="grid min-w-0 content-start gap-3 rounded-xl border border-slate-300 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/50">
+              <h3 className="text-sm font-semibold">Your Version</h3>
+              <div className="max-h-[52dvh] min-w-0 overflow-auto rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-950"><div className="prose-markdown text-sm" dangerouslySetInnerHTML={{ __html: enhancementComparison.originalContent }} /></div>
+            </section>
+            <section className="grid min-w-0 content-start gap-3 rounded-xl border border-cyan-500/40 bg-cyan-500/5 p-3">
+              <h3 className="text-sm font-semibold text-cyan-800 dark:text-cyan-200">AI Enhanced Version</h3>
+              <div className="max-h-[52dvh] min-w-0 overflow-auto rounded-lg border border-cyan-500/30 bg-white p-4 dark:bg-slate-950"><div className="prose-markdown text-sm" dangerouslySetInnerHTML={{ __html: enhancementComparison.enhancedContent }} /></div>
+            </section>
+          </div>
+          <div className="flex flex-wrap justify-end gap-2">
+            <button type="button" onClick={handleKeepOriginalInstructions} className="min-h-11 rounded-lg border border-slate-300 px-4 font-semibold dark:border-slate-700">Keep My Version</button>
+            <button type="button" disabled={enhancementComparison.sourceSnapshot !== JSON.stringify(currentSnapshot)} onClick={handleApplyEnhancedInstructions} className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-cyan-700 px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"><Sparkles size={16} />Use AI Enhanced Version</button>
+          </div>
+        </EditorDialog>
+      ) : null}
 
       {revisionConflictModal && portalReady
         ? createPortal(
@@ -3825,8 +3163,8 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
                     {revisionBumpConfirmationModal.nextRevision}.
                   </p>
                   <p className="text-sm text-slate-300">
-                    Saving will archive the current active revision and create a new active
-                    instruction revision.
+                    Saving creates a new revision for review. The approved revision remains
+                    available until its replacement is approved.
                   </p>
                 </div>
 

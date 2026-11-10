@@ -1,10 +1,13 @@
 "use client";
 
+import { useHydrated } from "@/lib/use-hydrated";
+
 import { GitMerge, Loader2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 
+import { markdownToPlainText } from "@/lib/editor-content";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { cn } from "@/lib/utils";
 
@@ -55,6 +58,8 @@ interface InstructionForkMergeControlProps {
   rootBodyMarkdown: string;
   forkRevision: number;
   rootRevision: number;
+  rootUpdatedAt: string;
+  forkUpdatedAt: string;
   forkMedia: MergePreviewMedia[];
   rootMedia: MergePreviewMedia[];
   className?: string;
@@ -93,17 +98,9 @@ function normalizeDiffLine(value: string) {
     .trim();
 }
 
-function richTextToPlain(value: string) {
-  return value
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|li|h1|h2|h3|h4|h5|h6|blockquote|pre)>/gi, "\n")
-    .replace(/<[^>]*>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .trim();
-}
-
+// Compare rendered text so a Markdown branch and an older HTML root line up line by line.
 function extractDiffLines(content: string) {
-  return richTextToPlain(content)
+  return markdownToPlainText(content)
     .split(/\r?\n+/)
     .map(normalizeDiffLine)
     .filter(Boolean);
@@ -293,7 +290,7 @@ function buildMergePreviewDiff(params: {
   let nextRevision: number | undefined;
   if (params.selectedFields.revision) {
     const previous = Math.max(1, params.rootRevision);
-    const next = Math.max(1, params.forkRevision);
+    const next = Math.max(1, params.rootRevision) + 1;
     if (previous !== next) {
       previousRevision = previous;
       nextRevision = next;
@@ -371,13 +368,15 @@ export function InstructionForkMergeControl({
   rootBodyMarkdown,
   forkRevision,
   rootRevision,
+  rootUpdatedAt,
+  forkUpdatedAt,
   forkMedia,
   rootMedia,
   className,
 }: InstructionForkMergeControlProps) {
   const router = useRouter();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
-  const [portalReady, setPortalReady] = useState(false);
+  const portalReady = useHydrated();
   const [modalOpen, setModalOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -457,10 +456,6 @@ export function InstructionForkMergeControl({
     ],
   );
 
-  useEffect(() => {
-    setPortalReady(true);
-  }, []);
-
   function closeModal() {
     if (busy) {
       return;
@@ -498,6 +493,7 @@ export function InstructionForkMergeControl({
           Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
+          expectedRootUpdatedAt: rootUpdatedAt, expectedForkUpdatedAt: forkUpdatedAt,
           mergeMode,
           fields,
         }),

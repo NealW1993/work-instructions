@@ -35,7 +35,7 @@ import {
 import { useSynchronizedNowMs } from "@/lib/second-ticker";
 import type { Profile, ThemePreference } from "@/lib/types";
 import { persistActiveThemePreference } from "@/lib/theme-client";
-import { cn } from "@/lib/utils";
+import { cn, drainResponse } from "@/lib/utils";
 
 interface UserAccountMenuProps {
   profile: Profile;
@@ -136,9 +136,8 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
   const [menuMounted, setMenuMounted] = useState(false);
   const [menuEntered, setMenuEntered] = useState(false);
   const [menuWidth, setMenuWidth] = useState(ACCOUNT_MENU_MIN_WIDTH_PX);
-  const [themePreference, setThemePreference] = useState<ThemePreference>(
-    profile.theme_preference ?? "dark",
-  );
+  const [localThemePreference, setThemePreference] = useState<ThemePreference | null>(null);
+  const themePreference = localThemePreference ?? profile.theme_preference ?? "dark";
   const [themeSaving, setThemeSaving] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [helpMessage, setHelpMessage] = useState("");
@@ -173,18 +172,16 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
     return formatElapsedHhMmSs(Math.max(0, synchronizedNowMs - sessionStartedAtMs));
   }, [sessionStartedAtMs, synchronizedNowMs]);
 
-  useEffect(() => {
-    setThemePreference(profile.theme_preference ?? "dark");
-  }, [profile.theme_preference]);
-
   const loadNotifications = useCallback(async () => {
-    setNotificationsBusy(true);
-    setNotificationsError(null);
+
+
 
     try {
       const {
         data: { session },
       } = await supabase.auth.getSession();
+      setNotificationsBusy(true);
+      setNotificationsError(null);
       if (!session?.access_token) {
         return;
       }
@@ -211,12 +208,12 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
   }, [supabase]);
 
   useEffect(() => {
-    void loadNotifications();
+    const initialLoad = window.setTimeout(() => { void loadNotifications(); }, 0);
     const intervalId = window.setInterval(() => {
       void loadNotifications();
     }, 45_000);
 
-    return () => window.clearInterval(intervalId);
+    return () => { window.clearTimeout(initialLoad); window.clearInterval(intervalId); };
   }, [loadNotifications]);
 
   async function markNotificationsRead(notificationIds?: string[]) {
@@ -483,7 +480,7 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
         return;
       }
 
-      await fetch("/api/auth/account", {
+      await drainResponse(await fetch("/api/auth/account", {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -492,7 +489,7 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
         body: JSON.stringify({
           themePreference: nextThemePreference,
         }),
-      });
+      }));
     } catch {
       // Theme save is silent by design in this menu.
     } finally {

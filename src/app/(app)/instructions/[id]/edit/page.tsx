@@ -21,6 +21,7 @@ interface WorkItemRelation {
 
 interface EditInstructionRecord {
   id: string;
+  updated_at: string;
   is_archived: boolean;
   body_markdown: string;
   uncommon_tools: string;
@@ -61,7 +62,7 @@ export default async function EditInstructionPage({ params }: EditInstructionPag
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, is_archived, body_markdown, uncommon_tools, iso_clause_refs, process_scope, acceptance_criteria, verification_records, risk_controls, approval_status, created_by, revision, fork_root_instruction_id, fork_number, merged_into_root_at, merge_count, work_item_id, work_items(id, department_id, part_id, item_title)",
+      "id, updated_at, is_archived, body_markdown, uncommon_tools, iso_clause_refs, process_scope, acceptance_criteria, verification_records, risk_controls, approval_status, created_by, revision, fork_root_instruction_id, fork_number, merged_into_root_at, merge_count, work_item_id, work_items(id, department_id, part_id, item_title)",
     )
     .eq("id", id)
     .eq("is_archived", false)
@@ -118,6 +119,8 @@ export default async function EditInstructionPage({ params }: EditInstructionPag
         mode="edit"
         initialData={{
           instructionId: instruction.id,
+          updatedAt: instruction.updated_at,
+          approvalStatus: instruction.approval_status ?? "draft",
           workItemId: instruction.work_item_id,
           departmentId: workItem.department_id,
           partId: workItem.part_id,

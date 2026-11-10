@@ -34,11 +34,13 @@ import {
   useMemo,
   useRef,
   useState,
+  useTransition,
 } from "react";
 
 import { LocalDateTime } from "@/components/ui/local-date-time";
 import { FloatingStatusNotices } from "@/components/ui/floating-status-notices";
-import { RichTextEditor } from "@/components/ui/rich-text-editor";
+import { MarkdownEditor } from "@/components/ui/markdown-editor";
+import { markdownToPlainText, normalizeEditorContent, toMarkdownSource } from "@/lib/editor-content";
 import {
   ISO_9001_CLAUSE_OPTIONS,
   PROCESS_DOCUMENT_STATUS_OPTIONS,
@@ -51,9 +53,12 @@ import {
 } from "@/lib/process-documents";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { cn } from "@/lib/utils";
+import { RICH_CONTENT_EXPORT_STYLES } from "@/lib/rich-content-export";
+import { sanitizeRichHtml } from "@/lib/rich-text-html";
 
 export interface ProcessDocumentListItem {
   id: string;
+  released_revision: number | null;
   document_number: string;
   title: string;
   document_type: ProcessDocumentType;
@@ -61,6 +66,8 @@ export interface ProcessDocumentListItem {
   department_id: string | null;
   owner_user_id: string | null;
   process_name: string;
+  process_purpose: string;
+  process_map_payload: Record<string, unknown>;
   process_scope: string;
   process_inputs: string;
   process_outputs: string;
@@ -110,6 +117,7 @@ export interface ProcessDocumentRevisionItem {
   approved_by_name: string | null;
   import_file_id: string | null;
   import_file_sha256: string;
+  metadata_snapshot: Record<string, unknown>;
 }
 
 export interface ProcessDocumentAuditItem {
@@ -177,6 +185,8 @@ interface ProcessDocumentsClientProps {
 }
 
 interface ProcessDocumentFormState {
+  expectedRevision: number | null;
+  expectedUpdatedAt: string | null;
   documentNumber: string;
   title: string;
   documentType: ProcessDocumentType;
@@ -184,6 +194,8 @@ interface ProcessDocumentFormState {
   departmentId: string;
   ownerUserId: string;
   processName: string;
+  processPurpose: string;
+  processMapPayload: Record<string, unknown>;
   processScope: string;
   processInputs: string;
   processOutputs: string;
@@ -231,6 +243,8 @@ type TemplateStudioPreset =
 type EditorBlockType = "h1" | "h2" | "checklist" | "callout" | "control-table";
 
 const EMPTY_FORM: ProcessDocumentFormState = {
+  expectedRevision: null,
+  expectedUpdatedAt: null,
   documentNumber: "",
   title: "",
   documentType: "procedure",
@@ -238,6 +252,8 @@ const EMPTY_FORM: ProcessDocumentFormState = {
   departmentId: "",
   ownerUserId: "",
   processName: "",
+  processPurpose: "",
+  processMapPayload: {},
   processScope: "",
   processInputs: "",
   processOutputs: "",
@@ -442,8 +458,8 @@ function extractDocumentChromeHtml(html: string, kind: "header" | "footer") {
   }
 }
 
-function buildDocumentChrome(kind: "header" | "footer", enabled: boolean, html: string) {
-  const trimmed = html.trim();
+function buildDocumentChrome(kind: "header" | "footer", enabled: boolean, source: string) {
+  const trimmed = normalizeEditorContent(source).trim();
   if (!enabled || !hasMeaningfulEditorHtml(trimmed)) {
     return "";
   }
@@ -475,11 +491,17 @@ function composeDocumentBodyHtml(form: ProcessDocumentFormState) {
   return [
     buildDocumentCoverImage(form.documentCoverImageDataUrl),
     buildDocumentChrome("header", form.documentHeaderEnabled, form.documentHeader),
-    form.bodyHtml,
+    normalizeEditorContent(form.bodyHtml),
     buildDocumentChrome("footer", form.documentFooterEnabled, form.documentFooter),
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function controlledFormFingerprint(form: ProcessDocumentFormState) {
+  return JSON.stringify(Object.fromEntries(Object.entries(form).filter(([key]) =>
+    !["changeSummary", "expectedRevision", "expectedUpdatedAt", "status"].includes(key),
+  )));
 }
 
 export function ProcessDocumentsClient({
@@ -512,8 +534,15 @@ export function ProcessDocumentsClient({
   );
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState<ProcessDocumentFormState>(EMPTY_FORM);
+  const [savedForm, setSavedForm] = useState<ProcessDocumentFormState>(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
+  // Pending while the post-save refresh loads fresh server data; actions wait for it.
+  const [refreshPending, startRefresh] = useTransition();
   const [importBusy, setImportBusy] = useState(false);
+  const [bodyUploadBusy, setBodyUploadBusy] = useState(false);
+  const [headerUploadBusy, setHeaderUploadBusy] = useState(false);
+  const [footerUploadBusy, setFooterUploadBusy] = useState(false);
+  const mediaUploadBusy = bodyUploadBusy || headerUploadBusy || footerUploadBusy;
   const [importReport, setImportReport] = useState<ImportReport | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -522,6 +551,26 @@ export function ProcessDocumentsClient({
   const [pageExplainError, setPageExplainError] = useState<string | null>(null);
   const [instructionSearchQuery, setInstructionSearchQuery] = useState("");
   const [instructionAiSearchEnabled, setInstructionAiSearchEnabled] = useState(false);
+  const hasControlledChanges = controlledFormFingerprint(form) !== controlledFormFingerprint(savedForm);
+  const hasUnsavedChanges = hasControlledChanges || form.changeSummary !== savedForm.changeSummary;
+
+  useEffect(() => {
+    if ((!hasUnsavedChanges && !mediaUploadBusy && !importBusy) || busy) return;
+    const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    const confirmLink = (event: MouseEvent) => {
+      if (!(event.target instanceof Element)) return;
+      const anchor = event.target.closest<HTMLAnchorElement>("a[href]");
+      if (!anchor || anchor.target === "_blank" || anchor.hasAttribute("download")) return;
+      const destination = new URL(anchor.href, window.location.href);
+      if (destination.origin === window.location.origin && destination.pathname === window.location.pathname && destination.search === window.location.search) return;
+      if (!window.confirm("Discard the unsaved changes to this document?")) {
+        event.preventDefault(); event.stopPropagation();
+      }
+    };
+    window.addEventListener("beforeunload", beforeUnload);
+    document.addEventListener("click", confirmLink, true);
+    return () => { window.removeEventListener("beforeunload", beforeUnload); document.removeEventListener("click", confirmLink, true); };
+  }, [hasUnsavedChanges, mediaUploadBusy, importBusy, busy]);
 
   const revisionsByDocumentId = useMemo(() => {
     const map = new Map<string, ProcessDocumentRevisionItem[]>();
@@ -571,7 +620,7 @@ export function ProcessDocumentsClient({
     selectedDocument && selectedRevisions.length > 0
       ? selectedRevisions.find(
           (revision) => revision.revision === selectedDocument.current_revision,
-        ) ?? selectedRevisions[0]
+        ) ?? null
       : null;
   const selectedAuditEvents = selectedDocument
     ? auditEventsByDocumentId.get(selectedDocument.id) ?? []
@@ -580,7 +629,7 @@ export function ProcessDocumentsClient({
 
   const approvalReadinessIssues = useMemo(() => {
     const issues: string[] = [];
-    const bodyText = extractVisibleText(form.bodyHtml);
+    const bodyText = markdownToPlainText(form.bodyHtml);
 
     if (!form.documentNumber.trim()) {
       issues.push("Document number");
@@ -606,12 +655,8 @@ export function ProcessDocumentsClient({
     if (form.sourceType === "import" && !form.importedFileName) {
       issues.push("Imported source file");
     }
-    if (!creating && !form.changeSummary.trim()) {
-      issues.push("Change summary");
-    }
-
     return issues;
-  }, [creating, form]);
+  }, [form]);
 
   const primaryChannels = useMemo(
     () => [
@@ -822,14 +867,17 @@ export function ProcessDocumentsClient({
   }, [documents, revisions]);
 
   useEffect(() => {
+    const initialization = window.setTimeout(() => {
     setImportReport(null);
 
     if (creating) {
-      setForm({
+      const initialForm = {
         ...EMPTY_FORM,
         documentNumber: createBlankDocumentNumber(documents.length),
         ownerUserId: currentUserId,
-      });
+      };
+      setForm(initialForm);
+      setSavedForm(initialForm);
       return;
     }
 
@@ -841,7 +889,9 @@ export function ProcessDocumentsClient({
     const documentHeader = extractDocumentChromeHtml(selectedBodyHtml, "header");
     const documentFooter = extractDocumentChromeHtml(selectedBodyHtml, "footer");
 
-    setForm({
+    const initialForm: ProcessDocumentFormState = {
+      expectedRevision: selectedDocument.current_revision,
+      expectedUpdatedAt: selectedDocument.updated_at,
       documentNumber: selectedDocument.document_number,
       title: selectedDocument.title,
       documentType: selectedDocument.document_type,
@@ -849,6 +899,8 @@ export function ProcessDocumentsClient({
       departmentId: selectedDocument.department_id ?? "",
       ownerUserId: selectedDocument.owner_user_id ?? currentUserId,
       processName: selectedDocument.process_name,
+      processPurpose: selectedDocument.process_purpose,
+      processMapPayload: selectedDocument.process_map_payload,
       processScope: selectedDocument.process_scope,
       processInputs: selectedDocument.process_inputs,
       processOutputs: selectedDocument.process_outputs,
@@ -856,23 +908,27 @@ export function ProcessDocumentsClient({
       processControls: selectedDocument.process_controls,
       relatedInstructionIds: selectedDocument.related_instruction_ids ?? [],
       isoClauseRefs: selectedDocument.iso_clause_refs ?? [],
-      bodyHtml: stripDocumentBuilderChrome(selectedBodyHtml),
+      bodyHtml: toMarkdownSource(stripDocumentBuilderChrome(selectedBodyHtml)),
       documentCoverImageDataUrl: selectedDocument.document_cover_image_data_url ?? "",
       documentCoverImageName: selectedDocument.document_cover_image_name ?? "",
       documentHeaderEnabled: hasMeaningfulEditorHtml(documentHeader),
-      documentHeader,
+      documentHeader: toMarkdownSource(documentHeader),
       documentFooterEnabled: hasMeaningfulEditorHtml(documentFooter),
-      documentFooter,
+      documentFooter: toMarkdownSource(documentFooter),
       changeSummary: "",
-      sourceType: "manual",
-      templateId: null,
-      importedFileName: null,
-      importedFileType: null,
-      importedFileSize: null,
+      sourceType: selectedRevision?.source_type ?? "manual",
+      templateId: selectedRevision?.template_id ?? null,
+      importedFileName: selectedRevision?.imported_file_name ?? null,
+      importedFileType: selectedRevision?.imported_file_type ?? null,
+      importedFileSize: selectedRevision?.imported_file_size ?? null,
       importedFileDataBase64: null,
-      importedFileSha256: null,
+      importedFileSha256: selectedRevision?.import_file_sha256 ?? null,
       accessGroupIds: selectedDocument.access_group_ids ?? [],
-    });
+    };
+    setForm(initialForm);
+    setSavedForm(initialForm);
+    }, 0);
+    return () => window.clearTimeout(initialization);
   }, [creating, currentUserId, documents.length, selectedDocument, selectedRevision]);
 
   function updateForm<K extends keyof ProcessDocumentFormState>(
@@ -916,7 +972,7 @@ export function ProcessDocumentsClient({
         `Controls: ${form.processControls || "Not specified"}`,
         `ISO clauses: ${form.isoClauseRefs.join("; ") || "None selected"}`,
         `Related work instructions: ${selectedInstructions.join("; ") || "None selected"}`,
-        `Visible body text: ${extractVisibleText(form.bodyHtml || (selectedRevision?.body_html ?? "")).slice(0, 1800)}`,
+        `Visible body text: ${markdownToPlainText(form.bodyHtml || (selectedRevision?.body_html ?? "")).slice(0, 1800)}`,
       ].join("\n");
       const response = await fetch("/api/page-explain", {
         method: "POST",
@@ -946,6 +1002,7 @@ export function ProcessDocumentsClient({
   }
 
   async function saveDocument(nextStatus: ProcessDocumentStatus) {
+    if (busy || refreshPending || importBusy || mediaUploadBusy || (!creating && !selectedDocument)) return;
     setBusy(true);
     setError(null);
     setMessage(null);
@@ -973,6 +1030,8 @@ export function ProcessDocumentsClient({
       const responsePayload = (await response.json().catch(() => ({}))) as {
         error?: string;
         documentId?: string;
+        revision?: number;
+        updatedAt?: string;
       };
 
       if (!response.ok) {
@@ -980,13 +1039,21 @@ export function ProcessDocumentsClient({
       }
 
       const nextDocumentId = responsePayload.documentId ?? selectedDocument?.id ?? null;
-      setMessage("Controlled document saved.");
+      // The next save must carry the stamp of the revision just written, or the server rejects
+      // it as a stale edit (for example, Submit for Review right after Save Draft).
+      const savedStamp = {
+        expectedRevision: responsePayload.revision ?? form.expectedRevision,
+        expectedUpdatedAt: responsePayload.updatedAt ?? form.expectedUpdatedAt,
+      };
+      setForm((current) => ({ ...current, ...savedStamp }));
+      setSavedForm({ ...form, ...savedStamp });
+      setMessage(`Revision ${responsePayload.revision ?? 1} ${getProcessDocumentStatusLabel(nextStatus).toLowerCase()}.`);
       setCreating(false);
-      if (nextDocumentId) {
-        setSelectedDocumentId(nextDocumentId);
-        router.replace(`/process-documents?doc=${nextDocumentId}`);
-      }
-      router.refresh();
+      if (nextDocumentId) setSelectedDocumentId(nextDocumentId);
+      startRefresh(() => {
+        if (nextDocumentId) router.replace(`/process-documents?doc=${nextDocumentId}`);
+        router.refresh();
+      });
     } catch (caughtError) {
       setError(
         caughtError instanceof Error
@@ -995,6 +1062,29 @@ export function ProcessDocumentsClient({
       );
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function downloadRevisionSource(revision: ProcessDocumentRevisionItem) {
+    if (!revision.import_file_id) return;
+    setError(null);
+    try {
+      const token = await getAccessToken();
+      const response = await fetch(`/api/process-documents/files/${revision.import_file_id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({})) as { error?: string };
+        throw new Error(payload.error ?? "Unable to download the retained source file.");
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = revision.imported_file_name || "source-document";
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (downloadError) {
+      setError(downloadError instanceof Error ? downloadError.message : "Unable to download the retained source file.");
     }
   }
 
@@ -1018,7 +1108,7 @@ export function ProcessDocumentsClient({
     setForm((current) => ({
       ...current,
       documentType: template.document_type,
-      bodyHtml: template.body_html,
+      bodyHtml: toMarkdownSource(template.body_html),
       sourceType: "template",
       templateId: template.id,
       importedFileName: null,
@@ -1030,6 +1120,7 @@ export function ProcessDocumentsClient({
   }
 
   function startNewDocument() {
+    if ((hasUnsavedChanges || mediaUploadBusy || importBusy) && !window.confirm("Discard the unsaved changes or uploads to this document?")) return;
     setCreating(true);
     setSelectedDocumentId(null);
     setImportReport(null);
@@ -1039,6 +1130,8 @@ export function ProcessDocumentsClient({
   }
 
   function selectDocument(documentId: string) {
+    if (documentId === selectedDocumentId && !creating) return;
+    if ((hasUnsavedChanges || mediaUploadBusy || importBusy) && !window.confirm("Discard the unsaved changes or uploads to this document?")) return;
     setCreating(false);
     setSelectedDocumentId(documentId);
     setImportReport(null);
@@ -1090,7 +1183,7 @@ export function ProcessDocumentsClient({
 
       setForm((current) => ({
         ...current,
-        bodyHtml: payload.convertedHtml ?? "",
+        bodyHtml: toMarkdownSource(payload.convertedHtml ?? ""),
         sourceType: "import",
         templateId: null,
         importedFileName: payload.fileName ?? file.name,
@@ -1214,7 +1307,7 @@ export function ProcessDocumentsClient({
 
     setForm((current) => ({
       ...current,
-      bodyHtml: [current.bodyHtml, snippets[blockType]].filter(Boolean).join("\n"),
+      bodyHtml: [current.bodyHtml.trimEnd(), toMarkdownSource(snippets[blockType])].filter(Boolean).join("\n\n"),
     }));
   }
 
@@ -1238,7 +1331,7 @@ export function ProcessDocumentsClient({
       ...current,
       title: current.title || templateTitle,
       documentType: preset,
-      bodyHtml: bodyHtml[preset],
+      bodyHtml: toMarkdownSource(bodyHtml[preset]),
       sourceType: "template",
       templateId: null,
       importedFileName: null,
@@ -1262,12 +1355,16 @@ export function ProcessDocumentsClient({
   }
 
   function exportCurrentDocumentHtml() {
+    if (mediaUploadBusy || importBusy || busy) return;
     const editing = Boolean(canEdit && (creating || selectedDocument));
-    const html = editing ? composeDocumentBodyHtml(form) : selectedRevision?.body_html ?? "";
+    const html = sanitizeRichHtml(editing ? composeDocumentBodyHtml(form) : selectedRevision?.body_html ?? "");
     const documentTitle =
       form.title.trim() || selectedDocument?.title || selectedRevision?.title || "controlled-document";
     const fileName = `${documentTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "controlled-document"}.html`;
-    const blob = new Blob([`<!doctype html><html><body>${html}</body></html>`], {
+    const released = selectedDocument?.status === "approved" && !hasControlledChanges;
+    const copyStatus = selectedDocument?.status === "obsolete" ? "Obsolete document — reference only" : released ? "Approved revision" : "Unreleased working copy — do not use for production";
+    const copyNotice = `<aside style="border:2px solid #334155;padding:12px;margin-bottom:24px;break-inside:avoid"><strong>${copyStatus}</strong><p>${escapeHtml(form.documentNumber || selectedDocument?.document_number || "New document")} · Revision ${selectedDocument?.current_revision ?? 1}</p><p>Downloaded and printed copies are uncontrolled. Verify the current approved revision in the application before use.</p></aside>`;
+    const blob = new Blob([`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(documentTitle)}</title><style>${RICH_CONTENT_EXPORT_STYLES}</style></head><body>${copyNotice}${html}</body></html>`], {
       type: "text/html;charset=utf-8",
     });
     const url = URL.createObjectURL(blob);
@@ -1279,19 +1376,19 @@ export function ProcessDocumentsClient({
     setActionsOpen(false);
   }
 
-  const canApproveCurrentForm = canApprove && approvalReadinessIssues.length === 0;
-  const canObsolete = isSystemAdmin && Boolean(selectedDocument);
+  const canApproveCurrentForm = canApprove && selectedDocument?.status === "in_review" && approvalReadinessIssues.length === 0 && !hasControlledChanges && !mediaUploadBusy;
+  const canObsolete = isSystemAdmin && Boolean(selectedDocument && selectedDocument.status !== "obsolete");
   const canEditSelectedDocument = Boolean(
     canEdit &&
       (creating ||
         !selectedDocument ||
         isSystemAdmin ||
-        (selectedDocument.status !== "approved" &&
+        (selectedDocument.status !== "approved" && selectedDocument.status !== "obsolete" &&
           (selectedDocument.created_by === currentUserId ||
             selectedDocument.owner_user_id === currentUserId))),
   );
-  const showEditor = Boolean(canEditSelectedDocument && (creating || selectedDocument));
-  const activeDocumentHtml = showEditor ? form.bodyHtml : selectedRevision?.body_html ?? "";
+  const showEditor = Boolean(canEditSelectedDocument && (creating || (selectedDocument && selectedRevision)));
+  const activeDocumentHtml = showEditor ? normalizeEditorContent(form.bodyHtml) : selectedRevision?.body_html ?? "";
   const documentOutline = useMemo(
     () => extractHeadingOutline(activeDocumentHtml),
     [activeDocumentHtml],
@@ -1402,6 +1499,13 @@ export function ProcessDocumentsClient({
           </button>
         </div>
       </section>
+
+      {selectedDocument?.released_revision != null && selectedDocument.current_revision !== selectedDocument.released_revision ? (
+        <p className="rounded-xl border border-cyan-500/35 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-900 dark:text-cyan-100">
+          Released revision <strong>{selectedDocument.released_revision}</strong> remains available to operators.
+          {" "}You are working on revision <strong>{selectedDocument.current_revision}</strong>; its changes take effect after approval.
+        </p>
+      ) : null}
 
       <div className="grid gap-3 xl:grid-cols-[16rem_minmax(0,1fr)] 2xl:grid-cols-[16rem_minmax(0,1fr)_17rem]">
         <aside id="doc-library" className="process-workbench-card grid h-fit scroll-mt-24 gap-3 rounded-2xl p-3 xl:sticky xl:top-24">
@@ -1617,7 +1721,7 @@ export function ProcessDocumentsClient({
           </div>
         </aside>
 
-        <main className="grid min-w-0 gap-3">
+        <section aria-label="Controlled document workspace" className="grid min-w-0 gap-3">
           {selectedDocument ? (
             <section id="doc-dashboard" className="process-workbench-card grid scroll-mt-24 gap-3 rounded-2xl p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1846,7 +1950,7 @@ export function ProcessDocumentsClient({
               </div>
 
               <div
-                className="tiptap-editor-content max-w-none rounded-lg border border-slate-300/70 bg-white p-4 text-sm dark:border-slate-700 dark:bg-slate-950"
+                className="prose-markdown max-w-none rounded-lg border border-slate-300/70 bg-white p-4 text-sm dark:border-slate-700 dark:bg-slate-950"
                 dangerouslySetInnerHTML={{ __html: selectedRevision.body_html }}
               />
             </section>
@@ -2065,8 +2169,9 @@ export function ProcessDocumentsClient({
                 <div className="grid gap-4 rounded-xl border border-slate-300 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80">
                   {form.documentHeaderEnabled ? (
                     <div className="border-b border-dashed border-slate-300 pb-4 dark:border-slate-700">
-                      <RichTextEditor
+                      <MarkdownEditor
                         label="Header"
+                        onUploadStateChange={setHeaderUploadBusy}
                         value={form.documentHeader}
                         onChange={(value) => updateForm("documentHeader", value)}
                         placeholder="Add document number, owner, site, release note, logo, or header table..."
@@ -2075,8 +2180,9 @@ export function ProcessDocumentsClient({
                     </div>
                   ) : null}
 
-                  <RichTextEditor
+                  <MarkdownEditor
                     label="Document Body"
+                    onUploadStateChange={setBodyUploadBusy}
                     value={form.bodyHtml}
                     onChange={(value) => updateForm("bodyHtml", value)}
                     placeholder="Write the controlled document..."
@@ -2085,8 +2191,9 @@ export function ProcessDocumentsClient({
 
                   {form.documentFooterEnabled ? (
                     <div className="border-t border-dashed border-slate-300 pt-4 dark:border-slate-700">
-                      <RichTextEditor
+                      <MarkdownEditor
                         label="Footer"
+                        onUploadStateChange={setFooterUploadBusy}
                         value={form.documentFooter}
                         onChange={(value) => updateForm("documentFooter", value)}
                         placeholder="Add retention, printed-copy warning, revision, page note, image, or footer table..."
@@ -2133,6 +2240,8 @@ export function ProcessDocumentsClient({
                     value={form.processScope}
                     onChange={(event) => updateForm("processScope", event.target.value)}
                     rows={3}
+                    maxLength={500}
+                    placeholder="Required when creating a new revision. Describe what changed and why."
                     className="resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
                   />
                 </label>
@@ -2487,33 +2596,34 @@ export function ProcessDocumentsClient({
                   </p>
                 ) : (
                   <p className="rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-800 dark:text-emerald-200">
-                    Ready for approval.
+                    {hasControlledChanges ? "Save changes and submit this revision for review before approval." : selectedDocument?.status === "in_review" ? "Saved revision is ready for approval." : "Required content is complete. Submit a saved revision for review before approval."}
                   </p>
                 )}
 
                 <div className="flex flex-wrap justify-end gap-2">
                   <button
                     type="button"
-                    disabled={busy}
+                    disabled={busy || refreshPending || importBusy || mediaUploadBusy}
                     onClick={() => void saveDocument("draft")}
                     className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
                   >
                     {busy ? <Loader2 size={15} className="animate-spin" /> : <FileText size={15} />}
-                    Save Draft
+                    {selectedDocument?.status === "approved" || selectedDocument?.status === "obsolete" ? "Create Draft Revision" : "Save Draft"}
                   </button>
                   <button
                     type="button"
-                    disabled={busy}
+                    disabled={busy || refreshPending || importBusy || mediaUploadBusy || selectedDocument?.status === "obsolete"}
                     onClick={() => void saveDocument("in_review")}
                     className="inline-flex items-center gap-2 rounded-lg border border-amber-500/45 bg-amber-500/15 px-4 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-amber-200"
                   >
                     <ShieldCheck size={15} />
-                    Submit Review
+                    Submit for Review
                   </button>
                   {canApprove ? (
                     <button
                       type="button"
-                      disabled={busy || !canApproveCurrentForm}
+                      disabled={busy || refreshPending || importBusy || mediaUploadBusy || !canApproveCurrentForm}
+                      title={selectedDocument?.status === "in_review" ? "Approve the saved revision. Save content changes before approval." : "Submit a saved revision for review before approval."}
                       onClick={() => void saveDocument("approved")}
                       className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/45 bg-emerald-500/15 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-emerald-200"
                     >
@@ -2524,7 +2634,7 @@ export function ProcessDocumentsClient({
                   {canObsolete ? (
                     <button
                       type="button"
-                      disabled={busy}
+                      disabled={busy || refreshPending || importBusy || mediaUploadBusy}
                       onClick={() => void saveDocument("obsolete")}
                       className="inline-flex items-center gap-2 rounded-lg border border-slate-500/45 bg-slate-500/15 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-slate-200"
                     >
@@ -2565,9 +2675,23 @@ export function ProcessDocumentsClient({
                           ? ` | Approved by ${revision.approved_by_name}`
                           : ""}
                       </p>
+                      <details className="mt-2 rounded-lg border border-slate-200 p-2 dark:border-slate-700">
+                        <summary className="cursor-pointer font-semibold text-slate-700 dark:text-slate-200">View retained revision</summary>
+                        {revision.metadata_snapshot.process_scope ? (
+                          <p className="mt-3 text-xs text-slate-600 dark:text-slate-300">
+                            <strong>Scope:</strong> {String(revision.metadata_snapshot.process_scope)}
+                          </p>
+                        ) : null}
+                        <div className="prose-markdown mt-3 max-w-none overflow-x-auto break-words" dangerouslySetInnerHTML={{ __html: revision.body_html }} />
+                        {!Object.keys(revision.metadata_snapshot).length ? (
+                          <p className="mt-2 text-xs text-slate-500">This earlier revision predates metadata snapshots. Its retained body and approval evidence are shown above.</p>
+                        ) : null}
+                      </details>
                       {revision.import_file_id ? (
-                        <a
-                          href={`/api/process-documents/files/${revision.import_file_id}`}
+                        <button
+                          type="button"
+                          onClick={() => void downloadRevisionSource(revision)}
+                          title={revision.import_file_sha256 ? `SHA-256: ${revision.import_file_sha256}` : "Download retained source evidence"}
                           className="inline-flex w-fit items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
                         >
                           <Download size={13} />
@@ -2575,7 +2699,7 @@ export function ProcessDocumentsClient({
                           {revision.import_file_sha256
                             ? ` | SHA-256 ${revision.import_file_sha256.slice(0, 12)}`
                             : ""}
-                        </a>
+                        </button>
                       ) : null}
                     </article>
                   ))}
@@ -2747,7 +2871,7 @@ export function ProcessDocumentsClient({
               </div>
             </section>
           ) : null}
-        </main>
+        </section>
 
         <aside className="hidden h-fit gap-4 2xl:sticky 2xl:top-24 2xl:grid">
           <section className="grid gap-3 rounded-2xl border border-slate-300/70 bg-white/85 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/75">

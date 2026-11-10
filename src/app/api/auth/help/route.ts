@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getRequestProfile } from "@/lib/api-auth";
 import { serverEnv } from "@/lib/env.server";
 import { sendLoginHelpRequestEmail } from "@/lib/mailer";
+import { clientAddress, consumeRateLimit } from "@/lib/rate-limit.server";
 
 interface HelpBody {
   name?: string;
@@ -56,6 +57,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { error: "Help endpoint is not configured." },
       { status: 503 },
+    );
+  }
+
+  // This endpoint emails administrators without signing in, so limit how often one device can use it.
+  const limit = consumeRateLimit(`help:${clientAddress(request)}`, 5, 60 * 60 * 1000);
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: "Too many messages were sent from this device. Try again later." },
+      { status: 429, headers: { "Retry-After": String(limit.retryAfterSeconds) } },
     );
   }
 

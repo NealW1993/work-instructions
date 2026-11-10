@@ -1,5 +1,11 @@
 node_modules
 .next
+.next-ui-smoke
+.tmp
+test-results
+playwright-report
+coverage
+*.tsbuildinfo
 .git
 .gitignore
 npm-debug.log
@@ -11,3 +17,6 @@ README.md
 .env.development
 .env.test
 .env.production
+.env*
+supabase/.temp
+supabase/.branches

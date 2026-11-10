@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { AlertTriangle, CheckCircle2, Info } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Info, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -34,7 +34,7 @@ export function FloatingStatusNotices({
 
   useEffect(() => {
     const timers = visibleNotices
-      .filter((notice) => notice.onDismiss)
+      .filter((notice) => notice.onDismiss && notice.tone !== "error")
       .map((notice) =>
         window.setTimeout(() => {
           notice.onDismiss?.();
@@ -68,6 +68,7 @@ export function FloatingStatusNotices({
         return (
           <div
             key={`${notice.id}:${notice.message}`}
+            role={notice.tone === "error" ? "alert" : "status"}
             className={cn(
               "system-status-toast pointer-events-auto flex items-start gap-2 rounded-xl border px-4 py-3 text-sm font-semibold shadow-xl backdrop-blur-md",
               notice.tone === "success"
@@ -79,6 +80,7 @@ export function FloatingStatusNotices({
           >
             <Icon size={18} className="mt-0.5 shrink-0" />
             <span className="min-w-0">{notice.message}</span>
+            {notice.onDismiss ? <button type="button" onClick={notice.onDismiss} aria-label="Dismiss notification" className="-my-2 -mr-2 ml-auto inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current dark:hover:bg-white/10"><X size={16} /></button> : null}
           </div>
         );
       })}

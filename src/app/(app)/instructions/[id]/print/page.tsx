@@ -1,10 +1,9 @@
 import { notFound } from "next/navigation";
 import { headers } from "next/headers";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import sanitizeHtml from "sanitize-html";
+import { sanitizeRichHtml } from "@/lib/rich-text.server";
 
 import { AutoPrintTrigger } from "@/components/instructions/auto-print-trigger";
+import { ControlledCopyNotice } from "@/components/instructions/controlled-copy-notice";
 import {
   PrintMediaIsolator,
   type PrintMediaMode,
@@ -31,6 +30,9 @@ interface InstructionPrintPageProps {
 
 interface InstructionPrintRecord {
   id: string;
+  approval_status: string | null;
+  approved_at: string | null;
+  is_archived: boolean;
   revision: number;
   body_markdown: string;
   uncommon_tools: string;
@@ -102,10 +104,6 @@ function getWorkItem(relation: InstructionPrintRecord["work_items"]) {
   return relation;
 }
 
-function looksLikeHtml(value: string): boolean {
-  return /<\/?[a-z][\s\S]*>/i.test(value);
-}
-
 function parseToolNames(value: string | null | undefined) {
   const dedupedByName = new Map<string, string>();
 
@@ -124,86 +122,20 @@ function parseToolNames(value: string | null | undefined) {
   return Array.from(dedupedByName.values());
 }
 
-function sanitizeRichHtml(value: string): string {
-  return sanitizeHtml(value, {
-    allowedTags: [
-      "p",
-      "br",
-      "strong",
-      "b",
-      "em",
-      "i",
-      "u",
-      "s",
-      "mark",
-      "ul",
-      "ol",
-      "li",
-      "blockquote",
-      "code",
-      "pre",
-      "h1",
-      "h2",
-      "h3",
-      "hr",
-      "span",
-      "div",
-      "figure",
-      "img",
-      "video",
-      "source",
-      "label",
-      "input",
-    ],
-    allowedAttributes: {
-      figure: ["data-type", "data-align", "data-width", "style", "class"],
-      img: ["src", "alt", "title", "width", "height", "style", "class"],
-      video: ["src", "controls", "width", "height", "style", "class", "playsinline", "preload", "data-mime-type"],
-      source: ["src", "type"],
-      span: ["style"],
-      div: ["style", "data-type"],
-      p: ["style"],
-      h1: ["style"],
-      h2: ["style"],
-      h3: ["style"],
-      ul: ["data-type"],
-      li: ["data-type", "data-checked"],
-      label: ["contenteditable"],
-      input: ["type", "checked", "disabled"],
-      mark: ["style", "data-color"],
-      "*": ["class", "style"],
-    },
-    allowedSchemes: ["http", "https", "data"],
-    allowedSchemesByTag: {
-      img: ["http", "https", "data"],
-      video: ["http", "https", "data"],
-      source: ["http", "https", "data"],
-    },
-  });
-}
-
 function renderInstructionContent(
   value: string,
   mediaUrlRuntime?: MediaUrlRuntimeContext,
 ) {
-  if (looksLikeHtml(value)) {
-    const sanitized = sanitizeRichHtml(value);
-    const normalizedMarkup = rewriteLoopbackMediaUrlsInHtml(
-      normalizeVideoMarkupForPlayback(sanitized),
-      mediaUrlRuntime,
-    );
-    return (
-      <div
-        className="prose prose-slate max-w-none dark:prose-invert"
-        dangerouslySetInnerHTML={{ __html: normalizedMarkup }}
-      />
-    );
-  }
-
+  const sanitized = sanitizeRichHtml(value);
+  const normalizedMarkup = rewriteLoopbackMediaUrlsInHtml(
+    normalizeVideoMarkupForPlayback(sanitized),
+    mediaUrlRuntime,
+  );
   return (
-    <div className="prose prose-slate max-w-none dark:prose-invert">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{value}</ReactMarkdown>
-    </div>
+    <div
+      className="prose-markdown"
+      dangerouslySetInnerHTML={{ __html: normalizedMarkup }}
+    />
   );
 }
 
@@ -375,7 +307,7 @@ export default async function InstructionPrintPage({
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, revision, body_markdown, uncommon_tools, iso_clause_refs, process_scope, acceptance_criteria, verification_records, risk_controls, instruction_media(public_url, media_type, caption, sort_order), work_items(part_id, item_title, departments(name))",
+      "id, approval_status, approved_at, is_archived, revision, body_markdown, uncommon_tools, iso_clause_refs, process_scope, acceptance_criteria, verification_records, risk_controls, instruction_media(public_url, media_type, caption, sort_order), work_items(part_id, item_title, departments(name))",
     )
     .eq("id", id)
     .maybeSingle();
@@ -446,7 +378,7 @@ export default async function InstructionPrintPage({
     { label: "Risks / Controls", value: instruction.risk_controls ?? "" },
   ].filter((entry) => entry.value.trim().length > 0);
   const printBodyMedia = extractPrintMediaFromBody(
-    rewriteLoopbackMediaUrlsInHtml(instruction.body_markdown, mediaUrlRuntime),
+    rewriteLoopbackMediaUrlsInHtml(sanitizeRichHtml(instruction.body_markdown), mediaUrlRuntime),
   );
   const printInstructionMedia = normalizeInstructionMediaForPrint(
     instruction.instruction_media,
@@ -574,6 +506,13 @@ export default async function InstructionPrintPage({
         className={`print-sheet ${printModeClassName} mx-auto max-w-4xl rounded-2xl border border-slate-300/70 bg-white p-6 shadow-lg dark:border-slate-700 dark:bg-slate-950`}
       >
         <PrintPageControls instructionHref={`/instructions/${instruction.id}`} />
+        <ControlledCopyNotice
+          status={instruction.approval_status}
+          archived={instruction.is_archived}
+          approvedAt={instruction.approved_at}
+          partId={workItem.part_id}
+          department={Array.isArray(workItem.departments) ? workItem.departments[0]?.name ?? "Unassigned" : workItem.departments?.name ?? "Unassigned"}
+        />
 
         <section className="border-b border-slate-300 pb-4 dark:border-slate-700">
           <h1 className="text-3xl font-extrabold text-slate-900 dark:text-slate-100">

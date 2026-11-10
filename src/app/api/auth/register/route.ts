@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { serverEnv } from "@/lib/env.server";
+import { isWeakPin, PIN_POLICY_MESSAGE } from "@/lib/pin-policy";
+import { clientAddress, consumeRateLimit } from "@/lib/rate-limit.server";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
-import type { AppRole } from "@/lib/types";
 import { isValidEmployeeId, normalizeEmployeeId } from "@/lib/utils";
 
 interface RegisterBody {
@@ -17,10 +18,10 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as RegisterBody;
-  const fullName = body.fullName?.trim() ?? "";
-  const email = body.email?.trim().toLowerCase() ?? "";
-  const employeeId = normalizeEmployeeId(body.employeeId ?? "");
-  const pin = body.pin?.trim() ?? "";
+  const fullName = typeof body?.fullName === "string" ? body.fullName.trim() : "";
+  const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+  const employeeId = normalizeEmployeeId(typeof body?.employeeId === "string" ? body.employeeId : "");
+  const pin = typeof body?.pin === "string" ? body.pin.trim() : "";
 
   if (!fullName || !email || !employeeId || !pin) {
     return NextResponse.json(
@@ -31,6 +32,16 @@ export async function POST(request: Request) {
 
   if (!EMAIL_PATTERN.test(email)) {
     return NextResponse.json({ error: "Enter a valid email." }, { status: 400 });
+  }
+
+  if (email === serverEnv.SYSTEM_ADMIN_EMAIL.trim().toLowerCase()) {
+    return NextResponse.json(
+      { error: "The initial administrator account must be provisioned by a trusted administrator in Supabase. Contact your system owner." },
+      { status: 403 },
+    );
+  }
+  if (fullName.length > 120 || email.length > 254) {
+    return NextResponse.json({ error: "Name or email is too long." }, { status: 400 });
   }
 
   if (!isValidEmployeeId(employeeId)) {
@@ -44,6 +55,19 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { error: "PIN must be exactly 6 digits." },
       { status: 400 },
+    );
+  }
+
+  if (isWeakPin(pin)) {
+    return NextResponse.json({ error: PIN_POLICY_MESSAGE }, { status: 400 });
+  }
+
+  // Self-registration is public, so limit how many accounts one device can attempt to create.
+  const registrationLimit = consumeRateLimit(`register:${clientAddress(request)}`, 10, 60 * 60 * 1000);
+  if (!registrationLimit.allowed) {
+    return NextResponse.json(
+      { error: "Too many accounts were requested from this device. Try again later or ask an administrator." },
+      { status: 429, headers: { "Retry-After": String(registrationLimit.retryAfterSeconds) } },
     );
   }
 
@@ -121,32 +145,12 @@ export async function POST(request: Request) {
     );
   }
 
-  let role: AppRole = "user";
-  const systemAdminEmail = serverEnv.SYSTEM_ADMIN_EMAIL.trim().toLowerCase();
-  if (systemAdminEmail && email === systemAdminEmail) {
-    const { data: admins, error: adminLookupError } = await supabaseAdmin
-      .from("profiles")
-      .select("id")
-      .eq("role", "system_admin")
-      .neq("id", userId)
-      .limit(1);
-
-    if (adminLookupError) {
-      await supabaseAdmin.auth.admin.deleteUser(userId);
-      return NextResponse.json({ error: adminLookupError.message }, { status: 500 });
-    }
-
-    if ((admins?.length ?? 0) === 0) {
-      role = "system_admin";
-    }
-  }
-
   const { error: profileUpdateError } = await supabaseAdmin
     .from("profiles")
     .update({
       full_name: fullName,
       employee_id: employeeId,
-      role,
+      role: "user",
     })
     .eq("id", userId);
 
@@ -167,6 +171,6 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     success: true,
-    promoted: role === "system_admin",
+    promoted: false,
   });
 }

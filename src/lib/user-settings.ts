@@ -1,6 +1,7 @@
 export type UserSettings = Record<string, unknown>;
 
 const USER_SETTINGS_PATH_SEGMENT_PATTERN = /^[A-Za-z0-9_-]+$/;
+const UNSAFE_PATH_SEGMENTS = new Set(["__proto__", "prototype", "constructor"]);
 
 function isPlainObject(value: unknown): value is UserSettings {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -15,18 +16,23 @@ export function parseUserSettingsPath(pathValue: unknown): string[] | null {
     return null;
   }
 
+  if (pathValue.length > 512) {
+    return null;
+  }
+
   const segments = pathValue
     .trim()
     .split(".")
-    .map((segment) => segment.trim())
-    .filter((segment) => segment.length > 0);
+    .map((segment) => segment.trim());
 
-  if (segments.length === 0) {
+  if (segments.length === 0 || segments.length > 16) {
     return null;
   }
 
   if (
-    segments.some((segment) => !USER_SETTINGS_PATH_SEGMENT_PATTERN.test(segment))
+    segments.some((segment) =>
+      !USER_SETTINGS_PATH_SEGMENT_PATTERN.test(segment) || UNSAFE_PATH_SEGMENTS.has(segment),
+    )
   ) {
     return null;
   }
@@ -48,6 +54,9 @@ export function getUserSettingAtPath(
       return undefined;
     }
 
+    if (UNSAFE_PATH_SEGMENTS.has(segment) || !Object.prototype.hasOwnProperty.call(current, segment)) {
+      return undefined;
+    }
     current = current[segment];
   }
 
@@ -64,6 +73,9 @@ export function setUserSettingAtPath(
   }
 
   const [segment, ...rest] = path;
+  if (UNSAFE_PATH_SEGMENTS.has(segment)) {
+    throw new Error("Invalid settings path.");
+  }
   const base = normalizeUserSettings(settings);
   const next = { ...base };
 

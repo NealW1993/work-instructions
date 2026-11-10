@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { SUPABASE_AUTH_COOKIE_NAME } from "@/lib/supabase/constants";
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let response = NextResponse.next({
     request,
   });
@@ -17,7 +17,7 @@ export async function middleware(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ??
     "";
 
-  // Avoid failing every request if middleware env isn't available in Edge runtime.
+  // Page requests refresh cookie sessions; API handlers validate their own bearer tokens.
   if (!supabaseUrl || !supabaseAnonKey) {
     return response;
   }
@@ -28,6 +28,7 @@ export async function middleware(request: NextRequest) {
     {
       cookieOptions: {
         name: SUPABASE_AUTH_COOKIE_NAME,
+        secure: request.headers.get("x-forwarded-proto")?.split(",")[0].trim() === "https" || request.nextUrl.protocol === "https:",
       },
       cookies: {
         getAll() {
@@ -53,6 +54,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!api(?:/|$)|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|mp4|webm|mov)$).*)",
   ],
 };

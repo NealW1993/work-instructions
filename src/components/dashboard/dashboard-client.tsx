@@ -1,13 +1,34 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  Activity,
+  Award,
+  BookOpen,
+  Building2,
+  Calculator,
+  ChartLine,
+  ChartNetwork,
   CheckCircle2,
+  ClipboardCheck,
   Eye,
   EyeOff,
+  FileClock,
+  FilePlus2,
   FileText,
+  FlaskConical,
+  GitFork,
   GripVertical,
+  History,
+  LayoutDashboard,
+  Loader2,
+  type LucideIcon,
+  Pencil,
+  Pin,
+  SearchX,
+  SlidersHorizontal,
+  Sparkles,
   Info,
   Search,
   TriangleAlert,
@@ -16,9 +37,11 @@ import {
 } from "lucide-react";
 import {
   type Dispatch,
+  type FormEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type SetStateAction,
+  startTransition,
   useCallback,
   useEffect,
   useMemo,
@@ -27,6 +50,17 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import { useHydrated } from "@/lib/use-hydrated";
+import { useSynchronizedMinuteMs } from "@/lib/second-ticker";
+import { ModalDialog } from "@/components/ui/modal-dialog";
+import { DashboardLayoutStudio } from "@/components/dashboard/dashboard-layout-studio";
+import {
+  formatRelativeDays,
+  InstructionRow,
+  QuickActionLink,
+  StatusPill,
+  WidgetEmptyState,
+} from "@/components/dashboard/dashboard-ui";
 import { LocalDateTime } from "@/components/ui/local-date-time";
 import {
   DASHBOARD_LAYOUT_PRESETS,
@@ -35,6 +69,7 @@ import {
   type DashboardWidgetLayoutItem,
   type DashboardWidgetSize,
   findMatchingDashboardLayoutPreset,
+  getDefaultDashboardLayout,
   normalizeDashboardLayout,
 } from "@/lib/dashboard-layout";
 import {
@@ -51,7 +86,7 @@ import {
   patchCurrentUserSetting,
 } from "@/lib/user-settings-client";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
-import { cn } from "@/lib/utils";
+import { cn, drainResponse } from "@/lib/utils";
 
 interface DashboardWorkItemSummary {
   department_id: string;
@@ -234,7 +269,10 @@ interface DashboardWidgetDefinition {
 
 interface DashboardClientProps {
   canEdit: boolean;
+  /** Users (contributors) may create instructions for review even though they cannot edit released ones. */
+  canCreate?: boolean;
   isSystemAdmin: boolean;
+  currentUserName?: string;
   initialQuery: string;
   searchError: string | null;
   newestError: string | null;
@@ -251,6 +289,7 @@ interface DashboardClientProps {
   currentUserId: string;
   initialDashboardLayout: unknown;
   initialDashboardDefaultLayout: unknown;
+  initialDashboardLayoutUpdatedAt: string;
   instructionReviewWindowDays: number;
   instructionReviewStatusByInstructionId: Record<
     string,
@@ -262,8 +301,6 @@ const DEFAULT_DEPARTMENT_COLOR = "#0EA5E9";
 const DASHBOARD_HISTORY_GUARD_STATE_KEY = "__dashboardLayoutUnsavedGuard";
 const DASHBOARD_RETURN_STATE_KEY = "__dashboardInstructionReturnState";
 const DASHBOARD_RETURN_STATE_MAX_AGE_MS = 1000 * 60 * 30;
-const DASHBOARD_LAYOUT_SNAPSHOT_KEY = "__dashboardSavedLayoutSnapshot";
-const DASHBOARD_LAYOUT_SNAPSHOT_MAX_AGE_MS = 1000 * 60 * 60 * 4;
 const ONE_DAY_MS = 1000 * 60 * 60 * 24;
 const DASHBOARD_WIDGET_DRAG_AUTOSCROLL_EDGE_THRESHOLD_PX = 120;
 const DASHBOARD_WIDGET_DRAG_AUTOSCROLL_MAX_SPEED_PX_PER_FRAME = 26;
@@ -316,18 +353,30 @@ function isKpiTimeRangeDays(value: number): value is KpiTimeRangeDays {
 const MAX_WIDGET_TITLE_LENGTH = 80;
 const DEFAULT_REVIEW_WINDOW_DAYS = 30;
 
+async function withDashboardSaveDeadline<T>(operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  let deadline: number | undefined;
+  try {
+    return await Promise.race([
+      operation(controller.signal),
+      new Promise<never>((_resolve, reject) => {
+        deadline = window.setTimeout(() => {
+          reject(new Error("The server did not confirm the save in time. Your draft is preserved. Cancel and reopen the editor to check the saved layout before trying again."));
+          controller.abort();
+        }, 30_000);
+      }),
+    ]);
+  } finally {
+    window.clearTimeout(deadline);
+  }
+}
+
 interface DashboardInstructionReturnState {
   query: string;
   selectedDepartmentId: string;
   scrollX: number;
   scrollY: number;
   savedAt: number;
-}
-
-interface DashboardSavedLayoutSnapshot {
-  userId: string;
-  savedAt: number;
-  layout: DashboardWidgetLayoutItem[];
 }
 
 const WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
@@ -339,25 +388,25 @@ const WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
   },
   {
     id: "pinned",
-    title: "Your Pinned Instructions",
+    title: "Pinned instructions",
     description: "Quick access to your pinned work instructions.",
     category: "core",
   },
   {
     id: "newest",
-    title: "Newest Work Instructions",
+    title: "New instructions",
     description: "Recently created instructions ordered by newest first.",
     category: "core",
   },
   {
     id: "department_activity",
-    title: "Department Activity",
+    title: "Department activity",
     description: "Instruction volume and activity split by department.",
     category: "core",
   },
   {
     id: "review_queue",
-    title: "Needs Review Queue",
+    title: "Needs review",
     description: "Instructions flagged or out of calibration window.",
     category: "core",
   },
@@ -381,7 +430,7 @@ const WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
   },
   {
     id: "recent_updates",
-    title: "Recently Updated Work Items",
+    title: "Recently changed",
     description: "Most recent system updates with direct links to instructions.",
     category: "core",
   },
@@ -399,19 +448,19 @@ const WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
   },
   {
     id: "kpi_throughput",
-    title: "KPI: Throughput Trend",
+    title: "Document Activity Trend",
     description: "Line graph of daily dashboard event throughput.",
     category: "kpi",
   },
   {
     id: "kpi_creation_velocity",
-    title: "KPI: Creation Velocity",
+    title: "New Instruction Trend",
     description: "Area graph of new instruction creation over time.",
     category: "kpi",
   },
   {
     id: "kpi_department_workload",
-    title: "KPI: Department Workload",
+    title: "Department Document Activity",
     description: "Bar graph of event load by department.",
     category: "kpi",
   },
@@ -423,8 +472,8 @@ const WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
   },
   {
     id: "kpi_revision_cycle_time",
-    title: "KPI: Revision Cycle Time",
-    description: "Scatter graph of days since update versus revision depth.",
+    title: "Revision Age and Number",
+    description: "Days since the last document update, compared with revision number. This is not production cycle time.",
     category: "kpi",
   },
   {
@@ -459,29 +508,6 @@ const WIDGET_SIZE_OPTIONS: Array<{ value: DashboardWidgetSize; label: string }> 
   { value: "wide", label: "Wide" },
   { value: "full", label: "Full Width" },
 ];
-
-const RESET_DEFAULT_WIDGET_SIZE_BY_ID: Record<DashboardWidgetId, DashboardWidgetSize> = {
-  finder: "full",
-  pinned: "standard",
-  newest: "standard",
-  department_activity: "standard",
-  review_queue: "standard",
-  formula_snapshot: "compact",
-  formula_review_queue: "standard",
-  formula_library: "wide",
-  recent_updates: "wide",
-  my_impact: "standard",
-  system_history: "full",
-  kpi_throughput: "wide",
-  kpi_creation_velocity: "wide",
-  kpi_department_workload: "standard",
-  kpi_review_health: "wide",
-  kpi_revision_cycle_time: "wide",
-  kpi_event_mix: "standard",
-  kpi_review_origin_mix: "standard",
-  kpi_department_event_share: "wide",
-  kpi_actor_activity_mix: "standard",
-};
 
 function isDashboardWidgetId(value: string): value is DashboardWidgetId {
   return WIDGET_DEFINITIONS.some((entry) => entry.id === value);
@@ -848,80 +874,36 @@ function areWidgetLayoutsEqual(
   });
 }
 
-function readSavedLayoutSnapshot(userId: string): DashboardWidgetLayoutItem[] | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  try {
-    const rawSnapshot = window.sessionStorage.getItem(DASHBOARD_LAYOUT_SNAPSHOT_KEY);
-    if (!rawSnapshot) {
-      return null;
-    }
-
-    const parsedSnapshot = JSON.parse(rawSnapshot) as Partial<DashboardSavedLayoutSnapshot>;
-    if (
-      parsedSnapshot.userId !== userId ||
-      typeof parsedSnapshot.savedAt !== "number" ||
-      !Array.isArray(parsedSnapshot.layout)
-    ) {
-      return null;
-    }
-
-    if (Date.now() - parsedSnapshot.savedAt > DASHBOARD_LAYOUT_SNAPSHOT_MAX_AGE_MS) {
-      window.sessionStorage.removeItem(DASHBOARD_LAYOUT_SNAPSHOT_KEY);
-      return null;
-    }
-
-    return cloneWidgetLayout(normalizeDashboardLayout(parsedSnapshot.layout));
-  } catch {
-    return null;
-  }
-}
-
-function persistSavedLayoutSnapshot(userId: string, layout: DashboardWidgetLayoutItem[]) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    const snapshot: DashboardSavedLayoutSnapshot = {
-      userId,
-      savedAt: Date.now(),
-      layout: cloneWidgetLayout(layout),
-    };
-    window.sessionStorage.setItem(DASHBOARD_LAYOUT_SNAPSHOT_KEY, JSON.stringify(snapshot));
-  } catch {
-    // Persisting layout snapshot is best-effort.
-  }
-}
-
-function clearSavedLayoutSnapshot(userId: string) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    const rawSnapshot = window.sessionStorage.getItem(DASHBOARD_LAYOUT_SNAPSHOT_KEY);
-    if (!rawSnapshot) {
-      return;
-    }
-
-    const parsedSnapshot = JSON.parse(rawSnapshot) as Partial<DashboardSavedLayoutSnapshot>;
-    if (parsedSnapshot.userId === userId) {
-      window.sessionStorage.removeItem(DASHBOARD_LAYOUT_SNAPSHOT_KEY);
-    }
-  } catch {
-    // Snapshot cleanup is best-effort.
-  }
-}
-
 function shouldCaptureInstructionReturnState(pathname: string) {
   if (!pathname.startsWith("/instructions/")) {
     return false;
   }
 
   return !pathname.startsWith("/instructions/new") && !pathname.startsWith("/instructions/archived");
+}
+
+const WIDGET_ICONS: Partial<Record<DashboardWidgetId, LucideIcon>> = {
+  pinned: Pin,
+  newest: Sparkles,
+  recent_updates: History,
+  review_queue: ClipboardCheck,
+  department_activity: Building2,
+  system_history: Activity,
+  my_impact: Award,
+  formula_snapshot: Calculator,
+  formula_review_queue: FlaskConical,
+  formula_library: Calculator,
+};
+
+/** Results shown before "Show more" so the search stays scannable on a tablet. */
+const SEARCH_RESULT_PAGE_SIZE = 12;
+
+function getGreeting(nowMs: number) {
+  if (nowMs <= 0) return "Welcome";
+  const hour = new Date(nowMs).getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
 }
 
 function getWidgetSpanClass(size: DashboardWidgetSize) {
@@ -936,14 +918,6 @@ function getWidgetSpanClass(size: DashboardWidgetSize) {
     default:
       return "col-span-12 md:col-span-6 lg:col-span-6";
   }
-}
-
-function getResetDefaultDashboardLayout() {
-  return DASHBOARD_WIDGET_IDS.map((id) => ({
-    id,
-    visible: true,
-    size: RESET_DEFAULT_WIDGET_SIZE_BY_ID[id],
-  }));
 }
 
 type DashboardPendingNavigation =
@@ -1217,17 +1191,18 @@ function KpiTimeRangePicker({
   onChange: (nextValue: KpiTimeRangeDays) => void;
 }) {
   return (
-    <div className="inline-flex items-center gap-1 rounded-xl border border-slate-300/70 bg-white/80 p-1 dark:border-slate-700 dark:bg-slate-900/70">
+    <div role="group" aria-label="Time range" className="inline-flex items-center gap-1 rounded-xl border border-slate-300 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-900">
       {KPI_TIME_RANGE_OPTIONS.map((option) => (
         <button
           key={option.value}
           type="button"
+          aria-pressed={value === option.value}
           onClick={() => onChange(option.value)}
           className={cn(
-            "rounded-lg px-2 py-1 text-[11px] font-semibold transition",
+            "min-h-9 min-w-11 rounded-lg px-2.5 text-sm font-semibold transition",
             value === option.value
-              ? "bg-cyan-500/20 text-cyan-800 dark:text-cyan-100"
-              : "text-slate-600 hover:bg-cyan-500/10 dark:text-slate-300 dark:hover:bg-cyan-500/15",
+              ? "bg-white text-slate-950 shadow-sm dark:bg-slate-700 dark:text-white"
+              : "text-slate-600 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-slate-800",
           )}
         >
           {option.label}
@@ -2409,6 +2384,9 @@ function computeKpiMetricsForRange(
 }
 
 export function DashboardClient({
+  canEdit,
+  canCreate = canEdit,
+  currentUserName = "",
   initialQuery,
   searchError,
   newestError,
@@ -2425,6 +2403,7 @@ export function DashboardClient({
   currentUserId,
   initialDashboardLayout,
   initialDashboardDefaultLayout,
+  initialDashboardLayoutUpdatedAt,
   instructionReviewWindowDays,
   instructionReviewStatusByInstructionId,
 }: DashboardClientProps) {
@@ -2437,6 +2416,7 @@ export function DashboardClient({
   const layoutRedoStackRef = useRef<DashboardWidgetLayoutItem[][]>([]);
   const customizeOpenRef = useRef(false);
   const saveLayoutActionRef = useRef<(() => Promise<void>) | null>(null);
+  const toggleCustomizeActionRef = useRef<(() => void) | null>(null);
   const saveLayoutAsDefaultActionRef = useRef<(() => Promise<void>) | null>(null);
   const loadDefaultLayoutActionRef = useRef<(() => Promise<void>) | null>(null);
   const resetDefaultsActionRef = useRef<(() => Promise<void>) | null>(null);
@@ -2466,6 +2446,7 @@ export function DashboardClient({
   const pendingNavigationRef = useRef<DashboardPendingNavigation | null>(null);
   const navigationModalOpenRef = useRef(false);
   const historyGuardActiveRef = useRef(false);
+  const historyGuardReleaseRef = useRef<Promise<void> | null>(null);
   const guardScrollRestoreRef = useRef<{
     x: number;
     y: number;
@@ -2477,24 +2458,38 @@ export function DashboardClient({
   const finderPreferencesHydratedRef = useRef(false);
   const previousUserIdRef = useRef(currentUserId);
   const widgetTitleInputRef = useRef<HTMLInputElement | null>(null);
-  const cancelWidgetTitleCommitRef = useRef(false);
+  const editedWidgetTitlesRef = useRef(new Set<DashboardWidgetId>());
   const newestListRef = useRef<HTMLDivElement | null>(null);
   const systemHistoryListRef = useRef<HTMLDivElement | null>(null);
   const recentUpdatesListRef = useRef<HTMLDivElement | null>(null);
   const [query, setQuery] = useState(initialQuery);
-  const [selectedDepartmentId, setSelectedDepartmentId] = useState("all");
+  const [departmentPreference, setSelectedDepartmentId] = useState("all");
+  const selectedDepartmentId = departmentPreference === "all" || departmentOptions.some((entry) => entry.id === departmentPreference) || items.some((entry) => entry.department_id === departmentPreference) ? departmentPreference : "all";
+  // A department picked while saved preferences are still loading must win over the stored one,
+  // otherwise a tap on a slow connection snaps back when the settings arrive.
+  const departmentChosenBeforeSettingsRef = useRef(false);
+  const latestDepartmentPreferenceRef = useRef(departmentPreference);
+  useEffect(() => {
+    latestDepartmentPreferenceRef.current = departmentPreference;
+  }, [departmentPreference]);
+  const chooseDepartment = useCallback((update: SetStateAction<string>) => {
+    if (!finderPreferencesHydratedRef.current) departmentChosenBeforeSettingsRef.current = true;
+    setSelectedDepartmentId(update);
+  }, []);
   const [departmentInsightExpanded, setDepartmentInsightExpanded] = useState(false);
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [draggedWidgetId, setDraggedWidgetId] = useState<DashboardWidgetId | null>(null);
   const [dragOverWidgetId, setDragOverWidgetId] = useState<DashboardWidgetId | null>(null);
-  const [savedWidgetLayout, setSavedWidgetLayout] = useState<DashboardWidgetLayoutItem[]>(() => {
-    const snapshotLayout = readSavedLayoutSnapshot(currentUserId);
-    return snapshotLayout ?? normalizeDashboardLayout(initialDashboardLayout);
-  });
-  const [widgetLayout, setWidgetLayout] = useState<DashboardWidgetLayoutItem[]>(() => {
-    const snapshotLayout = readSavedLayoutSnapshot(currentUserId);
-    return snapshotLayout ?? normalizeDashboardLayout(initialDashboardLayout);
-  });
+  const [savedWidgetLayout, setSavedWidgetLayout] = useState<DashboardWidgetLayoutItem[]>(() => normalizeDashboardLayout(initialDashboardLayout));
+  const [widgetLayout, setWidgetLayout] = useState<DashboardWidgetLayoutItem[]>(() => normalizeDashboardLayout(initialDashboardLayout));
+  const widgetLayoutRef = useRef(widgetLayout);
+  const savedWidgetLayoutRef = useRef(savedWidgetLayout);
+  const latestLayoutTimestampRef = useRef(Date.parse(initialDashboardLayoutUpdatedAt) || 0);
+  const layoutLoadControllerRef = useRef<AbortController | null>(null);
+  const layoutLoadingRef = useRef(false);
+  const [layoutLoading, setLayoutLoading] = useState(false);
+  const [layoutVersion, setLayoutVersion] = useState<string | null>(null);
+  const homepageEditorRef = useRef<HTMLDivElement>(null);
   const [defaultWidgetLayout, setDefaultWidgetLayout] = useState<DashboardWidgetLayoutItem[]>(
     () => normalizeDashboardLayout(initialDashboardDefaultLayout),
   );
@@ -2507,9 +2502,9 @@ export function DashboardClient({
   const [kpiTimeRangeByWidget, setKpiTimeRangeByWidget] = useState<Partial<Record<string, KpiTimeRangeDays>>>({});
   const [activeKpiDrilldown, setActiveKpiDrilldown] =
     useState<KpiDrilldownPanelData | null>(null);
-  const [portalReady, setPortalReady] = useState(false);
+  const portalReady = useHydrated();
+  const nowMs = useSynchronizedMinuteMs();
   const [navigationModalOpen, setNavigationModalOpen] = useState(false);
-  const [resetDefaultsModalOpen, setResetDefaultsModalOpen] = useState(false);
   const [layoutNotice, setLayoutNotice] = useState<string | null>(null);
   const [impactDrilldownKey, setImpactDrilldownKey] = useState<ImpactDrilldownKey | null>(null);
   const [departmentDrilldownDepartmentId, setDepartmentDrilldownDepartmentId] =
@@ -2531,16 +2526,77 @@ export function DashboardClient({
   const [editingWidgetTitleId, setEditingWidgetTitleId] =
     useState<DashboardWidgetId | null>(null);
   const [editingWidgetTitleValue, setEditingWidgetTitleValue] = useState("");
-  const [selectedSystemHistoryEventId, setSelectedSystemHistoryEventId] =
+  const [widgetTitleSaving, setWidgetTitleSaving] = useState(false);
+  const [selectedHistoryPreference, setSelectedSystemHistoryEventId] =
     useState<string | null>(null);
-  const [activeLikeCelebration, setActiveLikeCelebration] =
-    useState<DashboardLikeCelebrationData | null>(() =>
-      (likeCelebration?.newLikesCount ?? 0) > 0 ? likeCelebration : null,
-    );
-  const [likeCelebrationOpen, setLikeCelebrationOpen] = useState(
-    (activeLikeCelebration?.newLikesCount ?? 0) > 0,
-  );
+  const activeLikeCelebration = (likeCelebration?.newLikesCount ?? 0) > 0 ? likeCelebration : null;
+  const celebrationKey = activeLikeCelebration ? `${activeLikeCelebration.latestNewLikeAt}:${activeLikeCelebration.newLikesCount}` : "";
+  const [dismissedCelebration, setDismissedCelebration] = useState("");
+  const likeCelebrationOpen = Boolean(celebrationKey) && celebrationKey !== dismissedCelebration;
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+
+  const getAuthHeaders = useCallback(async () => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      throw new Error("Missing session token. Please sign in again.");
+    }
+
+    return {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+    };
+  }, [supabase]);
+
+  const openHomepageEditor = useCallback(async () => {
+    if (layoutLoadingRef.current || layoutSavingRef.current) return;
+    if (customizeOpenRef.current) { homepageEditorRef.current?.scrollIntoView({ block: "start" }); return; }
+    layoutLoadControllerRef.current?.abort();
+    const controller = new AbortController();
+    layoutLoadControllerRef.current = controller;
+    layoutLoadingRef.current = true;
+    setLayoutLoading(true);
+    setLayoutError(null);
+    setLayoutNotice(null);
+    let rejectAbort: () => void = () => {};
+    const aborted = new Promise<never>((_resolve, reject) => { rejectAbort = () => reject(controller.signal.reason); });
+    controller.signal.addEventListener("abort", rejectAbort, { once: true });
+    const deadline = window.setTimeout(() => controller.abort(new DOMException("Loading your homepage layout timed out. Check the connection and try again.", "TimeoutError")), 20_000);
+    try {
+      const headers = await Promise.race([getAuthHeaders(), aborted]);
+      const response = await fetch("/api/dashboard/layout", { headers, cache: "no-store", signal: controller.signal });
+      const payload = await response.json() as { error?: string; dashboardLayout?: unknown; dashboardDefaultLayout?: unknown; layoutVersion?: string; updatedAt?: string };
+      if (!response.ok || !payload.layoutVersion) throw new Error(payload.error || "Unable to load your saved homepage layout. Try again.");
+      if (controller.signal.aborted) return;
+      const saved = normalizeDashboardLayout(payload.dashboardLayout);
+      savedWidgetLayoutRef.current = cloneWidgetLayout(saved);
+      setSavedWidgetLayout(cloneWidgetLayout(saved));
+      if (!layoutDirtyRef.current) { widgetLayoutRef.current = cloneWidgetLayout(saved); setWidgetLayout(cloneWidgetLayout(saved)); }
+      setDefaultWidgetLayout(normalizeDashboardLayout(payload.dashboardDefaultLayout));
+      const timestamp = Date.parse(payload.updatedAt ?? "");
+      if (Number.isFinite(timestamp)) latestLayoutTimestampRef.current = timestamp;
+      setLayoutVersion(payload.layoutVersion);
+      layoutUndoStackRef.current = []; layoutRedoStackRef.current = [];
+      setLayoutUndoStack([]); setLayoutRedoStack([]);
+      setCustomizeOpen(true);
+    } catch (error) {
+      if (!controller.signal.aborted || (controller.signal.reason instanceof DOMException && controller.signal.reason.name === "TimeoutError")) setLayoutError(error instanceof Error ? error.message : "Unable to load the homepage editor.");
+    } finally {
+      window.clearTimeout(deadline);
+      controller.signal.removeEventListener("abort", rejectAbort);
+      if (layoutLoadControllerRef.current === controller) { layoutLoadingRef.current = false; setLayoutLoading(false); }
+    }
+  }, [getAuthHeaders]);
+
+  useEffect(() => () => { layoutLoadControllerRef.current?.abort(); }, []);
+  useEffect(() => {
+    if (customizeOpen) {
+      homepageEditorRef.current?.scrollIntoView({ block: "start" });
+      homepageEditorRef.current?.focus({ preventScroll: true });
+    }
+  }, [customizeOpen]);
 
   const getKpiWidgetTimeRange = (widgetId: string): KpiTimeRangeDays =>
     kpiTimeRangeByWidget[widgetId] ?? DEFAULT_KPI_TIME_RANGE_DAYS;
@@ -2570,12 +2626,25 @@ export function DashboardClient({
     [activeKpiDrilldown],
   );
 
+
+
+  function openNavigationModal(nextNavigation: DashboardPendingNavigation) {
+    setImpactDrilldownKey(null);
+    setDepartmentDrilldownDepartmentId(null);
+    setActiveKpiDrilldown(null);
+    pendingNavigationRef.current = nextNavigation;
+    setNavigationModalOpen(true);
+  }
+
   useEffect(() => {
     dragOverWidgetIdRef.current = dragOverWidgetId;
   }, [dragOverWidgetId]);
 
   const normalizedQuery = query.trim().toLowerCase();
   const isSearching = normalizedQuery.length > 0;
+  const [searchResultExpansion, setSearchResultExpansion] = useState({ query: "", limit: SEARCH_RESULT_PAGE_SIZE });
+  const searchResultLimit = searchResultExpansion.query === normalizedQuery ? searchResultExpansion.limit : SEARCH_RESULT_PAGE_SIZE;
+  const searchResultsRef = useRef<HTMLDivElement | null>(null);
   const widgetTitleById = useMemo(() => {
     return new Map<DashboardWidgetId, string>(
       WIDGET_DEFINITIONS.map((widgetDefinition) => [
@@ -2597,7 +2666,7 @@ export function DashboardClient({
         widgetDefinition,
       ]),
     );
-    const studioWidgets = widgetLayout.map((widget) => {
+    const studioWidgets = widgetLayout.filter((widget) => widget.id !== "finder").map((widget) => {
       const definition = widgetDefinitionById.get(widget.id);
       return {
         id: widget.id,
@@ -2670,11 +2739,9 @@ export function DashboardClient({
   }, [initialQuery]);
 
   useEffect(() => {
-    setPortalReady(true);
-  }, []);
-
-  useEffect(() => {
     let isActive = true;
+    finderPreferencesHydratedRef.current = false;
+    editedWidgetTitlesRef.current.clear();
 
     void (async () => {
       const settings = await fetchCurrentUserSettings(supabase);
@@ -2694,7 +2761,11 @@ export function DashboardClient({
         settings,
         FINDER_SELECTED_DEPARTMENT_SETTING_PATH,
       );
-      if (typeof storedDepartmentId === "string" && storedDepartmentId.trim().length > 0) {
+      if (
+        !departmentChosenBeforeSettingsRef.current &&
+        typeof storedDepartmentId === "string" &&
+        storedDepartmentId.trim().length > 0
+      ) {
         setSelectedDepartmentId(storedDepartmentId.trim());
       }
 
@@ -2772,18 +2843,34 @@ export function DashboardClient({
             parsedWidgetTitleOverrides[widgetId] = normalizedTitle;
           }
         }
-        setWidgetTitleOverrides(parsedWidgetTitleOverrides);
+        const editedTitles = [...editedWidgetTitlesRef.current];
+        setWidgetTitleOverrides((current) => {
+          const next = { ...parsedWidgetTitleOverrides };
+          for (const widgetId of editedTitles) {
+            if (current[widgetId]) next[widgetId] = current[widgetId];
+            else delete next[widgetId];
+          }
+          return next;
+        });
       }
     })().finally(() => {
       if (isActive) {
         finderPreferencesHydratedRef.current = true;
+        // The save effect skips changes made before settings loaded, so store that choice now.
+        if (departmentChosenBeforeSettingsRef.current) {
+          void patchCurrentUserSetting({
+            supabase,
+            path: FINDER_SELECTED_DEPARTMENT_SETTING_PATH.join("."),
+            value: latestDepartmentPreferenceRef.current,
+          });
+        }
       }
     });
 
     return () => {
       isActive = false;
     };
-  }, [supabase]);
+  }, [currentUserId, supabase]);
 
   useEffect(() => {
     if (!layoutNotice) {
@@ -2844,8 +2931,10 @@ export function DashboardClient({
       return;
     }
 
-    setQuery(parsed.query);
-    setSelectedDepartmentId(parsed.selectedDepartmentId || "all");
+    startTransition(() => {
+      setQuery(parsed.query);
+      chooseDepartment(parsed.selectedDepartmentId || "all");
+    });
     window.sessionStorage.removeItem(DASHBOARD_RETURN_STATE_KEY);
 
     const applyScroll = () => {
@@ -2863,23 +2952,13 @@ export function DashboardClient({
         applyScroll();
       });
     });
-  }, []);
+  }, [chooseDepartment]);
 
   useEffect(() => {
-    if ((activeLikeCelebration?.newLikesCount ?? 0) <= 0) {
-      setLikeCelebrationOpen(false);
-      return;
-    }
-
-    setLikeCelebrationOpen(true);
-    const timer = window.setTimeout(() => {
-      setLikeCelebrationOpen(false);
-    }, 7000);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [activeLikeCelebration?.latestNewLikeAt, activeLikeCelebration?.newLikesCount]);
+    if (!celebrationKey) return;
+    const timer = window.setTimeout(() => setDismissedCelebration(celebrationKey), 7000);
+    return () => window.clearTimeout(timer);
+  }, [celebrationKey]);
 
   useEffect(() => {
     if (!finderPreferencesHydratedRef.current) {
@@ -2945,7 +3024,7 @@ export function DashboardClient({
     try {
       const menuIntent = window.sessionStorage.getItem(DASHBOARD_LAYOUT_MENU_INTENT_KEY);
       if (menuIntent === DASHBOARD_LAYOUT_MENU_INTENT_OPEN_CUSTOMIZE) {
-        setCustomizeOpen(true);
+        startTransition(() => { void openHomepageEditor(); });
       }
     } catch {
       // Session menu intent is best-effort.
@@ -2956,15 +3035,15 @@ export function DashboardClient({
         // Session menu intent cleanup is best-effort.
       }
     }
-  }, []);
+  }, [openHomepageEditor]);
 
   useEffect(() => {
     layoutDirtyRef.current = layoutDirty;
   }, [layoutDirty]);
 
   useEffect(() => {
-    layoutSavingRef.current = layoutSaving;
-  }, [layoutSaving]);
+    layoutSavingRef.current = layoutSaving || layoutLoading;
+  }, [layoutSaving, layoutLoading]);
 
   useEffect(() => {
     layoutUndoStackRef.current = layoutUndoStack;
@@ -2984,12 +3063,13 @@ export function DashboardClient({
       dragPointerPositionRef.current = null;
       pointerDragStateRef.current = null;
       dragOverWidgetIdRef.current = null;
-      setDraggedWidgetId(null);
-      setDragOverWidgetId(null);
-      setActiveKpiDrilldown(null);
-      setEditingWidgetTitleId(null);
-      setEditingWidgetTitleValue("");
-      cancelWidgetTitleCommitRef.current = false;
+      startTransition(() => {
+        setDraggedWidgetId(null);
+        setDragOverWidgetId(null);
+        setActiveKpiDrilldown(null);
+        setEditingWidgetTitleId(null);
+        setEditingWidgetTitleValue("");
+      });
     }
   }, [customizeOpen]);
 
@@ -3053,28 +3133,25 @@ export function DashboardClient({
     previousUserIdRef.current = currentUserId;
 
     const serverDefaultLayout = normalizeDashboardLayout(initialDashboardDefaultLayout);
-    setDefaultWidgetLayout(cloneWidgetLayout(serverDefaultLayout));
-
-    if (layoutDirtyRef.current) {
-      return;
-    }
-
+    if ((layoutDirtyRef.current || customizeOpenRef.current) && !userChanged) return;
     const serverLayout = normalizeDashboardLayout(initialDashboardLayout);
-    const snapshotLayout = readSavedLayoutSnapshot(currentUserId);
-    const nextLayout = snapshotLayout ?? serverLayout;
+    const serverTimestamp = Date.parse(initialDashboardLayoutUpdatedAt) || 0;
+    if (!userChanged && serverTimestamp <= latestLayoutTimestampRef.current) return;
+    latestLayoutTimestampRef.current = serverTimestamp;
+    const nextLayout = serverLayout;
+    widgetLayoutRef.current = cloneWidgetLayout(nextLayout);
+    savedWidgetLayoutRef.current = cloneWidgetLayout(nextLayout);
 
-    setSavedWidgetLayout(cloneWidgetLayout(nextLayout));
-    setWidgetLayout(cloneWidgetLayout(nextLayout));
-    setLayoutDirty(false);
-    if (userChanged) {
-      setLayoutUndoStack([]);
-      setLayoutRedoStack([]);
-    }
+    startTransition(() => {
+      setDefaultWidgetLayout(cloneWidgetLayout(serverDefaultLayout));
+      setSavedWidgetLayout(cloneWidgetLayout(nextLayout));
+      setWidgetLayout(cloneWidgetLayout(nextLayout));
+      setLayoutDirty(false);
+      if (userChanged) { setLayoutUndoStack([]); setLayoutRedoStack([]); }
+    });
 
-    if (snapshotLayout && areWidgetLayoutsEqual(snapshotLayout, serverLayout)) {
-      clearSavedLayoutSnapshot(currentUserId);
-    }
-  }, [currentUserId, initialDashboardDefaultLayout, initialDashboardLayout]);
+    if (userChanged) { layoutLoadControllerRef.current?.abort(); layoutLoadingRef.current = false; startTransition(() => { setCustomizeOpen(false); setLayoutVersion(null); setLayoutLoading(false); }); }
+  }, [currentUserId, initialDashboardDefaultLayout, initialDashboardLayout, initialDashboardLayoutUpdatedAt]);
 
   useEffect(() => {
     navigationModalOpenRef.current = navigationModalOpen;
@@ -3106,9 +3183,8 @@ export function DashboardClient({
   }, []);
 
   const releaseHistoryGuard = useCallback(() => {
-    if (!historyGuardActiveRef.current) {
-      return;
-    }
+    if (historyGuardReleaseRef.current) return historyGuardReleaseRef.current;
+    if (!historyGuardActiveRef.current) return Promise.resolve();
 
     guardScrollRestoreRef.current = {
       x: window.scrollX,
@@ -3118,23 +3194,17 @@ export function DashboardClient({
     window.history.scrollRestoration = "manual";
     suppressNextPopStateRef.current = true;
     historyGuardActiveRef.current = false;
+    const released = new Promise<void>((resolve) => {
+      window.addEventListener("popstate", () => { window.setTimeout(() => { restoreGuardScrollPosition(); historyGuardReleaseRef.current = null; resolve(); }, 0); }, { once: true });
+    });
+    historyGuardReleaseRef.current = released;
     window.history.back();
-    window.setTimeout(() => {
-      restoreGuardScrollPosition();
-    }, 0);
+    return released;
   }, [restoreGuardScrollPosition]);
 
   const navigateWithGuardReleased = useCallback(
     (navigate: () => void) => {
-      if (historyGuardActiveRef.current) {
-        releaseHistoryGuard();
-        window.setTimeout(() => {
-          navigate();
-        }, 0);
-        return;
-      }
-
-      navigate();
+      void releaseHistoryGuard().then(navigate);
     },
     [releaseHistoryGuard],
   );
@@ -3146,7 +3216,7 @@ export function DashboardClient({
       }
 
       pendingNavigationRef.current = null;
-      setNavigationModalOpen(false);
+      startTransition(() => setNavigationModalOpen(false));
       navigationBypassRef.current = false;
       return;
     }
@@ -3425,19 +3495,6 @@ export function DashboardClient({
     return [...orderedInsights, ...orphanInsights];
   }, [departmentOptions, items]);
 
-  useEffect(() => {
-    if (selectedDepartmentId === "all") {
-      return;
-    }
-
-    const departmentStillExists = departmentInsights.some(
-      (department) => department.id === selectedDepartmentId,
-    );
-    if (!departmentStillExists) {
-      setSelectedDepartmentId("all");
-    }
-  }, [departmentInsights, selectedDepartmentId]);
-
   const totalInstructionCount = useMemo(() => {
     return departmentInsights.reduce((sum, entry) => sum + entry.instructionCount, 0);
   }, [departmentInsights]);
@@ -3621,8 +3678,8 @@ export function DashboardClient({
   }, [departmentFilteredSystemHistoryEvents, normalizedQuery]);
 
   const systemHistoryCutoffTimestamp = useMemo(
-    () => Date.now() - systemHistoryTimeRangeDays * ONE_DAY_MS,
-    [systemHistoryTimeRangeDays],
+    () => nowMs - systemHistoryTimeRangeDays * ONE_DAY_MS,
+    [nowMs, systemHistoryTimeRangeDays],
   );
 
   const visibleSystemHistoryEvents = useMemo(
@@ -3632,6 +3689,8 @@ export function DashboardClient({
       ),
     [filteredSystemHistoryEvents, systemHistoryCutoffTimestamp],
   );
+
+  const selectedSystemHistoryEventId = visibleSystemHistoryEvents.some((entry) => entry.id === selectedHistoryPreference) ? selectedHistoryPreference : null;
 
   const systemHistoryTimelineByInstruction = useMemo(() => {
     const eventsByInstruction = new Map<string, DashboardSystemHistoryEventData[]>();
@@ -3708,24 +3767,6 @@ export function DashboardClient({
     ],
   );
 
-  useEffect(() => {
-    setSelectedSystemHistoryEventId((currentSelection) => {
-      if (!currentSelection) {
-        return null;
-      }
-
-      if (visibleSystemHistoryEvents.length === 0) {
-        return null;
-      }
-
-      if (visibleSystemHistoryEvents.some((event) => event.id === currentSelection)) {
-        return currentSelection;
-      }
-
-      return null;
-    });
-  }, [visibleSystemHistoryEvents]);
-
   const shouldScrollSystemHistory =
     visibleSystemHistoryEvents.length > RECENT_UPDATES_SCROLL_CARD_LIMIT;
 
@@ -3791,8 +3832,8 @@ export function DashboardClient({
   }, [departmentInsights]);
 
   const recentUpdatesCutoffTimestamp = useMemo(
-    () => Date.now() - recentUpdatesTimeRangeDays * ONE_DAY_MS,
-    [recentUpdatesTimeRangeDays],
+    () => nowMs - recentUpdatesTimeRangeDays * ONE_DAY_MS,
+    [nowMs, recentUpdatesTimeRangeDays],
   );
 
   const recentUpdateEvents = useMemo(() => {
@@ -3804,6 +3845,7 @@ export function DashboardClient({
 
         return toSortableTimestamp(event.occurred_at) >= recentUpdatesCutoffTimestamp;
       })
+      .filter((event, index, events) => events.findIndex((candidate) => candidate.instruction_id === event.instruction_id) === index)
       .slice(0, RECENT_UPDATES_EVENT_LIMIT);
   }, [filteredSystemHistoryEvents, recentUpdatesCutoffTimestamp]);
 
@@ -4178,15 +4220,6 @@ export function DashboardClient({
   );
 
   useEffect(() => {
-    if ((likeCelebration?.newLikesCount ?? 0) > 0) {
-      setActiveLikeCelebration(likeCelebration);
-      return;
-    }
-
-    setActiveLikeCelebration(null);
-  }, [likeCelebration]);
-
-  useEffect(() => {
     if ((activeLikeCelebration?.newLikesCount ?? 0) <= 0) {
       return;
     }
@@ -4206,14 +4239,14 @@ export function DashboardClient({
           return;
         }
 
-        await fetch("/api/instruction-likes/mark-seen", {
+        await drainResponse(await fetch("/api/instruction-likes/mark-seen", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${session.access_token}`,
           },
           body: JSON.stringify({ seenAt }),
-        });
+        }));
       } catch {
         // This acknowledgement is best-effort and should never block dashboard usage.
       }
@@ -4459,7 +4492,6 @@ export function DashboardClient({
 
       const currentTitle =
         widgetTitleById.get(widgetId) ?? widgetDefinitionsById.get(widgetId)?.title ?? widgetId;
-      cancelWidgetTitleCommitRef.current = false;
       setEditingWidgetTitleId(widgetId);
       setEditingWidgetTitleValue(currentTitle);
     },
@@ -4467,13 +4499,14 @@ export function DashboardClient({
   );
 
   const cancelWidgetTitleEdit = useCallback(() => {
-    cancelWidgetTitleCommitRef.current = false;
     setEditingWidgetTitleId(null);
     setEditingWidgetTitleValue("");
   }, []);
 
   const commitWidgetTitleEdit = useCallback(
-    (widgetId: DashboardWidgetId) => {
+    async (widgetId: DashboardWidgetId) => {
+      if (widgetTitleSaving) return;
+      editedWidgetTitlesRef.current.add(widgetId);
       const defaultTitle = widgetDefinitionsById.get(widgetId)?.title ?? widgetId;
       const normalizedTitleOverride = normalizeWidgetTitleOverride(editingWidgetTitleValue);
       const shouldOverride = normalizedTitleOverride !== null && normalizedTitleOverride !== defaultTitle;
@@ -4491,269 +4524,174 @@ export function DashboardClient({
       setEditingWidgetTitleId(null);
       setEditingWidgetTitleValue("");
 
-      void patchCurrentUserSetting({
+      setWidgetTitleSaving(true);
+      const saved = await patchCurrentUserSetting({
         supabase,
         path: [...WIDGET_TITLE_OVERRIDES_SETTING_PATH, widgetId].join("."),
         value: shouldOverride ? normalizedTitleOverride : null,
       });
+      setWidgetTitleSaving(false);
+      if (!saved) {
+        setWidgetTitleOverrides(widgetTitleOverrides);
+        setLayoutError("The widget title could not be saved. Its previous title has been retained.");
+      } else {
+        setLayoutNotice("Widget title saved.");
+      }
     },
-    [editingWidgetTitleValue, supabase, widgetDefinitionsById],
+    [editingWidgetTitleValue, supabase, widgetDefinitionsById, widgetTitleOverrides, widgetTitleSaving],
   );
-
-  const getAuthHeaders = useCallback(async () => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session?.access_token) {
-      throw new Error("Missing session token. Please sign in again.");
-    }
-
-    return {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${session.access_token}`,
-    };
-  }, [supabase]);
 
   async function persistDashboardLayout(params: {
     layout: DashboardWidgetLayoutItem[];
     saveAsDefault: boolean;
     successNotice?: string | null;
   }) {
+    if (layoutSavingRef.current || layoutLoadingRef.current) return;
+    if (!layoutVersion) { setLayoutError("Open the homepage editor to load the latest saved layout before saving."); return; }
+    layoutSavingRef.current = true;
     setLayoutSaving(true);
     setLayoutError(null);
-
     try {
-      const layoutToPersist = params.layout.map((entry) => ({ ...entry }));
-      const headers = await getAuthHeaders();
-      const response = await fetch("/api/dashboard/layout", {
-        method: "PATCH",
-        headers,
-        body: JSON.stringify({
-          dashboardLayout: layoutToPersist,
-          saveAsDefault: params.saveAsDefault,
-        }),
+      const layoutToPersist = cloneWidgetLayout(params.layout);
+      const { response, payload } = await withDashboardSaveDeadline(async (signal) => {
+        const headers = await getAuthHeaders();
+        const response = await fetch("/api/dashboard/layout", {
+          method: "PATCH", headers, signal,
+          body: JSON.stringify({ dashboardLayout: layoutToPersist, saveAsDefault: params.saveAsDefault, expectedLayoutVersion: layoutVersion }),
+        });
+        const payload = await response.json() as { error?: string; dashboardLayout?: unknown; dashboardDefaultLayout?: unknown; layoutVersion?: string; updatedAt?: string };
+        return { response, payload };
       });
-
-      const payload = (await response.json().catch(() => ({}))) as {
-        error?: string;
-        dashboardLayout?: unknown;
-        dashboardDefaultLayout?: unknown;
-      };
-
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Unable to save dashboard layout.");
-      }
-
-      const persistedLayout = normalizeDashboardLayout(
-        payload.dashboardLayout ?? layoutToPersist,
-      );
+      if (!response.ok) throw new Error(response.status === 409
+        ? "The homepage was changed in another tab or device. Your draft is preserved. Cancel and reopen the editor to load the latest saved layout before reapplying your changes."
+        : payload.error || "Unable to save the homepage layout. Your changes are still available.");
+      const persistedLayout = normalizeDashboardLayout(payload.dashboardLayout ?? layoutToPersist);
+      savedWidgetLayoutRef.current = cloneWidgetLayout(persistedLayout);
+      widgetLayoutRef.current = cloneWidgetLayout(persistedLayout);
+      const timestamp = Date.parse(payload.updatedAt ?? "");
+      if (Number.isFinite(timestamp)) latestLayoutTimestampRef.current = timestamp;
       setSavedWidgetLayout(cloneWidgetLayout(persistedLayout));
       setWidgetLayout(cloneWidgetLayout(persistedLayout));
-      if (params.saveAsDefault) {
-        const persistedDefaultLayout = normalizeDashboardLayout(
-          payload.dashboardDefaultLayout ?? persistedLayout,
-        );
-        setDefaultWidgetLayout(cloneWidgetLayout(persistedDefaultLayout));
-      }
+      if (params.saveAsDefault) setDefaultWidgetLayout(normalizeDashboardLayout(payload.dashboardDefaultLayout ?? persistedLayout));
+      setLayoutVersion(payload.layoutVersion ?? layoutVersion);
+      layoutDirtyRef.current = false;
       setLayoutDirty(false);
-      if (params.successNotice) {
-        setLayoutNotice(params.successNotice);
-      }
-      persistSavedLayoutSnapshot(currentUserId, persistedLayout);
+      layoutUndoStackRef.current = []; layoutRedoStackRef.current = [];
+      setLayoutUndoStack([]); setLayoutRedoStack([]);
+      setLayoutNotice(params.successNotice || "Homepage layout saved.");
+      setCustomizeOpen(false);
+      await releaseHistoryGuard();
       router.refresh();
-    } catch (caughtError) {
-      const normalizedMessage =
-        caughtError instanceof Error
-          ? caughtError.message
-          : "Unable to save dashboard layout.";
-      setLayoutError(normalizedMessage);
+    } catch (error) {
+      setLayoutError(error instanceof Error ? error.message : "Unable to save the homepage layout. Your changes are still available.");
     } finally {
+      layoutSavingRef.current = false;
       setLayoutSaving(false);
     }
   }
 
   async function saveDashboardLayout() {
-    await persistDashboardLayout({
-      layout: widgetLayout,
-      saveAsDefault: false,
-    });
+    await persistDashboardLayout({ layout: widgetLayoutRef.current, saveAsDefault: false });
   }
-
   async function saveDashboardLayoutAsDefault() {
-    await persistDashboardLayout({
-      layout: widgetLayout,
-      saveAsDefault: true,
-      successNotice: "Default dashboard layout saved.",
-    });
+    await persistDashboardLayout({ layout: widgetLayoutRef.current, saveAsDefault: true, successNotice: "Homepage layout and personal default saved." });
   }
-
   async function loadDefaultDashboardLayout() {
-    const nextLayout = cloneWidgetLayout(defaultWidgetLayout);
-    if (areWidgetLayoutsEqual(widgetLayout, nextLayout)) {
-      setLayoutError(null);
-      setLayoutNotice("Loaded your saved default dashboard layout.");
-      return;
-    }
-
-    pushLayoutUndoSnapshot(widgetLayout);
-    await persistDashboardLayout({
-      layout: nextLayout,
-      saveAsDefault: false,
-      successNotice: "Loaded your saved default dashboard layout.",
-    });
+    updateWidgetLayout(() => cloneWidgetLayout(defaultWidgetLayout));
+    setLayoutNotice("Personal default loaded as a preview. Save to keep it.");
   }
-
   async function resetDashboardLayout() {
-    const resetLayout = getResetDefaultDashboardLayout();
-    if (areWidgetLayoutsEqual(widgetLayout, resetLayout)) {
-      setLayoutError(null);
-      setLayoutNotice("Dashboard reset. All widgets are visible. Saved default unchanged.");
-      return;
-    }
-
-    pushLayoutUndoSnapshot(widgetLayout);
-    await persistDashboardLayout({
-      layout: resetLayout,
-      saveAsDefault: false,
-      successNotice: "Dashboard reset. All widgets are visible. Saved default unchanged.",
-    });
+    updateWidgetLayout(() => getDefaultDashboardLayout());
+    setLayoutNotice("Balanced layout loaded as a preview. Save to keep it; your personal default is unchanged.");
   }
 
   function pushLayoutSnapshot(
     updateStack: Dispatch<SetStateAction<DashboardWidgetLayoutItem[][]>>,
+    stackRef: { current: DashboardWidgetLayoutItem[][] },
     layout: DashboardWidgetLayoutItem[],
   ) {
     const snapshot = cloneWidgetLayout(layout);
-    updateStack((currentStack) => {
-      const latestSnapshot = currentStack[currentStack.length - 1];
-      if (latestSnapshot && areWidgetLayoutsEqual(latestSnapshot, snapshot)) {
-        return currentStack;
-      }
-
-      if (currentStack.length >= MAX_LAYOUT_UNDO_STEPS) {
-        return [...currentStack.slice(1), snapshot];
-      }
-
-      return [...currentStack, snapshot];
-    });
+    const stack = stackRef.current;
+    if (stack.length && areWidgetLayoutsEqual(stack[stack.length - 1], snapshot)) return;
+    const next = [...stack.slice(-(MAX_LAYOUT_UNDO_STEPS - 1)), snapshot];
+    stackRef.current = next;
+    updateStack(next);
   }
-
-  function pushLayoutUndoSnapshot(
-    layout: DashboardWidgetLayoutItem[],
-    options?: { clearRedoStack?: boolean },
-  ) {
-    pushLayoutSnapshot(setLayoutUndoStack, layout);
-    if (options?.clearRedoStack ?? true) {
-      setLayoutRedoStack([]);
-    }
+  function pushLayoutUndoSnapshot(layout: DashboardWidgetLayoutItem[], options?: { clearRedoStack?: boolean }) {
+    pushLayoutSnapshot(setLayoutUndoStack, layoutUndoStackRef, layout);
+    if (options?.clearRedoStack ?? true) { layoutRedoStackRef.current = []; setLayoutRedoStack([]); }
   }
-
-  function pushLayoutRedoSnapshot(layout: DashboardWidgetLayoutItem[]) {
-    pushLayoutSnapshot(setLayoutRedoStack, layout);
+  function applyLayoutDraft(next: DashboardWidgetLayoutItem[]) {
+    const draft = cloneWidgetLayout(next);
+    widgetLayoutRef.current = draft;
+    setWidgetLayout(draft);
+    const dirty = !areWidgetLayoutsEqual(draft, savedWidgetLayoutRef.current);
+    layoutDirtyRef.current = dirty;
+    setLayoutDirty(dirty);
+    setLayoutError(null);
   }
-
   function undoDashboardLayoutChange() {
-    const latestSnapshot = layoutUndoStackRef.current[layoutUndoStackRef.current.length - 1];
-    if (!latestSnapshot) {
-      return;
-    }
-
-    const restoredLayout = cloneWidgetLayout(latestSnapshot);
-    setWidgetLayout((currentLayout) => {
-      if (areWidgetLayoutsEqual(currentLayout, restoredLayout)) {
-        return currentLayout;
-      }
-
-      pushLayoutRedoSnapshot(currentLayout);
-      setLayoutDirty(!areWidgetLayoutsEqual(restoredLayout, savedWidgetLayout));
-      setLayoutError(null);
-      setLayoutNotice("Reverted last dashboard layout change.");
-      return restoredLayout;
-    });
-    setLayoutUndoStack((currentStack) => currentStack.slice(0, -1));
+    if (layoutSavingRef.current || layoutLoadingRef.current) return;
+    const stack = layoutUndoStackRef.current;
+    const previous = stack[stack.length - 1];
+    if (!previous) return;
+    pushLayoutSnapshot(setLayoutRedoStack, layoutRedoStackRef, widgetLayoutRef.current);
+    layoutUndoStackRef.current = stack.slice(0, -1);
+    setLayoutUndoStack(layoutUndoStackRef.current);
+    applyLayoutDraft(previous);
   }
-
   function redoDashboardLayoutChange() {
-    const latestSnapshot = layoutRedoStackRef.current[layoutRedoStackRef.current.length - 1];
-    if (!latestSnapshot) {
-      return;
-    }
-
-    const restoredLayout = cloneWidgetLayout(latestSnapshot);
-    setWidgetLayout((currentLayout) => {
-      if (areWidgetLayoutsEqual(currentLayout, restoredLayout)) {
-        return currentLayout;
-      }
-
-      pushLayoutUndoSnapshot(currentLayout, { clearRedoStack: false });
-      setLayoutDirty(!areWidgetLayoutsEqual(restoredLayout, savedWidgetLayout));
-      setLayoutError(null);
-      setLayoutNotice("Reapplied last dashboard layout change.");
-      return restoredLayout;
-    });
-    setLayoutRedoStack((currentStack) => currentStack.slice(0, -1));
+    if (layoutSavingRef.current || layoutLoadingRef.current) return;
+    const stack = layoutRedoStackRef.current;
+    const next = stack[stack.length - 1];
+    if (!next) return;
+    pushLayoutUndoSnapshot(widgetLayoutRef.current, { clearRedoStack: false });
+    layoutRedoStackRef.current = stack.slice(0, -1);
+    setLayoutRedoStack(layoutRedoStackRef.current);
+    applyLayoutDraft(next);
   }
-
-  function updateWidgetLayout(
-    updater: (current: DashboardWidgetLayoutItem[]) => DashboardWidgetLayoutItem[],
-  ) {
-    setWidgetLayout((current) => {
-      const next = updater(current);
-      if (next === current || areWidgetLayoutsEqual(next, current)) {
-        return current;
-      }
-
-      pushLayoutUndoSnapshot(current);
-      setLayoutDirty(!areWidgetLayoutsEqual(next, savedWidgetLayout));
-      setLayoutError(null);
-      return next;
-    });
+  function updateWidgetLayout(updater: (current: DashboardWidgetLayoutItem[]) => DashboardWidgetLayoutItem[]) {
+    if (layoutSavingRef.current || layoutLoadingRef.current || !layoutVersion) return;
+    const current = widgetLayoutRef.current;
+    const next = updater(current);
+    if (areWidgetLayoutsEqual(next, current)) return;
+    pushLayoutUndoSnapshot(current);
+    applyLayoutDraft(next);
+    setLayoutNotice(null);
   }
-
   function toggleWidget(widgetId: DashboardWidgetId) {
-    updateWidgetLayout((current) =>
-      current.map((widget) =>
-        widget.id === widgetId ? { ...widget, visible: !widget.visible } : widget,
-      ),
-    );
+    updateWidgetLayout((current) => current.map((widget) => widget.id === widgetId ? { ...widget, visible: !widget.visible } : widget));
   }
-
   function setWidgetVisibility(widgetId: DashboardWidgetId, visible: boolean) {
-    updateWidgetLayout((current) =>
-      current.map((widget) =>
-        widget.id === widgetId ? { ...widget, visible } : widget,
-      ),
-    );
+    updateWidgetLayout((current) => current.map((widget) => widget.id === widgetId ? { ...widget, visible } : widget));
   }
-
   function updateWidgetSize(widgetId: DashboardWidgetId, size: DashboardWidgetSize) {
-    updateWidgetLayout((current) =>
-      current.map((widget) => (widget.id === widgetId ? { ...widget, size } : widget)),
-    );
+    updateWidgetLayout((current) => current.map((widget) => widget.id === widgetId ? { ...widget, size } : widget));
   }
-
   function reorderWidgets(sourceId: DashboardWidgetId, targetId: DashboardWidgetId) {
-    if (sourceId === targetId) {
-      return;
-    }
-
+    if (sourceId === targetId) return;
     updateWidgetLayout((current) => {
       const sourceIndex = current.findIndex((widget) => widget.id === sourceId);
       const targetIndex = current.findIndex((widget) => widget.id === targetId);
-
-      if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) {
-        return current;
-      }
-
+      if (sourceIndex < 0 || targetIndex < 0) return current;
       const next = [...current];
-      const [movedWidget] = next.splice(sourceIndex, 1);
-      if (!movedWidget) {
-        return current;
-      }
-
-      next.splice(targetIndex, 0, movedWidget);
+      const [moved] = next.splice(sourceIndex, 1);
+      next.splice(targetIndex, 0, moved);
       return next;
+    });
+  }
+  function moveVisibleWidget(id: DashboardWidgetId, direction: "up" | "down" | "top") {
+    updateWidgetLayout((current) => {
+      const visible = current.filter((widget) => widget.visible);
+      const index = visible.findIndex((widget) => widget.id === id);
+      if (index < 0) return current;
+      const target = direction === "top" ? 0 : direction === "up" ? index - 1 : index + 1;
+      if (target < 0 || target >= visible.length || target === index) return current;
+      const reordered = [...visible];
+      const [moved] = reordered.splice(index, 1);
+      reordered.splice(target, 0, moved);
+      let visibleIndex = 0;
+      return current.map((widget) => widget.visible ? reordered[visibleIndex++] : widget);
     });
   }
 
@@ -4857,7 +4795,7 @@ export function DashboardClient({
     widgetId: DashboardWidgetId,
     event: ReactPointerEvent<HTMLButtonElement>,
   ) {
-    if (!customizeOpenRef.current || event.pointerType === "mouse" && event.button !== 0) {
+    if (layoutSavingRef.current || layoutLoadingRef.current || !customizeOpenRef.current || event.pointerType === "mouse" && event.button !== 0) {
       return;
     }
 
@@ -4943,17 +4881,20 @@ export function DashboardClient({
   }
 
   function discardDashboardLayoutChanges() {
-    if (areWidgetLayoutsEqual(widgetLayout, savedWidgetLayout)) {
-      setLayoutError(null);
-      return;
-    }
-
-    pushLayoutUndoSnapshot(widgetLayout);
-    setWidgetLayout(cloneWidgetLayout(savedWidgetLayout));
+    if (layoutSavingRef.current) return;
+    const saved = cloneWidgetLayout(savedWidgetLayoutRef.current);
+    widgetLayoutRef.current = saved;
+    setWidgetLayout(saved);
+    layoutDirtyRef.current = false;
     setLayoutDirty(false);
+    layoutUndoStackRef.current = []; layoutRedoStackRef.current = [];
+    setLayoutUndoStack([]); setLayoutRedoStack([]);
     setLayoutError(null);
+    setCustomizeOpen(false);
+    setLayoutNotice("Homepage changes discarded.");
   }
 
+  useEffect(() => {
   saveLayoutActionRef.current = saveDashboardLayout;
   saveLayoutAsDefaultActionRef.current = saveDashboardLayoutAsDefault;
   loadDefaultLayoutActionRef.current = loadDefaultDashboardLayout;
@@ -4965,6 +4906,8 @@ export function DashboardClient({
   toggleWidgetActionRef.current = toggleWidget;
   setWidgetVisibilityActionRef.current = setWidgetVisibility;
   updateWidgetSizeActionRef.current = updateWidgetSize;
+  toggleCustomizeActionRef.current = () => { if (customizeOpenRef.current) discardDashboardLayoutChanges(); else void openHomepageEditor(); };
+  });
 
   useEffect(() => {
     const handleLayoutCommand = (event: Event) => {
@@ -5013,7 +4956,7 @@ export function DashboardClient({
       }
 
       if (detail.command === "toggle-customize") {
-        setCustomizeOpen((current) => !current);
+        toggleCustomizeActionRef.current?.();
         return;
       }
 
@@ -5069,7 +5012,7 @@ export function DashboardClient({
         if (layoutSavingRef.current) {
           return;
         }
-        setResetDefaultsModalOpen(true);
+        void resetDefaultsActionRef.current?.();
       }
     };
 
@@ -5082,43 +5025,9 @@ export function DashboardClient({
     };
   }, []);
 
-  function closeResetDefaultsModal() {
-    setResetDefaultsModalOpen(false);
-  }
-
-  function handleConfirmResetDefaults() {
-    setResetDefaultsModalOpen(false);
-    void resetDefaultsActionRef.current?.();
-  }
-
-  useEffect(() => {
-    if (!resetDefaultsModalOpen) {
-      return;
-    }
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setResetDefaultsModalOpen(false);
-      }
-    };
-
-    document.addEventListener("keydown", handleEscape);
-    return () => {
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, [resetDefaultsModalOpen]);
-
   function closeNavigationModal() {
     pendingNavigationRef.current = null;
     setNavigationModalOpen(false);
-  }
-
-  function openNavigationModal(nextNavigation: DashboardPendingNavigation) {
-    setImpactDrilldownKey(null);
-    setDepartmentDrilldownDepartmentId(null);
-    setActiveKpiDrilldown(null);
-    pendingNavigationRef.current = nextNavigation;
-    setNavigationModalOpen(true);
   }
 
   function handleCancelNavigationAway() {
@@ -5172,7 +5081,7 @@ export function DashboardClient({
       }
     }
 
-    window.location.assign(navigation.href);
+    navigateWithGuardReleased(() => window.location.assign(navigation.href));
   }
 
   useEffect(() => {
@@ -5273,8 +5182,8 @@ export function DashboardClient({
 
     if (widgetId === "recent_updates") {
       return (
-        <label className="inline-flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300">
-          <span>Window</span>
+        <label className="inline-flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+          <span className="sr-only">Time window</span>
           <select
             value={recentUpdatesTimeRangeDays}
             onChange={(event) => {
@@ -5283,7 +5192,7 @@ export function DashboardClient({
                 setRecentUpdatesTimeRangeDays(nextRange);
               }
             }}
-            className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+            className="min-h-10 rounded-lg border border-slate-300 bg-white px-2.5 text-sm font-medium outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
           >
             {RECENT_UPDATES_TIME_RANGE_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
@@ -5297,8 +5206,8 @@ export function DashboardClient({
 
     if (widgetId === "system_history") {
       return (
-        <label className="inline-flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300">
-          <span>Window</span>
+        <label className="inline-flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+          <span className="sr-only">Time window</span>
           <select
             value={systemHistoryTimeRangeDays}
             onChange={(event) => {
@@ -5307,7 +5216,7 @@ export function DashboardClient({
                 setSystemHistoryTimeRangeDays(nextRange);
               }
             }}
-            className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+            className="min-h-10 rounded-lg border border-slate-300 bg-white px-2.5 text-sm font-medium outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
           >
             {RECENT_UPDATES_TIME_RANGE_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
@@ -5447,7 +5356,7 @@ export function DashboardClient({
               >
                 <button
                   type="button"
-                  onClick={() => setSelectedDepartmentId("all")}
+                  onClick={() => chooseDepartment("all")}
                   className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
                     selectedDepartmentId === "all"
                       ? "border-cyan-500/50 bg-cyan-500/15 text-cyan-800 dark:text-cyan-200"
@@ -5461,7 +5370,7 @@ export function DashboardClient({
                     key={department.id}
                     type="button"
                     onClick={() =>
-                      setSelectedDepartmentId((current) =>
+                      chooseDepartment((current) =>
                         current === department.id ? "all" : department.id,
                       )
                     }
@@ -5582,61 +5491,24 @@ export function DashboardClient({
           {pinnedError}
         </p>
       ) : filteredPinnedInstructions.length === 0 ? (
-        <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-          No pinned instructions for {selectedDepartmentName}.
-        </p>
+        <WidgetEmptyState icon={Pin} title="Nothing pinned yet">
+          Open an instruction you use often and choose Pin. It will appear here{selectedDepartmentId !== "all" ? ` for ${selectedDepartmentName}` : ""}.
+        </WidgetEmptyState>
       ) : (
         <div className="grid gap-2">
           {filteredPinnedInstructions.map((instruction) => (
-            <Link
+            <InstructionRow
               key={instruction.id}
               href={`/instructions/${instruction.id}`}
-              style={{
-                borderColor: colorWithAlpha(instruction.workItem.department_color, 0.45),
-                backgroundColor: colorWithAlpha(instruction.workItem.department_color, 0.14),
-                boxShadow: `inset 4px 0 0 ${colorWithAlpha(
-                  instruction.workItem.department_color,
-                  0.85,
-                )}`,
-              }}
-              className="rounded-xl border p-3 transition hover:brightness-105"
-            >
-              <div className="flex flex-wrap items-center gap-1.5">
-                <PartDepartmentHeading workItem={instruction.workItem} />
-                {getForkLabel(
-                  instruction.fork_number,
-                  instruction.fork_root_instruction_id,
-                ) ? (
-                  <span className="inline-flex items-center rounded-full border border-cyan-500/45 bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-200">
-                    {getForkLabel(
-                      instruction.fork_number,
-                      instruction.fork_root_instruction_id,
-                    )}
-                  </span>
-                ) : null}
-                {instructionReviewStatusByInstructionId[instruction.id]?.status ===
-                  "needs_review" && (
-                  <span
-                    title={getNeedsReviewPillTooltip(
-                      instructionReviewStatusByInstructionId[instruction.id],
-                    )}
-                    className="inline-flex items-center gap-0.5 rounded-full border border-amber-500/45 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300"
-                  >
-                    <TriangleAlert size={10} />
-                    Needs Review
-                  </span>
-                )}
-              </div>
-              <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
-                {instruction.workItem.item_title}
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Revision {instruction.revision} | Created{" "}
-                <LocalDateTime value={instruction.created_at} mode="date" /> by{" "}
-                {instruction.creator_name} | Pinned{" "}
-                <LocalDateTime value={instruction.pinned_at} mode="date" />
-              </p>
-            </Link>
+              onClick={persistInstructionReturnState}
+              partId={instruction.workItem.part_id}
+              title={instruction.workItem.item_title}
+              departmentName={instruction.workItem.department_name}
+              departmentColor={normalizeDepartmentColor(instruction.workItem.department_color)}
+              revision={instruction.revision}
+              badges={<>{renderForkBadge(instruction.fork_number, instruction.fork_root_instruction_id)}{renderReviewBadge(instruction.id)}</>}
+              meta={<>Updated {relativeTime(instruction.updated_at)}</>}
+            />
           ))}
         </div>
       );
@@ -5650,31 +5522,24 @@ export function DashboardClient({
       ) : filteredNewestInstructions.length === 0 ? (
         <div className="grid gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                Created Date Range
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{newestDateRangeLabel}</p>
-            </div>
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              Created <span className="font-semibold text-slate-800 dark:text-slate-100">{newestDateRangeLabel}</span>
+            </p>
             <KpiTimeRangePicker
               value={newestTimeRangeDays}
               onChange={setNewestTimeRangeDays}
             />
           </div>
-          <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-            No instructions created in the last {newestTimeRangeDays} days for{" "}
-            {selectedDepartmentName}.
-          </p>
+          <WidgetEmptyState icon={Sparkles} title="No new instructions">
+            Nothing was created in the last {newestTimeRangeDays} days{selectedDepartmentId !== "all" ? ` for ${selectedDepartmentName}` : ""}.
+          </WidgetEmptyState>
         </div>
       ) : (
         <div className="grid gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                Created Date Range
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{newestDateRangeLabel}</p>
-            </div>
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              Created <span className="font-semibold text-slate-800 dark:text-slate-100">{newestDateRangeLabel}</span>
+            </p>
             <KpiTimeRangePicker
               value={newestTimeRangeDays}
               onChange={setNewestTimeRangeDays}
@@ -5690,55 +5555,19 @@ export function DashboardClient({
             }
           >
             {filteredNewestInstructions.map((instruction) => (
-              <Link
+              <InstructionRow
                 key={instruction.id}
-                data-newest-card="true"
+                rowProps={{ "data-newest-card": "true" }}
                 href={`/instructions/${instruction.id}`}
-                style={{
-                  borderColor: colorWithAlpha(instruction.workItem.department_color, 0.45),
-                  backgroundColor: colorWithAlpha(instruction.workItem.department_color, 0.14),
-                  boxShadow: `inset 4px 0 0 ${colorWithAlpha(
-                    instruction.workItem.department_color,
-                    0.85,
-                  )}`,
-                }}
-                className="rounded-xl border p-3 transition hover:brightness-105"
-              >
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <PartDepartmentHeading workItem={instruction.workItem} />
-                  {getForkLabel(
-                    instruction.fork_number,
-                    instruction.fork_root_instruction_id,
-                  ) ? (
-                    <span className="inline-flex items-center rounded-full border border-cyan-500/45 bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-200">
-                      {getForkLabel(
-                        instruction.fork_number,
-                        instruction.fork_root_instruction_id,
-                      )}
-                    </span>
-                  ) : null}
-                  {instructionReviewStatusByInstructionId[instruction.id]?.status ===
-                    "needs_review" && (
-                    <span
-                      title={getNeedsReviewPillTooltip(
-                        instructionReviewStatusByInstructionId[instruction.id],
-                      )}
-                      className="inline-flex items-center gap-0.5 rounded-full border border-amber-500/45 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300"
-                    >
-                      <TriangleAlert size={10} />
-                      Needs Review
-                    </span>
-                  )}
-                </div>
-                <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
-                  {instruction.workItem.item_title}
-                </p>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Revision {instruction.revision} | Created{" "}
-                  <LocalDateTime value={instruction.created_at} mode="date" /> by{" "}
-                  {instruction.creator_name}
-                </p>
-              </Link>
+                onClick={persistInstructionReturnState}
+                partId={instruction.workItem.part_id}
+                title={instruction.workItem.item_title}
+                departmentName={instruction.workItem.department_name}
+                departmentColor={normalizeDepartmentColor(instruction.workItem.department_color)}
+                revision={instruction.revision}
+                badges={<>{renderForkBadge(instruction.fork_number, instruction.fork_root_instruction_id)}{renderReviewBadge(instruction.id)}</>}
+                meta={<>Created {relativeTime(instruction.created_at)} by {instruction.creator_name}</>}
+              />
             ))}
           </div>
         </div>
@@ -5806,10 +5635,9 @@ export function DashboardClient({
 
     if (widgetId === "review_queue") {
       return reviewQueueEntries.length === 0 ? (
-        <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-          No instructions are out of the review range or flagged for review in{" "}
-          {selectedDepartmentName}.
-        </p>
+        <WidgetEmptyState icon={ClipboardCheck} title="All instructions are up to date">
+          Nothing is flagged or past its {normalizedReviewWindowDays}-day review window{selectedDepartmentId !== "all" ? ` in ${selectedDepartmentName}` : ""}.
+        </WidgetEmptyState>
       ) : (
         <div className="grid gap-2">
           {reviewQueueEntries.map((entry) => {
@@ -5817,73 +5645,32 @@ export function DashboardClient({
               entry.daysSinceCalibration === null
                 ? null
                 : Math.max(0, entry.daysSinceCalibration - normalizedReviewWindowDays);
+            const reason = entry.isFlagged
+              ? "Flagged by a user"
+              : overdueDays === null
+                ? "Review status unavailable"
+                : overdueDays === 0
+                  ? "Due for re-check now"
+                  : `${overdueDays} day${overdueDays === 1 ? "" : "s"} past review`;
 
             return (
-              <Link
+              <InstructionRow
                 key={entry.instruction.id}
                 href={`/instructions/${entry.instruction.id}`}
-                style={{
-                  borderColor: colorWithAlpha(entry.workItem.department_color, 0.45),
-                  backgroundColor: colorWithAlpha(entry.workItem.department_color, 0.14),
-                  boxShadow: `inset 4px 0 0 ${colorWithAlpha(
-                    entry.workItem.department_color,
-                    0.85,
-                  )}`,
-                }}
-                className="grid gap-1.5 rounded-xl border p-3 transition hover:brightness-105"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="inline-flex flex-wrap items-center gap-1.5">
-                    <PartDepartmentHeading workItem={entry.workItem} />
-                    {getForkLabel(
-                      entry.instruction.fork_number,
-                      entry.instruction.fork_root_instruction_id,
-                    ) ? (
-                      <span className="inline-flex items-center rounded-full border border-cyan-500/45 bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-200">
-                        {getForkLabel(
-                          entry.instruction.fork_number,
-                          entry.instruction.fork_root_instruction_id,
-                        )}
-                      </span>
-                    ) : null}
-                  </p>
-                  <span
-                    title={
-                      entry.isFlagged
-                        ? getNeedsReviewPillTooltip(entry.reviewStatus)
-                        : undefined
-                    }
-                    className={cn(
-                      "rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide",
-                      entry.isFlagged
-                        ? "border-rose-500/45 bg-rose-500/15 text-rose-700 dark:text-rose-200"
-                        : "border-amber-500/45 bg-amber-500/15 text-amber-700 dark:text-amber-200",
-                    )}
-                  >
+                onClick={persistInstructionReturnState}
+                partId={entry.workItem.part_id}
+                title={entry.workItem.item_title}
+                departmentName={entry.workItem.department_name}
+                departmentColor={normalizeDepartmentColor(entry.workItem.department_color)}
+                revision={entry.instruction.revision}
+                badges={<>
+                  {renderForkBadge(entry.instruction.fork_number, entry.instruction.fork_root_instruction_id)}
+                  <StatusPill tone={entry.isFlagged ? "rose" : "amber"} icon={TriangleAlert} title={entry.isFlagged ? getNeedsReviewPillTooltip(entry.reviewStatus) : undefined}>
                     {entry.isFlagged ? "Needs review" : "Out of range"}
-                  </span>
-                </div>
-                <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
-                  {entry.workItem.item_title}
-                </p>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Revision {entry.instruction.revision} | Updated{" "}
-                  <LocalDateTime value={entry.instruction.updated_at} mode="date" /> by{" "}
-                  {entry.instruction.updater_name}
-                </p>
-                <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  {formatElapsedDaysLabel(entry.daysSinceUpdate)}
-                </p>
-                <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  {entry.isFlagged
-                    ? "Marked as needs review by a user."
-                    : overdueDays === null
-                      ? "Review window status unavailable."
-                      : overdueDays === 0
-                        ? `Due for re-check now (${normalizedReviewWindowDays}-day window).`
-                        : `Out of range by ${overdueDays} day${overdueDays === 1 ? "" : "s"} (${normalizedReviewWindowDays}-day window).`}
-                </p>
-              </Link>
+                  </StatusPill>
+                </>}
+                meta={<>{reason} · {formatElapsedDaysLabel(entry.daysSinceUpdate)}</>}
+              />
             );
           })}
         </div>
@@ -6026,10 +5813,9 @@ export function DashboardClient({
 
     if (widgetId === "recent_updates") {
       return recentUpdateEvents.length === 0 ? (
-        <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-          No instruction updates in the last {recentUpdatesTimeRangeDays} days for{" "}
-          {selectedDepartmentName}.
-        </p>
+        <WidgetEmptyState icon={History} title="No recent changes">
+          No instructions were updated in the last {recentUpdatesTimeRangeDays} days{selectedDepartmentId !== "all" ? ` for ${selectedDepartmentName}` : ""}.
+        </WidgetEmptyState>
       ) : (
         <div
           ref={recentUpdatesListRef}
@@ -6041,51 +5827,18 @@ export function DashboardClient({
           }
         >
           {recentUpdateEvents.map((event) => (
-            <article
+            <InstructionRow
               key={event.id}
-              data-recent-update-card="true"
-              style={{
-                borderColor: colorWithAlpha(event.workItem.department_color, 0.45),
-                backgroundColor: colorWithAlpha(event.workItem.department_color, 0.12),
-                boxShadow: `inset 4px 0 0 ${colorWithAlpha(
-                  event.workItem.department_color,
-                  0.9,
-                )}`,
-              }}
-              className="grid gap-2 rounded-xl border p-3"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
-                  <LocalDateTime value={event.occurred_at} mode="dateTime" />
-                  <span className="font-semibold text-slate-700 dark:text-slate-200">
-                    By {event.actor_name}
-                  </span>
-                </p>
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-200">
-                  {event.action_label}
-                </p>
-              </div>
-
-              <p>
-                <PartDepartmentHeading workItem={event.workItem} />
-              </p>
-              <p className="text-xs text-slate-600 dark:text-slate-300">
-                <span className="font-semibold">Instruction:</span>{" "}
-                <span className="font-bold text-slate-900 dark:text-slate-100">
-                  {event.workItem.item_title}
-                </span>
-              </p>
-              <p className="text-xs text-slate-600 dark:text-slate-300">{event.detail}</p>
-
-              <div className="flex flex-wrap justify-end gap-2">
-                <Link
-                  href={`/instructions/${event.instruction_id}`}
-                  className="inline-flex items-center rounded-lg border border-cyan-500/35 bg-cyan-500/10 px-2.5 py-1 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-200"
-                >
-                  Open instruction
-                </Link>
-              </div>
-            </article>
+              rowProps={{ "data-recent-update-card": "true" }}
+              href={`/instructions/${event.instruction_id}`}
+              onClick={persistInstructionReturnState}
+              partId={event.workItem.part_id}
+              title={event.workItem.item_title}
+              departmentName={event.workItem.department_name}
+              departmentColor={normalizeDepartmentColor(event.workItem.department_color)}
+              revision={event.revision}
+              meta={<>{event.detail ? `${event.detail} · ` : ""}{relativeTime(event.occurred_at)} by {event.actor_name}</>}
+            />
           ))}
         </div>
       );
@@ -6338,7 +6091,7 @@ export function DashboardClient({
             lineColor="#06B6D4"
             onSelectPoint={(point) => {
               setActiveKpiDrilldown({
-                title: "Throughput Trend Drill Down",
+                title: "Document Activity Details",
                 subtitle: `${point.fullLabel} | ${selectedDepartmentName}`,
                 yAxisLabel: "Events",
                 rows: kpiData.throughputMetric.rowsByPointId.get(point.id) ?? [],
@@ -6505,7 +6258,7 @@ export function DashboardClient({
               widgetSize={widgetSize}
               onSelectPoint={(point) => {
                 setActiveKpiDrilldown({
-                  title: "Revision Cycle Time Drill Down",
+                  title: "Revision Age and Number Details",
                   subtitle: point.label,
                   yAxisLabel: "Revision",
                   rows: kpiData.revisionCycleMetric.rowsByPointId.get(point.id) ?? [],
@@ -6768,41 +6521,235 @@ export function DashboardClient({
     );
   }
 
+  const firstName = currentUserName.trim().split(/\s+/)[0] ?? "";
+  const homepageWidgets = visibleWidgets.filter((widget) => widget.id !== "finder");
+  const relativeTime = (value: string) => (nowMs > 0 ? formatRelativeDays(value, nowMs) : <LocalDateTime value={value} mode="date" />);
+  const otherSearchMatches = smartSuggestions.filter((suggestion) => suggestion.type === "process_document" || suggestion.type === "formula").slice(0, 6);
+  const departmentChips = departmentInsights.filter((department) => department.instructionCount > 0 || department.id === selectedDepartmentId);
+
+  function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    // A barcode scan or exact part number with a single match opens that instruction directly.
+    if (filteredFinderInstructionCards.length === 1) {
+      persistInstructionReturnState();
+      router.push(`/instructions/${filteredFinderInstructionCards[0].instruction.id}`);
+      return;
+    }
+    searchResultsRef.current?.querySelector<HTMLAnchorElement>("a[href]")?.focus();
+  }
+
+  function renderReviewBadge(instructionId: string) {
+    const status = instructionReviewStatusByInstructionId[instructionId];
+    return status?.status === "needs_review" ? (
+      <StatusPill tone="amber" icon={TriangleAlert} title={getNeedsReviewPillTooltip(status)}>Needs review</StatusPill>
+    ) : null;
+  }
+
+  function renderForkBadge(forkNumber: number | null, forkRootId: string | null) {
+    const label = getForkLabel(forkNumber, forkRootId);
+    return label ? <StatusPill tone="cyan" icon={GitFork}>{label}</StatusPill> : null;
+  }
+
   return (
     <>
       <div className="grid gap-5">
-        {layoutNotice ? (
-          <section className="rounded-2xl border border-emerald-500/45 bg-emerald-500/10 p-3 backdrop-blur-sm">
-            <p className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-800 dark:text-emerald-200">
-              <CheckCircle2 size={14} />
-              {layoutNotice}
-            </p>
-          </section>
-        ) : null}
-
-        {layoutDirty || layoutError ? (
-          <section className="rounded-2xl border border-white/20 bg-white/60 p-3 backdrop-blur-sm dark:border-white/10 dark:bg-slate-900/50">
-            {layoutDirty ? (
-              <p className="text-xs font-semibold text-amber-700 dark:text-amber-200">
-                Unsaved layout changes. Use the Dashboard Studio menu in the header
-                to save or discard.
-              </p>
-            ) : null}
-            {layoutError ? (
-              <p
-                className={cn(
-                  "rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-700 dark:text-rose-200",
-                  layoutDirty ? "mt-2" : "",
-                )}
+        <section aria-label="Find work instructions" data-hydrated={portalReady ? "true" : undefined} className="relative min-w-0 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-44 bg-gradient-to-b from-cyan-50 to-transparent dark:from-cyan-500/10" />
+          <div className="relative grid gap-5 p-5 sm:p-7 lg:p-8">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="grid min-w-0 gap-1">
+                <h1 className="text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl dark:text-white">
+                  {getGreeting(nowMs)}{firstName ? `, ${firstName}` : ""}
+                </h1>
+                <p className="text-base text-slate-600 sm:text-lg dark:text-slate-300">Find the current instruction for the job in front of you.</p>
+              </div>
+              <button
+                type="button"
+                aria-expanded={customizeOpen}
+                aria-controls="homepage-editor"
+                disabled={layoutLoading || layoutSaving}
+                onClick={() => { void openHomepageEditor(); }}
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-cyan-400 hover:text-cyan-800 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-cyan-500 dark:hover:text-cyan-200"
               >
-                {layoutError}
-              </p>
-            ) : null}
-          </section>
-        ) : null}
+                {layoutLoading ? <Loader2 size={17} className="animate-spin" /> : <SlidersHorizontal size={17} />}
+                {layoutLoading ? "Loading editor…" : "Customize homepage"}
+              </button>
+            </div>
 
-        <div className="grid grid-cols-12 gap-4">
-          {visibleWidgets.map((widget) => {
+            <form role="search" onSubmit={handleSearchSubmit} className="grid gap-2">
+              <label htmlFor="dashboard-search" className="sr-only">Search for anything</label>
+              <div className="relative">
+                <Search size={26} aria-hidden="true" className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  id="dashboard-search"
+                  ref={searchInputRef}
+                  type="search"
+                  inputMode="search"
+                  enterKeyHint="search"
+                  value={query}
+                  autoComplete="off"
+                  spellCheck={false}
+                  aria-label="Search for anything"
+                  aria-describedby="dashboard-search-help"
+                  placeholder="Part #, mold #, or instruction"
+                  onChange={(event) => setQuery(event.target.value)}
+                  className={cn(
+                    "dashboard-search-input h-16 w-full rounded-2xl border-2 border-slate-300 bg-white pl-14 text-lg font-medium text-slate-950 shadow-sm outline-none transition placeholder:font-normal placeholder:text-slate-400 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-500/20 sm:h-[4.5rem] sm:text-xl dark:border-slate-700 dark:bg-slate-900 dark:text-white",
+                    query.length > 0 ? "pr-28" : "pr-4",
+                  )}
+                />
+                {query.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuery("");
+                      searchInputRef.current?.focus();
+                    }}
+                    aria-label="Clear search"
+                    className="absolute right-3 top-1/2 inline-flex min-h-11 -translate-y-1/2 items-center gap-1 rounded-xl px-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                  >
+                    <X size={18} />
+                    Clear
+                  </button>
+                ) : null}
+              </div>
+              <p id="dashboard-search-help" className="text-sm text-slate-500 dark:text-slate-400">
+                Scan a part label or type a few characters. A single match opens when you press Enter.
+              </p>
+            </form>
+
+            {departmentChips.length > 0 ? (
+              <div role="group" aria-label="Filter by department" className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+                <button
+                  type="button"
+                  aria-pressed={selectedDepartmentId === "all"}
+                  onClick={() => chooseDepartment("all")}
+                  className={cn(
+                    "inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border px-4 text-sm font-semibold transition",
+                    selectedDepartmentId === "all"
+                      ? "border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-950"
+                      : "border-slate-300 bg-white text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200",
+                  )}
+                >
+                  All departments
+                  <span className="rounded-full bg-slate-500/15 px-2 text-xs">{totalInstructionCount}</span>
+                </button>
+                {departmentChips.map((department) => {
+                  const selected = selectedDepartmentId === department.id;
+                  return (
+                    <button
+                      key={department.id}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => chooseDepartment((current) => (current === department.id ? "all" : department.id))}
+                      className={cn(
+                        "inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border px-4 text-sm font-semibold transition",
+                        selected
+                          ? "border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-950"
+                          : "border-slate-300 bg-white text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200",
+                      )}
+                    >
+                      <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: department.color_hex }} />
+                      {department.name}
+                      <span className="rounded-full bg-slate-500/15 px-2 text-xs">{department.instructionCount}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+
+          {isSearching ? (
+            <div ref={searchResultsRef} aria-live="polite" className="relative grid gap-4 border-t border-slate-200 bg-slate-50/80 p-5 sm:p-7 lg:px-8 dark:border-slate-800 dark:bg-slate-900/40">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                  {filteredFinderInstructionCards.length} {filteredFinderInstructionCards.length === 1 ? "instruction" : "instructions"} for “{query.trim()}”
+                </h2>
+                <span className="text-sm font-medium text-slate-500 dark:text-slate-400">{selectedDepartmentName}</span>
+              </div>
+              {searchError ? <p role="alert" className="rounded-xl border border-rose-300 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200">{searchError}</p> : null}
+              {filteredFinderInstructionCards.length === 0 ? (
+                <WidgetEmptyState icon={SearchX} title="No matching instructions">
+                  Check the part or mold number{selectedDepartmentId !== "all" ? ", or search all departments" : ""}.
+                </WidgetEmptyState>
+              ) : (
+                <ul className="grid gap-2 lg:grid-cols-2">
+                  {filteredFinderInstructionCards.slice(0, searchResultLimit).map((entry) => (
+                    <li key={entry.instruction.id} className="min-w-0">
+                      <InstructionRow
+                        href={`/instructions/${entry.instruction.id}`}
+                        onClick={persistInstructionReturnState}
+                        partId={entry.workItem.part_id}
+                        title={entry.workItem.item_title}
+                        departmentName={entry.workItem.department_name}
+                        departmentColor={normalizeDepartmentColor(entry.workItem.department_color)}
+                        revision={entry.instruction.revision}
+                        badges={<>{renderForkBadge(entry.instruction.fork_number, entry.instruction.fork_root_instruction_id)}{renderReviewBadge(entry.instruction.id)}</>}
+                        meta={<>Updated {relativeTime(entry.instruction.updated_at)}</>}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {filteredFinderInstructionCards.length > searchResultLimit ? (
+                <button
+                  type="button"
+                  onClick={() => setSearchResultExpansion({ query: normalizedQuery, limit: searchResultLimit + SEARCH_RESULT_PAGE_SIZE })}
+                  className="min-h-12 justify-self-center rounded-xl border border-slate-300 bg-white px-5 text-base font-semibold text-slate-800 hover:border-cyan-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                >
+                  Show {Math.min(SEARCH_RESULT_PAGE_SIZE, filteredFinderInstructionCards.length - searchResultLimit)} more
+                </button>
+              ) : null}
+              {otherSearchMatches.length > 0 ? (
+                <div className="grid gap-2">
+                  <h3 className="text-sm font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Documents and formulas</h3>
+                  <ul className="grid gap-2 md:grid-cols-2">
+                    {otherSearchMatches.map((result) => (
+                      <li key={result.id} className="min-w-0">
+                        <Link href={result.href} className="flex min-h-14 items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 transition hover:border-cyan-400 dark:border-slate-800 dark:bg-slate-950">
+                          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                            {result.type === "process_document" ? <FileText size={18} /> : result.type === "formula" ? <Calculator size={18} /> : <Info size={18} />}
+                          </span>
+                          <span className="grid min-w-0">
+                            <span className="truncate font-semibold text-slate-900 dark:text-slate-100">{result.title}</span>
+                            <span className="truncate text-sm text-slate-500 dark:text-slate-400">{result.subtitle}</span>
+                          </span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </section>
+
+        {!isSearching ? (
+          <nav aria-label="Quick actions" className={cn("grid gap-3", canCreate ? "sm:grid-cols-2 xl:grid-cols-4" : "sm:grid-cols-3")}>
+            {canCreate ? <QuickActionLink href="/instructions/new" icon={FilePlus2} label="New instruction" description="Write steps and submit for review" primary /> : null}
+            <QuickActionLink href="/doc-center" icon={BookOpen} label="Document center" description="Procedures, forms and records" />
+            <QuickActionLink href="/process-maps/formulas" icon={Calculator} label="Formula tools" description="OEE, yield, Cpk and takt time" />
+            {canCreate
+              ? <QuickActionLink href="/drafts" icon={FileClock} label="My drafts" description="Pick up unfinished work" />
+              : <QuickActionLink href="/process-maps" icon={ChartNetwork} label="Process maps" description="Flowcharts and quality tools" />}
+          </nav>
+        ) : null}
+        {layoutNotice && !customizeOpen ? <p role="status" className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-800 dark:text-emerald-200"><CheckCircle2 size={17} />{layoutNotice}</p> : null}
+        {layoutError && !customizeOpen ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-500/30 bg-rose-500/5 p-3 text-sm text-rose-800 dark:text-rose-200"><p>{layoutError}</p><button type="button" disabled={layoutLoading} onClick={() => { void openHomepageEditor(); }} className="min-h-11 rounded-lg border px-3 font-semibold">Retry loading editor</button></div> : null}
+        {customizeOpen ? <div id="homepage-editor" ref={homepageEditorRef} tabIndex={-1} className="min-w-0 scroll-mt-28 outline-none">
+          <DashboardLayoutStudio
+            widgets={widgetLayout.filter((widget) => widget.id !== "finder").map((widget) => ({ ...widget, title: widgetTitleById.get(widget.id) ?? widget.id, description: widgetDefinitionsById.get(widget.id)?.description ?? "", category: widgetDefinitionsById.get(widget.id)?.category ?? "core" }))}
+            presets={DASHBOARD_LAYOUT_PRESETS} activePresetId={findMatchingDashboardLayoutPreset(widgetLayout)?.id ?? null}
+            hasUnsavedChanges={layoutDirty} busy={layoutSaving || layoutLoading} canUndo={layoutUndoStack.length > 0} canRedo={layoutRedoStack.length > 0} error={layoutError} notice={layoutNotice}
+            onSetVisibility={setWidgetVisibility} onSizeChange={updateWidgetSize} onMove={moveVisibleWidget} onPreset={applyLayoutPreset}
+            onSave={() => { void saveDashboardLayout(); }} onCancel={discardDashboardLayoutChanges} onUndo={undoDashboardLayoutChange} onRedo={redoDashboardLayoutChange}
+            onReset={() => { void resetDashboardLayout(); }} onLoadDefault={() => { void loadDefaultDashboardLayout(); }} onSaveDefault={() => { void saveDashboardLayoutAsDefault(); }}
+          />
+        </div> : null}
+        {homepageWidgets.length === 0 && !isSearching ? <section className="grid justify-items-center gap-3 rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center dark:border-slate-700 dark:bg-slate-950"><LayoutDashboard size={30} className="text-cyan-600" /><h2 className="text-xl font-semibold">Make this homepage yours</h2><p className="max-w-lg text-sm text-slate-600 dark:text-slate-400">Add pinned instructions, recent changes, review queues, or document insights. Start with a layout and adjust it to your work.</p>{!customizeOpen ? <button type="button" disabled={layoutLoading} onClick={() => { void openHomepageEditor(); }} className="min-h-11 rounded-lg bg-cyan-700 px-4 font-semibold text-white">Choose widgets</button> : null}</section> : null}
+
+        {!isSearching ? <div aria-label="Homepage widgets" className="grid grid-cols-12 items-start gap-4 lg:gap-5">
+          {homepageWidgets.map((widget) => {
             const definition = widgetDefinitionsById.get(widget.id);
             if (!definition) {
               return null;
@@ -6814,6 +6761,13 @@ export function DashboardClient({
             const isDragOverTarget =
               dragOverWidgetId === widget.id && draggedWidgetId !== widget.id;
             const useInlineHeaderControls = widget.id === "finder" && !customizeOpen;
+            const WidgetIcon = WIDGET_ICONS[widget.id] ?? (definition.category === "kpi" ? ChartLine : null);
+            const widgetCount =
+              widget.id === "pinned" ? filteredPinnedInstructions.length
+                : widget.id === "newest" ? filteredNewestInstructions.length
+                  : widget.id === "review_queue" ? reviewQueueEntries.length
+                    : widget.id === "recent_updates" ? recentUpdateEvents.length
+                      : null;
             const widgetHeaderControls = renderWidgetHeaderControls(
               widget.id,
               widget.size,
@@ -6829,6 +6783,8 @@ export function DashboardClient({
                 <span>Size</span>
                 <select
                   value={widget.size}
+                  disabled={layoutSaving || layoutLoading}
+                  aria-label={`Width of ${widgetDisplayTitle}`}
                   onChange={(event) =>
                     updateWidgetSize(
                       widget.id,
@@ -6853,11 +6809,12 @@ export function DashboardClient({
               <section
                 key={widget.id}
                 data-dashboard-widget-id={widget.id}
+                id={`homepage-widget-${widget.id}`}
                 className={cn(
                   getWidgetSpanClass(widget.size),
-                  "relative min-w-0 rounded-3xl border border-white/30 bg-white/80 shadow-xl backdrop-blur-xl transition dark:border-white/10 dark:bg-slate-900/70",
+                  "relative min-w-0 scroll-mt-28 rounded-2xl border border-slate-200 bg-white shadow-sm transition dark:border-slate-800 dark:bg-slate-950",
                   "overflow-hidden",
-                  widget.size === "compact" ? "p-3" : "p-4 md:p-5",
+                  widget.size === "compact" ? "p-4" : "p-4 md:p-5",
                   isDragging ? "scale-[0.99] opacity-70" : "",
                   isDragOverTarget
                     ? "ring-2 ring-cyan-400/80 ring-offset-2 ring-offset-transparent"
@@ -6868,8 +6825,9 @@ export function DashboardClient({
                   <button
                     type="button"
                     onClick={() => toggleWidget(widget.id)}
+                    disabled={layoutSaving || layoutLoading}
                     aria-label={`Remove ${widgetDisplayTitle} widget`}
-                    className="absolute right-4 top-4 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border border-rose-500/40 bg-rose-500/10 text-rose-700 transition hover:bg-rose-500/20 dark:text-rose-200"
+                    className="absolute right-3 top-3 z-10 inline-flex h-11 w-11 items-center justify-center rounded-full border border-rose-500/40 bg-rose-500/10 text-rose-700 transition hover:bg-rose-500/20 dark:text-rose-200"
                   >
                     <X size={12} />
                   </button>
@@ -6884,7 +6842,7 @@ export function DashboardClient({
                       : widget.size === "compact"
                         ? "mb-2 flex flex-col items-start gap-2"
                         : "mb-3 flex flex-col gap-2.5 md:flex-row md:items-start md:justify-between",
-                    customizeOpen ? "pr-10" : "",
+                    customizeOpen ? "pr-12" : "",
                   )}
                 >
                   <div
@@ -6897,6 +6855,8 @@ export function DashboardClient({
                       <button
                         type="button"
                         aria-label={`Drag to reorder ${widgetDisplayTitle}`}
+                        disabled={layoutSaving || layoutLoading}
+                        onKeyDown={(event) => { if (event.key === "ArrowUp" || event.key === "ArrowDown") { event.preventDefault(); moveVisibleWidget(widget.id, event.key === "ArrowUp" ? "up" : "down"); } }}
                         onDragStart={(event) => event.preventDefault()}
                         onPointerDown={(event) => handleWidgetGripPointerDown(widget.id, event)}
                         onPointerMove={handleWidgetGripPointerMove}
@@ -6909,49 +6869,26 @@ export function DashboardClient({
                     ) : null}
                     <div className="min-w-0">
                       {isEditingWidgetTitle ? (
-                        <input
-                          ref={widgetTitleInputRef}
-                          value={editingWidgetTitleValue}
-                          maxLength={MAX_WIDGET_TITLE_LENGTH}
-                          onChange={(event) => setEditingWidgetTitleValue(event.target.value)}
-                          onBlur={() => {
-                            if (cancelWidgetTitleCommitRef.current) {
-                              cancelWidgetTitleEdit();
-                              return;
-                            }
-                            commitWidgetTitleEdit(widget.id);
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key === "Escape") {
-                              event.preventDefault();
-                              cancelWidgetTitleCommitRef.current = true;
-                              event.currentTarget.blur();
-                              return;
-                            }
-
-                            if (event.key === "Enter") {
-                              event.preventDefault();
-                              event.currentTarget.blur();
-                            }
-                          }}
-                          className={cn(
-                            "w-full rounded-lg border border-cyan-500/45 bg-cyan-500/10 px-2.5 py-1 font-extrabold tracking-tight text-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/55 dark:text-slate-100",
-                            widget.size === "compact" ? "text-base" : "text-xl",
-                          )}
-                          aria-label={`Rename ${widgetDisplayTitle} widget`}
-                        />
+                        <div className="grid gap-2">
+                          <input ref={widgetTitleInputRef} value={editingWidgetTitleValue} maxLength={MAX_WIDGET_TITLE_LENGTH} onChange={(event) => setEditingWidgetTitleValue(event.target.value)}
+                            onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); cancelWidgetTitleEdit(); } if (event.key === "Enter") { event.preventDefault(); void commitWidgetTitleEdit(widget.id); } }}
+                            className="min-h-11 w-full rounded-lg border border-cyan-500/45 bg-white px-3 text-base font-semibold text-slate-900 dark:bg-slate-950 dark:text-slate-100" aria-label={`Rename ${widgetDisplayTitle} widget`} />
+                          <p className="text-xs text-slate-500 dark:text-slate-400">Save this title separately from the page layout.</p>
+                          <div className="flex flex-wrap gap-2"><button type="button" onClick={() => { void commitWidgetTitleEdit(widget.id); }} className="min-h-11 rounded-lg border border-cyan-500/40 px-3 text-xs font-semibold">Save title</button><button type="button" onClick={cancelWidgetTitleEdit} className="min-h-11 rounded-lg border px-3 text-xs">Cancel title</button></div>
+                        </div>
                       ) : (
-                        <h2
-                          onDoubleClick={() => beginWidgetTitleEdit(widget.id)}
-                          title={customizeOpen ? "Double-click to rename widget" : undefined}
-                          className={cn(
-                            "break-words font-extrabold tracking-tight text-slate-900 dark:text-slate-100",
-                            widget.size === "compact" ? "text-base" : "text-xl",
-                            customizeOpen ? "cursor-text" : "",
-                          )}
-                        >
-                          {widgetDisplayTitle}
-                        </h2>
+                        <div className="flex min-w-0 items-center gap-2.5">
+                          {WidgetIcon ? (
+                            <span aria-hidden="true" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cyan-50 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-300">
+                              <WidgetIcon size={20} />
+                            </span>
+                          ) : null}
+                          <h2 className="min-w-0 break-words text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100">{widgetDisplayTitle}</h2>
+                          {widgetCount !== null ? (
+                            <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-sm font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-200">{widgetCount}</span>
+                          ) : null}
+                          {customizeOpen ? <button type="button" disabled={widgetTitleSaving || layoutSaving} onClick={() => beginWidgetTitleEdit(widget.id)} aria-label={`Rename ${widgetDisplayTitle} widget`} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800"><Pencil size={15} /></button> : null}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -6977,7 +6914,7 @@ export function DashboardClient({
               </section>
             );
           })}
-        </div>
+        </div> : null}
       </div>
 
       {portalReady &&
@@ -7047,7 +6984,7 @@ export function DashboardClient({
                 <div className="flex justify-center">
                   <button
                     type="button"
-                    onClick={() => setLikeCelebrationOpen(false)}
+                    onClick={() => setDismissedCelebration(celebrationKey)}
                     className="rounded-xl border border-cyan-400/45 bg-cyan-500/20 px-4 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/30 dark:text-cyan-100"
                   >
                     Nice
@@ -7059,84 +6996,10 @@ export function DashboardClient({
           )
         : null}
 
-      {resetDefaultsModalOpen && portalReady
-        ? createPortal(
-            <div className="app-modal-shell fixed inset-0 z-[114] flex items-center justify-center overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
-              <div className="grid w-full max-w-md gap-4 rounded-2xl border border-amber-500/45 bg-slate-950/95 p-5 shadow-2xl">
-                <div className="flex items-start gap-3">
-                  <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-amber-500/40 bg-amber-500/15 text-amber-200">
-                    <TriangleAlert size={16} />
-                  </span>
-                  <div className="grid gap-1">
-                    <h3 className="text-lg font-bold text-slate-100">
-                      Reset dashboard layout?
-                    </h3>
-                    <p className="text-sm text-slate-300">
-                      This will load all widgets and re-arrange your current dashboard layout.
-                    </p>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-amber-200">
-                      Your saved default dashboard will not be changed.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={closeResetDefaultsModal}
-                    className="rounded-xl border border-slate-600 bg-slate-900/70 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleConfirmResetDefaults}
-                    className="rounded-xl border border-amber-500/45 bg-amber-500/20 px-4 py-2 text-sm font-semibold text-amber-100 transition hover:bg-amber-500/30"
-                  >
-                    Reset and Load All Widgets
-                  </button>
-                </div>
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
-
-      {navigationModalOpen && portalReady
-        ? createPortal(
-            <div className="app-modal-shell fixed inset-0 z-[111] flex items-center justify-center overflow-y-auto bg-slate-950/75 p-4 backdrop-blur-sm sm:p-6">
-              <div className="grid w-full max-w-md gap-4 rounded-2xl border border-amber-500/45 bg-slate-950/95 p-5 shadow-2xl">
-                <div className="grid gap-1">
-                  <h3 className="text-lg font-bold text-slate-100">
-                    Discard unsaved dashboard layout?
-                  </h3>
-                  <p className="text-sm text-slate-300">
-                    You have unsaved widget layout changes. Leaving now will discard those
-                    updates.
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={handleCancelNavigationAway}
-                    className="rounded-xl border border-slate-600 bg-slate-900/70 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
-                  >
-                    Keep Editing
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleConfirmNavigationAway}
-                    className="rounded-xl border border-amber-500/45 bg-amber-500/20 px-4 py-2 text-sm font-semibold text-amber-100 transition hover:bg-amber-500/30"
-                  >
-                    Leave Without Saving
-                  </button>
-                </div>
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
+      {navigationModalOpen && portalReady ? <ModalDialog title="Discard unsaved homepage changes?" onClose={handleCancelNavigationAway}>
+        <p className="text-sm text-slate-600 dark:text-slate-300">Leaving this page will discard your unsaved widget layout.</p>
+        <div className="flex flex-wrap justify-end gap-2"><button type="button" onClick={handleCancelNavigationAway} className="min-h-11 rounded-lg border px-4 font-semibold">Keep editing</button><button type="button" onClick={handleConfirmNavigationAway} className="min-h-11 rounded-lg bg-rose-700 px-4 font-semibold text-white">Discard and leave</button></div>
+      </ModalDialog> : null}
 
       {activeKpiDrilldown && portalReady
         ? createPortal(

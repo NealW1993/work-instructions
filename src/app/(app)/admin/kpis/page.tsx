@@ -8,6 +8,7 @@ import { KpiSummaryCards, type KpiSummaryCardConfig } from "@/components/admin/k
 import { ReviewCoverageKpiPanel } from "@/components/admin/review-coverage-kpi-panel";
 import { SystemUsageKpiPanel } from "@/components/admin/system-usage-kpi-panel";
 import { InstructionBackButton } from "@/components/instructions/instruction-back-button";
+import { DisclosureSection } from "@/components/ui/disclosure-section";
 import { requireAuthenticatedUser } from "@/lib/auth";
 import { canViewKpis, hasFullAccess } from "@/lib/roles";
 import { formatElapsedHhMmSs } from "@/lib/session-timer";
@@ -464,7 +465,7 @@ export default async function SystemKpisPage() {
         />
         <div className="grid min-w-0 gap-1">
           <h1 className="text-3xl font-extrabold text-slate-900 dark:text-slate-100">
-            System KPI&apos;s
+            Operations & Quality Metrics
           </h1>
           <p className="text-sm text-slate-600 dark:text-slate-300">
             Operations and usage metrics for your work instructions system.
@@ -480,13 +481,21 @@ export default async function SystemKpisPage() {
 
       <KpiSummaryCards cards={summaryCards} />
 
-      <KpiInsightsPanel />
-      <ReviewCoverageKpiPanel />
-      <SystemUsageKpiPanel isSystemAdmin={hasFullAccess(profile.role)} />
-      <AiEnhancementKpiPanel />
-      <ForkMergeKpiPanel />
+      <DisclosureSection title="Review coverage" description="Instruction reviews, overdue checks, and department coverage." open>
+        <ReviewCoverageKpiPanel />
+      </DisclosureSection>
+      <DisclosureSection title="Usage insights" description="Instruction views and engagement across the operation.">
+        <KpiInsightsPanel />
+      </DisclosureSection>
+      <DisclosureSection title="AI and platform usage" description="Tool usage, enhancement activity, and resource consumption.">
+        <SystemUsageKpiPanel isSystemAdmin={hasFullAccess(profile.role)} />
+        <AiEnhancementKpiPanel />
+      </DisclosureSection>
+      <DisclosureSection title="Revision branches and merges" description="Trace collaboration and revision integration activity.">
+        <ForkMergeKpiPanel />
+      </DisclosureSection>
 
-      <section className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-6">
+      <section className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-sm backdrop-blur-sm dark:border-white/10 dark:bg-slate-900/70 md:p-6">
           <div className="flex flex-wrap items-end justify-between gap-2">
             <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
               Instruction Load by Department

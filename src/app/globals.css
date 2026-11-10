@@ -1,4 +1,9 @@
 @import "tailwindcss";
+
+/* The image viewer uses a dark canvas in either application theme. */
+html dialog.instruction-image-dialog h2 {
+  color: #f8fafc !important;
+}
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
@@ -22,9 +27,9 @@
   --surface-strong: #050505;
   --foreground: #f5f5f5;
   --muted: #a3a3a3;
-  --ring: #d4d4d4;
+  --ring: #22d3ee;
 
-  /* Force dark mode into a neutral black/grey/white palette. */
+  /* Neutral surfaces retain colored actions and status indicators. */
   --color-slate-50: #fafafa;
   --color-slate-100: #f5f5f5;
   --color-slate-200: #e5e5e5;
@@ -37,53 +42,6 @@
   --color-slate-900: #171717;
   --color-slate-950: #0a0a0a;
 
-  --color-cyan-50: #fafafa;
-  --color-cyan-100: #f5f5f5;
-  --color-cyan-200: #e5e5e5;
-  --color-cyan-300: #d4d4d4;
-  --color-cyan-400: #a3a3a3;
-  --color-cyan-500: #737373;
-  --color-cyan-600: #525252;
-  --color-cyan-700: #404040;
-  --color-cyan-800: #262626;
-  --color-cyan-900: #171717;
-  --color-cyan-950: #0a0a0a;
-
-  --color-sky-50: var(--color-cyan-50);
-  --color-sky-100: var(--color-cyan-100);
-  --color-sky-200: var(--color-cyan-200);
-  --color-sky-300: var(--color-cyan-300);
-  --color-sky-400: var(--color-cyan-400);
-  --color-sky-500: var(--color-cyan-500);
-  --color-sky-600: var(--color-cyan-600);
-  --color-sky-700: var(--color-cyan-700);
-  --color-sky-800: var(--color-cyan-800);
-  --color-sky-900: var(--color-cyan-900);
-  --color-sky-950: var(--color-cyan-950);
-
-  --color-blue-50: var(--color-cyan-50);
-  --color-blue-100: var(--color-cyan-100);
-  --color-blue-200: var(--color-cyan-200);
-  --color-blue-300: var(--color-cyan-300);
-  --color-blue-400: var(--color-cyan-400);
-  --color-blue-500: var(--color-cyan-500);
-  --color-blue-600: var(--color-cyan-600);
-  --color-blue-700: var(--color-cyan-700);
-  --color-blue-800: var(--color-cyan-800);
-  --color-blue-900: var(--color-cyan-900);
-  --color-blue-950: var(--color-cyan-950);
-
-  --color-indigo-50: var(--color-cyan-50);
-  --color-indigo-100: var(--color-cyan-100);
-  --color-indigo-200: var(--color-cyan-200);
-  --color-indigo-300: var(--color-cyan-300);
-  --color-indigo-400: var(--color-cyan-400);
-  --color-indigo-500: var(--color-cyan-500);
-  --color-indigo-600: var(--color-cyan-600);
-  --color-indigo-700: var(--color-cyan-700);
-  --color-indigo-800: var(--color-cyan-800);
-  --color-indigo-900: var(--color-cyan-900);
-  --color-indigo-950: var(--color-cyan-950);
 }
 
 @theme inline {
@@ -122,6 +80,65 @@ body {
     var(--background);
   color: var(--foreground);
   font-family: var(--font-body), "Segoe UI", sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+
+:where(button, input, select, textarea) {
+  max-width: 100%;
+}
+
+.skip-to-content {
+  position: fixed;
+  top: 0.75rem;
+  left: 1rem;
+  z-index: 1000;
+  transform: translateY(-200%);
+  border-radius: 0.5rem;
+  background: var(--surface-strong);
+  color: var(--foreground);
+  padding: 0.75rem 1rem;
+  font-weight: 600;
+}
+
+.skip-to-content:focus {
+  transform: translateY(0);
+}
+
+.app-workspace {
+  overflow-x: clip;
+}
+
+.app-workspace [id] {
+  scroll-margin-top: 8.5rem;
+}
+
+.app-workspace main > :first-child > header {
+  margin-bottom: 0.25rem;
+}
+
+.workspace-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.workspace-disclosure > summary:hover {
+  background: color-mix(in oklab, var(--foreground) 3%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 @keyframes system-status-toast-life {
@@ -420,6 +437,174 @@ h6 {
   font-weight: 700;
 }
 
+/* The same content blocks appear in the editor, AI review, controlled viewers, and print. */
+.prose-markdown a {
+  color: #0891b2;
+  text-decoration: underline;
+  text-underline-offset: 0.16em;
+  overflow-wrap: anywhere;
+}
+
+.prose-markdown hr {
+  border: 0;
+  border-top: 1px solid color-mix(in oklab, var(--foreground) 22%, transparent);
+  margin: 1.4rem 0;
+}
+
+.prose-markdown pre code {
+  background: none;
+  padding: 0;
+}
+
+.prose-markdown aside[data-type="callout"] {
+  --callout-accent: #0284c7;
+  border: 1px solid color-mix(in oklab, var(--callout-accent) 35%, transparent);
+  border-left: 4px solid var(--callout-accent);
+  border-radius: 0.6rem;
+  background: color-mix(in oklab, var(--callout-accent) 8%, transparent);
+  margin: 1rem 0;
+  padding: 0.85rem 1rem;
+  color: inherit;
+}
+
+.prose-markdown aside[data-tone="warning"] { --callout-accent: #d97706; }
+.prose-markdown aside[data-tone="success"] { --callout-accent: #059669; }
+.prose-markdown aside[data-type="callout"] > :first-child { margin-top: 0; }
+.prose-markdown aside[data-type="callout"] > :last-child { margin-bottom: 0; }
+
+.prose-markdown figure[data-type="instruction-chart"] {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.7rem;
+  background: #fff;
+  padding: 1rem;
+  color: #0f172a;
+  overflow: hidden;
+}
+
+.prose-markdown figure[data-type="instruction-chart"] figcaption {
+  font-weight: 700;
+  font-size: 1rem;
+  margin-bottom: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.prose-markdown figure[data-type="instruction-chart"] svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  background: #fff;
+}
+
+.prose-markdown figure[data-type="instruction-chart"] table {
+  display: table;
+  width: 100%;
+  font-size: 0.8rem;
+  border-color: #cbd5e1;
+  table-layout: fixed;
+}
+
+.prose-markdown figure[data-type="instruction-chart"] :is(th, td) {
+  border-color: #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+  min-width: 0;
+  padding: 0.3rem 0.5rem;
+}
+
+.prose-markdown figure[data-type="instruction-chart"] thead th { background: #f1f5f9; }
+.prose-markdown caption { text-align: left; font-weight: 600; margin-bottom: 0.35rem; }
+
+/* Callouts carry a visible label so safety notes stand out on screen and in print. */
+.prose-markdown aside[data-type="callout"]::before {
+  content: "Note";
+  display: block;
+  margin-bottom: 0.35rem;
+  color: var(--callout-accent);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.prose-markdown aside[data-tone="success"]::before { content: "Tip"; }
+.prose-markdown aside[data-tone="important"] { --callout-accent: #7c3aed; }
+.prose-markdown aside[data-tone="important"]::before { content: "Important"; }
+.prose-markdown aside[data-tone="warning"]::before { content: "Warning"; }
+.prose-markdown aside[data-tone="danger"] { --callout-accent: #dc2626; border-width: 2px; border-left-width: 6px; }
+.prose-markdown aside[data-tone="danger"]::before { content: "Caution"; }
+.dark .prose-markdown aside[data-type="callout"] { --callout-accent: #38bdf8; }
+.dark .prose-markdown aside[data-tone="success"] { --callout-accent: #34d399; }
+.dark .prose-markdown aside[data-tone="important"] { --callout-accent: #a78bfa; }
+.dark .prose-markdown aside[data-tone="warning"] { --callout-accent: #fbbf24; }
+.dark .prose-markdown aside[data-tone="danger"] { --callout-accent: #f87171; }
+
+/* Markdown photos keep their natural size up to the column width and never crop. */
+.prose-markdown figure[data-type="resizable-image"]:not([data-width]) img {
+  width: auto;
+  max-height: 80vh;
+  object-fit: contain;
+}
+.prose-markdown figure[data-type="resizable-image"][data-align="center"]:not([data-width]) img {
+  margin-inline: auto;
+}
+.prose-markdown figure:not([data-type="instruction-chart"]) figcaption {
+  margin-top: 0.4rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.prose-markdown ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0.25rem;
+}
+.prose-markdown li[data-type="taskItem"] {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+}
+.prose-markdown li[data-type="taskItem"] > label { flex: none; padding-top: 0.2rem; }
+.prose-markdown li[data-type="taskItem"] > label input { width: 1.1rem; height: 1.1rem; accent-color: #0891b2; }
+.prose-markdown li[data-type="taskItem"] > div { flex: 1; min-width: 0; }
+.prose-markdown li[data-type="taskItem"] > div > p { margin: 0; }
+
+/* Markdown source editor: the surrounding frame shows focus, so the textarea itself stays flat. */
+.md-source {
+  tab-size: 2;
+  font-variant-ligatures: none;
+}
+/* The homepage search is the primary control on the plant floor; keep it high-contrast with a strong focus ring. */
+input.dashboard-search-input::-webkit-search-cancel-button,
+input.dashboard-search-input::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
+html:not(.dark) input.dashboard-search-input {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #94a3b8 !important;
+}
+html:not(.dark) input.dashboard-search-input:focus {
+  border-color: #0891b2 !important;
+  box-shadow: 0 0 0 4px rgb(8 145 178 / 0.2) !important;
+}
+html:not(.dark) textarea.md-source,
+html:not(.dark) textarea.md-source:focus {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: none !important;
+}
+
+@media print {
+  .prose-markdown :is(aside[data-type="callout"], figure[data-type="instruction-chart"]) {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  .prose-markdown figure[data-type="instruction-chart"] svg { break-inside: avoid; }
+  .prose-markdown table { display: table; width: 100%; }
+  .prose-markdown tr { break-inside: avoid; }
+}
+
 html:not(.dark) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]),
 html:not(.dark) textarea,
 html:not(.dark) select {
@@ -591,183 +776,6 @@ html:not(.dark) .review-note-modal-shell textarea:focus {
   box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.25) !important;
 }
 
-.tiptap-editor-content.ProseMirror {
-  outline: none;
-}
-
-.tiptap-editor-content p {
-  margin: 0.25rem 0;
-  line-height: 1.6;
-}
-
-.tiptap-editor-content strong,
-.tiptap-editor-content b {
-  font-weight: 700;
-}
-
-.tiptap-editor-content em,
-.tiptap-editor-content i {
-  font-style: italic;
-}
-
-.tiptap-editor-content u {
-  text-decoration: underline;
-}
-
-.tiptap-editor-content h1,
-.tiptap-editor-content h2,
-.tiptap-editor-content h3 {
-  margin-top: 0.8rem;
-  margin-bottom: 0.45rem;
-  font-weight: 700;
-  line-height: 1.25;
-}
-
-.tiptap-editor-content h1 {
-  font-size: clamp(1.7rem, 1.55rem + 0.9vw, 2.2rem);
-}
-
-.tiptap-editor-content h2 {
-  font-size: clamp(1.35rem, 1.25rem + 0.65vw, 1.75rem);
-}
-
-.tiptap-editor-content h3 {
-  font-size: clamp(1.15rem, 1.05rem + 0.45vw, 1.4rem);
-}
-
-.tiptap-editor-content ul,
-.tiptap-editor-content ol {
-  margin: 0.5rem 0;
-  padding-left: 1.25rem;
-}
-
-.tiptap-editor-content ul {
-  list-style: disc;
-}
-
-.tiptap-editor-content ol {
-  list-style: decimal;
-}
-
-.tiptap-editor-content ul[data-type="taskList"] {
-  margin-left: 0;
-  padding-left: 0;
-  list-style: none;
-}
-
-.tiptap-editor-content ul[data-type="taskList"] li {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.55rem;
-}
-
-.tiptap-editor-content ul[data-type="taskList"] li > label {
-  margin-top: 0.15rem;
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-}
-
-.tiptap-editor-content ul[data-type="taskList"] li > label input {
-  margin: 0;
-}
-
-.tiptap-editor-content ul[data-type="taskList"] li > div {
-  flex: 1;
-  min-width: 0;
-}
-
-.tiptap-editor-content ul[data-type="taskList"] li > div p {
-  margin: 0;
-}
-
-.tiptap-editor-content li::marker {
-  color: currentColor;
-}
-
-.tiptap-editor-content blockquote {
-  border-left: 3px solid color-mix(in oklab, var(--ring) 80%, transparent);
-  margin: 0.6rem 0;
-  padding-left: 0.75rem;
-  color: var(--muted);
-}
-
-.tiptap-editor-content figure {
-  margin-top: 0.75rem;
-  margin-bottom: 0.75rem;
-  padding-left: 0.85rem;
-  border-left: 2px solid color-mix(in oklab, var(--ring) 55%, transparent);
-}
-
-.tiptap-editor-content figure img,
-.tiptap-editor-content figure video {
-  display: block;
-  width: 100%;
-  height: auto;
-}
-
-.tiptap-editor-content code {
-  border-radius: 0.35rem;
-  background: color-mix(in oklab, var(--foreground) 8%, transparent);
-  padding: 0.1rem 0.35rem;
-  font-size: 0.92em;
-}
-
-.tiptap-editor-content pre {
-  overflow-x: auto;
-  border-radius: 0.75rem;
-  background: color-mix(in oklab, var(--foreground) 10%, transparent);
-  padding: 0.9rem;
-}
-
-.tiptap-editor-content table {
-  table-layout: fixed;
-  width: 100%;
-  max-width: 100%;
-  margin: 0.85rem 0;
-  border-collapse: collapse;
-}
-
-.tiptap-editor-content th,
-.tiptap-editor-content td {
-  position: relative;
-  min-width: 4rem;
-  border: 1px solid color-mix(in oklab, var(--foreground) 20%, transparent);
-  padding: 0.45rem 0.55rem;
-  overflow-wrap: anywhere;
-  vertical-align: top;
-}
-
-.tiptap-editor-content th {
-  background: color-mix(in oklab, var(--foreground) 7%, transparent);
-  font-weight: 700;
-}
-
-.tiptap-editor-content .selectedCell::after {
-  content: "";
-  pointer-events: none;
-  position: absolute;
-  inset: 0;
-  background: color-mix(in oklab, var(--ring) 18%, transparent);
-}
-
-.tiptap-editor-content .column-resize-handle {
-  pointer-events: none;
-  position: absolute;
-  right: -2px;
-  top: 0;
-  bottom: -2px;
-  width: 4px;
-  background: color-mix(in oklab, var(--ring) 75%, transparent);
-}
-
-.tiptap-editor-content p.is-editor-empty:first-child::before {
-  content: attr(data-placeholder);
-  color: var(--muted);
-  pointer-events: none;
-  float: left;
-  height: 0;
-}
 
 @keyframes instruction-like-thumb-pop {
   0% {

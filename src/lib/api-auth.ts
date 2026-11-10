@@ -11,7 +11,10 @@ export async function getRequestProfile(request: NextRequest): Promise<Profile |
     return null;
   }
 
-  const token = authorization.slice(7);
+  const token = authorization.slice(7).trim();
+  if (!token) {
+    return null;
+  }
 
   const {
     data: { user },
@@ -28,5 +31,5 @@ export async function getRequestProfile(request: NextRequest): Promise<Profile |
     .eq("id", user.id)
     .maybeSingle<Profile>();
 
-  return profile ?? null;
+  return profile?.is_active ? profile : null;
 }

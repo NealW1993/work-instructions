@@ -7,9 +7,11 @@ const VIDEO_MIME_TYPE_BY_EXTENSION = {
   ".ogg": "video/ogg",
 } as const;
 
-const MOBILE_SAFE_VIDEO_MIME_TYPES = new Set<string>([
+const SUPPORTED_VIDEO_MIME_TYPES = new Set<string>([
   "video/mp4",
   "video/x-m4v",
+  "video/quicktime",
+  "video/webm",
 ]);
 
 function normalizeMimeType(value: string | null | undefined) {
@@ -40,7 +42,7 @@ function readFileExtension(value: string) {
 }
 
 function ensureBooleanAttribute(tagAttributes: string, attributeName: string) {
-  const pattern = new RegExp(`\\b${attributeName}\\b`, "i");
+  const pattern = new RegExp(`(?:^|\\s)${attributeName}(?:\\s|=|$)`, "i");
   if (pattern.test(tagAttributes)) {
     return tagAttributes;
   }
@@ -49,7 +51,7 @@ function ensureBooleanAttribute(tagAttributes: string, attributeName: string) {
 }
 
 function ensureValueAttribute(tagAttributes: string, attributeName: string, attributeValue: string) {
-  const pattern = new RegExp(`\\b${attributeName}\\s*=`, "i");
+  const pattern = new RegExp(`(?:^|\\s)${attributeName}\\s*=`, "i");
   if (pattern.test(tagAttributes)) {
     return tagAttributes;
   }
@@ -73,33 +75,32 @@ export function inferVideoMimeType(value: string | null | undefined) {
   ] ?? null;
 }
 
-export function isMobileSafeVideoUpload(file: { name: string; type?: string | null }) {
+export function isSupportedVideoUpload(file: { name: string; type?: string | null }) {
   const normalizedMimeType = normalizeMimeType(file.type);
-  if (MOBILE_SAFE_VIDEO_MIME_TYPES.has(normalizedMimeType)) {
-    return true;
-  }
+  if (normalizedMimeType && normalizedMimeType !== "application/octet-stream") return SUPPORTED_VIDEO_MIME_TYPES.has(normalizedMimeType);
 
   const inferredMimeType = inferVideoMimeType(file.name);
-  return inferredMimeType !== null && MOBILE_SAFE_VIDEO_MIME_TYPES.has(inferredMimeType);
+  return inferredMimeType !== null && SUPPORTED_VIDEO_MIME_TYPES.has(inferredMimeType);
 }
 
 export function getUnsupportedVideoUploadMessage(fileName: string) {
-  return `${fileName} is not a mobile-safe video upload. Use MP4 video encoded with H.264/AAC.`;
+  return `${fileName} is unsupported. Use MP4, MOV or WebM. MP4 with H.264/AAC provides the broadest playback compatibility.`;
 }
 
 export function normalizeVideoMarkupForPlayback(value: string) {
   return value.replace(
     /<video\b([^>]*)>([\s\S]*?)<\/video>/gi,
     (fullMarkup, rawAttributes: string, rawInnerMarkup: string) => {
-      const sourceMarkup = rawInnerMarkup.match(/<source\b[^>]*>/i)?.[0] ?? "";
-      const sourceTypeMatch = sourceMarkup.match(/\btype\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
-      const sourceSrcMatch = sourceMarkup.match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
-      const videoSrcMatch = rawAttributes.match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+      const sources = rawInnerMarkup.match(/<source\b[^>]*>/gi) ?? [];
+      const sourceMarkup = sources[0] ?? "";
+      const sourceTypeMatch = sourceMarkup.match(/\stype\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+      const sourceSrcMatch = sourceMarkup.match(/\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+      const videoSrcMatch = rawAttributes.match(/(?:^|\s)src\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
       const resolvedSource =
-        sourceSrcMatch?.[1] ??
-        sourceSrcMatch?.[2] ??
         videoSrcMatch?.[1] ??
         videoSrcMatch?.[2] ??
+        sourceSrcMatch?.[1] ??
+        sourceSrcMatch?.[2] ??
         "";
 
       if (!resolvedSource) {
@@ -107,18 +108,20 @@ export function normalizeVideoMarkupForPlayback(value: string) {
       }
 
       const inferredMimeType =
-        sourceTypeMatch?.[1] ??
-        sourceTypeMatch?.[2] ??
-        inferVideoMimeType(resolvedSource) ??
+        (videoSrcMatch ? inferVideoMimeType(resolvedSource) : sourceTypeMatch?.[1] ?? sourceTypeMatch?.[2] ?? inferVideoMimeType(resolvedSource)) ??
         "";
 
       let normalizedAttributes = rawAttributes
-        .replace(/\bsrc\s*=\s*(?:"[^"]*"|'[^']*')/i, "")
+        .replace(/(?:^|\s)src\s*=\s*(?:"[^"]*"|'[^']*')/i, "")
         .trim();
 
       normalizedAttributes = ensureBooleanAttribute(normalizedAttributes, "controls");
       normalizedAttributes = ensureBooleanAttribute(normalizedAttributes, "playsinline");
       normalizedAttributes = ensureValueAttribute(normalizedAttributes, "preload", "metadata");
+      if (sources.length > 1 && !videoSrcMatch) {
+        // Let the browser choose a supported codec rather than pinning it to the first source.
+        return `<video ${normalizedAttributes.trim()}>${rawInnerMarkup}</video>`;
+      }
       normalizedAttributes = ensureValueAttribute(normalizedAttributes, "src", resolvedSource);
 
       const normalizedInnerMarkup = rawInnerMarkup.replace(/<source\b[^>]*>\s*/gi, "").trim();
@@ -130,7 +133,7 @@ export function normalizeVideoMarkupForPlayback(value: string) {
         inferredMimeType ? ` type="${inferredMimeType}"` : ""
       }>`;
 
-      return `<video ${normalizedAttributes}>${sourceTag}${fallbackMarkup}</video>`;
+      return `<video ${normalizedAttributes.trim()}>${sourceTag}${fallbackMarkup}</video>`;
     },
   );
 }

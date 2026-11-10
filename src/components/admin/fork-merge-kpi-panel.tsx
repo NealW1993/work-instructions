@@ -191,11 +191,13 @@ export function ForkMergeKpiPanel() {
 
   const fetchKpiData = useCallback(
     async (params: string) => {
-      setLoading(true);
-      setError(null);
+
+
 
       try {
         const headers = await getAuthHeaders();
+      setLoading(true);
+      setError(null);
         const response = await fetch(`/api/kpis/fork-merge?${params}`, {
           method: "GET",
           headers,
@@ -315,7 +317,8 @@ export function ForkMergeKpiPanel() {
       return;
     }
 
-    void fetchKpiData(periodParams);
+    const timer = window.setTimeout(() => { void fetchKpiData(periodParams); }, 0);
+    return () => window.clearTimeout(timer);
   }, [fetchKpiData, periodParams, preferencesHydrated]);
 
   const trendPoints = data?.trendPoints ?? [];

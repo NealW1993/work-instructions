@@ -24,3 +24,16 @@ export function normalizeEmployeeId(value: string): string {
 export function isValidEmployeeId(value: string): boolean {
   return /^[0-9]{1,6}$/.test(value);
 }
+
+/**
+ * Reads and discards a response body. Fire-and-forget requests must still consume their
+ * response, otherwise the browser keeps the connection busy and later requests can stall.
+ */
+export async function drainResponse(response: Response): Promise<Response> {
+  try {
+    await response.text();
+  } catch {
+    // The body is not needed; a read failure does not change the outcome.
+  }
+  return response;
+}

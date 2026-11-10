@@ -34,14 +34,6 @@ const CARD_TONE_CLASSES: Record<KpiSummaryTone, string> = {
   rose: "border-rose-500/40 bg-rose-500/10 text-rose-900 transition hover:bg-rose-500/15 dark:text-rose-100",
 };
 
-const MODAL_TONE_CLASSES: Record<KpiSummaryTone, string> = {
-  cyan: "border-cyan-500/35 bg-cyan-500/10 text-cyan-100",
-  emerald: "border-emerald-500/35 bg-emerald-500/10 text-emerald-100",
-  amber: "border-amber-500/35 bg-amber-500/10 text-amber-100",
-  violet: "border-violet-500/35 bg-violet-500/10 text-violet-100",
-  rose: "border-rose-500/35 bg-rose-500/10 text-rose-100",
-};
-
 const ICON_BY_CARD_ID: Record<KpiSummaryCardConfig["id"], LucideIcon> = {
   "active-users": Users,
   "active-instructions": FileText,
@@ -56,7 +48,6 @@ export function KpiSummaryCards({ cards }: { cards: KpiSummaryCardConfig[] }) {
     () => cards.find((entry) => entry.id === selectedCardId) ?? null,
     [cards, selectedCardId],
   );
-  const SelectedCardIcon = selectedCard ? ICON_BY_CARD_ID[selectedCard.id] : null;
   const shouldScrollDetails = (selectedCard?.details.length ?? 0) > 5;
   const canUsePortal = typeof document !== "undefined";
 

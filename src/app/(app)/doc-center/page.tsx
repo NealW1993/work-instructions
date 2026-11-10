@@ -8,6 +8,7 @@ import {
   getProcessDocumentTypeLabel,
 } from "@/lib/process-documents";
 import type { InstructionApprovalStatus } from "@/lib/types";
+import { readAllRows } from "@/lib/supabase/read-all-rows";
 
 interface AccessGroupRow {
   id: string;
@@ -67,8 +68,9 @@ function getInstructionApprovalLabel(status: InstructionApprovalStatus | null | 
     case "rejected":
       return "Rejected";
     case "approved":
-    default:
       return "Approved";
+    default:
+      return "Unverified";
   }
 }
 
@@ -95,36 +97,44 @@ function buildGroupMap<T extends { group_id: string }>(
 export default async function DocCenterPage() {
   const { supabase } = await requireAuthenticatedUser();
   const [
-    { data: groupRows },
-    { data: documentRows },
-    { data: documentGroupRows },
-    { data: instructionRows },
-    { data: instructionGroupRows },
+    { data: groupRows, error: groupError },
+    { data: documentRows, error: documentError },
+    { data: documentGroupRows, error: documentGroupError },
+    { data: instructionRows, error: instructionError },
+    { data: instructionGroupRows, error: instructionGroupError },
   ] = await Promise.all([
-    supabase
+    readAllRows((from, to) => supabase
       .from("access_groups")
       .select("id, name")
       .eq("is_active", true)
-      .order("name", { ascending: true }),
-    supabase
-      .from("process_documents")
-      .select("id, document_number, title, document_type, status, process_name, current_revision, updated_at")
-      .order("updated_at", { ascending: false })
-      .range(0, 999),
-    supabase
+      .order("name", { ascending: true }).order("id")
+      .range(from, to)),
+    readAllRows<ProcessDocumentRow>(async (from, to) => {
+      const result = await supabase.rpc("list_process_documents_controlled")
+        .select("id, document_number, title, document_type, status, process_name, current_revision, updated_at")
+        .order("updated_at", { ascending: false }).order("id").range(from, to);
+      return {
+        data: Array.isArray(result.data) ? result.data as ProcessDocumentRow[] : null,
+        error: result.error ?? (result.data !== null && !Array.isArray(result.data) ? { message: "The document library returned an invalid response." } : null),
+      };
+    }),
+    readAllRows((from, to) => supabase
       .from("process_document_group_access")
       .select("document_id, group_id")
-      .range(0, 9999),
-    supabase
+      .order("document_id").order("group_id")
+      .range(from, to)),
+    readAllRows((from, to) => supabase
       .from("work_instructions")
       .select("id, revision, approval_status, updated_at, work_items(part_id, item_title, departments(name))")
       .eq("is_archived", false)
       .order("updated_at", { ascending: false })
-      .range(0, 999),
-    supabase
+      .order("id")
+      .range(from, to)),
+    readAllRows((from, to) => supabase
       .from("work_instruction_group_access")
       .select("instruction_id, group_id")
-      .range(0, 9999),
+      .order("instruction_id").order("group_id")
+      .range(from, to)),
   ]);
 
   const groups = ((groupRows ?? []) as AccessGroupRow[]).map(
@@ -197,5 +207,5 @@ export default async function DocCenterPage() {
       new Date(second.updated_at).getTime() - new Date(first.updated_at).getTime(),
   );
 
-  return <DocCenterClient groups={groups} items={items} />;
+  return <DocCenterClient groups={groups} items={items} loadFailed={Boolean(groupError || documentError || documentGroupError || instructionError || instructionGroupError)} />;
 }

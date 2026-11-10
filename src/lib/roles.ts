@@ -31,7 +31,7 @@ export function canViewKpis(role: AppRole): boolean {
 }
 
 export function accessLevelLabel(role: AppRole): string {
-  return hasFullAccess(role) ? "Full Access" : "Read Only";
+  return hasFullAccess(role) ? "Full Access" : "Contributor";
 }
 
 export function roleLabel(role: AppRole): string {

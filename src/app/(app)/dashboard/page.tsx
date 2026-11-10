@@ -17,7 +17,7 @@ import {
   type ProcessDocumentType,
   getProcessDocumentTypeLabel,
 } from "@/lib/process-documents";
-import { canEditInstructions, hasFullAccess } from "@/lib/roles";
+import { canCreateInstructions, canEditInstructions, hasFullAccess } from "@/lib/roles";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 interface DashboardPageProps {
@@ -553,7 +553,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     .order("name", { ascending: true });
 
   const processDocumentsRequest = supabase
-    .from("process_documents")
+    .rpc("list_process_documents_controlled")
     .select(
       "id, document_number, title, document_type, status, department_id, process_name, process_scope, process_inputs, process_outputs, process_risks, process_controls, iso_clause_refs, current_revision, updated_at, departments(name, color_hex)",
     )
@@ -1163,6 +1163,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   return (
     <DashboardClient
       canEdit={canEditInstructions(profile.role)}
+      canCreate={canCreateInstructions(profile.role)}
       isSystemAdmin={hasFullAccess(profile.role)}
       initialQuery={initialQuery}
       searchError={searchError?.message ?? null}
@@ -1177,8 +1178,10 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       formulas={formulas}
       systemHistoryEvents={systemHistoryEvents.slice(0, 240)}
       currentUserId={profile.id}
+      currentUserName={profile.full_name ?? ""}
       initialDashboardLayout={profile.dashboard_layout ?? null}
       initialDashboardDefaultLayout={profile.dashboard_default_layout ?? null}
+      initialDashboardLayoutUpdatedAt={profile.updated_at}
       instructionReviewWindowDays={instructionReviewWindowDays}
       instructionReviewStatusByInstructionId={instructionReviewStatusByInstructionId}
       departmentOptions={

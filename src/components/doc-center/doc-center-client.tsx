@@ -4,6 +4,7 @@ import Link from "next/link";
 import { BookOpen, FileText, GitBranch, Lock, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { LocalDateTime } from "@/components/ui/local-date-time";
 import { cn } from "@/lib/utils";
 
 export interface DocCenterGroup {
@@ -26,7 +27,10 @@ export interface DocCenterItem {
 interface DocCenterClientProps {
   groups: DocCenterGroup[];
   items: DocCenterItem[];
+  loadFailed?: boolean;
 }
+
+const PAGE_SIZE = 18;
 
 function kindLabel(kind: DocCenterItem["kind"]) {
   switch (kind) {
@@ -52,10 +56,14 @@ function kindIcon(kind: DocCenterItem["kind"]) {
   }
 }
 
-export function DocCenterClient({ groups, items }: DocCenterClientProps) {
+export function DocCenterClient({ groups, items, loadFailed = false }: DocCenterClientProps) {
   const [query, setQuery] = useState("");
   const [kindFilter, setKindFilter] = useState<"all" | DocCenterItem["kind"]>("all");
   const [groupFilter, setGroupFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("updated");
+  const [page, setPage] = useState(1);
+  const statuses = useMemo(() => [...new Set(items.map((item) => item.status))].sort(), [items]);
 
   const filteredItems = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -69,6 +77,10 @@ export function DocCenterClient({ groups, items }: DocCenterClientProps) {
         return false;
       }
 
+      if (statusFilter !== "all" && item.status !== statusFilter) {
+        return false;
+      }
+
       if (!normalizedQuery) {
         return true;
       }
@@ -77,8 +89,23 @@ export function DocCenterClient({ groups, items }: DocCenterClientProps) {
         .join(" ")
         .toLowerCase()
         .includes(normalizedQuery);
-    });
-  }, [groupFilter, items, kindFilter, query]);
+    }).sort((left, right) => sortBy === "title"
+      ? left.title.localeCompare(right.title, undefined, { numeric: true })
+      : (Date.parse(right.updated_at) || 0) - (Date.parse(left.updated_at) || 0));
+  }, [groupFilter, items, kindFilter, query, sortBy, statusFilter]);
+
+  const pageCount = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const visibleItems = filteredItems.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const hasFilters = Boolean(query.trim() || kindFilter !== "all" || groupFilter !== "all" || statusFilter !== "all");
+
+  function resetFilters() {
+    setQuery("");
+    setKindFilter("all");
+    setGroupFilter("all");
+    setStatusFilter("all");
+    setPage(1);
+  }
 
   const counts = {
     all: items.length,
@@ -109,6 +136,12 @@ export function DocCenterClient({ groups, items }: DocCenterClientProps) {
         </div>
       </header>
 
+      {loadFailed ? (
+        <p role="alert" className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-200">
+          Part of the document library could not be loaded. Refresh the page to retry; the results below may be incomplete.
+        </p>
+      ) : null}
+
       <section className="grid gap-3 rounded-2xl border border-slate-300/70 bg-white/85 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/75">
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
           <label className="relative block">
@@ -119,14 +152,16 @@ export function DocCenterClient({ groups, items }: DocCenterClientProps) {
             />
             <input
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              type="search"
+              onChange={(event) => { setQuery(event.target.value); setPage(1); }}
               placeholder="Search documents, instructions, maps"
               className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
             />
           </label>
           <select
+            aria-label="Content type"
             value={kindFilter}
-            onChange={(event) => setKindFilter(event.target.value as typeof kindFilter)}
+            onChange={(event) => { setKindFilter(event.target.value as typeof kindFilter); setPage(1); }}
             className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
           >
             <option value="all">All ({counts.all})</option>
@@ -135,8 +170,9 @@ export function DocCenterClient({ groups, items }: DocCenterClientProps) {
             <option value="map">Maps ({counts.map})</option>
           </select>
           <select
+            aria-label="Access group"
             value={groupFilter}
-            onChange={(event) => setGroupFilter(event.target.value)}
+            onChange={(event) => { setGroupFilter(event.target.value); setPage(1); }}
             className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
           >
             <option value="all">All groups</option>
@@ -148,21 +184,39 @@ export function DocCenterClient({ groups, items }: DocCenterClientProps) {
           </select>
         </div>
 
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3 dark:border-slate-800">
+          <p role="status" className="text-sm text-slate-600 dark:text-slate-400">
+            {filteredItems.length.toLocaleString()} result{filteredItems.length === 1 ? "" : "s"}
+            {hasFilters ? ` of ${items.length.toLocaleString()}` : ""}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <select aria-label="Approval status" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950">
+              <option value="all">All statuses</option>
+              {statuses.map((status) => <option key={status} value={status}>{status}</option>)}
+            </select>
+            <select aria-label="Sort results" value={sortBy} onChange={(event) => { setSortBy(event.target.value); setPage(1); }} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950">
+              <option value="updated">Recently updated</option>
+              <option value="title">Title A–Z</option>
+            </select>
+            {hasFilters ? <button type="button" onClick={resetFilters} className="rounded-lg px-3 py-2 text-sm font-semibold text-cyan-800 hover:bg-cyan-500/10 dark:text-cyan-200">Clear filters</button> : null}
+          </div>
+        </div>
+
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {filteredItems.map((item) => {
+          {visibleItems.map((item) => {
             const Icon = kindIcon(item.kind);
             return (
               <Link
                 key={`${item.kind}:${item.id}`}
                 href={item.href}
-                className="grid gap-3 rounded-xl border border-slate-300/70 bg-white/75 p-4 transition hover:border-cyan-500/45 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/50"
+                className="grid min-w-0 content-start gap-3 rounded-xl border border-slate-300/70 bg-white/75 p-4 transition hover:border-cyan-500/45 hover:bg-cyan-500/5 dark:border-slate-700 dark:bg-slate-900/50"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                       {kindLabel(item.kind)}
                     </p>
-                    <h2 className="mt-1 line-clamp-2 font-extrabold text-slate-950 dark:text-slate-50">
+                    <h2 title={item.title} className="mt-1 line-clamp-2 break-words font-semibold text-slate-950 dark:text-slate-50">
                       {item.title}
                     </h2>
                   </div>
@@ -177,7 +231,7 @@ export function DocCenterClient({ groups, items }: DocCenterClientProps) {
                   <span
                     className={cn(
                       "rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-                      item.status.toLowerCase().includes("approved")
+                      item.status.toLowerCase() === "approved"
                         ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200"
                         : "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200",
                     )}
@@ -191,15 +245,30 @@ export function DocCenterClient({ groups, items }: DocCenterClientProps) {
                     </span>
                   ) : null}
                 </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Updated <LocalDateTime value={item.updated_at} mode="date" />
+                </p>
               </Link>
             );
           })}
         </div>
 
         {filteredItems.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
-            No matching controlled content is available.
-          </p>
+          <div className="grid justify-items-center gap-2 rounded-xl border border-dashed border-slate-300 px-4 py-10 text-center dark:border-slate-700">
+            <BookOpen aria-hidden="true" size={26} className="text-slate-400" />
+            <p className="font-semibold text-slate-800 dark:text-slate-200">{hasFilters ? "No matching documents" : "Your document library is empty"}</p>
+            <p className="max-w-md text-sm text-slate-500 dark:text-slate-400">{hasFilters ? "Try another search or clear the filters to see available content." : "Approved content appears here when it is available to your access groups."}</p>
+            {hasFilters ? <button type="button" onClick={resetFilters} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold dark:border-slate-700">Clear filters</button> : null}
+          </div>
+        ) : null}
+        {pageCount > 1 ? (
+          <nav aria-label="Document results pages" className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4 dark:border-slate-800">
+            <p className="text-sm text-slate-500 dark:text-slate-400">Page {currentPage} of {pageCount}</p>
+            <div className="flex gap-2">
+              <button type="button" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700">Previous</button>
+              <button type="button" disabled={currentPage === pageCount} onClick={() => setPage(currentPage + 1)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700">Next</button>
+            </div>
+          </nav>
         ) : null}
       </section>
     </div>

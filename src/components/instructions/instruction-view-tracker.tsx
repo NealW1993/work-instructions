@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { drainResponse } from "@/lib/utils";
 
 interface InstructionViewTrackerProps {
   instructionId: string;
@@ -29,14 +30,14 @@ export function InstructionViewTracker({ instructionId }: InstructionViewTracker
           return;
         }
 
-        await fetch(`/api/instructions/${instructionId}/views`, {
+        await drainResponse(await fetch(`/api/instructions/${instructionId}/views`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${session.access_token}`,
             "Content-Type": "application/json",
           },
           keepalive: true,
-        });
+        }));
       } catch {
         // Best effort tracking: ignore logging failures.
       }

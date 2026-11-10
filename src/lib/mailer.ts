@@ -4,7 +4,7 @@ import nodemailer from "nodemailer";
 
 import { serverEnv } from "@/lib/env.server";
 
-let transporter: nodemailer.Transporter | null = null;
+let transporter: ReturnType<typeof nodemailer.createTransport> | null = null;
 
 function getTransporter() {
   if (!transporter) {
@@ -12,6 +12,10 @@ function getTransporter() {
       host: serverEnv.SMTP_HOST,
       port: serverEnv.SMTP_PORT,
       secure: false,
+      // Fail fast when the mail server is unreachable instead of holding work open for minutes.
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 30_000,
       auth:
         serverEnv.SMTP_USER && serverEnv.SMTP_PASS
           ? {

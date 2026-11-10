@@ -76,11 +76,13 @@ export function AiEnhancementKpiPanel() {
   }, [supabase]);
 
   const fetchAiEnhancementKpis = useCallback(async () => {
-    setBusy(true);
-    setError(null);
+
+
 
     try {
       const headers = await getAuthHeaders();
+      setBusy(true);
+      setError(null);
       const response = await fetch("/api/kpis/ai-enhancement", {
         method: "GET",
         headers,
@@ -113,7 +115,8 @@ export function AiEnhancementKpiPanel() {
   }, [getAuthHeaders]);
 
   useEffect(() => {
-    void fetchAiEnhancementKpis();
+    const timer = window.setTimeout(() => { void fetchAiEnhancementKpis(); }, 0);
+    return () => window.clearTimeout(timer);
   }, [fetchAiEnhancementKpis]);
 
   const shouldLimitUserTableHeight = Boolean(

@@ -1,9 +1,7 @@
 import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import sanitizeHtml from "sanitize-html";
+import { sanitizeRichHtml } from "@/lib/rich-text.server";
 
 import { InstructionActionMenu } from "@/components/instructions/instruction-action-menu";
 import { DeleteInstructionButton } from "@/components/instructions/delete-instruction-button";
@@ -25,6 +23,7 @@ import { InstructionViewTracker } from "@/components/instructions/instruction-vi
 import { LikeInstructionButton } from "@/components/instructions/like-instruction-button";
 import { PinInstructionButton } from "@/components/instructions/pin-instruction-button";
 import { PrintInstructionButton } from "@/components/instructions/print-instruction-button";
+import { ControlledCopyNotice } from "@/components/instructions/controlled-copy-notice";
 import { PrintMediaIsolator } from "@/components/instructions/print-media-isolator";
 import { RestoreArchivedInstructionButton } from "@/components/instructions/restore-archived-instruction-button";
 import {
@@ -53,6 +52,7 @@ interface InstructionPageProps {
 
 interface InstructionRecord {
   id: string;
+  revision_family_id: string;
   work_item_id: string;
   fork_root_instruction_id: string | null;
   fork_number: number | null;
@@ -131,6 +131,7 @@ interface MergePreviewMediaRow {
 
 interface ForkRootLookupRow {
   id: string;
+  updated_at: string;
   body_markdown: string;
   revision: number;
   work_items:
@@ -189,21 +190,6 @@ interface InstructionRevisionHistoryRow {
   created_at: string;
   updated_at: string;
   updated_by: string;
-}
-
-interface InstructionRevisionHistoryLookupRow extends InstructionRevisionHistoryRow {
-  work_items:
-    | {
-        part_id: string;
-        item_title: string;
-        department_id: string;
-      }
-    | Array<{
-        part_id: string;
-        item_title: string;
-        department_id: string;
-      }>
-    | null;
 }
 
 interface InstructionReviewSettingsRow {
@@ -309,86 +295,6 @@ function toElapsedCalendarDaysUtc(value: string) {
   return Math.round(elapsed / (1000 * 60 * 60 * 24));
 }
 
-function looksLikeHtml(value: string): boolean {
-  return /<\/?[a-z][\s\S]*>/i.test(value);
-}
-
-function sanitizeRichHtml(value: string): string {
-  return sanitizeHtml(value, {
-    allowedTags: [
-      "p",
-      "br",
-      "strong",
-      "b",
-      "em",
-      "i",
-      "u",
-      "s",
-      "mark",
-      "ul",
-      "ol",
-      "li",
-      "blockquote",
-      "code",
-      "pre",
-      "h1",
-      "h2",
-      "h3",
-      "hr",
-      "span",
-      "div",
-      "figure",
-      "img",
-      "video",
-      "source",
-      "label",
-      "input",
-    ],
-    allowedAttributes: {
-      figure: ["data-type", "data-align", "data-width", "style", "class"],
-      img: ["src", "alt", "title", "width", "height", "style", "class"],
-      video: ["src", "controls", "width", "height", "style", "class", "playsinline", "preload", "data-mime-type"],
-      source: ["src", "type"],
-      span: ["style"],
-      div: ["style", "data-type"],
-      p: ["style"],
-      h1: ["style"],
-      h2: ["style"],
-      h3: ["style"],
-      ul: ["data-type"],
-      li: ["data-type", "data-checked"],
-      label: ["contenteditable"],
-      input: ["type", "checked", "disabled"],
-      mark: ["style", "data-color"],
-      "*": ["class", "style"],
-    },
-    allowedSchemes: ["http", "https", "data"],
-    allowedSchemesByTag: {
-      img: ["http", "https", "data"],
-      video: ["http", "https", "data"],
-      source: ["http", "https", "data"],
-    },
-    allowedStyles: {
-      "*": {
-        "text-align": [/^left$/, /^right$/, /^center$/, /^justify$/],
-        display: [/^block$/, /^inline-block$/],
-        width: [/^[0-9.]+(px|%)$/],
-        height: [/^[0-9.]+(px|%)$/, /^auto$/],
-        "max-width": [/^[0-9.]+(px|%)$/],
-        "margin-left": [/^auto$/, /^[0-9.]+(px|%)$/],
-        "margin-right": [/^auto$/, /^[0-9.]+(px|%)$/],
-      },
-      span: {
-        color: [/^#[0-9a-fA-F]{3,8}$/, /^rgb\([0-9,\s.]+\)$/],
-        "font-size": [/^[0-9]+(px|em|rem|%)$/],
-      },
-      mark: {
-        "background-color": [/^#[0-9a-fA-F]{3,8}$/, /^rgb\([0-9,\s.]+\)$/],
-      },
-    },
-  });
-}
-
 function getWorkItem(relation: InstructionRecord["work_items"]) {
   if (Array.isArray(relation)) {
     return relation[0] ?? null;
@@ -419,10 +325,6 @@ function getDepartmentName(
   return relation.name;
 }
 
-function normalizeLookupValue(value: string) {
-  return value.trim().toLowerCase();
-}
-
 function parseToolNames(value: string | null | undefined) {
   const dedupedByName = new Map<string, string>();
 
@@ -439,20 +341,6 @@ function parseToolNames(value: string | null | undefined) {
   }
 
   return Array.from(dedupedByName.values());
-}
-
-function normalizeRevisionHistoryLookupWorkItem(
-  relation: InstructionRevisionHistoryLookupRow["work_items"],
-) {
-  if (!relation) {
-    return null;
-  }
-
-  if (Array.isArray(relation)) {
-    return relation[0] ?? null;
-  }
-
-  return relation;
 }
 
 function normalizeForkRootWorkItem(
@@ -508,11 +396,6 @@ function normalizeMergePreviewMediaRows(
     );
 }
 
-function revisionHistoryRowSortValue(row: InstructionRevisionHistoryRow) {
-  const updatedAtValue = Date.parse(row.updated_at);
-  return Number.isFinite(updatedAtValue) ? updatedAtValue : 0;
-}
-
 function renderInstructionContent(
   value: string,
   mediaUrlRuntime?: MediaUrlRuntimeContext,
@@ -521,24 +404,17 @@ function renderInstructionContent(
     return null;
   }
 
-  if (looksLikeHtml(value)) {
-    const sanitizedMarkup = sanitizeRichHtml(value);
-    const normalizedMarkup = rewriteLoopbackMediaUrlsInHtml(
-      normalizeVideoMarkupForPlayback(sanitizedMarkup),
-      mediaUrlRuntime,
-    );
-    return (
-      <div
-        className="prose-markdown"
-        dangerouslySetInnerHTML={{ __html: normalizedMarkup }}
-      />
-    );
-  }
-
+  // Markdown and legacy HTML share one renderer and sanitizer, so callouts, charts and media look the same everywhere.
+  const sanitizedMarkup = sanitizeRichHtml(value);
+  const normalizedMarkup = rewriteLoopbackMediaUrlsInHtml(
+    normalizeVideoMarkupForPlayback(sanitizedMarkup),
+    mediaUrlRuntime,
+  );
   return (
-    <div className="prose-markdown">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{value}</ReactMarkdown>
-    </div>
+    <div
+      className="prose-markdown"
+      dangerouslySetInnerHTML={{ __html: normalizedMarkup }}
+    />
   );
 }
 
@@ -914,7 +790,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const { data, error } = await supabase
     .from("work_instructions")
     .select(
-      "id, work_item_id, fork_root_instruction_id, fork_number, merged_into_root_at, merge_count, is_archived, body_markdown, uncommon_tools, iso_clause_refs, process_scope, acceptance_criteria, verification_records, risk_controls, approval_status, submitted_by, submitted_at, approved_by, approved_at, rejected_by, rejected_at, approval_note, ai_assisted, ai_assisted_at, last_change_summary, revision, created_at, updated_at, created_by, updated_by, work_items(id, department_id, part_id, item_title, departments(name)), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
+      "id, revision_family_id, work_item_id, fork_root_instruction_id, fork_number, merged_into_root_at, merge_count, is_archived, body_markdown, uncommon_tools, iso_clause_refs, process_scope, acceptance_criteria, verification_records, risk_controls, approval_status, submitted_by, submitted_at, approved_by, approved_at, rejected_by, rejected_at, approval_note, ai_assisted, ai_assisted_at, last_change_summary, revision, created_at, updated_at, created_by, updated_by, work_items(id, department_id, part_id, item_title, departments(name)), instruction_media(id, instruction_id, storage_path, public_url, media_type, caption, sort_order, created_by, created_at)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -938,7 +814,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
     Boolean(instruction.fork_root_instruction_id) && instructionForkNumber !== null;
   const forkFamilyRootId = isForkInstruction
     ? (instruction.fork_root_instruction_id as string)
-    : instruction.id;
+    : (instruction.revision_family_id ?? instruction.id);
 
   if (!workItem) {
     notFound();
@@ -957,9 +833,12 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
       ? supabase
           .from("work_instructions")
           .select(
-            "id, body_markdown, revision, work_items(part_id, item_title, department_id, departments(name)), instruction_media(public_url, media_type, caption, sort_order)",
+            "id, updated_at, body_markdown, revision, work_items(part_id, item_title, department_id, departments(name)), instruction_media(public_url, media_type, caption, sort_order)",
           )
-          .eq("id", forkFamilyRootId)
+          .eq("revision_family_id", forkFamilyRootId)
+          .eq("is_archived", false)
+          .order("revision", { ascending: false })
+          .limit(1)
           .maybeSingle<ForkRootLookupRow>()
       : Promise.resolve({
           data: null as ForkRootLookupRow | null,
@@ -999,117 +878,18 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const forkRootDepartmentName = getDepartmentName(forkRootWorkItem?.departments);
   const forkCount = forkFamilyRows.length;
 
-  const [
-    { data: revisionHistoryByWorkItemData, error: revisionHistoryByWorkItemError },
-    {
-      data: revisionHistoryByPartAndDepartmentData,
-      error: revisionHistoryByPartAndDepartmentError,
-    },
-  ] = await Promise.all([
-    isForkInstruction
-      ? supabase
-          .from("work_instructions")
-          .select("id, revision, is_archived, created_at, updated_at, updated_by")
-          .eq("fork_root_instruction_id", forkFamilyRootId)
-          .eq("fork_number", instructionForkNumber as number)
-          .order("revision", { ascending: false })
-          .order("updated_at", { ascending: false })
-      : supabase
-          .from("work_instructions")
-          .select("id, revision, is_archived, created_at, updated_at, updated_by")
-          .eq("work_item_id", instruction.work_item_id)
-          .is("fork_root_instruction_id", null)
-          .order("revision", { ascending: false })
-          .order("updated_at", { ascending: false }),
-    isForkInstruction
-      ? Promise.resolve({
-          data: null as InstructionRevisionHistoryLookupRow[] | null,
-          error: null as { message?: string } | null,
-        })
-      : supabase
-          .from("work_instructions")
-          .select(
-            "id, revision, is_archived, created_at, updated_at, updated_by, work_items!inner(part_id, item_title, department_id)",
-          )
-          .eq("work_items.department_id", workItem.department_id)
-          .is("fork_root_instruction_id", null),
-  ]);
-
-  if (revisionHistoryByWorkItemError) {
-    throw new Error(revisionHistoryByWorkItemError.message);
+  const dedupedRevisionHistoryRows: Array<InstructionRevisionHistoryRow & { approval_status: InstructionApprovalStatus }> = [];
+  for (let offset = 0; ; offset += 500) {
+    const { data: history, error: historyError } = await supabase.from("work_instructions")
+      .select("id, revision, approval_status, is_archived, created_at, updated_at, updated_by")
+      .eq("revision_family_id", instruction.revision_family_id ?? instruction.id)
+      .order("revision", { ascending: false }).order("id").range(offset, offset + 499);
+    if (historyError) throw new Error(historyError.message);
+    const rows = history ?? [];
+    dedupedRevisionHistoryRows.push(...rows);
+    if (!rows.length) break;
+    offset += rows.length - 500;
   }
-
-  if (revisionHistoryByPartAndDepartmentError) {
-    throw new Error(revisionHistoryByPartAndDepartmentError.message);
-  }
-
-  const normalizedWorkItemPartId = normalizeLookupValue(workItem.part_id);
-  const normalizedWorkItemItemTitle = normalizeLookupValue(workItem.item_title);
-  const revisionHistoryRowsByWorkItem =
-    (revisionHistoryByWorkItemData ?? []) as InstructionRevisionHistoryRow[];
-  const revisionHistoryRowsByPartAndDepartment =
-    (revisionHistoryByPartAndDepartmentData ?? []) as InstructionRevisionHistoryLookupRow[];
-
-  const revisionHistoryById = new Map<string, InstructionRevisionHistoryRow>();
-  for (const row of revisionHistoryRowsByWorkItem) {
-    revisionHistoryById.set(row.id, row);
-  }
-
-  for (const row of revisionHistoryRowsByPartAndDepartment) {
-    const rowWorkItem = normalizeRevisionHistoryLookupWorkItem(row.work_items);
-    if (!rowWorkItem) {
-      continue;
-    }
-
-    if (
-      normalizeLookupValue(rowWorkItem.part_id) !== normalizedWorkItemPartId ||
-      normalizeLookupValue(rowWorkItem.item_title) !== normalizedWorkItemItemTitle
-    ) {
-      continue;
-    }
-
-    revisionHistoryById.set(row.id, {
-      id: row.id,
-      revision: row.revision,
-      is_archived: row.is_archived,
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-      updated_by: row.updated_by,
-    });
-  }
-
-  const revisionHistoryRows = [...revisionHistoryById.values()].sort((first, second) => {
-    if (second.revision !== first.revision) {
-      return second.revision - first.revision;
-    }
-
-    if (first.is_archived !== second.is_archived) {
-      return Number(first.is_archived) - Number(second.is_archived);
-    }
-
-    return revisionHistoryRowSortValue(second) - revisionHistoryRowSortValue(first);
-  });
-
-  const dedupedRevisionHistoryRowsByRevision = new Map<number, InstructionRevisionHistoryRow>();
-  for (const row of revisionHistoryRows) {
-    if (!dedupedRevisionHistoryRowsByRevision.has(row.revision)) {
-      dedupedRevisionHistoryRowsByRevision.set(row.revision, row);
-    }
-  }
-
-  const dedupedRevisionHistoryRows = [...dedupedRevisionHistoryRowsByRevision.values()].sort(
-    (first, second) => {
-      if (second.revision !== first.revision) {
-        return second.revision - first.revision;
-      }
-
-      if (first.is_archived !== second.is_archived) {
-        return Number(first.is_archived) - Number(second.is_archived);
-      }
-
-      return revisionHistoryRowSortValue(second) - revisionHistoryRowSortValue(first);
-    },
-  );
 
   const { data: instructionChangeEventsData } = await supabase
     .from("instruction_change_events")
@@ -1150,6 +930,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
       id: entry.id,
       revision: entry.revision,
       isArchived: entry.is_archived,
+      approvalStatus: entry.approval_status,
       createdAt: entry.created_at,
       updatedAt: entry.updated_at,
       updatedByName: userMap.get(entry.updated_by) ?? "Unknown",
@@ -1370,7 +1151,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const showReviewIndicator =
     reviewStatus.status === "needs_review" || reviewIsOutOfRange;
   const instructionIsArchived = instruction.is_archived;
-  const approvalStatus = instruction.approval_status ?? "approved";
+  const approvalStatus = instruction.approval_status ?? "draft";
   const canEditOwnPendingInstruction =
     instruction.created_by === profile.id &&
     (approvalStatus === "draft" ||
@@ -1408,7 +1189,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
     { label: "Risks / Controls", value: instruction.risk_controls ?? "" },
   ].filter((entry) => entry.value.trim().length > 0);
   const printBodyMedia = extractPrintMediaFromBody(
-    rewriteLoopbackMediaUrlsInHtml(instruction.body_markdown, mediaUrlRuntime),
+    rewriteLoopbackMediaUrlsInHtml(sanitizeRichHtml(instruction.body_markdown), mediaUrlRuntime),
   );
   const printInstructionMedia = normalizeInstructionMediaForPrint(
     instructionMedia,
@@ -1429,6 +1210,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
       />
       <style>
         {`.print-preview-sheet {
+          display: none;
           position: fixed;
           left: -100000px;
           top: 0;
@@ -1440,6 +1222,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
         }
         @media print {
           .print-preview-sheet {
+            display: block !important;
             position: static !important;
             left: auto !important;
             top: auto !important;
@@ -1514,6 +1297,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
       </style>
 
       <section className="print-preview-sheet print:bg-white print:text-slate-900">
+        <ControlledCopyNotice status={approvalStatus} archived={instructionIsArchived} approvedAt={instruction.approved_at} partId={workItem.part_id} department={departmentName} />
         <h1 className="text-3xl font-extrabold text-slate-900">{workItem.item_title}</h1>
         <p className="mt-1 text-sm text-slate-700">
           Revision <span className="font-semibold">{instruction.revision}</span>
@@ -1736,6 +1520,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
                 <InstructionApprovalControls
                   instructionId={instruction.id}
                   initialStatus={approvalStatus}
+                  expectedUpdatedAt={instruction.updated_at}
                   canApprove={hasFullAccess(profile.role)}
                   className="shrink-0"
                 />
@@ -1803,7 +1588,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
                   <InstructionForkMergeControl
                     forkInstructionId={instruction.id}
                     forkNumber={instructionForkNumber}
-                    rootInstructionId={forkFamilyRootId}
+                    rootInstructionId={forkRootLookup?.id ?? forkFamilyRootId}
                     forkPartId={workItem.part_id}
                     rootPartId={forkRootWorkItem?.part_id ?? workItem.part_id}
                     forkItemTitle={workItem.item_title}
@@ -1814,6 +1599,8 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
                     rootBodyMarkdown={forkRootLookup?.body_markdown ?? ""}
                     forkRevision={instruction.revision}
                     rootRevision={forkRootLookup?.revision ?? instruction.revision}
+                    rootUpdatedAt={forkRootLookup?.updated_at ?? ""}
+                    forkUpdatedAt={instruction.updated_at}
                     forkMedia={forkInstructionMedia}
                     rootMedia={forkRootMedia}
                     className="w-full justify-center px-3 py-1.5 text-xs"
@@ -1832,9 +1619,9 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
         </header>
 
         {isoContextRows.length > 0 ? (
-          <section className="grid min-w-0 gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
-            <h2 className="text-xl font-bold">ISO / Control Context</h2>
-            <dl className="grid gap-3 md:grid-cols-2">
+          <details className="min-w-0 rounded-2xl border border-slate-300/70 bg-white/80 p-5 dark:border-slate-700 dark:bg-slate-900/70">
+            <summary className="cursor-pointer text-base font-semibold">Document controls and traceability</summary>
+            <dl className="mt-4 grid gap-3 md:grid-cols-2">
               {isoContextRows.map((entry) => (
                 <div key={entry.label} className="rounded-2xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-950/50">
                   <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
@@ -1846,13 +1633,25 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
                 </div>
               ))}
             </dl>
-          </section>
+          </details>
         ) : null}
 
         <ImportedInstructionFilesSection files={importedInstructionFiles} />
 
         <section className="grid min-w-0 gap-4 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
           <h2 className="text-xl font-bold">Work Instructions</h2>
+          {instruction.acceptance_criteria?.trim() ? (
+            <aside className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4">
+              <h3 className="text-sm font-semibold">Acceptance criteria</h3>
+              <p className="mt-1 whitespace-pre-wrap text-sm">{instruction.acceptance_criteria}</p>
+            </aside>
+          ) : null}
+          {instruction.risk_controls?.trim() ? (
+            <aside className="rounded-xl border border-amber-500/35 bg-amber-500/5 p-4">
+              <h3 className="text-sm font-semibold">Safety, controls and reaction plan</h3>
+              <p className="mt-1 whitespace-pre-wrap text-sm">{instruction.risk_controls}</p>
+            </aside>
+          ) : null}
           <div className="screen-work-instructions-body min-w-0 max-w-full">
             <InstructionBodyLightbox>
               {renderInstructionContent(instruction.body_markdown, mediaUrlRuntime)}

@@ -194,7 +194,7 @@ export function KpiInsightsPanel() {
   const [period, setPeriod] = useState<InstructionViewPeriod>("year");
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [month, setMonth] = useState(() => new Date().getMonth() + 1);
-  const [weekStart, setWeekStart] = useState(() => toDateKey(getWeekStart(new Date())));
+  const [requestedWeekStart, setWeekStart] = useState(() => toDateKey(getWeekStart(new Date())));
   const [day, setDay] = useState(() => toDateKey(new Date()));
   const [viewsPayload, setViewsPayload] = useState<InstructionViewsPayload | null>(null);
   const [viewsLoading, setViewsLoading] = useState(false);
@@ -221,6 +221,9 @@ export function KpiInsightsPanel() {
     return years.sort((first, second) => second - first);
   }, [currentYear, year]);
   const weekOptions = useMemo(() => buildWeekOptionsForMonth(year, month), [month, year]);
+  const weekStart = weekOptions.some((option) => option.value === requestedWeekStart)
+    ? requestedWeekStart
+    : weekOptions[0]?.value ?? requestedWeekStart;
 
   useEffect(() => {
     let isActive = true;
@@ -301,8 +304,8 @@ export function KpiInsightsPanel() {
   }, [supabase]);
 
   const fetchInstructionViews = useCallback(async () => {
-    setViewsLoading(true);
-    setViewsError(null);
+
+
 
     try {
       const params = new URLSearchParams({
@@ -320,6 +323,8 @@ export function KpiInsightsPanel() {
       }
 
       const headers = await getAuthHeaders();
+      setViewsLoading(true);
+      setViewsError(null);
       const response = await fetch(`/api/kpis/instruction-views?${params.toString()}`, {
         method: "GET",
         headers,
@@ -352,8 +357,8 @@ export function KpiInsightsPanel() {
 
   const fetchInstructionViewDetail = useCallback(
     async (point: InstructionViewPoint) => {
-      setDetailLoading(true);
-      setDetailError(null);
+
+
       try {
         const params = new URLSearchParams({
           instructionId: point.instructionId,
@@ -369,6 +374,10 @@ export function KpiInsightsPanel() {
         }
 
         const headers = await getAuthHeaders();
+      setDetailLoading(true);
+      setDetailError(null);
+      setDetailTotalViews(point.viewCount);
+      setDetailContributors([]);
         const response = await fetch(`/api/kpis/instruction-views/detail?${params.toString()}`, {
           method: "GET",
           headers,
@@ -402,26 +411,12 @@ export function KpiInsightsPanel() {
   );
 
   useEffect(() => {
-    if (period !== "week") {
-      return;
-    }
-
-    if (weekOptions.some((option) => option.value === weekStart)) {
-      return;
-    }
-
-    const fallbackWeek = weekOptions[0]?.value;
-    if (fallbackWeek) {
-      setWeekStart(fallbackWeek);
-    }
-  }, [period, weekOptions, weekStart]);
-
-  useEffect(() => {
     if (!filtersHydrated) {
       return;
     }
 
-    void fetchInstructionViews();
+    const timer = window.setTimeout(() => { void fetchInstructionViews(); }, 0);
+    return () => window.clearTimeout(timer);
   }, [fetchInstructionViews, filtersHydrated]);
 
   useEffect(() => {
@@ -429,9 +424,8 @@ export function KpiInsightsPanel() {
       return;
     }
 
-    setDetailTotalViews(selectedPoint.viewCount);
-    setDetailContributors([]);
-    void fetchInstructionViewDetail(selectedPoint);
+    const timer = window.setTimeout(() => { void fetchInstructionViewDetail(selectedPoint); }, 0);
+    return () => window.clearTimeout(timer);
   }, [fetchInstructionViewDetail, selectedPoint]);
 
   useEffect(() => {

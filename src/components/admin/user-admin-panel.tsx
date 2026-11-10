@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -12,11 +12,14 @@ import {
 } from "lucide-react";
 
 import { InstructionReviewActivityChart } from "@/components/admin/instruction-review-activity-chart";
+import { DisclosureSection } from "@/components/ui/disclosure-section";
 import { FloatingStatusNotices } from "@/components/ui/floating-status-notices";
 import { LocalDateTime } from "@/components/ui/local-date-time";
 import { PinInput } from "@/components/ui/pin-input";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { useHydrated } from "@/lib/use-hydrated";
 import type { AppRole } from "@/lib/types";
+import { canManageAccounts } from "@/lib/user-management";
 import { cn, isValidEmployeeId, normalizeEmployeeId } from "@/lib/utils";
 
 interface AdminUser {
@@ -241,25 +244,9 @@ function SavedRibbonOverlay({ visible }: { visible: boolean }) {
   );
 }
 
-function isInteractiveClickTarget(target: EventTarget | null) {
-  if (!(target instanceof Node)) {
-    return false;
-  }
-
-  const element =
-    target instanceof HTMLElement ? target : target.parentElement;
-  if (!element) {
-    return false;
-  }
-
-  return Boolean(
-    element.closest(
-      "button, a, input, select, textarea, label, [role='button'], [role='link']",
-    ),
-  );
-}
-
-export function UserAdminPanel() {
+export function UserAdminPanel({ currentUserId, currentUserRole }: { currentUserId: string; currentUserRole: AppRole }) {
+  // Only system admins manage accounts; admins use this page for departments and review settings.
+  const accountManager = canManageAccounts(currentUserRole);
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -267,7 +254,6 @@ export function UserAdminPanel() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [reviewWindowDaysInput, setReviewWindowDaysInput] = useState<string>(
     String(DEFAULT_REVIEW_WINDOW_DAYS),
   );
@@ -352,7 +338,7 @@ export function UserAdminPanel() {
     {},
   );
   const [userSettingSavedFlash, setUserSettingSavedFlash] = useState<Record<string, boolean>>({});
-  const [portalReady, setPortalReady] = useState(false);
+  const portalReady = useHydrated();
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const userSettingSavedTimeoutIdsRef = useRef<Record<string, number>>({});
 
@@ -372,6 +358,7 @@ export function UserAdminPanel() {
   }, [supabase]);
 
   const fetchUsers = useCallback(async () => {
+    if (!accountManager) return;
     setBusy(true);
     setError(null);
 
@@ -399,7 +386,7 @@ export function UserAdminPanel() {
     } finally {
       setBusy(false);
     }
-  }, [getAuthHeaders]);
+  }, [accountManager, getAuthHeaders]);
 
   const fetchDepartments = useCallback(async () => {
     setBusy(true);
@@ -567,10 +554,6 @@ export function UserAdminPanel() {
   }, [getAuthHeaders]);
 
   useEffect(() => {
-    setPortalReady(true);
-  }, []);
-
-  useEffect(() => {
     return () => {
       for (const timeoutId of Object.values(userSettingSavedTimeoutIdsRef.current)) {
         window.clearTimeout(timeoutId);
@@ -622,16 +605,6 @@ export function UserAdminPanel() {
     fetchUsers,
     fetchWorkInstructions,
   ]);
-
-  useEffect(() => {
-    void (async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      setCurrentUserId(user?.id ?? null);
-    })();
-  }, [supabase]);
 
   const scheduleUsersRefresh = useCallback(() => {
     if (typeof window === "undefined" || usersRefreshTimeoutRef.current !== null) {
@@ -1222,6 +1195,31 @@ export function UserAdminPanel() {
     }
   }
 
+  async function updateAccountStatus(userId: string, isActive: boolean) {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/users/${userId}/status`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ isActive }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to change account status.");
+      }
+      setUsers((current) => current.map((entry) => (entry.id === userId ? { ...entry, is_active: isActive } : entry)));
+      setMessage(isActive ? "Account reactivated." : "Account deactivated. The user can no longer sign in.");
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Unable to change account status.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function updateEmployeeId(userId: string) {
     setBusy(true);
     setError(null);
@@ -1667,7 +1665,11 @@ export function UserAdminPanel() {
   }, [workInstructions.length, workInstructionsCollapsed]);
 
   useEffect(() => {
-    syncWorkInstructionListMaxHeight();
+    const frame = window.requestAnimationFrame(syncWorkInstructionListMaxHeight);
+    const observer = new ResizeObserver(syncWorkInstructionListMaxHeight);
+    const list = workInstructionListRef.current;
+    if (list) observer.observe(list);
+    return () => { window.cancelAnimationFrame(frame); observer.disconnect(); };
   }, [syncWorkInstructionListMaxHeight]);
 
   useEffect(() => {
@@ -1917,7 +1919,7 @@ export function UserAdminPanel() {
         ]}
       />
 
-      <div className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7">
+      <DisclosureSection title="Review policy and activity" description="Set the review interval and monitor instruction checks.">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-lg font-bold">Instruction Review Window</h2>
           <button
@@ -1979,25 +1981,18 @@ export function UserAdminPanel() {
           getAuthHeaders={getAuthHeaders}
           reloadToken={reviewActivityReloadToken}
         />
-      </div>
+      </DisclosureSection>
 
       <div
-        onClick={(event) => {
-          if (isInteractiveClickTarget(event.target)) {
-            return;
-          }
-
-          setWorkInstructionsCollapsed((current) => !current);
-        }}
         className={cn(
-          "grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7",
-          "cursor-pointer",
+          "grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-sm backdrop-blur-sm dark:border-white/10 dark:bg-slate-900/70 md:p-7",
         )}
       >
         <div className="flex flex-wrap items-center justify-between gap-2">
           <button
             type="button"
             onClick={() => setWorkInstructionsCollapsed((current) => !current)}
+            aria-expanded={!workInstructionsCollapsed}
             className="flex items-center gap-1.5 text-lg font-bold transition hover:opacity-80"
           >
             {workInstructionsCollapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
@@ -2168,22 +2163,15 @@ export function UserAdminPanel() {
       </div>
 
       <div
-        onClick={(event) => {
-          if (isInteractiveClickTarget(event.target)) {
-            return;
-          }
-
-          setSuggestedToolsCollapsed((current) => !current);
-        }}
         className={cn(
-          "grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7",
-          "cursor-pointer",
+          "grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-sm backdrop-blur-sm dark:border-white/10 dark:bg-slate-900/70 md:p-7",
         )}
       >
         <div className="flex items-center justify-between gap-2">
           <button
             type="button"
             onClick={() => setSuggestedToolsCollapsed((current) => !current)}
+            aria-expanded={!suggestedToolsCollapsed}
             className="flex items-center gap-1.5 text-lg font-bold transition hover:opacity-80"
           >
             {suggestedToolsCollapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
@@ -2407,22 +2395,15 @@ export function UserAdminPanel() {
       </div>
 
       <div
-        onClick={(event) => {
-          if (isInteractiveClickTarget(event.target)) {
-            return;
-          }
-
-          setDepartmentsCollapsed((current) => !current);
-        }}
         className={cn(
-          "grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7",
-          "cursor-pointer",
+          "grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-sm backdrop-blur-sm dark:border-white/10 dark:bg-slate-900/70 md:p-7",
         )}
       >
         <div className="flex flex-wrap items-center justify-between gap-2">
           <button
             type="button"
             onClick={() => setDepartmentsCollapsed((v) => !v)}
+            aria-expanded={!departmentsCollapsed}
             className="flex items-center gap-1.5 text-lg font-bold transition hover:opacity-80"
           >
             {departmentsCollapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
@@ -2752,23 +2733,17 @@ export function UserAdminPanel() {
         ))}
       </div>
 
+      {accountManager ? (
       <div
-        onClick={(event) => {
-          if (isInteractiveClickTarget(event.target)) {
-            return;
-          }
-
-          setUsersCollapsed((current) => !current);
-        }}
         className={cn(
-          "grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-7",
-          "cursor-pointer",
+          "grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-sm backdrop-blur-sm dark:border-white/10 dark:bg-slate-900/70 md:p-7",
         )}
       >
         <div className="flex items-center justify-between gap-2">
           <button
             type="button"
             onClick={() => setUsersCollapsed((v) => !v)}
+            aria-expanded={!usersCollapsed}
             className="flex items-center gap-1.5 text-lg font-bold transition hover:opacity-80"
           >
             {usersCollapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
@@ -2919,7 +2894,10 @@ export function UserAdminPanel() {
                 );
 
                 return (
-                <tr key={user.id} className="border-t border-slate-200/70 dark:border-slate-800">
+                <tr
+                  key={user.id}
+                  className="border-t border-slate-200/70 dark:border-slate-800"
+                >
                   <td className="px-3 py-2 font-medium">{user.full_name}</td>
                   <td className="px-3 py-2">{user.email}</td>
                   <td className="px-3 py-2">
@@ -3088,6 +3066,21 @@ export function UserAdminPanel() {
                     <LocalDateTime value={user.created_at} mode="date" />
                   </td>
                   <td className="px-3 py-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={busy || currentUserId === user.id}
+                      onClick={() => void updateAccountStatus(user.id, !user.is_active)}
+                      className={cn(
+                        "rounded-lg border px-2 py-1 transition disabled:cursor-not-allowed disabled:opacity-40",
+                        user.is_active
+                          ? "border-amber-500/45 text-amber-800 hover:bg-amber-500/10 dark:text-amber-200"
+                          : "border-emerald-500/45 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300",
+                      )}
+                      title={user.is_active ? "Block sign-in and keep this user's history." : "Allow this user to sign in again."}
+                    >
+                      {user.is_active ? "Deactivate" : "Reactivate"}
+                    </button>
                     <button
                       type="button"
                       disabled={busy || currentUserId === user.id}
@@ -3109,6 +3102,7 @@ export function UserAdminPanel() {
                     >
                       Delete User
                     </button>
+                    </div>
                   </td>
                 </tr>
                 );
@@ -3120,6 +3114,11 @@ export function UserAdminPanel() {
           </div>
         )}
       </div>
+      ) : (
+        <p className="rounded-2xl border border-slate-300/70 bg-white/80 px-5 py-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300">
+          Only system administrators create and change user accounts. Ask a system administrator to add someone, reset a PIN or change a role.
+        </p>
+      )}
 
       <style jsx global>{`
         @keyframes userSettingSavedRibbonSweep {

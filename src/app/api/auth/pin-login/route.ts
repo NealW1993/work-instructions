@@ -1,7 +1,14 @@
 import { NextResponse } from "next/server";
 
+import { clientAddress, isRateLimited, recordRateLimitedEvent } from "@/lib/rate-limit.server";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { isValidEmployeeId, normalizeEmployeeId } from "@/lib/utils";
+
+// Matches the database lock: ten wrong PINs for one Employee ID lock it for 1 minute.
+const LOCKOUT_SECONDS = 60;
+// Many failures from one device within a minute pause it for up to a minute, across all IDs.
+const MAX_FAILURES_PER_ADDRESS = 20;
+const FAILURE_WINDOW_MS = LOCKOUT_SECONDS * 1000;
 
 interface PinLoginBody {
   employeeId?: string;
@@ -12,8 +19,8 @@ export async function POST(request: Request) {
   const supabaseAdmin = getSupabaseAdminClient();
   const body = (await request.json().catch(() => ({}))) as PinLoginBody;
 
-  const employeeId = normalizeEmployeeId(body.employeeId ?? "");
-  const pin = body.pin?.trim();
+  const employeeId = normalizeEmployeeId(typeof body?.employeeId === "string" ? body.employeeId : "");
+  const pin = typeof body?.pin === "string" ? body.pin.trim() : "";
 
   if (!isValidEmployeeId(employeeId)) {
     return NextResponse.json(
@@ -29,6 +36,15 @@ export async function POST(request: Request) {
     );
   }
 
+  // Many failures from one address are slowed down across all identifiers (PIN spraying).
+  const addressKey = `pin-login:${clientAddress(request)}`;
+  if (isRateLimited(addressKey, MAX_FAILURES_PER_ADDRESS)) {
+    return NextResponse.json(
+      { error: "Too many failed sign-in attempts from this device. Wait a minute and try again." },
+      { status: 429, headers: { "Retry-After": String(LOCKOUT_SECONDS) } },
+    );
+  }
+
   const { data: userId, error: pinError } = await supabaseAdmin.rpc(
     "verify_pin_login",
     {
@@ -38,23 +54,25 @@ export async function POST(request: Request) {
   );
 
   if (pinError) {
-    return NextResponse.json({ error: pinError.message }, { status: 500 });
+    if (pinError.code === "P0429") {
+      return NextResponse.json({ error: pinError.message }, { status: 429, headers: { "Retry-After": String(LOCKOUT_SECONDS) } });
+    }
+    return NextResponse.json({ error: "Sign-in is unavailable right now. Try again shortly." }, { status: 500 });
   }
 
   if (!userId) {
+    recordRateLimitedEvent(addressKey, FAILURE_WINDOW_MS);
     return NextResponse.json(
       { error: "Invalid credentials." },
       { status: 401 },
     );
   }
 
-  const { data: profile, error: profileError } = await supabaseAdmin
-    .from("profiles")
-    .select("email")
-    .eq("id", userId)
-    .maybeSingle<{ email: string }>();
+  // Issue the session for the exact account whose PIN was verified (by id), not a profile email copy.
+  const { data: authUser, error: profileError } = await supabaseAdmin.auth.admin.getUserById(userId);
 
-  const resolvedEmail = profile?.email?.trim().toLowerCase();
+  const verifiedUser = authUser?.user?.id === userId ? authUser.user : null;
+  const resolvedEmail = verifiedUser?.email?.trim().toLowerCase();
 
   if (profileError || !resolvedEmail) {
     return NextResponse.json(
@@ -70,7 +88,7 @@ export async function POST(request: Request) {
     },
   );
 
-  if (linkError || !linkData.properties?.hashed_token) {
+  if (linkError || !linkData.properties?.hashed_token || linkData.user?.id !== userId) {
     return NextResponse.json(
       { error: linkError?.message ?? "Unable to generate login token." },
       { status: 500 },

@@ -16,6 +16,7 @@ export async function createSupabaseServerClient() {
     {
       cookieOptions: {
         name: SUPABASE_AUTH_COOKIE_NAME,
+        secure: clientEnv.NEXT_PUBLIC_APP_URL.startsWith("https://"),
       },
       cookies: {
         getAll() {

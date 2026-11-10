@@ -1,23 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
-import { serverEnv } from "@/lib/env.server";
+import { getAiConfig, requestStructuredJson } from "@/lib/ai-provider.server";
 
 interface AnalyzeEquationBody {
   equation?: unknown;
   inputs?: unknown;
   outputs?: unknown;
-}
-
-interface OpenAICompletionResponse {
-  choices?: Array<{
-    message?: {
-      content?: string | null;
-    };
-  }>;
-  error?: {
-    message?: string;
-  };
 }
 
 interface AnalyzedInput {
@@ -223,7 +212,8 @@ export async function POST(request: NextRequest) {
   }
 
   const fallback = buildFallbackAnalysis(equation);
-  if (!serverEnv.OPENAI_API_KEY) {
+  const aiConfig = await getAiConfig("enhance");
+  if (!aiConfig) {
     return NextResponse.json({
       ...fallback,
       openAiConfigured: false,
@@ -231,100 +221,61 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  try {
-    const openAiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${serverEnv.OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: serverEnv.OPENAI_ENHANCE_MODEL,
-        temperature: 0.1,
-        messages: [
-          {
-            role: "system",
-            content:
-              "Convert shop-floor equation text into a formula draft. Return only valid JSON. Use JavaScript-style math expressions with variable names, numbers, arithmetic operators, and helpers: sin, cos, tan, asin, acos, atan, atan2, sqrt, pow, abs, min, max, round, floor, ceil, log, log10, exp. Do not invent production facts.",
-          },
-          {
-            role: "user",
-            content: JSON.stringify({
-              equation,
-              existingInputs: body.inputs,
-              existingOutputs: body.outputs,
-            }),
-          },
-        ],
-        response_format: {
-          type: "json_schema",
-          json_schema: {
-            name: "formula_interpretation",
-            schema: {
-              type: "object",
-              properties: {
-                description: { type: "string" },
-                inputs: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      name: { type: "string" },
-                      label: { type: "string" },
-                      value: { type: "string" },
-                    },
-                    required: ["name", "label", "value"],
-                    additionalProperties: false,
-                  },
-                },
-                outputs: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      name: { type: "string" },
-                      label: { type: "string" },
-                      expression: { type: "string" },
-                    },
-                    required: ["name", "label", "expression"],
-                    additionalProperties: false,
-                  },
-                },
-                note: { type: "string" },
-              },
-              required: ["description", "inputs", "outputs", "note"],
-              additionalProperties: false,
+  const result = await requestStructuredJson(aiConfig, {
+    system:
+      "Convert shop-floor equation text into a formula draft. Return only valid JSON. Use JavaScript-style math expressions with variable names, numbers, arithmetic operators, and helpers: sin, cos, tan, asin, acos, atan, atan2, sqrt, pow, abs, min, max, round, floor, ceil, log, log10, exp. Do not invent production facts.",
+    user: JSON.stringify({
+      equation,
+      existingInputs: body.inputs,
+      existingOutputs: body.outputs,
+    }),
+    schemaName: "formula_interpretation",
+    schema: {
+      type: "object",
+      properties: {
+        description: { type: "string" },
+        inputs: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              label: { type: "string" },
+              value: { type: "string" },
             },
+            required: ["name", "label", "value"],
+            additionalProperties: false,
           },
         },
-      }),
-    });
+        outputs: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              label: { type: "string" },
+              expression: { type: "string" },
+            },
+            required: ["name", "label", "expression"],
+            additionalProperties: false,
+          },
+        },
+        note: { type: "string" },
+      },
+      required: ["description", "inputs", "outputs", "note"],
+      additionalProperties: false,
+    },
+    temperature: 0.1,
+    maxTokens: 4096,
+  });
 
-    const openAiPayload = (await openAiResponse.json().catch(() => ({}))) as OpenAICompletionResponse;
-    if (!openAiResponse.ok) {
-      return NextResponse.json({
-        ...buildFallbackAnalysis(
-          equation,
-          openAiPayload.error?.message ?? "AI analysis failed, so a rules-based interpretation was used.",
-        ),
-        openAiConfigured: true,
-      });
-    }
-
-    const analyzed = parseOpenAiContent(
-      openAiPayload.choices?.[0]?.message?.content?.trim() ?? "",
-      fallback,
-    );
-    return NextResponse.json({ ...analyzed, openAiConfigured: true });
-  } catch (caughtError) {
+  if (!result.ok) {
     return NextResponse.json({
-      ...buildFallbackAnalysis(
-        equation,
-        caughtError instanceof Error
-          ? caughtError.message
-          : "AI analysis failed, so a rules-based interpretation was used.",
-      ),
+      ...buildFallbackAnalysis(equation, `${result.error} A rules-based interpretation was used.`),
       openAiConfigured: true,
     });
   }
+
+  const analyzed = parseOpenAiContent(result.content, fallback);
+  return NextResponse.json({ ...analyzed, openAiConfigured: true });
 }

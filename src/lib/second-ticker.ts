@@ -73,9 +73,19 @@ function getSnapshot() {
 }
 
 function getServerSnapshot() {
-  return Date.now();
+  // A stable value is required both on the server and the first hydration pass.
+  return 0;
 }
 
 export function useSynchronizedNowMs() {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+}
+
+function getMinuteSnapshot() {
+  return Math.floor(currentNowMs / 60000) * 60000;
+}
+
+/** Dashboard date windows update each minute rather than rerendering each second. */
+export function useSynchronizedMinuteMs() {
+  return useSyncExternalStore(subscribe, getMinuteSnapshot, getServerSnapshot);
 }

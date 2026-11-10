@@ -1,4 +1,5 @@
 import { normalizeUserSettings, type UserSettings } from "@/lib/user-settings";
+import { drainResponse } from "@/lib/utils";
 
 interface BrowserSession {
   access_token?: string | null;
@@ -72,6 +73,7 @@ export async function patchCurrentUserSetting(params: {
       }),
     });
 
+    await drainResponse(response);
     return response.ok;
   } catch {
     return false;

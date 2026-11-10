@@ -7,6 +7,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { FloatingStatusNotices } from "@/components/ui/floating-status-notices";
 import { PinInput } from "@/components/ui/pin-input";
 import {
+  normalizeAppRestorePath,
   popAutoLogoutRouteForUser,
   savePendingPostLoginScrollRestore,
 } from "@/lib/last-route-restore";
@@ -28,20 +29,7 @@ async function parseJsonResponse(response: Response) {
 }
 
 function isSafeRestorePath(path: string) {
-  const normalizedPath = path.trim();
-  if (!normalizedPath.startsWith("/")) {
-    return false;
-  }
-
-  if (
-    normalizedPath.startsWith("/login") ||
-    normalizedPath.startsWith("/api") ||
-    normalizedPath.startsWith("/_next")
-  ) {
-    return false;
-  }
-
-  return true;
+  return normalizeAppRestorePath(path) !== null;
 }
 
 async function doesRouteExistForCurrentSession(path: string) {
@@ -63,6 +51,9 @@ async function doesRouteExistForCurrentSession(path: string) {
     }
 
     const finalUrl = new URL(response.url, window.location.origin);
+    if (finalUrl.origin !== window.location.origin) {
+      return false;
+    }
     if (finalUrl.pathname === "/login") {
       return false;
     }
@@ -113,10 +104,17 @@ async function resolvePostLoginDestination(userId: string) {
   };
 }
 
-export function LoginPanel() {
+export function LoginPanel({ inactiveSession = false }: { inactiveSession?: boolean }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [showCreateAccount, setShowCreateAccount] = useState(false);
+
+  // A session whose account was deactivated (or never got a profile) is signed out here,
+  // so the browser does not keep presenting a token the app will refuse.
+  useEffect(() => {
+    if (!inactiveSession) return;
+    void getSupabaseBrowserClient().auth.signOut().catch(() => undefined);
+  }, [inactiveSession]);
 
   const [pinEmployeeId, setPinEmployeeId] = useState("");
   const [pinLoginValue, setPinLoginValue] = useState("");
@@ -486,9 +484,9 @@ export function LoginPanel() {
           </p>
         </div>
 
-        {searchParams.get("error") === "missing_profile" ? (
-          <p className="mt-4 rounded-2xl border border-amber-400/40 bg-amber-500/15 p-3 text-sm text-amber-100">
-            Account is missing a profile row. Run the SQL migration and try again.
+        {searchParams.get("error") === "missing_profile" || inactiveSession ? (
+          <p role="alert" className="mt-4 rounded-2xl border border-amber-400/40 bg-amber-500/15 p-3 text-sm text-amber-100">
+            This account is not active. Ask your system administrator to reactivate it, then sign in again.
           </p>
         ) : null}
 

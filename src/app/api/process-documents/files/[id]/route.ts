@@ -10,6 +10,7 @@ interface ImportFileRecord {
   file_name: string;
   content_type: string;
   content_base64: string;
+  process_document_revisions: { revision: number } | Array<{ revision: number }> | null;
   process_documents:
     | {
         status: string;
@@ -46,7 +47,7 @@ export async function GET(
   const supabaseAdmin = getSupabaseAdminClient();
   const { data: file, error } = await supabaseAdmin
     .from("process_document_import_files")
-    .select("id, document_id, file_name, content_type, content_base64, process_documents(status, created_by, owner_user_id)")
+    .select("id, document_id, file_name, content_type, content_base64, process_document_revisions(revision), process_documents(status, created_by, owner_user_id)")
     .eq("id", id)
     .maybeSingle<ImportFileRecord>();
 
@@ -59,41 +60,20 @@ export async function GET(
   }
 
   const document = normalizeRelation(file.process_documents);
-  let hasGroupAccess = true;
-  if (!hasFullAccess(requester.role) && document?.created_by !== requester.id && document?.owner_user_id !== requester.id) {
-    const { data: groupRows, error: groupRowsError } = await supabaseAdmin
-      .from("process_document_group_access")
-      .select("group_id")
-      .eq("document_id", file.document_id);
-
-    if (groupRowsError) {
-      return NextResponse.json({ error: groupRowsError.message }, { status: 500 });
-    }
-
-    const groupIds = ((groupRows ?? []) as Array<{ group_id: string }>).map(
-      (row) => row.group_id,
-    );
-
-    if (groupIds.length > 0) {
-      const { data: membershipRows, error: membershipRowsError } = await supabaseAdmin
-        .from("access_group_memberships")
-        .select("group_id")
-        .eq("user_id", requester.id)
-        .in("group_id", groupIds);
-
-      if (membershipRowsError) {
-        return NextResponse.json({ error: membershipRowsError.message }, { status: 500 });
-      }
-
-      hasGroupAccess = (membershipRows ?? []).length > 0;
-    }
-  }
-
-  const canAccess =
+  let canAccess =
     hasFullAccess(requester.role) ||
     document?.created_by === requester.id ||
-    document?.owner_user_id === requester.id ||
-    (document?.status === "approved" && hasGroupAccess);
+    document?.owner_user_id === requester.id;
+  if (!canAccess) {
+    const { data: releasedDocument, error: releaseError } = await supabaseAdmin
+      .rpc("list_process_documents_controlled", { p_actor_user_id: requester.id })
+      .select("current_revision, status")
+      .eq("id", file.document_id)
+      .maybeSingle<{ current_revision: number; status: string }>();
+    if (releaseError) return NextResponse.json({ error: releaseError.message }, { status: 500 });
+    const fileRevision = normalizeRelation(file.process_document_revisions);
+    canAccess = releasedDocument?.status === "approved" && releasedDocument.current_revision === fileRevision?.revision;
+  }
 
   if (!canAccess) {
     return NextResponse.json({ error: "Forbidden." }, { status: 403 });

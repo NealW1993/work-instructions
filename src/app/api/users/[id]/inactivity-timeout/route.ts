@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
-import { hasFullAccess } from "@/lib/roles";
+import { ACCOUNT_MANAGEMENT_DENIED, canManageAccounts } from "@/lib/user-management";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import { authorizeAccountChange } from "@/lib/user-management.server";
 
 interface UpdateInactivityTimeoutBody {
   inactivityTimeoutMinutes?: number | null;
@@ -36,9 +37,9 @@ export async function PATCH(
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  if (!hasFullAccess(requester.role)) {
+  if (!canManageAccounts(requester.role)) {
     return NextResponse.json(
-      { error: "Admin privileges required." },
+      { error: ACCOUNT_MANAGEMENT_DENIED },
       { status: 403 },
     );
   }
@@ -46,6 +47,10 @@ export async function PATCH(
   const body = (await request.json().catch(() => ({}))) as UpdateInactivityTimeoutBody;
 
   const { id } = await context.params;
+  const authorization = await authorizeAccountChange(requester.role, id);
+  if (authorization.response) {
+    return authorization.response;
+  }
   let inactivityTimeoutMinutes: number | null;
 
   if (body.inactivityTimeoutMinutes === null) {

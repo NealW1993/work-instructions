@@ -176,12 +176,14 @@ export function KpiActivitySection({ usageByActiveUsers }: KpiActivitySectionPro
 
   const fetchData = useCallback(
     async (params: string) => {
-      setLoading(true);
-      setError(null);
+
+
       try {
         const {
           data: { session },
         } = await supabase.auth.getSession();
+      setLoading(true);
+      setError(null);
         if (!session?.access_token) throw new Error("Not authenticated.");
 
         const response = await fetch(`/api/kpis/activity?${params}`, {
@@ -250,7 +252,8 @@ export function KpiActivitySection({ usageByActiveUsers }: KpiActivitySectionPro
       return;
     }
 
-    void fetchData(periodParams);
+    const timer = window.setTimeout(() => { void fetchData(periodParams); }, 0);
+    return () => window.clearTimeout(timer);
   }, [fetchData, filtersHydrated, periodParams]);
 
   const currentPeriod = data?.period ?? "week";

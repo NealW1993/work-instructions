@@ -14,6 +14,7 @@ export default async function AccountSettingsPage() {
           <h1 className="text-3xl font-extrabold text-slate-900 dark:text-slate-100">
             Account Settings
           </h1>
+          <p className="text-sm text-slate-600 dark:text-slate-400">Manage your profile, preferences, and sign-in security.</p>
         </div>
       </header>
       <AccountSettingsPanel

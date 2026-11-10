@@ -1,28 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getRequestProfile } from "@/lib/api-auth";
-import {
-  normalizeOpenAiTokenUsage,
-  recordAiUsageEvent,
-  type OpenAiTokenUsage,
-} from "@/lib/ai-usage";
-import { serverEnv } from "@/lib/env.server";
+import { AI_NOT_CONFIGURED_MESSAGE, getAiConfig, requestStructuredJson } from "@/lib/ai-provider.server";
+import { normalizeOpenAiTokenUsage, recordAiUsageEvent } from "@/lib/ai-usage";
 
 interface PageExplainRequestBody {
   pageType?: unknown;
   context?: unknown;
-}
-
-interface OpenAICompletionResponse {
-  choices?: Array<{
-    message?: {
-      content?: string | null;
-    };
-  }>;
-  usage?: OpenAiTokenUsage;
-  error?: {
-    message?: string;
-  };
 }
 
 interface PageExplainPayload {
@@ -84,67 +68,43 @@ export async function POST(request: NextRequest) {
   const pageType = normalizePageType(requestBody.pageType);
   const context = normalizeString(requestBody.context);
 
-  if (!serverEnv.OPENAI_API_KEY) {
+  const aiConfig = await getAiConfig("diagram");
+  if (!aiConfig) {
     return NextResponse.json({
       explanation: fallbackExplanation(pageType, context),
       mode: "rules",
-      warning: "OPENAI_API_KEY is not configured.",
+      warning: AI_NOT_CONFIGURED_MESSAGE,
     });
   }
 
-  const openAiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${serverEnv.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: serverEnv.OPENAI_DIAGRAM_MODEL,
-      temperature: 0.2,
-      messages: [
-        { role: "system", content: buildSystemPrompt() },
-        {
-          role: "user",
-          content: [
-            `Page type: ${pageType}`,
-            "Explain this page in simple terms using this context:",
-            context || "No current page context was provided.",
-          ].join("\n\n"),
-        },
-      ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "page_explanation",
-          schema: {
-            type: "object",
-            properties: {
-              explanation: { type: "string" },
-            },
-            required: ["explanation"],
-            additionalProperties: false,
-          },
-        },
+  const result = await requestStructuredJson(aiConfig, {
+    system: buildSystemPrompt(),
+    user: [
+      `Page type: ${pageType}`,
+      "Explain this page in simple terms using this context:",
+      context || "No current page context was provided.",
+    ].join("\n\n"),
+    schemaName: "page_explanation",
+    schema: {
+      type: "object",
+      properties: {
+        explanation: { type: "string" },
       },
-    }),
+      required: ["explanation"],
+      additionalProperties: false,
+    },
+    temperature: 0.2,
+    maxTokens: 2048,
   });
 
-  const payload = (await openAiResponse.json().catch(() => ({}))) as OpenAICompletionResponse;
-
-  if (!openAiResponse.ok) {
-    return NextResponse.json(
-      {
-        error: payload.error?.message ?? "Unable to explain this page right now.",
-      },
-      { status: openAiResponse.status },
-    );
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: result.status });
   }
 
-  const rawContent = payload.choices?.[0]?.message?.content?.trim() ?? "";
   const explanation =
-    normalizeString(parseExplainPayload(rawContent)?.explanation, 1800) ||
+    normalizeString(parseExplainPayload(result.content)?.explanation, 1800) ||
     fallbackExplanation(pageType, context);
-  const tokenUsage = normalizeOpenAiTokenUsage(payload.usage);
+  const tokenUsage = normalizeOpenAiTokenUsage(result.usage);
 
   await recordAiUsageEvent({
     actorUserId: requester.id,
@@ -152,13 +112,14 @@ export async function POST(request: NextRequest) {
     action: "explain",
     mode: pageType,
     subjectType: pageType,
-    model: serverEnv.OPENAI_DIAGRAM_MODEL,
+    model: result.model,
     tokenInput: tokenUsage.tokenInput,
     tokenOutput: tokenUsage.tokenOutput,
     tokenTotal: tokenUsage.tokenTotal,
     metadata: {
       pageType,
       contextLength: context.length,
+      provider: result.provider,
     },
   });
 

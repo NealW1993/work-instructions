@@ -6,6 +6,7 @@ import type {
 } from "@/components/groups/groups-client";
 import { requireAuthenticatedUser } from "@/lib/auth";
 import { hasFullAccess, isSystemAdmin } from "@/lib/roles";
+import { readAllRows } from "@/lib/supabase/read-all-rows";
 
 interface AccessGroupRow {
   id: string;
@@ -37,31 +38,35 @@ export default async function GroupsPage() {
   const { supabase, profile } = await requireAuthenticatedUser();
   const canApproveRequests = hasFullAccess(profile.role);
   const [
-    { data: groupRows },
-    { data: membershipRows },
-    { data: joinRequestRows },
-    { data: profileRows },
+    { data: groupRows, error: groupError },
+    { data: membershipRows, error: membershipError },
+    { data: joinRequestRows, error: requestError },
+    { data: profileRows, error: profileError },
   ] = await Promise.all([
-    supabase
+    readAllRows((from, to) => supabase
       .from("access_groups")
       .select("id, name, slug, description")
       .eq("is_active", true)
-      .order("name", { ascending: true }),
-    supabase
+      .order("name", { ascending: true }).order("id")
+      .range(from, to)),
+    readAllRows((from, to) => supabase
       .from("access_group_memberships")
       .select("group_id, user_id")
-      .range(0, 9999),
-    supabase
+      .order("group_id").order("user_id")
+      .range(from, to)),
+    readAllRows((from, to) => supabase
       .from("access_group_join_requests")
       .select("id, group_id, requester_user_id, request_note, created_at")
       .eq("status", "pending")
       .order("created_at", { ascending: true })
-      .range(0, 9999),
-    supabase
+      .order("id")
+      .range(from, to)),
+    readAllRows((from, to) => supabase
       .from("profiles")
       .select("id, full_name, email")
       .eq("is_active", true)
-      .order("full_name", { ascending: true }),
+      .order("full_name", { ascending: true }).order("id")
+      .range(from, to)),
   ]);
 
   const memberships = (membershipRows ?? []) as MembershipRow[];
@@ -121,6 +126,7 @@ export default async function GroupsPage() {
       profiles={profiles}
       isSystemAdmin={isSystemAdmin(profile.role)}
       canApproveRequests={canApproveRequests}
+      loadFailed={Boolean(groupError || membershipError || requestError || profileError)}
     />
   );
 }

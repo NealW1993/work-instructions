@@ -21,21 +21,33 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function normalizeStoredPath(value: unknown): string | null {
+export function normalizeAppRestorePath(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
   }
 
   const trimmed = value.trim();
-  if (!trimmed.startsWith("/")) {
+  if (!trimmed.startsWith("/") || trimmed.startsWith("//") || /[\\\u0000-\u001f\u007f]/.test(trimmed)) {
     return null;
   }
 
-  if (trimmed.startsWith("/api") || trimmed.startsWith("/_next")) {
+  try {
+    const baseOrigin = "https://restore.invalid";
+    const url = new URL(trimmed, baseOrigin);
+    const decodedPath = decodeURIComponent(url.pathname);
+    if (
+      url.origin !== baseOrigin ||
+      decodedPath.startsWith("//") ||
+      /[\\\u0000-\u001f\u007f]/.test(decodedPath) ||
+      /^\/(?:api|_next|login)(?:\/|$)/i.test(decodedPath)
+    ) {
+      return null;
+    }
+
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
     return null;
   }
-
-  return trimmed;
 }
 
 function getAutoLogoutRouteStorageKey(userId: string) {
@@ -49,7 +61,7 @@ function parseStoredAutoLogoutRoute(raw: string | null): StoredAutoLogoutRoute |
 
   try {
     const parsed = JSON.parse(raw) as Partial<StoredAutoLogoutRoute>;
-    const path = normalizeStoredPath(parsed.path);
+    const path = normalizeAppRestorePath(parsed.path);
     const scrollX = isFiniteNumber(parsed.scrollX) ? Math.max(0, parsed.scrollX) : null;
     const scrollY = isFiniteNumber(parsed.scrollY) ? Math.max(0, parsed.scrollY) : null;
     const savedAt = isFiniteNumber(parsed.savedAt) ? parsed.savedAt : null;
@@ -57,7 +69,7 @@ function parseStoredAutoLogoutRoute(raw: string | null): StoredAutoLogoutRoute |
       return null;
     }
 
-    if (Date.now() - savedAt > MAX_STORED_ROUTE_AGE_MS) {
+    if (savedAt > Date.now() + 60_000 || Date.now() - savedAt > MAX_STORED_ROUTE_AGE_MS) {
       return null;
     }
 
@@ -79,7 +91,7 @@ function parsePostLoginScrollRestore(raw: string | null): PostLoginScrollRestore
 
   try {
     const parsed = JSON.parse(raw) as Partial<PostLoginScrollRestore>;
-    const path = normalizeStoredPath(parsed.path);
+    const path = normalizeAppRestorePath(parsed.path);
     const scrollX = isFiniteNumber(parsed.scrollX) ? Math.max(0, parsed.scrollX) : null;
     const scrollY = isFiniteNumber(parsed.scrollY) ? Math.max(0, parsed.scrollY) : null;
     const savedAt = isFiniteNumber(parsed.savedAt) ? parsed.savedAt : null;
@@ -87,7 +99,7 @@ function parsePostLoginScrollRestore(raw: string | null): PostLoginScrollRestore
       return null;
     }
 
-    if (Date.now() - savedAt > MAX_POST_LOGIN_SCROLL_AGE_MS) {
+    if (savedAt > Date.now() + 60_000 || Date.now() - savedAt > MAX_POST_LOGIN_SCROLL_AGE_MS) {
       return null;
     }
 
@@ -108,7 +120,7 @@ export function getCurrentBrowserPathWithSearch() {
   }
 
   const path = `${window.location.pathname}${window.location.search}`;
-  return normalizeStoredPath(path);
+  return normalizeAppRestorePath(path);
 }
 
 export function saveAutoLogoutRouteForUser(userId: string, path: string, scrollX: number, scrollY: number) {
@@ -116,7 +128,7 @@ export function saveAutoLogoutRouteForUser(userId: string, path: string, scrollX
     return;
   }
 
-  const normalizedPath = normalizeStoredPath(path);
+  const normalizedPath = normalizeAppRestorePath(path);
   if (!normalizedPath) {
     return;
   }
@@ -162,7 +174,7 @@ export function savePendingPostLoginScrollRestore(path: string, scrollX: number,
     return;
   }
 
-  const normalizedPath = normalizeStoredPath(path);
+  const normalizedPath = normalizeAppRestorePath(path);
   if (!normalizedPath) {
     return;
   }
@@ -186,7 +198,7 @@ export function takePendingPostLoginScrollRestoreForPath(path: string): PostLogi
     return null;
   }
 
-  const normalizedPath = normalizeStoredPath(path);
+  const normalizedPath = normalizeAppRestorePath(path);
   if (!normalizedPath) {
     return null;
   }

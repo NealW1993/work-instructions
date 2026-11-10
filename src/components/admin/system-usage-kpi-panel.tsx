@@ -102,11 +102,13 @@ export function SystemUsageKpiPanel({ isSystemAdmin }: SystemUsageKpiPanelProps)
   }, [supabase]);
 
   const fetchUsage = useCallback(async () => {
-    setBusy(true);
-    setError(null);
+
+
 
     try {
       const headers = await getAuthHeaders();
+      setBusy(true);
+      setError(null);
       const response = await fetch("/api/kpis/system-usage", {
         method: "GET",
         headers,
@@ -142,10 +144,11 @@ export function SystemUsageKpiPanel({ isSystemAdmin }: SystemUsageKpiPanelProps)
       return;
     }
 
-    setSettingError(null);
+
 
     try {
       const headers = await getAuthHeaders();
+      setSettingError(null);
       const response = await fetch("/api/admin/system-settings/dashboard-ai-search", {
         method: "GET",
         headers,
@@ -203,8 +206,11 @@ export function SystemUsageKpiPanel({ isSystemAdmin }: SystemUsageKpiPanelProps)
   );
 
   useEffect(() => {
-    void fetchUsage();
-    void fetchDashboardAiSearchSetting();
+    const timer = window.setTimeout(() => {
+      void fetchUsage();
+      void fetchDashboardAiSearchSetting();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [fetchDashboardAiSearchSetting, fetchUsage]);
 
   const shouldLimitUserTableHeight = Boolean(

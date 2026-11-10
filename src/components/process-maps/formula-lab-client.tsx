@@ -28,8 +28,12 @@ import {
 } from "lucide-react";
 
 import { FloatingStatusNotices } from "@/components/ui/floating-status-notices";
+import { LocalDateTime } from "@/components/ui/local-date-time";
+import { useSynchronizedMinuteMs } from "@/lib/second-ticker";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { cn } from "@/lib/utils";
+import { evaluateFormulaExpression, FORMULA_CONSTANTS, isReservedFormulaName, normalizeFormulaExpression } from "@/lib/formula-expression";
+import { calculateOeeMetrics, calculateOeeSummary, calculateDpmoMetrics, calculateIndividualsLimits, calculateCapabilityMetrics, calculateYieldMetrics, parseFiniteNumber, parseMeasurementSeries } from "@/lib/manufacturing-calculations";
 
 interface OeeRecording {
   id: string;
@@ -393,7 +397,7 @@ const FORMULA_GUIDES: Record<FormulaTab, FormulaGuide> = {
     ],
     resultHints: {
       "DPMO": "Defects normalized to one million opportunities.",
-      "Yield": "Approximate percent of opportunities without defects.",
+      "Opportunity yield": "Percent of defined defect opportunities without a defect; this is not the percent of units that pass.",
     },
   },
   takt: {
@@ -417,16 +421,16 @@ const FORMULA_GUIDES: Record<FormulaTab, FormulaGuide> = {
   },
   yield: {
     title: "First Pass Yield and Rolled Throughput Yield",
-    formula: "FPY = (units - defects) / units; RTY = product of step yields",
+    formula: "FPY = (units - failed first-pass units) / units; DPU = total defects / units; RTY = product of step yields",
     calculation:
-      "First pass yield estimates the percent accepted without defects at one point. Rolled throughput yield multiplies step yields to show the chance a unit passes the whole route without rework.",
+      "First pass yield is the percent of units accepted without rework, repair, rerun, or scrap. Count each failed unit once even when it has several defects. Rolled throughput yield multiplies step yields for the whole route.",
     whenToUse:
       "Use yield when scrap or rework is hiding the true cost of a multi-step manufacturing process.",
     scenario:
       "A coated part passes prep, coating, and final inspection at 98%, 97.5%, and 99%. RTY shows the end-to-end pass rate before rework masks the loss.",
     inputHints: [
       "Step yields can be entered as percentages such as 98 or decimals such as 0.98.",
-      "Defects should match the same population as units started.",
+      "Failed first-pass units and total defects must refer to the same population as units started; a unit can have several defects.",
       "Use RTY when a unit must pass multiple operations.",
     ],
     resultHints: {
@@ -482,20 +486,20 @@ const FORMULA_GUIDES: Record<FormulaTab, FormulaGuide> = {
     title: "Control Limits",
     formula: "UCL = centerline + 3 x sigma; LCL = centerline - 3 x sigma",
     calculation:
-      "The calculator estimates the process center and spread from the sample values, then places three-sigma limits around the centerline.",
+      "For individual observations in collection order, sigma = average moving range / 1.128. Limits are mean plus or minus three times this within-process sigma.",
     whenToUse:
       "Use control limits when monitoring stability and looking for special-cause variation over time.",
     scenario:
       "A press brake bend angle is checked every hour. Control limits help distinguish routine variation from a drift that needs reaction before parts fail inspection.",
     inputHints: [
       "Enter measurements in time order when using them for a control chart.",
-      "Control limits are not customer specification limits.",
+      "Individuals chart only; enter measurements in collection order, not subgroup averages. Control limits are not specifications.",
       "Investigate points outside limits or non-random patterns inside limits.",
     ],
     resultHints: {
       "N": "Number of values used.",
       "Centerline": "Average of the entered values.",
-      "Sigma": "Sample standard deviation of the entered values.",
+      "Sigma": "Within-process sigma from average consecutive moving range divided by 1.128.",
       "UCL": "Upper three-sigma control limit.",
       "LCL": "Lower three-sigma control limit.",
     },
@@ -522,13 +526,8 @@ const FORMULA_GUIDES: Record<FormulaTab, FormulaGuide> = {
 };
 
 function parsePositive(value: string) {
-  const parsed = Number.parseFloat(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-}
-
-function parseNonNegative(value: string) {
-  const parsed = Number.parseFloat(value);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+  const parsed = parseFiniteNumber(value);
+  return parsed !== null && parsed > 0 ? parsed : null;
 }
 
 function formatPercent(value: number | null) {
@@ -551,116 +550,19 @@ function createBlankOeeRecording(id: string): OeeRecording {
 }
 
 function calculateOee(row: OeeRecording) {
-  const planned = parsePositive(row.plannedMinutes);
-  const run = parsePositive(row.runMinutes);
-  const idealCycle = parsePositive(row.idealCycleSeconds);
-  const total = parseNonNegative(row.totalCount);
-  const good = parseNonNegative(row.goodCount);
-  const availability = planned && run ? Math.min(1, run / planned) : null;
-  const performance =
-    run && idealCycle && total !== null ? Math.min(1, (idealCycle * total) / (run * 60)) : null;
-  const quality = total && good !== null ? Math.min(1, good / total) : null;
-  const oee =
-    availability !== null && performance !== null && quality !== null
-      ? availability * performance * quality
-      : null;
-
-  return {
-    availability,
-    performance,
-    quality,
-    oee,
-  };
+  return calculateOeeMetrics(row);
 }
 
 function calculateOeeAggregate(recordings: OeeRecording[]) {
-  let plannedMinutes = 0;
-  let runMinutes = 0;
-  let idealRunSeconds = 0;
-  let totalCount = 0;
-  let goodCount = 0;
-  let usableRecordings = 0;
-
-  for (const recording of recordings) {
-    const planned = parsePositive(recording.plannedMinutes);
-    const run = parsePositive(recording.runMinutes);
-    const idealCycle = parsePositive(recording.idealCycleSeconds);
-    const total = parseNonNegative(recording.totalCount);
-    const good = parseNonNegative(recording.goodCount);
-
-    if (planned !== null) {
-      plannedMinutes += planned;
-    }
-    if (run !== null) {
-      runMinutes += run;
-    }
-    if (idealCycle !== null && total !== null) {
-      idealRunSeconds += idealCycle * total;
-    }
-    if (total !== null) {
-      totalCount += total;
-    }
-    if (good !== null) {
-      goodCount += good;
-    }
-    if (planned !== null || run !== null || total !== null || good !== null) {
-      usableRecordings += 1;
-    }
-  }
-
-  const availability = plannedMinutes > 0 ? Math.min(1, runMinutes / plannedMinutes) : null;
-  const performance = runMinutes > 0 ? Math.min(1, idealRunSeconds / (runMinutes * 60)) : null;
-  const quality = totalCount > 0 ? Math.min(1, goodCount / totalCount) : null;
-  const oee =
-    availability !== null && performance !== null && quality !== null
-      ? availability * performance * quality
-      : null;
-
-  return {
-    count: usableRecordings,
-    plannedMinutes,
-    runMinutes,
-    totalCount,
-    goodCount,
-    availability,
-    performance,
-    quality,
-    oee,
-  };
+  return calculateOeeSummary(recordings);
 }
 
 function parseMeasurementValues(value: string) {
-  return value
-    .split(/[\s,\t;|]+/)
-    .map((entry) => Number.parseFloat(entry.trim()))
-    .filter((entry) => Number.isFinite(entry));
+  return parseMeasurementSeries(value);
 }
 
 function calculateCapability(values: number[], lslText: string, uslText: string) {
-  if (values.length < 2) {
-    return null;
-  }
-
-  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
-  const variance =
-    values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / Math.max(1, values.length - 1);
-  const sigma = Math.sqrt(variance);
-  const lsl = lslText.trim() ? Number.parseFloat(lslText) : null;
-  const usl = uslText.trim() ? Number.parseFloat(uslText) : null;
-  const hasLsl = lsl !== null && Number.isFinite(lsl);
-  const hasUsl = usl !== null && Number.isFinite(usl);
-  const cp = hasLsl && hasUsl && sigma > 0 ? ((usl as number) - (lsl as number)) / (6 * sigma) : null;
-  const cpu = hasUsl && sigma > 0 ? ((usl as number) - mean) / (3 * sigma) : null;
-  const cpl = hasLsl && sigma > 0 ? (mean - (lsl as number)) / (3 * sigma) : null;
-  const cpk = cpu !== null && cpl !== null ? Math.min(cpu, cpl) : cpu ?? cpl;
-
-  return {
-    count: values.length,
-    mean,
-    sigma,
-    cp,
-    cpk,
-  };
+  return calculateCapabilityMetrics(values, lslText, uslText);
 }
 
 function erfApprox(value: number) {
@@ -680,26 +582,8 @@ function normalCdf(value: number) {
   return 0.5 * (1 + erfApprox(value / Math.SQRT2));
 }
 
-function parseRateValues(value: string) {
-  return value
-    .split(/[\s,\t;|]+/)
-    .map((entry) => Number.parseFloat(entry.trim()))
-    .filter((entry) => Number.isFinite(entry))
-    .map((entry) => (entry > 1 ? entry / 100 : entry))
-    .filter((entry) => entry >= 0 && entry <= 1);
-}
-
-function calculateYield(unitsText: string, defectsText: string, stepYieldsText: string) {
-  const units = parsePositive(unitsText);
-  const defects = Number.parseFloat(defectsText);
-  const stepYields = parseRateValues(stepYieldsText);
-  const fpy = units && Number.isFinite(defects) ? Math.max(0, Math.min(1, (units - defects) / units)) : null;
-  const dpu = units && Number.isFinite(defects) ? defects / units : null;
-  const rty = stepYields.length
-    ? stepYields.reduce((product, stepYield) => product * stepYield, 1)
-    : fpy;
-
-  return { fpy, dpu, rty, stepCount: stepYields.length };
+function calculateYield(unitsText: string, failedUnitsText: string, stepYieldsText: string, defectsText: string) {
+  return calculateYieldMetrics(unitsText, failedUnitsText, stepYieldsText, defectsText);
 }
 
 function calculateLittleLaw(wipText: string, throughputText: string, leadTimeText: string) {
@@ -720,14 +604,16 @@ function calculateNormalCurve(
   lowerText: string,
   upperText: string,
 ) {
-  const mean = Number.parseFloat(meanText);
+  const mean = parseFiniteNumber(meanText);
   const sigma = parsePositive(sigmaText);
-  const lower = lowerText.trim() ? Number.parseFloat(lowerText) : null;
-  const upper = upperText.trim() ? Number.parseFloat(upperText) : null;
+  const lower = parseFiniteNumber(lowerText);
+  const upper = parseFiniteNumber(upperText);
   const hasLower = lower !== null && Number.isFinite(lower);
   const hasUpper = upper !== null && Number.isFinite(upper);
-  const zLower = sigma && hasLower ? ((lower as number) - mean) / sigma : null;
-  const zUpper = sigma && hasUpper ? ((upper as number) - mean) / sigma : null;
+  const valid = mean !== null && (!lowerText.trim() || hasLower) && (!upperText.trim() || hasUpper) &&
+    (lower === null || upper === null || lower <= upper);
+  const zLower = valid && mean !== null && sigma && hasLower ? ((lower as number) - mean) / sigma : null;
+  const zUpper = valid && mean !== null && sigma && hasUpper ? ((upper as number) - mean) / sigma : null;
   const belowLower = zLower === null ? null : normalCdf(zLower);
   const aboveUpper = zUpper === null ? null : 1 - normalCdf(zUpper);
   const between =
@@ -744,24 +630,7 @@ function calculateNormalCurve(
 }
 
 function calculateControlLimits(valuesText: string) {
-  const values = parseMeasurementValues(valuesText);
-  if (values.length < 2) {
-    return null;
-  }
-
-  const centerline = values.reduce((sum, value) => sum + value, 0) / values.length;
-  const variance =
-    values.reduce((sum, value) => sum + (value - centerline) ** 2, 0) /
-    Math.max(1, values.length - 1);
-  const sigma = Math.sqrt(variance);
-
-  return {
-    count: values.length,
-    centerline,
-    sigma,
-    ucl: centerline + 3 * sigma,
-    lcl: centerline - 3 * sigma,
-  };
+  return calculateIndividualsLimits(parseMeasurementValues(valuesText));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -846,16 +715,7 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function normalizeCustomExpressionSyntax(value: string) {
-  return value
-    .replace(/π/g, "pi")
-    .replace(/Π/g, "pi")
-    .replace(/×/g, "*")
-    .replace(/÷/g, "/")
-    .replace(/−/g, "-")
-    .replace(/√\s*\(/g, "sqrt(")
-    .replace(/\^/g, "**");
-}
+
 
 function getCustomApprovalStatus(value: unknown): CustomFormulaApprovalStatus {
   return value === "pending_review" ||
@@ -919,96 +779,29 @@ function getSavedFormulaRevisionHistory(
     }));
 }
 
-const CUSTOM_FORMULA_HELPERS: Record<string, (...values: number[]) => number> = {
-  abs: Math.abs,
-  acos: Math.acos,
-  asin: Math.asin,
-  atan: Math.atan,
-  atan2: Math.atan2,
-  cbrt: Math.cbrt,
-  ceil: Math.ceil,
-  cos: Math.cos,
-  exp: Math.exp,
-  floor: Math.floor,
-  log: Math.log,
-  log10: Math.log10,
-  max: Math.max,
-  min: Math.min,
-  pow: Math.pow,
-  round: Math.round,
-  sin: Math.sin,
-  sqrt: Math.sqrt,
-  tan: Math.tan,
-  trunc: Math.trunc,
-};
 
-const CUSTOM_FORMULA_CONSTANTS: Record<string, number> = {
-  e: Math.E,
-  E: Math.E,
-  pi: Math.PI,
-  PI: Math.PI,
-};
-
-function evaluateCustomExpression(
-  expression: string,
-  variables: Record<string, number>,
-): { value: number | null; error: string | null } {
-  const trimmedExpression = normalizeCustomExpressionSyntax(expression).trim();
-  if (!trimmedExpression) {
-    return { value: null, error: "Expression is required." };
-  }
-
-  if (!/^[0-9+\-*/%().,\s_a-zA-Z]+$/.test(trimmedExpression)) {
-    return { value: null, error: "Only numbers, variables, math helpers, and operators are allowed." };
-  }
-
-  if (
-    /\b(?:constructor|document|eval|function|globalThis|import|new|process|return|this|window)\b/i.test(
-      trimmedExpression,
-    )
-  ) {
-    return { value: null, error: "Expression contains a blocked keyword." };
-  }
-
-  try {
-    const helperNames = Object.keys(CUSTOM_FORMULA_HELPERS);
-    const variableNames = Object.keys(variables);
-    const evaluator = new Function(
-      ...helperNames,
-      ...variableNames,
-      `"use strict"; return (${trimmedExpression});`,
-    );
-    const result = evaluator(
-      ...helperNames.map((name) => CUSTOM_FORMULA_HELPERS[name]),
-      ...variableNames.map((name) => variables[name]),
-    ) as unknown;
-    const numericResult = typeof result === "number" ? result : Number(result);
-
-    return Number.isFinite(numericResult)
-      ? { value: numericResult, error: null }
-      : { value: null, error: "Result is not a finite number." };
-  } catch (caughtError) {
-    return {
-      value: null,
-      error: caughtError instanceof Error ? caughtError.message : "Expression could not be evaluated.",
-    };
-  }
-}
 
 function calculateCustomFormulaResults(
   inputs: CustomFormulaInput[],
   outputs: CustomFormulaOutput[],
 ) {
-  const variables: Record<string, number> = { ...CUSTOM_FORMULA_CONSTANTS };
+  const variables: Record<string, number> = { ...FORMULA_CONSTANTS };
+  const inputNames = new Set<string>();
+  let inputError: string | null = null;
   inputs.forEach((input, index) => {
     const variableName = normalizeCustomVariableName(input.name, `input_${index + 1}`);
-    const parsedValue = Number.parseFloat(input.value);
-    variables[variableName] = Number.isFinite(parsedValue) ? parsedValue : 0;
+    const parsedValue = parseFiniteNumber(input.value);
+    if (isReservedFormulaName(variableName) || inputNames.has(variableName)) {
+      inputError = "Input name " + variableName + " is duplicated or reserved.";
+    }
+    if (parsedValue === null) inputError = "Enter a valid number for " + (input.label || variableName) + ".";
+    inputNames.add(variableName);
+    if (parsedValue !== null) variables[variableName] = parsedValue;
   });
 
   return outputs.map((output, index) => {
     const outputName = normalizeCustomVariableName(output.name, `output_${index + 1}`);
-    const evaluated = evaluateCustomExpression(output.expression, variables);
+    const evaluated = inputError ? { value: null, error: inputError } : evaluateFormulaExpression(output.expression, variables);
     return {
       ...output,
       name: outputName,
@@ -1118,6 +911,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
   const [taktMinutes, setTaktMinutes] = useState("420");
   const [taktDemand, setTaktDemand] = useState("210");
   const [yieldUnits, setYieldUnits] = useState("1000");
+  const [yieldFailedUnits, setYieldFailedUnits] = useState("20");
   const [yieldDefects, setYieldDefects] = useState("24");
   const [yieldStepYields, setYieldStepYields] = useState("98\n97.5\n99");
   const [littleWip, setLittleWip] = useState("120");
@@ -1147,10 +941,11 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
   const [savedFormulaFilter, setSavedFormulaFilter] = useState<
     "all" | "system" | "custom" | "drafts" | "pending"
   >("all");
-  const [libraryBusy, setLibraryBusy] = useState(false);
+  const [libraryBusy, setLibraryBusy] = useState(true);
   const [libraryMessage, setLibraryMessage] = useState<string | null>(null);
   const [libraryError, setLibraryError] = useState<string | null>(null);
   const [printRequestedAt, setPrintRequestedAt] = useState<number | null>(null);
+  const currentMinuteMs = useSynchronizedMinuteMs();
 
   const oeeGroupResults = useMemo(
     () =>
@@ -1177,20 +972,10 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
     () => calculateCapability(capabilityValues, lsl, usl),
     [capabilityValues, lsl, usl],
   );
-  const dpmoStats = useMemo(() => {
-    const defects = parsePositive(dpmoDefects);
-    const units = parsePositive(dpmoUnits);
-    const opportunities = parsePositive(dpmoOpps);
-    if (!defects || !units || !opportunities) {
-      return { dpmo: null, yieldPercent: null };
-    }
-
-    const dpmo = (defects / (units * opportunities)) * 1_000_000;
-    return {
-      dpmo,
-      yieldPercent: Math.max(0, 100 - dpmo / 10_000),
-    };
-  }, [dpmoDefects, dpmoOpps, dpmoUnits]);
+  const dpmoStats = useMemo(
+    () => calculateDpmoMetrics(dpmoDefects, dpmoUnits, dpmoOpps),
+    [dpmoDefects, dpmoOpps, dpmoUnits],
+  );
   const taktStats = useMemo(() => {
     const minutes = parsePositive(taktMinutes);
     const demand = parsePositive(taktDemand);
@@ -1201,8 +986,8 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
     };
   }, [taktDemand, taktMinutes]);
   const yieldStats = useMemo(
-    () => calculateYield(yieldUnits, yieldDefects, yieldStepYields),
-    [yieldDefects, yieldStepYields, yieldUnits],
+    () => calculateYield(yieldUnits, yieldFailedUnits, yieldStepYields, yieldDefects),
+    [yieldDefects, yieldFailedUnits, yieldStepYields, yieldUnits],
   );
   const littleLawStats = useMemo(
     () => calculateLittleLaw(littleWip, littleThroughput, littleLeadTime),
@@ -1294,15 +1079,16 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
     return session.access_token;
   }
 
-  async function loadSavedFormulas() {
-    setLibraryBusy(true);
-    setLibraryError(null);
-
+  async function loadSavedFormulas(signal?: AbortSignal) {
     try {
       const token = await getAccessToken();
+      if (signal?.aborted) return;
+      setLibraryBusy(true);
+      setLibraryError(null);
       const response = await fetch(
         `/api/process-maps/formulas${canApproveCustomFormulas ? "?includeAll=true" : ""}`,
         {
+          signal,
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -1314,18 +1100,21 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
         throw new Error(payload.error ?? "Unable to load saved formulas.");
       }
 
-      setSavedFormulas(payload.formulas ?? []);
+      if (!signal?.aborted) setSavedFormulas(payload.formulas ?? []);
     } catch (caughtError) {
+      if (signal?.aborted) return;
       setLibraryError(
         caughtError instanceof Error ? caughtError.message : "Unable to load saved formulas.",
       );
     } finally {
-      setLibraryBusy(false);
+      if (!signal?.aborted) setLibraryBusy(false);
     }
   }
 
   useEffect(() => {
-    void loadSavedFormulas();
+    const controller = new AbortController();
+    void Promise.resolve().then(() => loadSavedFormulas(controller.signal));
+    return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1574,7 +1363,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
             : `Output ${index + 1}`,
         expression:
           typeof output.expression === "string"
-            ? normalizeCustomExpressionSyntax(output.expression).trim()
+            ? normalizeFormulaExpression(output.expression)
             : "",
       }));
       if (nextOutputs.length > 0) {
@@ -1641,7 +1430,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
   ) {
     const revision = revisionOptions.revision ?? getSavedFormulaRevision(selectedFormula);
     return {
-      version: 2,
+      version: 3,
       oeeGroups,
       capabilityData,
       lsl,
@@ -1652,6 +1441,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
       taktMinutes,
       taktDemand,
       yieldUnits,
+      yieldFailedUnits,
       yieldDefects,
       yieldStepYields,
       littleWip,
@@ -1764,6 +1554,8 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
     if (typeof payload.taktMinutes === "string") setTaktMinutes(payload.taktMinutes);
     if (typeof payload.taktDemand === "string") setTaktDemand(payload.taktDemand);
     if (typeof payload.yieldUnits === "string") setYieldUnits(payload.yieldUnits);
+    // Historical formulas only stored total defects; their failed-unit count is unknown.
+    setYieldFailedUnits(typeof payload.yieldFailedUnits === "string" ? payload.yieldFailedUnits : "");
     if (typeof payload.yieldDefects === "string") setYieldDefects(payload.yieldDefects);
     if (typeof payload.yieldStepYields === "string") setYieldStepYields(payload.yieldStepYields);
     if (typeof payload.littleWip === "string") setLittleWip(payload.littleWip);
@@ -2073,6 +1865,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
       setTaktDemand("210");
     } else if (tab === "yield") {
       setYieldUnits("1000");
+      setYieldFailedUnits("20");
       setYieldDefects("24");
       setYieldStepYields("98\n97.5\n99");
     } else if (tab === "little_law") {
@@ -2268,7 +2061,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
         ["Units", dpmoUnits],
         ["Opportunities per unit", dpmoOpps],
         ["DPMO", formatNumber(dpmoStats.dpmo, 0)],
-        ["Yield", dpmoStats.yieldPercent === null ? "N/A" : `${formatNumber(dpmoStats.yieldPercent, 2)}%`],
+        ["Opportunity yield", dpmoStats.yieldPercent === null ? "N/A" : `${formatNumber(dpmoStats.yieldPercent, 2)}%`],
       ];
     }
 
@@ -2286,7 +2079,8 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
       return [
         ["Metric", "Value"],
         ["Units started", yieldUnits],
-        ["Defects", yieldDefects],
+        ["Failed first-pass units", yieldFailedUnits],
+        ["Total defects", yieldDefects],
         ["First pass yield", formatPercent(yieldStats.fpy)],
         ["Defects per unit", formatNumber(yieldStats.dpu, 4)],
         ["Step count", String(yieldStats.stepCount)],
@@ -2390,7 +2184,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
           title="DPMO View"
           bars={[
             { label: "DPMO", value: dpmoStats.dpmo, suffix: "" },
-            { label: "Yield", value: dpmoStats.yieldPercent, suffix: "%" },
+            { label: "Opportunity yield", value: dpmoStats.yieldPercent, suffix: "%" },
           ]}
         />
       );
@@ -2529,7 +2323,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
       <FormulaPrintPage
         title={formulaName.trim() || DEFAULT_FORMULA_NAMES[activeTab]}
         formulaType={activeTab}
-        printedAt={new Date(printRequestedAt ?? Date.now())}
+        printedAt={new Date(printRequestedAt ?? currentMinuteMs)}
         rows={getActiveFormulaRows()}
       >
         {renderActiveFormulaChart()}
@@ -2835,8 +2629,13 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
                 OEE by Operator Group
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Record time studies inside each operator group. Group totals and all-operator totals are weighted from the underlying recordings.
+                Enter complete time studies. OEE weights good production by its ideal cycle time; mixed-product totals may differ from the product of the three displayed ratios.
               </p>
+              {oeeTotal.excludedCount > 0 ? (
+                <p role="status" className="mt-2 text-sm font-medium text-amber-700 dark:text-amber-300">
+                  {oeeTotal.excludedCount} incomplete or invalid recording(s) excluded from totals. Check the highlighted rows.
+                </p>
+              ) : null}
             </div>
             <div className="flex flex-wrap gap-2">
               <button
@@ -2977,6 +2776,10 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
                             <td key={key} className="px-2 py-2">
                               <input
                                 value={value}
+                                inputMode="decimal"
+                                aria-label={`${key} for recording ${recordingIndex + 1} in ${group.operator}`}
+                                aria-invalid={Boolean(stats.error)}
+                                title={stats.error ?? undefined}
                                 onChange={(event) =>
                                   updateOeeRecording(
                                     group.id,
@@ -2992,8 +2795,9 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
                           <td className="px-2 py-2 text-right font-semibold">{formatPercent(stats.availability)}</td>
                           <td className="px-2 py-2 text-right font-semibold">{formatPercent(stats.performance)}</td>
                           <td className="px-2 py-2 text-right font-semibold">{formatPercent(stats.quality)}</td>
-                          <td className="px-2 py-2 text-right font-extrabold text-cyan-800 dark:text-cyan-100">
+                          <td title={stats.error ?? undefined} className="px-2 py-2 text-right font-extrabold text-cyan-800 dark:text-cyan-100">
                             {formatPercent(stats.oee)}
+                            {stats.error ? <span className="mt-1 block max-w-40 text-left text-xs font-medium text-amber-700 dark:text-amber-300">{stats.error}</span> : null}
                           </td>
                           <td className="px-2 py-2">
                             <button
@@ -3018,7 +2822,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
       ) : null}
 
       {activeTab === "capability" ? (
-        <section className="grid gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80 lg:grid-cols-[1fr_20rem]">
+        <section className="grid min-w-0 gap-5 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80 xl:grid-cols-[minmax(0,1fr)_20rem]">
           <div className="grid gap-3">
             <h2 className="text-lg font-extrabold">Cp / Cpk Capability</h2>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -3058,7 +2862,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
       ) : null}
 
       {activeTab === "dpmo" ? (
-        <section className="grid gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80 lg:grid-cols-[1fr_20rem]">
+        <section className="grid min-w-0 gap-5 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80 xl:grid-cols-[minmax(0,1fr)_20rem]">
           <FormulaInputGrid
             fields={[
               ["Defects", dpmoDefects, setDpmoDefects],
@@ -3070,7 +2874,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
             hints={FORMULA_GUIDES.dpmo.resultHints}
             rows={[
               ["DPMO", formatNumber(dpmoStats.dpmo, 0)],
-              ["Yield", dpmoStats.yieldPercent === null ? "N/A" : `${formatNumber(dpmoStats.yieldPercent, 2)}%`],
+              ["Opportunity yield", dpmoStats.yieldPercent === null ? "N/A" : `${formatNumber(dpmoStats.yieldPercent, 2)}%`],
             ]}
           />
           {renderActiveFormulaChart()}
@@ -3078,7 +2882,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
       ) : null}
 
       {activeTab === "takt" ? (
-        <section className="grid gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80 lg:grid-cols-[1fr_20rem]">
+        <section className="grid min-w-0 gap-5 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80 xl:grid-cols-[minmax(0,1fr)_20rem]">
           <FormulaInputGrid
             fields={[
               ["Available production minutes", taktMinutes, setTaktMinutes],
@@ -3097,14 +2901,18 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
       ) : null}
 
       {activeTab === "yield" ? (
-        <section className="grid gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80 lg:grid-cols-[1fr_20rem]">
+        <section className="grid min-w-0 gap-5 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80 xl:grid-cols-[minmax(0,1fr)_20rem]">
           <div className="grid content-start gap-4">
             <FormulaInputGrid
               fields={[
                 ["Units started", yieldUnits, setYieldUnits],
-                ["Defects", yieldDefects, setYieldDefects],
+                ["Failed first-pass units", yieldFailedUnits, setYieldFailedUnits],
+                ["Total defects", yieldDefects, setYieldDefects],
               ]}
             />
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              Count each failed unit once for first pass yield. Total defects may exceed units because one unit can have several defects. Enter failed first-pass units to calculate FPY for older saved formulas.
+            </p>
             <NumberListInput
               label="Step yields"
               value={yieldStepYields}
@@ -3126,7 +2934,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
       ) : null}
 
       {activeTab === "little_law" ? (
-        <section className="grid gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80 lg:grid-cols-[1fr_20rem]">
+        <section className="grid min-w-0 gap-5 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80 xl:grid-cols-[minmax(0,1fr)_20rem]">
           <FormulaInputGrid
             fields={[
               ["WIP", littleWip, setLittleWip],
@@ -3147,7 +2955,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
       ) : null}
 
       {activeTab === "normal_curve" ? (
-        <section className="grid gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80 lg:grid-cols-[1fr_20rem]">
+        <section className="grid min-w-0 gap-5 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80 xl:grid-cols-[minmax(0,1fr)_20rem]">
           <FormulaInputGrid
             fields={[
               ["Mean", normalMean, setNormalMean],
@@ -3182,7 +2990,7 @@ export function FormulaLabClient({ canApproveCustomFormulas = false }: FormulaLa
       ) : null}
 
       {activeTab === "control_limits" ? (
-        <section className="grid gap-4 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80 lg:grid-cols-[1fr_20rem]">
+        <section className="grid min-w-0 gap-5 rounded-2xl border border-slate-300/70 bg-white/90 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-950/80 xl:grid-cols-[minmax(0,1fr)_20rem]">
           <NumberListInput
             label="Measurements"
             value={controlLimitValues}
@@ -3405,7 +3213,7 @@ function FormulaPrintPage({
         <header>
           <h1 className="text-2xl font-extrabold text-slate-950">{title}</h1>
           <p className="text-sm text-slate-600">
-            Calculator: {formulaType.toUpperCase()} | Printed {printedAt.toLocaleString()}
+            Calculator: {formulaType.toUpperCase()} | Printed <LocalDateTime value={printedAt} />
           </p>
         </header>
         <table className="w-full border-collapse text-sm">

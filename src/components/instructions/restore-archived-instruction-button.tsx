@@ -1,8 +1,10 @@
 ﻿"use client";
 
+import { useHydrated } from "@/lib/use-hydrated";
+
 import { ArchiveRestore, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -36,15 +38,11 @@ export function RestoreArchivedInstructionButton({
   const router = useRouter();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
-  const [portalReady, setPortalReady] = useState(false);
+  const portalReady = useHydrated();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<RestoreConflictPayload | null>(null);
-
-  useEffect(() => {
-    setPortalReady(true);
-  }, []);
 
   async function handleRestore(options?: { forceSwap?: boolean }) {
     setBusy(true);

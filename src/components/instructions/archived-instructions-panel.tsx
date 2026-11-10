@@ -1,9 +1,11 @@
 ﻿"use client";
 
+import { useHydrated } from "@/lib/use-hydrated";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArchiveRestore, Eye, Loader2, Search, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { InstructionBackButton } from "@/components/instructions/instruction-back-button";
@@ -97,11 +99,12 @@ export function ArchivedInstructionsPanel({
   const router = useRouter();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
-  const [portalReady, setPortalReady] = useState(false);
+  const portalReady = useHydrated();
   const [instructions, setInstructions] = useState(initialInstructions);
   const [query, setQuery] = useState("");
   const [selectedDepartment, setSelectedDepartment] = useState("all");
-  const [selectedInstructionIds, setSelectedInstructionIds] = useState<string[]>([]);
+  const [selectedIds, setSelectedInstructionIds] = useState<string[]>([]);
+  const selectedInstructionIds = selectedIds.filter((id) => instructions.some((instruction) => instruction.id === id));
 
   const [busyInstructionId, setBusyInstructionId] = useState<string | null>(null);
 
@@ -112,16 +115,6 @@ export function ArchivedInstructionsPanel({
 
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setPortalReady(true);
-  }, []);
-
-  useEffect(() => {
-    setSelectedInstructionIds((current) =>
-      current.filter((id) => instructions.some((instruction) => instruction.id === id)),
-    );
-  }, [instructions]);
 
   const departmentOptions = useMemo(() => {
     const departmentCounts = new Map<string, number>();

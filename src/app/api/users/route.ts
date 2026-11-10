@@ -2,10 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 
 import { getRequestProfile } from "@/lib/api-auth";
-import { hasFullAccess } from "@/lib/roles";
+import { isWeakPin, PIN_POLICY_MESSAGE } from "@/lib/pin-policy";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { AppRole, Profile } from "@/lib/types";
+import { ACCOUNT_MANAGEMENT_DENIED, canManageAccounts } from "@/lib/user-management";
 import { isValidEmployeeId, normalizeEmployeeId } from "@/lib/utils";
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 interface CreateUserBody {
   fullName?: string;
@@ -19,7 +22,8 @@ function validateRole(role: string): role is AppRole {
   return role === "user" || role === "admin" || role === "system_admin";
 }
 
-async function requireFullAccess(request: NextRequest) {
+/** Listing and creating accounts is for system admins only. */
+async function requireAccountManager(request: NextRequest) {
   const profile = await getRequestProfile(request);
 
   if (!profile) {
@@ -29,10 +33,10 @@ async function requireFullAccess(request: NextRequest) {
     };
   }
 
-  if (!hasFullAccess(profile.role)) {
+  if (!canManageAccounts(profile.role)) {
     return {
       error: NextResponse.json(
-        { error: "Admin privileges required." },
+        { error: ACCOUNT_MANAGEMENT_DENIED },
         { status: 403 },
       ),
       profile,
@@ -44,7 +48,7 @@ async function requireFullAccess(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   const supabaseAdmin = getSupabaseAdminClient();
-  const auth = await requireFullAccess(request);
+  const auth = await requireAccountManager(request);
 
   if (auth.error) {
     return auth.error;
@@ -64,18 +68,19 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const supabaseAdmin = getSupabaseAdminClient();
-  const auth = await requireFullAccess(request);
+  const auth = await requireAccountManager(request);
 
   if (auth.error) {
     return auth.error;
   }
 
   const body = (await request.json().catch(() => ({}))) as CreateUserBody;
+  const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
 
-  const fullName = body.fullName?.trim();
-  const email = body.email?.trim().toLowerCase();
-  const employeeId = normalizeEmployeeId(body.employeeId ?? "");
-  const pin = body.pin?.trim();
+  const fullName = text(body.fullName);
+  const email = text(body.email).toLowerCase();
+  const employeeId = normalizeEmployeeId(text(body.employeeId));
+  const pin = text(body.pin);
   const role = body.role;
 
   if (!fullName || !email || !employeeId || !pin || !role) {
@@ -87,6 +92,10 @@ export async function POST(request: NextRequest) {
 
   if (!validateRole(role)) {
     return NextResponse.json({ error: "Invalid role." }, { status: 400 });
+  }
+
+  if (fullName.length > 120 || email.length > 254 || !EMAIL_PATTERN.test(email)) {
+    return NextResponse.json({ error: "Enter a valid name and email." }, { status: 400 });
   }
 
   if (!isValidEmployeeId(employeeId)) {
@@ -101,6 +110,22 @@ export async function POST(request: NextRequest) {
       { error: "PIN must be exactly 6 digits." },
       { status: 400 },
     );
+  }
+
+  if (isWeakPin(pin)) {
+    return NextResponse.json({ error: PIN_POLICY_MESSAGE }, { status: 400 });
+  }
+
+  const { data: duplicateEmployee, error: duplicateError } = await supabaseAdmin
+    .from("profiles")
+    .select("id")
+    .eq("employee_id", employeeId)
+    .limit(1);
+  if (duplicateError) {
+    return NextResponse.json({ error: duplicateError.message }, { status: 500 });
+  }
+  if ((duplicateEmployee?.length ?? 0) > 0) {
+    return NextResponse.json({ error: "That employee ID already exists." }, { status: 409 });
   }
 
   const generatedPassword = `WI-${randomUUID()}!`;

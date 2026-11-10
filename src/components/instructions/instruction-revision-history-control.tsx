@@ -1,5 +1,7 @@
 ﻿"use client";
 
+import { useHydrated } from "@/lib/use-hydrated";
+
 import { Eye, History, Loader2, RotateCcw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -12,6 +14,7 @@ export interface InstructionRevisionHistoryEntry {
   id: string;
   revision: number;
   isArchived: boolean;
+  approvalStatus?: string;
   createdAt: string;
   updatedAt: string;
   updatedByName: string;
@@ -35,22 +38,21 @@ export function InstructionRevisionHistoryControl({
   currentInstructionId,
   entries,
   canPromoteArchivedRevision,
-  hideBaseRevision = false,
 }: InstructionRevisionHistoryControlProps) {
   const router = useRouter();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
-  const [portalReady, setPortalReady] = useState(false);
+  const portalReady = useHydrated();
   const [menuOpen, setMenuOpen] = useState(false);
   const [busyRevisionId, setBusyRevisionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const uniqueRevisionCount = useMemo(
-    () => new Set(entries.map((entry) => entry.revision)).size,
+    () => entries.length,
     [entries],
   );
   const visibleEntries = useMemo(
     () =>
       entries
-        .filter((entry) => (hideBaseRevision ? entry.revision > 1 : true))
+        .slice()
         .sort((first, second) => {
           if (second.revision !== first.revision) {
             return second.revision - first.revision;
@@ -68,12 +70,12 @@ export function InstructionRevisionHistoryControl({
 
           return 0;
         }),
-    [entries, hideBaseRevision],
+    [entries],
   );
   const activeEntryId = useMemo(() => {
     const activeEntries = visibleEntries.filter((entry) => !entry.isArchived);
-    if (activeEntries.length > 0) {
-      return activeEntries[0]?.id ?? null;
+    if (activeEntries.some((entry) => entry.id === currentInstructionId)) {
+      return currentInstructionId;
     }
 
     const activeEntriesFromAllRevisions = entries
@@ -100,10 +102,6 @@ export function InstructionRevisionHistoryControl({
   }, [currentInstructionId, entries, visibleEntries]);
 
   useEffect(() => {
-    setPortalReady(true);
-  }, []);
-
-  useEffect(() => {
     if (!menuOpen) {
       return;
     }
@@ -125,6 +123,7 @@ export function InstructionRevisionHistoryControl({
   }
 
   async function handlePromoteRevision(revisionEntry: InstructionRevisionHistoryEntry) {
+    if (busyRevisionId || !window.confirm(`Restore revision ${revisionEntry.revision}? This replaces the active revision with the same release status and records the restoration in history.`)) return;
     setBusyRevisionId(revisionEntry.id);
     setError(null);
 
@@ -184,7 +183,7 @@ export function InstructionRevisionHistoryControl({
                 <div className="grid gap-1">
                   <h3 className="text-lg font-bold text-slate-100">Revision History</h3>
                   <p className="text-sm text-slate-300">
-                    Select a revision to view. The active revision is marked Current.
+                    Review retained revisions and their release status. Restorations are recorded in the audit history.
                   </p>
                 </div>
 
@@ -214,7 +213,7 @@ export function InstructionRevisionHistoryControl({
                                 : "border-amber-500/40 bg-amber-500/15 text-amber-200"
                             }`}
                           >
-                            {isCurrent ? "Current" : entry.isArchived ? "Archived" : "Active"}
+                            {entry.isArchived ? "Archived" : entry.approvalStatus === "approved" ? "Released" : entry.approvalStatus === "rejected" ? "Rejected" : "Under review"}{entry.id === currentInstructionId ? " · Viewing" : ""}
                           </span>
                         </div>
 
@@ -242,7 +241,7 @@ export function InstructionRevisionHistoryControl({
                           {canPromoteArchivedRevision && entry.isArchived && !isCurrent ? (
                             <button
                               type="button"
-                              disabled={busyRevisionId === entry.id}
+                              disabled={busyRevisionId !== null}
                               onClick={() => void handlePromoteRevision(entry)}
                               className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/45 bg-emerald-500/20 px-3 py-1.5 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-500/30 disabled:cursor-not-allowed disabled:opacity-60"
                             >

@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { after } from "next/server";
 
 import { sendUserNotificationEmail } from "@/lib/mailer";
 import {
@@ -29,6 +30,26 @@ interface NotificationEmailPayload {
 
 function uniqueIds(ids: string[]) {
   return Array.from(new Set(ids.filter(Boolean)));
+}
+
+/**
+ * Notification email is best-effort. It is delivered after the response is sent, so a slow or
+ * unreachable mail server never delays a save, submission or approval that has already committed.
+ */
+function deliverAfterResponse(description: string, task: () => Promise<void>) {
+  const run = async () => {
+    try {
+      await task();
+    } catch (error) {
+      console.warn(`Unable to send ${description}.`, error);
+    }
+  };
+  try {
+    after(run);
+  } catch {
+    // Outside a request (scripts, tests) there is no response to wait for.
+    void run();
+  }
 }
 
 async function sendToProfiles(
@@ -77,17 +98,19 @@ export async function sendNotificationEmailsToUsers(
     return;
   }
 
-  const { data, error } = await supabaseAdmin
-    .from("profiles")
-    .select("id, email, full_name, role, is_active, user_settings")
-    .in("id", recipientUserIds);
+  deliverAfterResponse("notification email", async () => {
+    const { data, error } = await supabaseAdmin
+      .from("profiles")
+      .select("id, email, full_name, role, is_active, user_settings")
+      .in("id", recipientUserIds);
 
-  if (error) {
-    console.warn("Unable to read notification email recipients.", error);
-    return;
-  }
+    if (error) {
+      console.warn("Unable to read notification email recipients.", error);
+      return;
+    }
 
-  await sendToProfiles((data ?? []) as NotificationEmailProfile[], options);
+    await sendToProfiles((data ?? []) as NotificationEmailProfile[], options);
+  });
 }
 
 export async function sendNotificationEmailsToRoles(
@@ -102,23 +125,25 @@ export async function sendNotificationEmailsToRoles(
     return;
   }
 
-  let query = supabaseAdmin
-    .from("profiles")
-    .select("id, email, full_name, role, is_active, user_settings")
-    .eq("is_active", true)
-    .in("role", roles);
+  deliverAfterResponse("role notification email", async () => {
+    let query = supabaseAdmin
+      .from("profiles")
+      .select("id, email, full_name, role, is_active, user_settings")
+      .eq("is_active", true)
+      .in("role", roles);
 
-  const excludedIds = uniqueIds(options.excludeUserIds ?? []);
-  if (excludedIds.length > 0) {
-    query = query.not("id", "in", `(${excludedIds.join(",")})`);
-  }
+    const excludedIds = uniqueIds(options.excludeUserIds ?? []);
+    if (excludedIds.length > 0) {
+      query = query.not("id", "in", `(${excludedIds.join(",")})`);
+    }
 
-  const { data, error } = await query;
+    const { data, error } = await query;
 
-  if (error) {
-    console.warn("Unable to read role notification email recipients.", error);
-    return;
-  }
+    if (error) {
+      console.warn("Unable to read role notification email recipients.", error);
+      return;
+    }
 
-  await sendToProfiles((data ?? []) as NotificationEmailProfile[], options);
+    await sendToProfiles((data ?? []) as NotificationEmailProfile[], options);
+  });
 }

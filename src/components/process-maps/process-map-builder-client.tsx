@@ -1,5 +1,6 @@
 "use client";
 
+import { calculateOeeMetrics, calculateDpmoMetrics, calculateIndividualsLimits, parseFiniteNumber, parseMeasurementSeries } from "@/lib/manufacturing-calculations";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -56,7 +57,12 @@ import {
 } from "@/lib/process-map-tools";
 import { FloatingStatusNotices } from "@/components/ui/floating-status-notices";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
-import { cn } from "@/lib/utils";
+import { cn, drainResponse } from "@/lib/utils";
+
+// Called by explicit canvas editing events; separate identity from render state.
+function createCanvasEntityId(prefix: string) {
+  return `${prefix}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+}
 
 interface DepartmentOption {
   id: string;
@@ -717,10 +723,7 @@ function parseMetricRows(value: string, fallbackLabels: string[]): MetricPoint[]
 }
 
 function parseMeasurementValues(value: string) {
-  return value
-    .split(/[\s,\t;|]+/)
-    .map((entry) => Number.parseFloat(entry.trim()))
-    .filter((entry) => Number.isFinite(entry));
+  return parseMeasurementSeries(value);
 }
 
 function formatNumber(value: number | null | undefined, digits = 3) {
@@ -812,8 +815,8 @@ function calculateCapability(
 }
 
 function parsePositiveNumber(value: string) {
-  const parsed = Number.parseFloat(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  const parsed = parseFiniteNumber(value);
+  return parsed !== null && parsed > 0 ? parsed : null;
 }
 
 function calculateOee(input: {
@@ -823,55 +826,17 @@ function calculateOee(input: {
   totalCount: string;
   goodCount: string;
 }): OeeStats {
-  const plannedProductionMinutes = parsePositiveNumber(input.plannedProductionMinutes);
-  const runTimeMinutes = parsePositiveNumber(input.runTimeMinutes);
-  const idealCycleSeconds = parsePositiveNumber(input.idealCycleSeconds);
-  const totalCount = parsePositiveNumber(input.totalCount);
-  const goodCount = parsePositiveNumber(input.goodCount);
-
-  const availability =
-    plannedProductionMinutes && runTimeMinutes
-      ? Math.min(1, runTimeMinutes / plannedProductionMinutes)
-      : null;
-  const performance =
-    runTimeMinutes && idealCycleSeconds && totalCount
-      ? Math.min(1, (idealCycleSeconds * totalCount) / (runTimeMinutes * 60))
-      : null;
-  const quality = totalCount && goodCount ? Math.min(1, goodCount / totalCount) : null;
-  const oee =
-    availability !== null && performance !== null && quality !== null
-      ? availability * performance * quality
-      : null;
-
-  return {
-    availability,
-    performance,
-    quality,
-    oee,
-  };
+  return calculateOeeMetrics({
+    plannedMinutes: input.plannedProductionMinutes,
+    runMinutes: input.runTimeMinutes,
+    idealCycleSeconds: input.idealCycleSeconds,
+    totalCount: input.totalCount,
+    goodCount: input.goodCount,
+  });
 }
 
-function calculateDpmo(input: {
-  defects: string;
-  units: string;
-  opportunities: string;
-}): DpmoStats {
-  const defects = parsePositiveNumber(input.defects);
-  const units = parsePositiveNumber(input.units);
-  const opportunities = parsePositiveNumber(input.opportunities);
-
-  if (!defects || !units || !opportunities) {
-    return {
-      dpmo: null,
-      yieldPercent: null,
-    };
-  }
-
-  const dpmo = (defects / (units * opportunities)) * 1_000_000;
-  return {
-    dpmo,
-    yieldPercent: Math.max(0, 100 - dpmo / 10_000),
-  };
+function calculateDpmo(input: { defects: string; units: string; opportunities: string }): DpmoStats {
+  return calculateDpmoMetrics(input.defects, input.units, input.opportunities);
 }
 
 function calculateTakt(input: {
@@ -889,27 +854,8 @@ function calculateTakt(input: {
 }
 
 function calculateControlLimits(metrics: MetricPoint[]): ControlLimitStats {
-  const values = metrics.map((metric) => metric.value).filter(Number.isFinite);
-  if (values.length < 2) {
-    return {
-      centerline: values[0] ?? null,
-      sigma: null,
-      ucl: null,
-      lcl: null,
-    };
-  }
-
-  const centerline = values.reduce((sum, value) => sum + value, 0) / values.length;
-  const variance =
-    values.reduce((sum, value) => sum + (value - centerline) ** 2, 0) /
-    Math.max(1, values.length - 1);
-  const sigma = Math.sqrt(variance);
-
-  return {
-    centerline,
-    sigma,
-    ucl: centerline + 3 * sigma,
-    lcl: centerline - 3 * sigma,
+  return calculateIndividualsLimits(metrics.map((metric) => metric.value)) ?? {
+    centerline: null, sigma: null, ucl: null, lcl: null,
   };
 }
 
@@ -1632,10 +1578,7 @@ function buildLineSvg(
   const chartHeight = 248;
   const values = metrics.map((metric) => metric.value);
   const center = values.reduce((sum, value) => sum + value, 0) / Math.max(values.length, 1);
-  const variance =
-    values.reduce((sum, value) => sum + (value - center) ** 2, 0) /
-    Math.max(1, values.length - 1);
-  const sigma = Math.sqrt(variance);
+  const sigma = calculateIndividualsLimits(values)?.sigma ?? 0;
   const ucl = center + 3 * sigma;
   const lcl = center - 3 * sigma;
   const maxValue = Math.max(...values, control ? ucl : -Infinity, 1);
@@ -2167,7 +2110,7 @@ function buildControlledDocumentHtml(input: {
                     ["Metric", "Value"],
                     [
                       ["Centerline", formatNumber(input.controlLimitStats.centerline)],
-                      ["Sample Sigma", formatNumber(input.controlLimitStats.sigma)],
+                      ["Within Sigma (MR-bar / 1.128)", formatNumber(input.controlLimitStats.sigma)],
                       ["UCL", formatNumber(input.controlLimitStats.ucl)],
                       ["LCL", formatNumber(input.controlLimitStats.lcl)],
                     ],
@@ -2929,7 +2872,7 @@ export function ProcessMapBuilderClient({
 
   function addValueStreamNote(point?: { x: number; y: number }) {
     const note: ValueStreamNote = {
-      id: `vsm-note-${Date.now()}`,
+      id: createCanvasEntityId("vsm-note"),
       text: "Note",
       x: clampNumber(point?.x ?? 480, 90, 870),
       y: clampNumber(point?.y ?? 310, 70, 390),
@@ -3001,7 +2944,7 @@ export function ProcessMapBuilderClient({
         Math.max(0, swimlaneSteps.at(-1)?.laneIndex ?? 0),
       );
       const nextStep: SwimlaneStep = {
-        id: `swim-step-${Date.now()}`,
+        id: createCanvasEntityId("swim-step"),
         label: `${lanes[laneIndex] ?? "Lane"}: Step ${nextIndex}`,
         laneIndex,
         x: clampNumber(300 + nextIndex * 120, 250, 840),
@@ -3666,7 +3609,7 @@ export function ProcessMapBuilderClient({
 
     const baseId = `${fromNodeId}-${toNodeId}`;
     const id = customFlowLinks.some((link) => link.id === baseId)
-      ? `${baseId}-${Date.now()}`
+      ? createCanvasEntityId(baseId)
       : baseId;
 
     pushCustomFlowHistory();
@@ -4722,7 +4665,7 @@ export function ProcessMapBuilderClient({
   async function logProcessMapUsage(action: string) {
     try {
       const token = await getAccessToken();
-      await fetch("/api/process-maps/usage", {
+      await drainResponse(await fetch("/api/process-maps/usage", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -4733,7 +4676,7 @@ export function ProcessMapBuilderClient({
           mode: formulaTool === "none" ? "manual" : formulaTool,
           metadata: buildUsageMetadata(),
         }),
-      });
+      }));
     } catch {
       // Usage telemetry should not interrupt exports, printing, or draft creation.
     }
@@ -4985,7 +4928,7 @@ export function ProcessMapBuilderClient({
                     ["Metric", "Value"],
                     [
                       ["Centerline", formatNumber(controlLimitStats.centerline)],
-                      ["Sample Sigma", formatNumber(controlLimitStats.sigma)],
+                      ["Within Sigma (MR-bar / 1.128)", formatNumber(controlLimitStats.sigma)],
                       ["UCL", formatNumber(controlLimitStats.ucl)],
                       ["LCL", formatNumber(controlLimitStats.lcl)],
                     ],
