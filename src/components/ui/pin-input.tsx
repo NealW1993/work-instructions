@@ -14,6 +14,8 @@ interface PinInputProps {
   name?: string;
   autoComplete?: string;
   className?: string;
+  /** Extra classes for the show/hide button, for example on a dark surface. */
+  toggleClassName?: string;
   placeholder?: string;
 }
 
@@ -26,6 +28,7 @@ export function PinInput({
   name,
   autoComplete,
   className,
+  toggleClassName,
   placeholder,
 }: PinInputProps) {
   const [showPin, setShowPin] = useState(false);
@@ -62,7 +65,10 @@ export function PinInput({
         onClick={() => setShowPin((current) => !current)}
         aria-label={showPin ? "Hide PIN" : "Show PIN"}
         title={showPin ? "Hide PIN" : "Show PIN"}
-        className="absolute inset-y-0 right-2 flex items-center rounded-md px-1.5 text-slate-500 transition hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-400 dark:hover:text-slate-200"
+        className={cn(
+          "absolute inset-y-0 right-2 flex items-center rounded-md px-1.5 text-slate-500 transition hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-400 dark:hover:text-slate-200",
+          toggleClassName,
+        )}
       >
         {showPin ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
       </button>

@@ -95,8 +95,11 @@ body {
   outline-offset: 3px;
 }
 
-:where(button, input, select, textarea) {
-  max-width: 100%;
+/* In the base layer, so a max-w-* utility on a control still applies. */
+@layer base {
+  :where(button, input, select, textarea) {
+    max-width: 100%;
+  }
 }
 
 .skip-to-content {
@@ -718,49 +721,56 @@ html:not(.dark) textarea:-webkit-autofill:focus {
   transition: background-color 9999s ease-in-out 0s;
 }
 
-/* Keep the login shell visually stable even if the global light overrides are active. */
-html:not(.dark) .auth-login-shell h1,
-html:not(.dark) .auth-login-shell h2,
-html:not(.dark) .auth-login-shell h3,
-html:not(.dark) .auth-login-shell h4,
-html:not(.dark) .auth-login-shell h5,
-html:not(.dark) .auth-login-shell h6 {
+/* The sign-in screen has one dark look in both themes. These rules match the specificity of the
+   light-theme form rules above and come after them, so they win in light mode as well as dark. */
+html .auth-login-shell :is(h1, h2, h3, h4, h5, h6) {
   color: #f8fafc !important;
 }
 
-html:not(.dark) .auth-login-shell label,
-html:not(.dark) .auth-login-shell legend {
+html .auth-login-shell label,
+html .auth-login-shell legend {
   color: #e2e8f0 !important;
 }
 
-html:not(.dark) .auth-login-shell input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]),
-html:not(.dark) .auth-login-shell textarea,
-html:not(.dark) .auth-login-shell select {
-  background-color: rgba(2, 6, 23, 0.65) !important;
+html .auth-login-shell input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]),
+html .auth-login-shell textarea,
+html .auth-login-shell select {
+  background-color: rgb(15 23 42 / 0.72) !important;
   color: #f8fafc !important;
-  border-color: rgba(255, 255, 255, 0.2) !important;
+  border-color: rgb(255 255 255 / 0.14) !important;
 }
 
-html:not(.dark) .auth-login-shell input::placeholder,
-html:not(.dark) .auth-login-shell textarea::placeholder {
-  color: #94a3b8 !important;
+html .auth-login-shell input::placeholder,
+html .auth-login-shell textarea::placeholder {
+  color: #64748b !important;
 }
 
-html:not(.dark) .auth-login-shell input:focus,
-html:not(.dark) .auth-login-shell textarea:focus,
-html:not(.dark) .auth-login-shell select:focus {
-  border-color: rgba(226, 232, 240, 0.65) !important;
-  box-shadow: 0 0 0 1px rgba(226, 232, 240, 0.35) !important;
+html .auth-login-shell input:focus,
+html .auth-login-shell textarea:focus,
+html .auth-login-shell select:focus {
+  border-color: #22d3ee !important;
+  box-shadow: 0 0 0 3px rgb(34 211 238 / 0.22) !important;
+  outline: none !important;
 }
 
-html:not(.dark) .auth-login-shell input:-webkit-autofill,
-html:not(.dark) .auth-login-shell input:-webkit-autofill:hover,
-html:not(.dark) .auth-login-shell input:-webkit-autofill:focus,
-html:not(.dark) .auth-login-shell textarea:-webkit-autofill,
-html:not(.dark) .auth-login-shell textarea:-webkit-autofill:hover,
-html:not(.dark) .auth-login-shell textarea:-webkit-autofill:focus {
+html .auth-login-shell input:-webkit-autofill,
+html .auth-login-shell input:-webkit-autofill:hover,
+html .auth-login-shell textarea:-webkit-autofill,
+html .auth-login-shell textarea:-webkit-autofill:hover {
   -webkit-text-fill-color: #f8fafc !important;
-  box-shadow: 0 0 0 1000px rgba(2, 6, 23, 0.65) inset !important;
+  box-shadow: 0 0 0 1000px #0f172a inset !important;
+  caret-color: #f8fafc !important;
+}
+
+html .auth-login-shell :is(a, button, summary):focus-visible {
+  outline: 2px solid #67e8f9;
+  outline-offset: 2px;
+}
+
+html .auth-login-shell input:-webkit-autofill:focus,
+html .auth-login-shell textarea:-webkit-autofill:focus {
+  -webkit-text-fill-color: #f8fafc !important;
+  box-shadow: 0 0 0 1000px #0f172a inset, 0 0 0 3px rgb(34 211 238 / 0.22) !important;
   caret-color: #f8fafc !important;
 }
 
@@ -973,8 +983,8 @@ summary > .rounded-full {
  * its own look.
  * ======================================================================== */
 
-/* No frosted glass. */
-[class*="backdrop-blur"] {
+/* No frosted glass, except on the sign-in screen, whose card sits over the background video. */
+[class*="backdrop-blur"]:not(.auth-login-shell, .auth-login-shell *) {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }

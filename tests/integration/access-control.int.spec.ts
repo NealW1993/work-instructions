@@ -112,7 +112,7 @@ test.describe("sign-in and PIN security", () => {
       await page.goto("/login");
       await page.getByLabel("Employee ID").first().fill(user.employeeId);
       await page.getByLabel("6-Digit PIN").first().fill("482916");
-      await page.getByRole("button", { name: /Login with PIN/ }).click();
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
       await page.waitForURL(/\/dashboard/, { timeout: 120_000 });
       await page.goto("/account");
       await page.getByRole("button", { name: "Change PIN" }).click();
@@ -256,7 +256,7 @@ test.describe("role permissions", () => {
       await page.goto("/login");
       await page.getByLabel("Employee ID").first().fill(user.employeeId);
       await page.getByLabel("6-Digit PIN").first().fill("482916");
-      await page.getByRole("button", { name: /Login with PIN/ }).click();
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
       await page.waitForURL(/\/dashboard/, { timeout: 120_000 });
       await serviceClient().from("profiles").update({ is_active: false }).eq("id", user.id);
       await page.goto("/dashboard");

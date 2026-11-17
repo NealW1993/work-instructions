@@ -1,8 +1,19 @@
 "use client";
 
-import { CircleHelp } from "lucide-react";
+import {
+  ArrowLeft,
+  LifeBuoy,
+  Loader2,
+  LogIn,
+  type LucideIcon,
+  MessageSquare,
+  Send,
+  UserPlus,
+  X,
+} from "lucide-react";
+import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 
 import { FloatingStatusNotices } from "@/components/ui/floating-status-notices";
 import { PinInput } from "@/components/ui/pin-input";
@@ -107,7 +118,8 @@ async function resolvePostLoginDestination(userId: string) {
 export function LoginPanel({ inactiveSession = false }: { inactiveSession?: boolean }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [showCreateAccount, setShowCreateAccount] = useState(false);
+  // The card shows one task at a time: signing in, or creating an account.
+  const [view, setView] = useState<"signin" | "signup">("signin");
 
   // A session whose account was deactivated (or never got a profile) is signed out here,
   // so the browser does not keep presenting a token the app will refuse.
@@ -140,6 +152,22 @@ export function LoginPanel({ inactiveSession = false }: { inactiveSession?: bool
   const [helpStatus, setHelpStatus] = useState<string | null>(null);
   const [helpError, setHelpError] = useState<string | null>(null);
   const backgroundVideoRef = useRef<HTMLVideoElement | null>(null);
+  const helpTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const feedbackTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const helpWasOpenRef = useRef(false);
+  const feedbackWasOpenRef = useRef(false);
+
+  // When a dialog closes (Escape, Cancel, the close button, a click outside or a successful send),
+  // keyboard focus goes back to the button that opened it.
+  useEffect(() => {
+    if (helpWasOpenRef.current && !helpOpen) helpTriggerRef.current?.focus();
+    helpWasOpenRef.current = helpOpen;
+  }, [helpOpen]);
+
+  useEffect(() => {
+    if (feedbackWasOpenRef.current && !feedbackOpen) feedbackTriggerRef.current?.focus();
+    feedbackWasOpenRef.current = feedbackOpen;
+  }, [feedbackOpen]);
 
   useEffect(() => {
     if (!feedbackOpen && !helpOpen) {
@@ -359,8 +387,9 @@ export function LoginPanel({ inactiveSession = false }: { inactiveSession?: bool
       });
 
       await parseJsonResponse(response);
-      setFeedbackStatus("Feedback sent anonymously. Thank you.");
+      setFeedbackStatus("Thank you. Your feedback was sent anonymously.");
       setFeedbackMessage("");
+      setFeedbackOpen(false);
     } catch (caughtError) {
       const normalizedError =
         caughtError instanceof Error ? caughtError.message : "Unable to send feedback.";
@@ -406,6 +435,7 @@ export function LoginPanel({ inactiveSession = false }: { inactiveSession?: bool
       await parseJsonResponse(response);
       setHelpStatus("Help request sent. A system admin will follow up.");
       setHelpMessage("");
+      setHelpOpen(false);
     } catch (caughtError) {
       const normalizedError =
         caughtError instanceof Error ? caughtError.message : "Unable to send help request.";
@@ -416,6 +446,18 @@ export function LoginPanel({ inactiveSession = false }: { inactiveSession?: bool
   }
 
   const signupPinMismatch = signupPinConfirm.length > 0 && signupPin !== signupPinConfirm;
+
+  function openHelp() {
+    setHelpOpen(true);
+    setHelpError(null);
+    setHelpStatus(null);
+  }
+
+  function openFeedback() {
+    setFeedbackOpen(true);
+    setFeedbackError(null);
+    setFeedbackStatus(null);
+  }
 
   return (
     <>
@@ -433,23 +475,11 @@ export function LoginPanel({ inactiveSession = false }: { inactiveSession?: bool
             message: error,
             onDismiss: () => setError(null),
           },
-          feedbackError && {
-            id: "login-feedback-error",
-            tone: "error",
-            message: feedbackError,
-            onDismiss: () => setFeedbackError(null),
-          },
           feedbackStatus && {
             id: "login-feedback-status",
             tone: "success",
             message: feedbackStatus,
             onDismiss: () => setFeedbackStatus(null),
-          },
-          helpError && {
-            id: "login-help-error",
-            tone: "error",
-            message: helpError,
-            onDismiss: () => setHelpError(null),
           },
           helpStatus && {
             id: "login-help-status",
@@ -474,269 +504,386 @@ export function LoginPanel({ inactiveSession = false }: { inactiveSession?: bool
         </video>
       </div>
       <div className="pointer-events-none fixed inset-0 -z-10 bg-slate-950/58" />
-      <div className="auth-login-shell relative z-10 mx-auto w-full max-w-2xl rounded-[2rem] border border-white/20 bg-slate-950/32 p-5 text-slate-100 shadow-2xl shadow-black/45 backdrop-blur-2xl md:p-8">
-        <div className="grid gap-2 text-center">
-          <h1 className="text-4xl font-extrabold leading-tight text-white md:text-5xl">
-            Visual work instructions.
-          </h1>
-          <p className="text-base text-slate-200/90">
-            Reduce training time and increase quality.
-          </p>
+
+      <div className="auth-login-shell relative z-10 mx-auto w-full max-w-[28rem] overflow-hidden rounded-2xl border border-white/10 bg-slate-950/75 p-6 text-slate-100 shadow-2xl shadow-black/50 backdrop-blur-xl sm:p-8">
+        <div aria-hidden="true" className={CARD_ACCENT_CLASS} />
+
+        <div className="flex items-center gap-3">
+          <Image
+            src="/delta-logo.svg"
+            alt=""
+            width={40}
+            height={40}
+            priority
+            className="h-10 w-10 shrink-0 rounded-full ring-1 ring-white/25"
+          />
+          <span className="text-base font-semibold tracking-tight text-white">Work Instructions</span>
         </div>
 
-        {searchParams.get("error") === "missing_profile" || inactiveSession ? (
-          <p role="alert" className="mt-4 rounded-2xl border border-amber-400/40 bg-amber-500/15 p-3 text-sm text-amber-100">
-            This account is not active. Ask your system administrator to reactivate it, then sign in again.
-          </p>
-        ) : null}
-
-        <form
-          className="mx-auto mt-5 grid w-full max-w-xl justify-items-center gap-3"
-          onSubmit={handlePinLogin}
-        >
-          <label className="grid w-full max-w-[360px] gap-1 text-left text-sm text-slate-200">
-            <span>Employee ID</span>
-            <input
-              required
-              inputMode="numeric"
-              pattern="[0-9]{1,6}"
-              maxLength={6}
-              value={pinEmployeeId}
-              onChange={(event) => setPinEmployeeId(normalizeEmployeeId(event.target.value))}
-              className="rounded-xl border border-white/20 bg-black/65 px-3 py-2 text-slate-100 outline-none transition focus:border-slate-300"
-            />
-          </label>
-          <label className="grid w-full max-w-[360px] gap-1 text-left text-sm text-slate-200">
-            <span>6-Digit PIN</span>
-            <PinInput
-              required
-              value={pinLoginValue}
-              onChange={setPinLoginValue}
-              className="border-white/20 bg-black/65 text-slate-100 tracking-[0.35em] focus:border-slate-300 dark:border-white/20 dark:bg-black/65 dark:text-slate-100"
-            />
-          </label>
-          <div className="mt-1 flex w-full max-w-[360px] items-center justify-center gap-2">
-            <button
-              type="submit"
-              disabled={busy}
-              className="flex-1 rounded-xl bg-white/40 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/50 disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {busy ? "Validating PIN..." : "Login with PIN"}
-            </button>
-            <div className="group relative inline-flex shrink-0">
-              <button
-                type="button"
-                aria-label="Need help?"
-                onClick={() => {
-                  setHelpOpen(true);
-                  setHelpError(null);
-                  setHelpStatus(null);
-                }}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/20 bg-black/50 text-slate-100 transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
-              >
-                <CircleHelp size={18} />
-              </button>
-              <div className="pointer-events-none absolute bottom-[calc(100%+0.55rem)] right-0 z-20 w-60 rounded-xl border border-white/20 bg-slate-950/95 p-2.5 text-left text-xs text-slate-200 opacity-0 shadow-xl transition group-hover:opacity-100 group-focus-within:opacity-100">
-                If you need help logging in, contact the system admin.
-              </div>
+        {view === "signin" ? (
+          <>
+            <div className="mt-7 grid gap-1.5">
+              <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
+                Visual work instructions.
+              </h1>
+              <p className="text-sm text-slate-300">Reduce training time and increase quality.</p>
             </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setShowCreateAccount((current) => !current)}
-            className="justify-self-center w-full max-w-[360px] rounded-xl border border-white/20 bg-black/50 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
-          >
-            {showCreateAccount ? "Hide Create Account" : "Create Account"}
-          </button>
-        </form>
 
-        {showCreateAccount ? (
-          <form
-            className="mx-auto mt-4 grid w-full max-w-xl gap-3 rounded-2xl border border-white/30 bg-gradient-to-br from-white/[0.16] via-white/[0.1] to-white/[0.06] p-4 shadow-[0_18px_50px_rgba(2,6,23,0.28)] backdrop-blur-2xl md:p-5"
-            onSubmit={handleSignup}
-          >
-            <label className="grid gap-1 text-left text-sm text-slate-200">
-              <span>Full Name</span>
-              <input
-                required
-                value={signupName}
-                onChange={(event) => setSignupName(event.target.value)}
-                className="rounded-xl border border-white/20 bg-black/65 px-3 py-2 text-slate-100 outline-none transition focus:border-slate-300"
-              />
-            </label>
-            <label className="grid gap-1 text-left text-sm text-slate-200">
-              <span>Email</span>
-              <input
-                required
-                type="email"
-                value={signupEmail}
-                onChange={(event) => setSignupEmail(event.target.value)}
-                className="rounded-xl border border-white/20 bg-black/65 px-3 py-2 text-slate-100 outline-none transition focus:border-slate-300"
-              />
-            </label>
-            <label className="grid gap-1 text-left text-sm text-slate-200">
-              <span>Employee ID</span>
-              <input
-                required
-                inputMode="numeric"
-                pattern="[0-9]{1,6}"
-                maxLength={6}
-                value={signupEmployeeId}
-                onChange={(event) =>
-                  setSignupEmployeeId(normalizeEmployeeId(event.target.value))
-                }
-                className="rounded-xl border border-white/20 bg-black/65 px-3 py-2 text-slate-100 outline-none transition focus:border-slate-300"
-              />
-            </label>
-            <label className="grid gap-1 text-left text-sm text-slate-200">
-              <span>6-Digit PIN</span>
-              <PinInput
-                required
-                value={signupPin}
-                onChange={setSignupPin}
-                className="border-white/20 bg-black/65 text-slate-100 tracking-[0.35em] focus:border-slate-300 dark:border-white/20 dark:bg-black/65 dark:text-slate-100"
-              />
-            </label>
-            <label className="grid gap-1 text-left text-sm text-slate-200">
-              <span>Confirm PIN</span>
-              <PinInput
-                required
-                value={signupPinConfirm}
-                onChange={setSignupPinConfirm}
-                className="border-white/20 bg-black/65 text-slate-100 tracking-[0.35em] focus:border-slate-300 dark:border-white/20 dark:bg-black/65 dark:text-slate-100"
-              />
-            </label>
-            {signupPinMismatch ? (
-              <p className="text-sm text-rose-200">PIN and Confirm PIN do not match.</p>
+            {searchParams.get("error") === "missing_profile" || inactiveSession ? (
+              <p
+                role="alert"
+                className="mt-5 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-100"
+              >
+                This account is not active. Ask your system administrator to reactivate it, then sign in again.
+              </p>
             ) : null}
-            <button
-              type="submit"
-              disabled={busy || signupPinMismatch}
-              className="mt-1 justify-self-center w-full max-w-[220px] rounded-xl bg-white/40 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/50 disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {busy ? "Creating account..." : "Create account"}
-            </button>
-            <p className="text-xs text-slate-300/85">
-              New accounts are created as <strong>user</strong> by default. System admin can
-              promote roles in User Admin.
-            </p>
-          </form>
-        ) : null}
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-white/15 pt-3 text-xs text-slate-300/80">
-          <p>&copy; 2026</p>
+            <form className="mt-6 grid gap-4" onSubmit={handlePinLogin}>
+              <label className="grid gap-1.5">
+                <span className={LABEL_CLASS}>Employee ID</span>
+                <input
+                  required
+                  inputMode="numeric"
+                  pattern="[0-9]{1,6}"
+                  maxLength={6}
+                  autoComplete="username"
+                  placeholder="Your employee number"
+                  value={pinEmployeeId}
+                  onChange={(event) => setPinEmployeeId(normalizeEmployeeId(event.target.value))}
+                  className={FIELD_CLASS}
+                />
+              </label>
+              <label className="grid gap-1.5">
+                <span className={LABEL_CLASS}>6-digit PIN</span>
+                <PinInput
+                  required
+                  value={pinLoginValue}
+                  onChange={setPinLoginValue}
+                  className={PIN_FIELD_CLASS}
+                  toggleClassName={PIN_TOGGLE_CLASS}
+                />
+              </label>
+              <button type="submit" disabled={busy} className={`${PRIMARY_BUTTON_CLASS} mt-1`}>
+                {busy ? (
+                  <Loader2 aria-hidden="true" size={18} className="animate-spin" />
+                ) : (
+                  <LogIn aria-hidden="true" size={18} />
+                )}
+                {busy ? "Signing in..." : "Sign in"}
+              </button>
+              <div className="flex justify-center">
+                <button type="button" ref={helpTriggerRef} onClick={openHelp} className={LINK_BUTTON_CLASS}>
+                  <LifeBuoy aria-hidden="true" size={15} />
+                  Trouble signing in?
+                </button>
+              </div>
+            </form>
+
+            <div className="mt-6 flex items-center gap-3 text-xs font-medium uppercase tracking-wider text-slate-500">
+              <span aria-hidden="true" className="h-px flex-1 bg-white/10" />
+              New here?
+              <span aria-hidden="true" className="h-px flex-1 bg-white/10" />
+            </div>
+            <button type="button" onClick={() => setView("signup")} className={`${SECONDARY_BUTTON_CLASS} mt-4`}>
+              <UserPlus aria-hidden="true" size={18} />
+              Create account
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="mt-7 grid gap-1.5">
+              <h1 className="text-2xl font-bold tracking-tight text-white">Create your account</h1>
+              <p className="text-sm text-slate-300">
+                New accounts start as operators. A system admin can change your role later.
+              </p>
+            </div>
+
+            <form className="mt-6 grid gap-4" onSubmit={handleSignup}>
+              <label className="grid gap-1.5">
+                <span className={LABEL_CLASS}>Full name</span>
+                <input
+                  required
+                  autoComplete="name"
+                  value={signupName}
+                  onChange={(event) => setSignupName(event.target.value)}
+                  className={FIELD_CLASS}
+                />
+              </label>
+              <label className="grid gap-1.5">
+                <span className={LABEL_CLASS}>Email</span>
+                <input
+                  required
+                  type="email"
+                  autoComplete="email"
+                  value={signupEmail}
+                  onChange={(event) => setSignupEmail(event.target.value)}
+                  className={FIELD_CLASS}
+                />
+              </label>
+              <label className="grid gap-1.5">
+                <span className={LABEL_CLASS}>Employee ID</span>
+                <input
+                  required
+                  inputMode="numeric"
+                  pattern="[0-9]{1,6}"
+                  maxLength={6}
+                  value={signupEmployeeId}
+                  onChange={(event) => setSignupEmployeeId(normalizeEmployeeId(event.target.value))}
+                  className={FIELD_CLASS}
+                />
+              </label>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="grid gap-1.5">
+                  <span className={LABEL_CLASS}>6-digit PIN</span>
+                  <PinInput
+                    required
+                    value={signupPin}
+                    onChange={setSignupPin}
+                    className={PIN_FIELD_CLASS}
+                    toggleClassName={PIN_TOGGLE_CLASS}
+                  />
+                </label>
+                <label className="grid gap-1.5">
+                  <span className={LABEL_CLASS}>Confirm PIN</span>
+                  <PinInput
+                    required
+                    value={signupPinConfirm}
+                    onChange={setSignupPinConfirm}
+                    className={PIN_FIELD_CLASS}
+                    toggleClassName={PIN_TOGGLE_CLASS}
+                  />
+                </label>
+              </div>
+              {signupPinMismatch ? (
+                <p role="alert" className="text-sm text-rose-300">
+                  The two PINs do not match.
+                </p>
+              ) : null}
+              <button
+                type="submit"
+                disabled={busy || signupPinMismatch}
+                className={`${PRIMARY_BUTTON_CLASS} mt-1`}
+              >
+                {busy ? (
+                  <Loader2 aria-hidden="true" size={18} className="animate-spin" />
+                ) : (
+                  <UserPlus aria-hidden="true" size={18} />
+                )}
+                {busy ? "Creating account..." : "Create account"}
+              </button>
+            </form>
+
+            <div className="mt-4 flex justify-center">
+              <button type="button" onClick={() => setView("signin")} className={LINK_BUTTON_CLASS}>
+                <ArrowLeft aria-hidden="true" size={15} />
+                Back to sign in
+              </button>
+            </div>
+          </>
+        )}
+
+        <div className="mt-8 flex items-center justify-between gap-3 border-t border-white/10 pt-4 text-xs text-slate-400">
+          <p>&copy; 2026 Work Instructions</p>
           <button
             type="button"
-            onClick={() => {
-              setFeedbackOpen(true);
-              setFeedbackError(null);
-              setFeedbackStatus(null);
-            }}
-            className="rounded-lg border border-white/20 bg-black/45 px-2.5 py-1 font-semibold text-slate-100 transition hover:bg-white/10"
+            ref={feedbackTriggerRef}
+            onClick={openFeedback}
+            className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 font-medium text-slate-300 transition hover:bg-white/5 hover:text-white"
           >
-            Leave Feedback
+            <MessageSquare aria-hidden="true" size={14} />
+            Leave feedback
           </button>
         </div>
       </div>
 
       {feedbackOpen ? (
-        <div className="auth-login-shell fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
-          <div className="grid w-full max-w-lg gap-3 rounded-2xl border border-white/20 bg-slate-950/90 p-4 text-slate-100 shadow-2xl">
-            <div className="grid gap-1">
-              <h3 className="text-lg font-bold text-slate-100">Leave Anonymous Feedback</h3>
-              <p className="text-sm text-slate-300">
-                This will email your feedback anonymously to the system admin.
-              </p>
-            </div>
-
-            <form className="grid gap-3" onSubmit={handleSubmitFeedback}>
-              <label className="grid gap-1 text-sm text-slate-200">
-                <span>Feedback</span>
-                <textarea
-                  value={feedbackMessage}
-                  onChange={(event) => setFeedbackMessage(event.target.value)}
-                  rows={6}
-                  maxLength={4000}
-                  placeholder="What should we improve?"
-                  className="rounded-xl border border-white/20 bg-black/60 px-3 py-2 text-slate-100 outline-none transition focus:border-slate-300"
-                />
-              </label>
-
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setFeedbackOpen(false)}
-                  className="rounded-xl border border-white/20 bg-black/45 px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
-                >
-                  Close
-                </button>
-                <button
-                  type="submit"
-                  disabled={feedbackBusy}
-                  className="rounded-xl bg-white/40 px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/50 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  {feedbackBusy ? "Sending..." : "Send Feedback"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <LoginDialog
+          id="login-feedback"
+          icon={MessageSquare}
+          title="Leave feedback"
+          description="Tell us what would make this system better. Your feedback is sent anonymously to the system admin."
+          onClose={() => setFeedbackOpen(false)}
+        >
+          <form className="grid gap-4" onSubmit={handleSubmitFeedback}>
+            <label className="grid gap-1.5">
+              <span className={LABEL_CLASS}>Your feedback</span>
+              <textarea
+                autoFocus
+                value={feedbackMessage}
+                onChange={(event) => setFeedbackMessage(event.target.value)}
+                rows={5}
+                maxLength={4000}
+                placeholder="What should we improve?"
+                className={TEXTAREA_CLASS}
+              />
+            </label>
+            {feedbackError ? <DialogError message={feedbackError} /> : null}
+            <DialogActions
+              busy={feedbackBusy}
+              submitLabel="Send feedback"
+              busyLabel="Sending..."
+              onCancel={() => setFeedbackOpen(false)}
+            />
+          </form>
+        </LoginDialog>
       ) : null}
 
       {helpOpen ? (
-        <div className="auth-login-shell fixed inset-0 z-[121] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
-          <div className="grid w-full max-w-lg gap-3 rounded-2xl border border-white/20 bg-slate-950/90 p-4 text-slate-100 shadow-2xl">
-            <div className="grid gap-1">
-              <h3 className="text-lg font-bold text-slate-100">Request Help</h3>
-              <p className="text-sm text-slate-300">
-                Send your name and a short message to the system admin.
-              </p>
-            </div>
-
-            <form className="grid gap-3" onSubmit={handleSubmitHelpRequest}>
-              <label className="grid gap-1 text-sm text-slate-200">
-                <span>Name</span>
-                <input
-                  value={helpName}
-                  onChange={(event) => setHelpName(event.target.value)}
-                  maxLength={120}
-                  placeholder="Your name"
-                  className="rounded-xl border border-white/20 bg-black/60 px-3 py-2 text-slate-100 outline-none transition focus:border-slate-300"
-                />
-              </label>
-
-              <label className="grid gap-1 text-sm text-slate-200">
-                <span>Message</span>
-                <textarea
-                  value={helpMessage}
-                  onChange={(event) => setHelpMessage(event.target.value)}
-                  rows={6}
-                  maxLength={4000}
-                  placeholder="How can we help?"
-                  className="rounded-xl border border-white/20 bg-black/60 px-3 py-2 text-slate-100 outline-none transition focus:border-slate-300"
-                />
-              </label>
-
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setHelpOpen(false)}
-                  className="rounded-xl border border-white/20 bg-black/45 px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
-                >
-                  Close
-                </button>
-                <button
-                  type="submit"
-                  disabled={helpBusy}
-                  className="rounded-xl bg-white/40 px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/50 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  {helpBusy ? "Sending..." : "Send Help Request"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <LoginDialog
+          id="login-help"
+          icon={LifeBuoy}
+          title="Trouble signing in?"
+          description="Send a short message and a system admin will follow up."
+          onClose={() => setHelpOpen(false)}
+        >
+          <form className="grid gap-4" onSubmit={handleSubmitHelpRequest}>
+            <ul className="grid gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3.5 py-3 text-sm text-slate-300">
+              <li>Locked out after too many wrong PINs? Wait one minute, then try again.</li>
+              <li>Forgot your PIN? A system admin can reset it for you.</li>
+            </ul>
+            <label className="grid gap-1.5">
+              <span className={LABEL_CLASS}>Your name</span>
+              <input
+                autoFocus
+                value={helpName}
+                onChange={(event) => setHelpName(event.target.value)}
+                maxLength={120}
+                autoComplete="name"
+                className={FIELD_CLASS}
+              />
+            </label>
+            <label className="grid gap-1.5">
+              <span className={LABEL_CLASS}>What do you need help with?</span>
+              <textarea
+                value={helpMessage}
+                onChange={(event) => setHelpMessage(event.target.value)}
+                rows={4}
+                maxLength={4000}
+                placeholder="For example: I forgot my PIN, Employee ID 1042."
+                className={TEXTAREA_CLASS}
+              />
+            </label>
+            {helpError ? <DialogError message={helpError} /> : null}
+            <DialogActions
+              busy={helpBusy}
+              submitLabel="Send request"
+              busyLabel="Sending..."
+              onCancel={() => setHelpOpen(false)}
+            />
+          </form>
+        </LoginDialog>
       ) : null}
     </>
+  );
+}
+
+const LABEL_CLASS = "text-sm font-medium text-slate-200";
+const FIELD_CLASS = "h-12 w-full rounded-lg border px-3.5 text-base outline-none transition";
+const TEXTAREA_CLASS = "w-full rounded-lg border px-3.5 py-3 text-base outline-none transition";
+const PIN_FIELD_CLASS = "h-12 rounded-lg px-3.5 pr-12 text-base tracking-[0.35em]";
+const PIN_TOGGLE_CLASS = "right-1.5 px-2 text-slate-400 hover:text-white dark:text-slate-400 dark:hover:text-white";
+const PRIMARY_BUTTON_CLASS =
+  "inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-cyan-600 px-5 text-base font-semibold text-white shadow-lg shadow-cyan-950/40 transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60";
+const SECONDARY_BUTTON_CLASS =
+  "inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg border border-white/15 bg-white/5 px-5 text-base font-semibold text-slate-100 transition hover:border-white/25 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60";
+const LINK_BUTTON_CLASS =
+  "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium text-cyan-300 underline-offset-4 transition hover:text-cyan-200 hover:underline";
+const CARD_ACCENT_CLASS =
+  "pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-cyan-400/80 to-transparent";
+
+/** A dialog on the sign-in screen: the same dark card as the sign-in form, closed by Escape, the X or a click outside. */
+function LoginDialog({
+  id,
+  icon: Icon,
+  title,
+  description,
+  onClose,
+  children,
+}: {
+  id: string;
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className="auth-login-shell fixed inset-0 z-[120] flex items-center justify-center overflow-y-auto bg-slate-950/70 p-4 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={`${id}-title`}
+        aria-describedby={`${id}-description`}
+        className="relative my-auto w-full max-w-md overflow-hidden rounded-2xl border border-white/10 bg-slate-950/95 p-6 text-slate-100 shadow-2xl shadow-black/60"
+      >
+        <div aria-hidden="true" className={CARD_ACCENT_CLASS} />
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-400 transition hover:bg-white/10 hover:text-white"
+        >
+          <X aria-hidden="true" size={18} />
+        </button>
+        <div className="flex items-start gap-3 pr-8">
+          <span
+            aria-hidden="true"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-cyan-500/15 text-cyan-300 ring-1 ring-cyan-400/20"
+          >
+            <Icon size={20} />
+          </span>
+          <div className="grid gap-1">
+            <h2 id={`${id}-title`} className="text-lg font-semibold text-white">
+              {title}
+            </h2>
+            <p id={`${id}-description`} className="text-sm text-slate-300">
+              {description}
+            </p>
+          </div>
+        </div>
+        <div className="mt-5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function DialogError({ message }: { message: string }) {
+  return (
+    <p role="alert" className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2.5 text-sm text-rose-100">
+      {message}
+    </p>
+  );
+}
+
+function DialogActions({
+  busy,
+  submitLabel,
+  busyLabel,
+  onCancel,
+}: {
+  busy: boolean;
+  submitLabel: string;
+  busyLabel: string;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="mt-1 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+      <button type="button" onClick={onCancel} className={`${SECONDARY_BUTTON_CLASS} h-11 sm:w-auto`}>
+        Cancel
+      </button>
+      <button type="submit" disabled={busy} className={`${PRIMARY_BUTTON_CLASS} h-11 sm:w-auto`}>
+        {busy ? (
+          <Loader2 aria-hidden="true" size={17} className="animate-spin" />
+        ) : (
+          <Send aria-hidden="true" size={17} />
+        )}
+        {busy ? busyLabel : submitLabel}
+      </button>
+    </div>
   );
 }

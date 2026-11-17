@@ -100,7 +100,7 @@ export async function signIn(page: Page, role: Role) {
   await page.goto("/login");
   await page.getByLabel("Employee ID").first().fill(user.employeeId);
   await page.getByLabel("6-Digit PIN").first().fill(user.pin);
-  await page.getByRole("button", { name: /Login with PIN/ }).click();
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.waitForURL(/\/(dashboard|instructions|account)/, { timeout: 120_000 });
 }
 
