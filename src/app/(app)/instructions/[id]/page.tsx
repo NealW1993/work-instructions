@@ -9,6 +9,7 @@ import { DeleteInstructionButton } from "@/components/instructions/delete-instru
 import { InstructionBackButton } from "@/components/instructions/instruction-back-button";
 import { InstructionArchivedRedirectGuard } from "@/components/instructions/instruction-archived-redirect-guard";
 import { InstructionBodyLightbox } from "@/components/instructions/instruction-body-lightbox";
+import { InstructionChecklistSession } from "@/components/instructions/instruction-checklist-session";
 import { InstructionMediaSection } from "@/components/instructions/instruction-media-section";
 import { InstructionForkMergeControl } from "@/components/instructions/instruction-fork-merge-control";
 import {
@@ -400,6 +401,8 @@ function normalizeMergePreviewMediaRows(
 function renderInstructionContent(
   value: string,
   mediaUrlRuntime?: MediaUrlRuntimeContext,
+  /** On screen, readers can tick the checklist for their own session; the printed copy stays blank. */
+  checklistStorageKey?: string,
 ) {
   if (!value.trim()) {
     return null;
@@ -411,11 +414,21 @@ function renderInstructionContent(
     normalizeVideoMarkupForPlayback(sanitizedMarkup),
     mediaUrlRuntime,
   );
-  return (
+  const body = (
     <div
       className="prose-markdown"
       dangerouslySetInnerHTML={{ __html: normalizedMarkup }}
     />
+  );
+  const checklistItemCount = normalizedMarkup.match(/<li\b[^>]*\bdata-type="taskItem"/g)?.length ?? 0;
+  if (!checklistStorageKey || checklistItemCount === 0) {
+    return body;
+  }
+
+  return (
+    <InstructionChecklistSession storageKey={checklistStorageKey} itemCount={checklistItemCount}>
+      {body}
+    </InstructionChecklistSession>
   );
 }
 
@@ -1647,7 +1660,11 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
           ) : null}
           <div className="screen-work-instructions-body min-w-0 max-w-full">
             <InstructionBodyLightbox>
-              {renderInstructionContent(instruction.body_markdown, mediaUrlRuntime)}
+              {renderInstructionContent(
+                instruction.body_markdown,
+                mediaUrlRuntime,
+                `${instruction.id}:${instruction.updated_at}`,
+              )}
             </InstructionBodyLightbox>
           </div>
         </section>

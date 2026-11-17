@@ -12,7 +12,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "npm run test:unit",
-    "test:unit": "node --test scripts/tests/*.test.mjs && playwright test tests/manufacturing.spec.ts tests/backend-gateway.spec.ts tests/media.spec.ts tests/editor-content.spec.ts tests/dashboard-layout.spec.ts tests/secret-box.spec.ts tests/rich-editor-markdown.spec.ts",
+    "test:unit": "node --test scripts/tests/*.test.mjs && playwright test tests/manufacturing.spec.ts tests/backend-gateway.spec.ts tests/media.spec.ts tests/editor-content.spec.ts tests/dashboard-layout.spec.ts tests/secret-box.spec.ts tests/rich-editor-markdown.spec.ts tests/search-match.spec.ts tests/session-exit.spec.ts",
     "test:e2e": "playwright test --config=playwright.ui.config.ts",
     "test:sql": "node scripts/test-database.mjs",
     "docker:build": "docker build -t work-instructions:latest .",

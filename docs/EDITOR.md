@@ -33,6 +33,8 @@ Use the toolbar, the usual keyboard shortcuts, or type a Markdown shortcut at th
 
 Pasting from Word or a web page keeps headings, lists, tables and links. Plain text that is clearly Markdown, for example copied from a `.md` file, is formatted instead of being pasted as symbols. There is always an empty line below a final table, chart or photo, so you can click there or press Ctrl+End to keep writing.
 
+When an instruction is read, its checklist can be ticked while working through it: tap a box or the item's text. A line above the instructions counts the ticks and has **Clear ticks**. Ticks are only for the person reading: they stay while that browser tab is open (also when coming back to the instruction), clear when the tab is closed, start again when the instruction changes, and are never saved to the instruction or printed. The text itself cannot be edited there. Every reader starts with an empty checklist, even if boxes were left ticked in the editor.
+
 ## Safety callouts
 
 The **Callout** menu adds a coloured, labelled box that operators cannot miss on screen or in print. With text selected it wraps the selection; with the cursor inside a callout it changes the callout's kind or removes it.

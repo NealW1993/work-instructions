@@ -222,3 +222,74 @@ export function takePendingPostLoginScrollRestoreForPath(path: string): PostLogi
 
   return parsed;
 }
+
+const POST_LOGIN_RESUME_STORAGE_KEY = "__postLoginResumeRoute";
+const POST_LOGIN_WELCOME_STORAGE_KEY = "__postLoginWelcome";
+
+function takeSessionValue(key: string): unknown {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    window.sessionStorage.removeItem(key);
+    return raw ? (JSON.parse(raw) as unknown) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveSessionValue(key: string, value: unknown) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Persistence is best-effort.
+  }
+}
+
+/**
+ * After an automatic sign-out the dashboard loads first and then opens the page the user was on,
+ * so Back returns to the dashboard. Sign-in is a full page load, so the page is handed over here.
+ */
+export function savePendingPostLoginResumeRoute(path: string) {
+  const normalizedPath = normalizeAppRestorePath(path);
+  if (normalizedPath) {
+    saveSessionValue(POST_LOGIN_RESUME_STORAGE_KEY, { path: normalizedPath, savedAt: Date.now() });
+  }
+}
+
+export function takePendingPostLoginResumeRoute(): string | null {
+  const parsed = takeSessionValue(POST_LOGIN_RESUME_STORAGE_KEY) as { path?: unknown; savedAt?: unknown } | null;
+  if (!parsed || !isFiniteNumber(parsed.savedAt) || Date.now() - parsed.savedAt > MAX_POST_LOGIN_SCROLL_AGE_MS) {
+    return null;
+  }
+
+  return normalizeAppRestorePath(parsed.path);
+}
+
+export interface PostLoginWelcome {
+  name: string;
+  promoted: boolean;
+}
+
+/** A new account is greeted on the first page after it signs in. */
+export function savePostLoginWelcome(welcome: PostLoginWelcome) {
+  saveSessionValue(POST_LOGIN_WELCOME_STORAGE_KEY, { ...welcome, savedAt: Date.now() });
+}
+
+export function takePostLoginWelcome(): PostLoginWelcome | null {
+  const parsed = takeSessionValue(POST_LOGIN_WELCOME_STORAGE_KEY) as
+    | { name?: unknown; promoted?: unknown; savedAt?: unknown }
+    | null;
+  if (!parsed || !isFiniteNumber(parsed.savedAt) || Date.now() - parsed.savedAt > MAX_POST_LOGIN_SCROLL_AGE_MS) {
+    return null;
+  }
+
+  const name = typeof parsed.name === "string" ? parsed.name.trim().slice(0, 120) : "";
+  return { name, promoted: parsed.promoted === true };
+}

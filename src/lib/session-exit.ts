@@ -19,8 +19,22 @@ function getSameTabExitKey(userId: string) {
   return `${SAME_TAB_EXIT_KEY_PREFIX}:${userId}`;
 }
 
+// Set when this page signs the user out on purpose (the account menu, the sign-out button or the
+// inactivity timeout). Sign-out ends with a full page load to the sign-in page, which fires the same
+// "page is closing" events as closing the browser; without this, that load left a "sign out on the
+// next visit" mark behind, and the next sign-in was signed straight out again.
+let signingOutOnPurpose = false;
+
+/** Call before an intentional sign-out leaves the page, so leaving is not mistaken for closing the browser. */
+export function prepareIntentionalSignOut(userId: string | null | undefined) {
+  signingOutOnPurpose = true;
+  if (userId) {
+    clearBrowserExitSignOutPending(userId);
+  }
+}
+
 export function markBrowserExitSignOutPending(userId: string) {
-  if (typeof window === "undefined") {
+  if (typeof window === "undefined" || signingOutOnPurpose) {
     return;
   }
 

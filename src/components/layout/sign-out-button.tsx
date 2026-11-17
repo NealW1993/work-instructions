@@ -1,16 +1,14 @@
 "use client";
 
 import { LogOut } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { usePostHog } from "posthog-js/react";
 
 import { clearSessionStart, getSessionStartTime } from "@/lib/session-timer";
-import { clearBrowserExitSignOutPending } from "@/lib/session-exit";
+import { prepareIntentionalSignOut } from "@/lib/session-exit";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { persistActiveThemePreference } from "@/lib/theme-client";
 
 export function SignOutButton() {
-  const router = useRouter();
   const posthog = usePostHog();
 
   async function handleSignOut() {
@@ -52,13 +50,12 @@ export function SignOutButton() {
 
     await supabase.auth.signOut();
     clearSessionStart();
-    if (user?.id) {
-      clearBrowserExitSignOutPending(user.id);
-    }
+    prepareIntentionalSignOut(user?.id);
     posthog?.reset();
     persistActiveThemePreference();
-    router.push("/login");
-    router.refresh();
+    // A full page load: it drops pages the client router fetched while signed in, which would
+    // otherwise be reused after the next sign-in and bounce between the dashboard and this page.
+    window.location.replace("/login");
   }
 
   return (

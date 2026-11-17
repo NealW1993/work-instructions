@@ -165,11 +165,30 @@ body {
   100% {
     opacity: 0;
     transform: translateY(-0.35rem) scale(0.98);
+    /* Once faded out it no longer catches clicks meant for the page underneath. */
+    visibility: hidden;
+  }
+}
+
+@keyframes system-status-toast-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-0.6rem) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }
 
 .system-status-toast {
   animation: system-status-toast-life 4.2s ease-in-out forwards;
+}
+
+/* Errors stay until they are dismissed, so they only fade in. */
+.system-status-toast[role="alert"] {
+  animation: system-status-toast-enter 0.3s ease-out both;
 }
 
 .dark body {
@@ -570,6 +589,15 @@ h6 {
 .prose-markdown li[data-type="taskItem"] > label input { width: 1.1rem; height: 1.1rem; accent-color: #0891b2; }
 .prose-markdown li[data-type="taskItem"] > div { flex: 1; min-width: 0; }
 .prose-markdown li[data-type="taskItem"] > div > p { margin: 0; }
+/* On the instruction page, readers tick the checklist for their own session (InstructionChecklistSession). */
+.prose-markdown li[data-session-checklist] > label { padding-top: 0.1rem; }
+.prose-markdown li[data-session-checklist] > label input { width: 1.3rem; height: 1.3rem; cursor: pointer; }
+.prose-markdown li[data-session-checklist] > div { cursor: pointer; }
+.prose-markdown li[data-session-checklist][data-checked="true"] > div {
+  opacity: 0.6;
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
 
 /* Formatted instruction editor: the writing surface reuses the viewer's prose styles, so authors see what operators see. */
 .rich-editor-content {

@@ -17,7 +17,6 @@ import {
   Sun,
 } from "lucide-react";
 import { useTheme } from "next-themes";
-import { useRouter } from "next/navigation";
 import { usePostHog } from "posthog-js/react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -26,7 +25,7 @@ import { FloatingStatusNotices } from "@/components/ui/floating-status-notices";
 import { setHeaderAnimationEnabled, useHeaderAnimationEnabled } from "@/lib/header-animation";
 import { accessLevelLabel, canViewKpis, hasFullAccess, roleLabel } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
-import { clearBrowserExitSignOutPending } from "@/lib/session-exit";
+import { prepareIntentionalSignOut } from "@/lib/session-exit";
 import {
   clearSessionStart,
   ensureSessionStartTime,
@@ -126,7 +125,6 @@ function formatNotificationTime(value: string) {
 }
 
 export function UserAccountMenu({ profile }: UserAccountMenuProps) {
-  const router = useRouter();
   const posthog = usePostHog();
   const { setTheme } = useTheme();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
@@ -465,12 +463,13 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
 
     await supabase.auth.signOut();
     clearSessionStart();
-    clearBrowserExitSignOutPending(profile.id);
+    prepareIntentionalSignOut(profile.id);
     posthog?.reset();
     persistActiveThemePreference();
     closeMenu();
-    router.push("/login");
-    router.refresh();
+    // A full page load: it drops pages the client router fetched while signed in, which would
+    // otherwise be reused after the next sign-in and bounce between the dashboard and this page.
+    window.location.replace("/login");
   }
 
   async function persistThemePreferenceToProfile(nextThemePreference: ThemePreference) {

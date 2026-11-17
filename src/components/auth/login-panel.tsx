@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  AlertTriangle,
   ArrowLeft,
   LifeBuoy,
   Loader2,
@@ -12,7 +13,7 @@ import {
   X,
 } from "lucide-react";
 import Image from "next/image";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 
 import { FloatingStatusNotices } from "@/components/ui/floating-status-notices";
@@ -20,8 +21,12 @@ import { PinInput } from "@/components/ui/pin-input";
 import {
   normalizeAppRestorePath,
   popAutoLogoutRouteForUser,
+  type PostLoginWelcome,
+  savePendingPostLoginResumeRoute,
   savePendingPostLoginScrollRestore,
+  savePostLoginWelcome,
 } from "@/lib/last-route-restore";
+import { clearBrowserExitSignOutPending } from "@/lib/session-exit";
 import { setSessionStartNow } from "@/lib/session-timer";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isValidEmployeeId, normalizeEmployeeId } from "@/lib/utils";
@@ -116,7 +121,6 @@ async function resolvePostLoginDestination(userId: string) {
 }
 
 export function LoginPanel({ inactiveSession = false }: { inactiveSession?: boolean }) {
-  const router = useRouter();
   const searchParams = useSearchParams();
   // The card shows one task at a time: signing in, or creating an account.
   const [view, setView] = useState<"signin" | "signup">("signin");
@@ -152,6 +156,7 @@ export function LoginPanel({ inactiveSession = false }: { inactiveSession?: bool
   const [helpStatus, setHelpStatus] = useState<string | null>(null);
   const [helpError, setHelpError] = useState<string | null>(null);
   const backgroundVideoRef = useRef<HTMLVideoElement | null>(null);
+  const navigatingRef = useRef(false);
   const helpTriggerRef = useRef<HTMLButtonElement | null>(null);
   const feedbackTriggerRef = useRef<HTMLButtonElement | null>(null);
   const helpWasOpenRef = useRef(false);
@@ -217,11 +222,16 @@ export function LoginPanel({ inactiveSession = false }: { inactiveSession?: bool
         caughtError instanceof Error ? caughtError.message : "Unexpected error";
       setError(normalizedMessage);
     } finally {
-      setBusy(false);
+      // Once the next page is loading, the button keeps saying "Signing in..." until it appears.
+      if (!navigatingRef.current) setBusy(false);
     }
   }
 
-  async function signInWithPinCredentials(employeeId: string, pin: string) {
+  function clearError() {
+    if (error) setError(null);
+  }
+
+  async function signInWithPinCredentials(employeeId: string, pin: string, welcome?: PostLoginWelcome) {
     const supabase = getSupabaseBrowserClient();
 
     const response = await fetch("/api/auth/pin-login", {
@@ -234,6 +244,12 @@ export function LoginPanel({ inactiveSession = false }: { inactiveSession?: bool
         pin,
       }),
     });
+
+    // The server answers a wrong PIN and an unknown Employee ID the same way, so nobody can find out
+    // which Employee IDs exist; the message covers both.
+    if (response.status === 401) {
+      throw new Error(INCORRECT_SIGN_IN_MESSAGE);
+    }
 
     const payload = (await parseJsonResponse(response)) as {
       tokenHash: string;
@@ -259,6 +275,12 @@ export function LoginPanel({ inactiveSession = false }: { inactiveSession?: bool
     const {
       data: { user },
     } = await supabase.auth.getUser();
+    // A fresh sign-in replaces any "sign out on the next visit" mark left when the browser was closed
+    // (or by a sign-out in an older version of the app), which would otherwise sign this session out
+    // as soon as the first page loads.
+    if (user?.id) {
+      clearBrowserExitSignOutPending(user.id);
+    }
     const destination = user
       ? await resolvePostLoginDestination(user.id)
       : {
@@ -271,19 +293,25 @@ export function LoginPanel({ inactiveSession = false }: { inactiveSession?: bool
     if (destination.scrollX > 0 || destination.scrollY > 0) {
       savePendingPostLoginScrollRestore(destination.path, destination.scrollX, destination.scrollY);
     }
+    if (welcome) {
+      savePostLoginWelcome(welcome);
+    }
 
+    // A full page load, not a client-side navigation. The client router can still hold pages fetched
+    // while signed out, which redirect here; reusing one made the dashboard and this page bounce back
+    // and forth (a flicker) after signing out and in again.
+    navigatingRef.current = true;
     if (
       destination.isAutoTimeoutResume &&
       !destination.path.startsWith("/dashboard")
     ) {
-      router.replace("/dashboard");
-      window.setTimeout(() => {
-        router.push(destination.path);
-      }, 0);
+      // The dashboard opens first and then the interrupted page, so Back returns to the dashboard.
+      savePendingPostLoginResumeRoute(destination.path);
+      window.location.replace("/dashboard");
       return;
     }
 
-    router.replace(destination.path);
+    window.location.replace(destination.path);
   }
 
   async function handlePinLogin(event: FormEvent<HTMLFormElement>) {
@@ -351,13 +379,9 @@ export function LoginPanel({ inactiveSession = false }: { inactiveSession?: bool
         promoted?: boolean;
       };
 
-      if (payload.promoted) {
-        setMessage("Account created and promoted to system admin. Signing in...");
-      } else {
-        setMessage("Account created. Signing in...");
-      }
+      setMessage("Account created. Signing you in...");
 
-      await signInWithPinCredentials(employeeId, pin);
+      await signInWithPinCredentials(employeeId, pin, { name: fullName, promoted: Boolean(payload.promoted) });
     });
   }
 
@@ -469,12 +493,6 @@ export function LoginPanel({ inactiveSession = false }: { inactiveSession?: bool
             message,
             onDismiss: () => setMessage(null),
           },
-          error && {
-            id: "login-error",
-            tone: "error",
-            message: error,
-            onDismiss: () => setError(null),
-          },
           feedbackStatus && {
             id: "login-feedback-status",
             tone: "success",
@@ -549,7 +567,7 @@ export function LoginPanel({ inactiveSession = false }: { inactiveSession?: bool
                   autoComplete="username"
                   placeholder="Your employee number"
                   value={pinEmployeeId}
-                  onChange={(event) => setPinEmployeeId(normalizeEmployeeId(event.target.value))}
+                  onChange={(event) => { setPinEmployeeId(normalizeEmployeeId(event.target.value)); clearError(); }}
                   className={FIELD_CLASS}
                 />
               </label>
@@ -558,11 +576,12 @@ export function LoginPanel({ inactiveSession = false }: { inactiveSession?: bool
                 <PinInput
                   required
                   value={pinLoginValue}
-                  onChange={setPinLoginValue}
+                  onChange={(value) => { setPinLoginValue(value); clearError(); }}
                   className={PIN_FIELD_CLASS}
                   toggleClassName={PIN_TOGGLE_CLASS}
                 />
               </label>
+              {error ? <FormError message={error} /> : null}
               <button type="submit" disabled={busy} className={`${PRIMARY_BUTTON_CLASS} mt-1`}>
                 {busy ? (
                   <Loader2 aria-hidden="true" size={18} className="animate-spin" />
@@ -584,7 +603,7 @@ export function LoginPanel({ inactiveSession = false }: { inactiveSession?: bool
               New here?
               <span aria-hidden="true" className="h-px flex-1 bg-white/10" />
             </div>
-            <button type="button" onClick={() => setView("signup")} className={`${SECONDARY_BUTTON_CLASS} mt-4`}>
+            <button type="button" onClick={() => { setView("signup"); setError(null); }} className={`${SECONDARY_BUTTON_CLASS} mt-4`}>
               <UserPlus aria-hidden="true" size={18} />
               Create account
             </button>
@@ -605,7 +624,7 @@ export function LoginPanel({ inactiveSession = false }: { inactiveSession?: bool
                   required
                   autoComplete="name"
                   value={signupName}
-                  onChange={(event) => setSignupName(event.target.value)}
+                  onChange={(event) => { setSignupName(event.target.value); clearError(); }}
                   className={FIELD_CLASS}
                 />
               </label>
@@ -616,7 +635,7 @@ export function LoginPanel({ inactiveSession = false }: { inactiveSession?: bool
                   type="email"
                   autoComplete="email"
                   value={signupEmail}
-                  onChange={(event) => setSignupEmail(event.target.value)}
+                  onChange={(event) => { setSignupEmail(event.target.value); clearError(); }}
                   className={FIELD_CLASS}
                 />
               </label>
@@ -628,7 +647,7 @@ export function LoginPanel({ inactiveSession = false }: { inactiveSession?: bool
                   pattern="[0-9]{1,6}"
                   maxLength={6}
                   value={signupEmployeeId}
-                  onChange={(event) => setSignupEmployeeId(normalizeEmployeeId(event.target.value))}
+                  onChange={(event) => { setSignupEmployeeId(normalizeEmployeeId(event.target.value)); clearError(); }}
                   className={FIELD_CLASS}
                 />
               </label>
@@ -638,7 +657,7 @@ export function LoginPanel({ inactiveSession = false }: { inactiveSession?: bool
                   <PinInput
                     required
                     value={signupPin}
-                    onChange={setSignupPin}
+                    onChange={(value) => { setSignupPin(value); clearError(); }}
                     className={PIN_FIELD_CLASS}
                     toggleClassName={PIN_TOGGLE_CLASS}
                   />
@@ -648,12 +667,13 @@ export function LoginPanel({ inactiveSession = false }: { inactiveSession?: bool
                   <PinInput
                     required
                     value={signupPinConfirm}
-                    onChange={setSignupPinConfirm}
+                    onChange={(value) => { setSignupPinConfirm(value); clearError(); }}
                     className={PIN_FIELD_CLASS}
                     toggleClassName={PIN_TOGGLE_CLASS}
                   />
                 </label>
               </div>
+              {error ? <FormError message={error} /> : null}
               {signupPinMismatch ? (
                 <p role="alert" className="text-sm text-rose-300">
                   The two PINs do not match.
@@ -674,7 +694,7 @@ export function LoginPanel({ inactiveSession = false }: { inactiveSession?: bool
             </form>
 
             <div className="mt-4 flex justify-center">
-              <button type="button" onClick={() => setView("signin")} className={LINK_BUTTON_CLASS}>
+              <button type="button" onClick={() => { setView("signin"); setError(null); }} className={LINK_BUTTON_CLASS}>
                 <ArrowLeft aria-hidden="true" size={15} />
                 Back to sign in
               </button>
@@ -774,6 +794,18 @@ export function LoginPanel({ inactiveSession = false }: { inactiveSession?: bool
         </LoginDialog>
       ) : null}
     </>
+  );
+}
+
+const INCORRECT_SIGN_IN_MESSAGE =
+  "That Employee ID and PIN don't match an account. Check both and try again, or create an account if you're new.";
+
+function FormError({ message }: { message: string }) {
+  return (
+    <p role="alert" className="flex items-start gap-2 rounded-lg border border-rose-400/35 bg-rose-500/10 px-3 py-2.5 text-sm text-rose-100">
+      <AlertTriangle aria-hidden="true" size={16} className="mt-0.5 shrink-0 text-rose-300" />
+      <span>{message}</span>
+    </p>
   );
 }
 

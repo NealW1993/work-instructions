@@ -90,6 +90,7 @@ import {
 } from "@/lib/user-settings-client";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { cn, drainResponse } from "@/lib/utils";
+import { everyTermStartsAWord, scoreSearchFields, SEARCH_RANK, workItemSearchRank } from "@/lib/search-match";
 
 interface DashboardWorkItemSummary {
   department_id: string;
@@ -692,14 +693,10 @@ function pseudoRandom(seed: number) {
   return value - Math.floor(value);
 }
 
-function itemMatchesQuery(item: DashboardWorkItemData, normalizedQuery: string) {
-  if (!normalizedQuery) {
-    return true;
-  }
-
-  const haystack =
-    `${item.item_title} ${item.part_id} ${item.department_name}`.toLowerCase();
-  return haystack.includes(normalizedQuery);
+// A short search matches the start of part numbers only (see search-match.ts), so "P" lists P- parts
+// instead of every instruction with a "p" in its title.
+function itemMatchesQuery(item: DashboardWorkItemSummary, normalizedQuery: string) {
+  return workItemSearchRank(item, normalizedQuery) > 0;
 }
 
 function instructionMatchesQuery(
@@ -710,11 +707,16 @@ function instructionMatchesQuery(
     return true;
   }
 
+  // Authors, revision and date count from three characters, by the start of their words.
+  if (normalizedQuery.trim().length < 3) {
+    return false;
+  }
+
   const haystack =
     `revision ${instruction.revision} ${instruction.creator_name} ${instruction.updater_name} ` +
     `${formatDateForSearch(instruction.created_at)}`;
 
-  return haystack.toLowerCase().includes(normalizedQuery);
+  return everyTermStartsAWord(haystack, normalizedQuery);
 }
 
 function systemHistoryMatchesQuery(
@@ -725,13 +727,18 @@ function systemHistoryMatchesQuery(
     return true;
   }
 
+  if (itemMatchesQuery(event.workItem, normalizedQuery)) {
+    return true;
+  }
+  if (normalizedQuery.trim().length < 3) {
+    return false;
+  }
+
   const haystack =
     `${event.action_label} ${event.actor_name} ${event.detail} ` +
-    `${event.workItem.item_title} ${event.workItem.part_id} ` +
-    `${event.workItem.department_name} ${getPartIdLabel(event.workItem)} ` +
     `${formatDateForSearch(event.occurred_at)}`;
 
-  return haystack.toLowerCase().includes(normalizedQuery);
+  return everyTermStartsAWord(haystack, normalizedQuery);
 }
 
 function scoreSmartTextMatch(normalizedQuery: string, fields: Array<string | null | undefined>) {
@@ -739,20 +746,7 @@ function scoreSmartTextMatch(normalizedQuery: string, fields: Array<string | nul
     return 0;
   }
 
-  const queryTerms = normalizedQuery.split(/\s+/).filter(Boolean);
-  const haystack = fields.filter(Boolean).join(" ").toLowerCase();
-  if (!haystack) {
-    return 0;
-  }
-
-  let score = haystack.includes(normalizedQuery) ? 35 : 0;
-  for (const term of queryTerms) {
-    if (haystack.includes(term)) {
-      score += 12;
-    }
-  }
-
-  return score;
+  return scoreSearchFields(normalizedQuery, fields);
 }
 
 function getPartIdLabel(workItem: DashboardWorkItemSummary) {
@@ -3575,12 +3569,15 @@ export function DashboardClient({
             instruction,
           })),
         )
+        .map((entry) => ({ entry, rank: workItemSearchRank(entry.workItem, normalizedQuery) }))
         .sort(
           (a, b) =>
-            toSortableTimestamp(b.instruction.updated_at) -
-            toSortableTimestamp(a.instruction.updated_at),
-        ),
-    [filteredItems],
+            b.rank - a.rank ||
+            toSortableTimestamp(b.entry.instruction.updated_at) -
+              toSortableTimestamp(a.entry.instruction.updated_at),
+        )
+        .map(({ entry }) => entry),
+    [filteredItems, normalizedQuery],
   );
 
   const filteredPinnedInstructions = useMemo(() => {
@@ -6492,10 +6489,20 @@ export function DashboardClient({
       searchInputRef.current?.focus();
       return;
     }
-    // A barcode scan or exact part number with a single match opens that instruction directly.
-    if (filteredFinderInstructionCards.length === 1) {
+    // A barcode scan or exact part number with a single match opens that instruction directly,
+    // even when other part numbers start with what was scanned (P-1 opens with P-10 listed too).
+    const exactPartMatches = filteredFinderInstructionCards.filter(
+      (card) => workItemSearchRank(card.workItem, normalizedQuery) === SEARCH_RANK.exactPart,
+    );
+    const onlyMatch =
+      exactPartMatches.length === 1
+        ? exactPartMatches[0]
+        : filteredFinderInstructionCards.length === 1
+          ? filteredFinderInstructionCards[0]
+          : null;
+    if (onlyMatch) {
       persistInstructionReturnState();
-      router.push(`/instructions/${filteredFinderInstructionCards[0].instruction.id}`);
+      router.push(`/instructions/${onlyMatch.instruction.id}`);
       return;
     }
     searchResultsRef.current?.querySelector<HTMLAnchorElement>("a[href]")?.focus();

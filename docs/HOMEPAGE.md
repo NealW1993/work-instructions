@@ -4,8 +4,8 @@ The homepage is built for the plant floor: find the right instruction fast, get 
 
 ## Find an instruction
 
-- The search box at the top searches part numbers, mold numbers and instruction titles as you type.
-- **Scan a part label** (barcode scanners type into the focused box) or type a part number and press **Enter** or **Search**. If exactly one instruction matches, it opens immediately; otherwise focus moves to the first result. With nothing entered, **Search** puts the cursor in the box, ready for a scan.
+- The search box at the top searches part numbers, mold numbers and instruction titles as you type. Part numbers come first: a single character matches only the start of part numbers (**P** finds P-100033 and PG-8280, not every title with a "p" in it), and dashes and spaces are ignored (**pg8280** finds PG-8280). From two characters, the start of title words matches too (**pour** finds "Pouring Instructions"); from three, a part number containing the search and department names also match. The closest part-number matches are listed first.
+- **Scan a part label** (barcode scanners type into the focused box) or type a part number and press **Enter** or **Search**. If exactly one instruction matches, or exactly one has that exact part number, it opens immediately (scanning P-1 opens it even when P-10 is listed too); otherwise focus moves to the first result. With nothing entered, **Search** puts the cursor in the box, ready for a scan.
 - The **Department** menu beside the search box filters the results and every list on the page. It lists only departments with instructions, each with its count. Choose **All departments** to clear the filter.
 - Matching controlled documents and formulas are listed under the instruction results.
 

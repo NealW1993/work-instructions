@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { usePostHog } from "posthog-js/react";
 
 import {
@@ -9,9 +8,9 @@ import {
   saveAutoLogoutRouteForUser,
 } from "@/lib/last-route-restore";
 import {
-  clearBrowserExitSignOutPending,
   consumeBrowserExitSignOutPending,
   markBrowserExitSignOutPending,
+  prepareIntentionalSignOut,
 } from "@/lib/session-exit";
 import { clearSessionStart, getSessionStartTime } from "@/lib/session-timer";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
@@ -52,7 +51,6 @@ function normalizeInactivityTimeoutMinutes(value: number | null | undefined) {
 }
 
 export function InactivitySignOut({ userId, inactivityTimeoutMinutes }: InactivitySignOutProps) {
-  const router = useRouter();
   const posthog = usePostHog();
 
   useEffect(() => {
@@ -147,11 +145,12 @@ export function InactivitySignOut({ userId, inactivityTimeoutMinutes }: Inactivi
 
       await supabase.auth.signOut();
       clearSessionStart();
-      clearBrowserExitSignOutPending(userId);
+      prepareIntentionalSignOut(userId);
       posthog?.reset();
       persistActiveThemePreference();
-      router.push("/login");
-      router.refresh();
+      // A full page load: it drops pages the client router fetched while signed in, which would
+      // otherwise be reused after the next sign-in and bounce between the dashboard and this page.
+      window.location.replace("/login");
     }
 
     if (consumeBrowserExitSignOutPending(userId)) {
@@ -221,7 +220,7 @@ export function InactivitySignOut({ userId, inactivityTimeoutMinutes }: Inactivi
       window.removeEventListener("pagehide", handleBrowserExit);
       window.removeEventListener("beforeunload", handleBrowserExit);
     };
-  }, [inactivityTimeoutMinutes, posthog, router, userId]);
+  }, [inactivityTimeoutMinutes, posthog, userId]);
 
   return null;
 }
