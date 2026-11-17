@@ -4,11 +4,16 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { createPortal } from "react-dom";
 import {
   Archive,
+  Building2,
+  CalendarClock,
   ChevronDown,
-  ChevronRight,
   Eye,
+  Files,
   GripVertical,
+  type LucideIcon,
   RefreshCw,
+  Users,
+  Wrench,
 } from "lucide-react";
 
 import { InstructionReviewActivityChart } from "@/components/admin/instruction-review-activity-chart";
@@ -241,6 +246,29 @@ function SavedRibbonOverlay({ visible }: { visible: boolean }) {
         Saved
       </span>
     </span>
+  );
+}
+
+/** The title of an administration section: an icon, what the section is and one line on what it does. */
+function AdminSectionTitle({ icon: Icon, title, description, collapsed }: {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  collapsed: boolean;
+}) {
+  return (
+    <>
+      <span aria-hidden="true" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-cyan-700 dark:border-slate-700 dark:bg-slate-900 dark:text-cyan-400">
+        <Icon size={18} />
+      </span>
+      <span className="grid min-w-0 gap-0.5">
+        <span className="flex items-center gap-1.5 text-base font-semibold text-slate-900 dark:text-slate-100">
+          {title}
+          <ChevronDown size={16} aria-hidden="true" className={cn("shrink-0 text-slate-400 transition-transform", collapsed ? "" : "rotate-180")} />
+        </span>
+        <span className="text-sm font-normal text-slate-500 dark:text-slate-400">{description}</span>
+      </span>
+    </>
   );
 }
 
@@ -1919,9 +1947,9 @@ export function UserAdminPanel({ currentUserId, currentUserRole }: { currentUser
         ]}
       />
 
-      <DisclosureSection title="Review policy and activity" description="Set the review interval and monitor instruction checks.">
+      <DisclosureSection icon={CalendarClock} title="Review policy and activity" description="Set the review interval and monitor instruction checks.">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-lg font-bold">Instruction Review Window</h2>
+          <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">How often instructions are checked</h2>
           <button
             type="button"
             disabled={reviewSettingsBusy}
@@ -1960,7 +1988,7 @@ export function UserAdminPanel({ currentUserId, currentUserRole }: { currentUser
             type="button"
             disabled={reviewSettingsBusy}
             onClick={() => void saveInstructionReviewSettings()}
-            className="rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
+            className="rounded-xl bg-cyan-700 shadow-sm hover:bg-cyan-800 dark:bg-cyan-600 dark:hover:bg-cyan-500 px-4 py-2 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-70"
           >
             {reviewSettingsBusy ? "Saving..." : "Save Review Window"}
           </button>
@@ -1993,10 +2021,9 @@ export function UserAdminPanel({ currentUserId, currentUserRole }: { currentUser
             type="button"
             onClick={() => setWorkInstructionsCollapsed((current) => !current)}
             aria-expanded={!workInstructionsCollapsed}
-            className="flex items-center gap-1.5 text-lg font-bold transition hover:opacity-80"
+            className="group flex min-w-0 flex-1 items-center gap-3 rounded-md text-left"
           >
-            {workInstructionsCollapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
-            Work Instruction Management
+            <AdminSectionTitle icon={Files} title="Work Instruction Management" description="Archive or permanently delete instructions in bulk." collapsed={workInstructionsCollapsed} />
           </button>
           <div className="flex items-center gap-2">
             <span className="rounded-full border border-cyan-500/35 bg-cyan-500/10 px-2 py-0.5 text-xs font-semibold text-cyan-800 dark:text-cyan-200">
@@ -2172,13 +2199,15 @@ export function UserAdminPanel({ currentUserId, currentUserRole }: { currentUser
             type="button"
             onClick={() => setSuggestedToolsCollapsed((current) => !current)}
             aria-expanded={!suggestedToolsCollapsed}
-            className="flex items-center gap-1.5 text-lg font-bold transition hover:opacity-80"
+            className="group flex min-w-0 flex-1 items-center gap-3 rounded-md text-left"
           >
-            {suggestedToolsCollapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
-            Common Tools
+            <AdminSectionTitle icon={Wrench} title="Common Tools" description="The shared tool list authors pick from." collapsed={suggestedToolsCollapsed} />
           </button>
-          <span className="rounded-full border border-cyan-500/35 bg-cyan-500/10 px-2 py-0.5 text-xs font-semibold text-cyan-800 dark:text-cyan-200">
-            {suggestedToolActiveCount}/{suggestedTools.length}
+          <span
+            title={`${suggestedToolActiveCount} of ${suggestedTools.length} tools are offered to authors`}
+            className="shrink-0 rounded-full border border-cyan-500/35 bg-cyan-500/10 px-2 py-0.5 text-xs font-semibold text-cyan-800 dark:text-cyan-200"
+          >
+            {suggestedToolActiveCount} of {suggestedTools.length} in use
           </span>
         </div>
 
@@ -2214,7 +2243,7 @@ export function UserAdminPanel({ currentUserId, currentUserRole }: { currentUser
                 <button
                   type="submit"
                   disabled={busy}
-                  className="rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
+                  className="rounded-xl bg-cyan-700 shadow-sm hover:bg-cyan-800 dark:bg-cyan-600 dark:hover:bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {busy ? "Working..." : "Add Tool"}
                 </button>
@@ -2404,10 +2433,9 @@ export function UserAdminPanel({ currentUserId, currentUserRole }: { currentUser
             type="button"
             onClick={() => setDepartmentsCollapsed((v) => !v)}
             aria-expanded={!departmentsCollapsed}
-            className="flex items-center gap-1.5 text-lg font-bold transition hover:opacity-80"
+            className="group flex min-w-0 flex-1 items-center gap-3 rounded-md text-left"
           >
-            {departmentsCollapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
-            Department Management
+            <AdminSectionTitle icon={Building2} title="Department Management" description="Department names, colours and display order." collapsed={departmentsCollapsed} />
           </button>
           <div className="flex flex-wrap items-center gap-2">
             {dirtyDepartments.length >= 2 && (
@@ -2428,14 +2456,16 @@ export function UserAdminPanel({ currentUserId, currentUserRole }: { currentUser
                 Save All ({dirtyDepartments.length})
               </button>
             )}
-            <button
-              type="button"
-              disabled={busy || !departmentOrderDirty}
-              onClick={() => void saveDepartmentOrder()}
-              className="rounded-lg border border-cyan-500/35 px-3 py-1 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-50 dark:text-cyan-200"
-            >
-              Save Order
-            </button>
+            {departmentOrderDirty ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void saveDepartmentOrder()}
+                className="rounded-md border border-cyan-600 bg-cyan-700 px-3 py-1 text-xs font-semibold text-white transition hover:bg-cyan-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Save order
+              </button>
+            ) : null}
           </div>
         </div>
         {!departmentsCollapsed && (
@@ -2499,7 +2529,7 @@ export function UserAdminPanel({ currentUserId, currentUserRole }: { currentUser
           <button
             type="submit"
             disabled={busy}
-            className="rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
+            className="rounded-xl bg-cyan-700 shadow-sm hover:bg-cyan-800 dark:bg-cyan-600 dark:hover:bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-70"
           >
             {busy ? "Working..." : "Add Department"}
           </button>
@@ -2744,10 +2774,9 @@ export function UserAdminPanel({ currentUserId, currentUserRole }: { currentUser
             type="button"
             onClick={() => setUsersCollapsed((v) => !v)}
             aria-expanded={!usersCollapsed}
-            className="flex items-center gap-1.5 text-lg font-bold transition hover:opacity-80"
+            className="group flex min-w-0 flex-1 items-center gap-3 rounded-md text-left"
           >
-            {usersCollapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
-            User Management
+            <AdminSectionTitle icon={Users} title="User Management" description="Accounts, roles, PINs and sign-in access." collapsed={usersCollapsed} />
           </button>
         </div>
 
@@ -2836,7 +2865,7 @@ export function UserAdminPanel({ currentUserId, currentUserRole }: { currentUser
         <button
           type="submit"
           disabled={busy}
-          className="rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70 md:col-span-2"
+          className="rounded-xl bg-cyan-700 shadow-sm hover:bg-cyan-800 dark:bg-cyan-600 dark:hover:bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-70 md:col-span-2"
         >
           {busy ? "Working..." : "Create User"}
         </button>

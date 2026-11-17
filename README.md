@@ -16,11 +16,14 @@ Internal work-instructions software built with React (Next.js), TypeScript, Supa
   - Search by `Part Number` or `Mold Number`
   - Each part/mold work item can have multiple instructions
   - Each work item/instruction is assigned to a department
-  - Dashboard department filter + department instruction counts
-  - Markdown editor with toolbar and live preview: steps, checklists, safety callouts (CAUTION/WARNING/NOTE…), tables and charts (see [docs/EDITOR.md](./docs/EDITOR.md))
+  - Dashboard department menu with instruction counts
+  - Formatted instruction editor (formatting shows as you type; stored as Markdown): steps, checklists, safety callouts (CAUTION/WARNING/NOTE…), tables, charts, photos and videos (see [docs/EDITOR.md](./docs/EDITOR.md))
+  - A new instruction needs only a part number, a title, a department and steps. Tools and four plain-language details (Where this applies, What good looks like, Records to fill out, Safety and what to do if something goes wrong) are optional, under **More details (optional)**; there are no ISO fields to fill in
+  - Tools field: click anywhere in it and start typing; pick from the shared list or press Enter to add your own. Text typed but not yet added is saved with the instruction
   - Inline image/video inserts upload to Supabase Storage bucket `instruction-media` (tablet camera compatible)
+- Application header: logo and **Work Instructions** over the animated header loop (plays by default; each device can turn it off with **Header animation** in the account menu), a **New Instruction** button with import, drafts and archive shortcuts, the account menu with your role, and one tab per workspace (Dashboard, Doc Center, Process Docs, Process Maps, Formula Tools, Groups) that scrolls sideways on phones
 - Plant-floor homepage + KPI layer (see [docs/HOMEPAGE.md](./docs/HOMEPAGE.md)):
-  - Large search with scan-to-open (a single match opens on Enter), department chips, role-based quick actions
+  - Large scan-or-search box with a Search button (a single match opens on Enter), a department menu beside it, role-based quick actions
   - Pinned, recently changed, new and needs-review lists with large touch targets
   - Dashboard Studio controls (layout presets, widget library, KPI widget library, save/discard/default actions)
   - KPI widgets support responsive compact/standard/wide/full layouts
@@ -106,17 +109,17 @@ Recommended:
 - `SYSTEM_ADMIN_EMAIL=you@company.com` to identify a trusted, provisioned first administrator
 - `SMTP_HOST=mailpit` and `SMTP_PORT=1025` for local email testing in Docker
 - `NEXT_PUBLIC_POSTHOG_KEY` if analytics is desired
-- `AI_KEY_ENCRYPTION_KEY` so a system admin can save an AI provider key in the app. Generate it once with `openssl rand -base64 32`, keep it secret and back it up (see [AI provider key](#ai-provider-key))
+- `AI_KEY_ENCRYPTION_KEY` so a system admin can save an AI provider key in the app. Generate it once (see [AI provider key](#ai-provider-key)), keep it secret and back it up (see [AI provider key](#ai-provider-key))
 - `OPENAI_API_KEY` (optional) is used for AI features only until a key is saved in the app
 - `OPENAI_ENHANCE_MODEL`, `OPENAI_SEARCH_MODEL` and `OPENAI_DIAGRAM_MODEL` (optional) choose models for `OPENAI_API_KEY`; a key saved in the app uses the model chosen with it
 
 For `npm run dev` outside Docker, use an SMTP host reachable from the host OS, such as `127.0.0.1` for a published Mailpit port. `mailpit` is the service name within the Docker Compose network. For production HTTPS and backend addressing, follow [Synology deployment](./docs/SYNOLOGY_DEPLOYMENT.md).
 
-See [Structured instruction editor](./docs/EDITOR.md) for block formatting, Markdown files, charts and AI suggestions.
+See [Instruction editor](./docs/EDITOR.md) for formatting, safety callouts, tables, charts, photos, Markdown files and AI suggestions.
 
 ## Process documentation controls
 
-The `/process-documents` area is the controlled-document workspace for ISO-style QMS documentation.
+The `/process-documents` area is the controlled-document workspace for ISO-style QMS documentation. It opens on one list of documents (search and filter on the left); the editor, revision details and review tools appear only once a document is open.
 
 - Create process maps, procedures, work instructions, quality records, and controlled forms from built-in templates.
 - Import `.docx`, `.html`, `.htm`, `.txt`, and `.md` files into sanitized rich text while keeping source-file metadata on the revision.
@@ -125,6 +128,7 @@ The `/process-documents` area is the controlled-document workspace for ISO-style
 - Work instructions and process documents are retained through archive/obsolete states; permanent deletion is blocked for audit evidence.
 - Dashboard search uses the configured AI provider when the system-admin Dashboard AI Search setting is enabled; otherwise it still searches all work instructions and process documents with deterministic controlled-text ranking.
 - `/process-maps` provides process maps, flowcharts, SIPOC, CTQ trees, fishbone, Pareto, histograms, run/control/scatter charts, FMEA, control plans, and solution matrices with AI or rules-based chart recommendations by DMAIC phase. The builder includes editable layers, print/export actions, CSV/SVG/report downloads, and Six Sigma formulas such as Cp, Cpu, Cpl, Cpk, DPMO, takt time, and control limits.
+- The metrics page (`/admin/kpis`) opens with summary cards and **Review coverage**: plain counts, an up-to-date bar, the instructions waiting for a review and who checks them. Deeper panels (usage, AI and platform usage, branches and merges) stay collapsed until opened.
 - Admin KPI panels include per-user AI/tool usage, token counts, dashboard search counts, chart exports, Cp/Cpk use, imports, templates, and controlled-document activity.
 - System-admin exports include process documents, revisions, audit events, document search events, and AI/tool usage events for audit packages.
 
@@ -168,7 +172,7 @@ The migration set provides:
 
 ### Controlled writes and migration troubleshooting
 
-Apply only pending migrations according to the target database's migration history. The initial schema alone is insufficient. The controlled document, instruction, import, upload, access-hardening and AI provider migrations through `202611090001_ai_provider_settings.sql` are required by this application version.
+Apply only pending migrations according to the target database's migration history. The initial schema alone is insufficient. The controlled document, instruction, import, upload, access-hardening, AI provider and optional-details migrations through `202611140001_instruction_details_optional.sql` are required by this application version. Without `202611140001`, saving an instruction that leaves the optional details empty is rejected by the database.
 
 Instruction saves use `save_work_instruction_controlled`; document saves use `save_process_document_controlled`. Approval, archive, restore, merge and import operations use their corresponding controlled RPCs. These transactions enforce revision checks, permissions, retained evidence and audit events. Direct browser mutations of controlled instruction records and tool links are intentionally revoked.
 
@@ -266,7 +270,7 @@ How the key is protected (migration `202611090001_ai_provider_settings.sql`):
 
 To set it up:
 
-1. Generate the encryption key once: `openssl rand -base64 32`.
+1. Generate the encryption key once. On any computer with Node.js (including Windows): `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`. Where OpenSSL is installed (Linux, macOS, Synology): `openssl rand -base64 32`.
 2. Add it to the server environment as `AI_KEY_ENCRYPTION_KEY` and restart the app.
 3. Add the API key in System Administration.
 
@@ -302,7 +306,7 @@ Quick verification checklist:
 - `npm run start` - run production server
 - `npm run lint` - lint code
 - `npm run typecheck` - TypeScript checks
-- `npm test` / `npm run test:unit` - navigation, pagination, manufacturing calculation, formula security, export-format, Markdown editor, homepage layout and AI key encryption regressions
+- `npm test` / `npm run test:unit` - navigation, pagination, manufacturing calculation, formula security, export-format, editor Markdown round-trip, homepage layout and AI key encryption regressions
 - `npm run test:e2e` - isolated fixture-backed browser checks; install Chromium first with `npx playwright install chromium`
 - `npm run test:sql` - SQL regression checks in a disposable schema clone of the running local Supabase database
 - `npm run test:integration` - real-backend workflows (create, edit, approve, archive/restore, documents, homepage) against a disposable local Supabase stack; see [docs/VALIDATION.md](./docs/VALIDATION.md)
@@ -313,7 +317,7 @@ Quick verification checklist:
 - `npm run supabase:status` - show local Supabase endpoints and keys
 - `npm run supabase:reset` - recreate DB, apply migrations, run seeds
 
-The browser tests use a local fixture backend and do not write to the configured Supabase project. `npm run test:sql` requires Docker and the running local `supabase_db_work-instructions` container. It creates a database from a schema-only dump, applies the control migrations and regression fixtures, then removes its own test database. It does not migrate or reset the application database. Set `SQL_TEST_CONTAINER` only to another intended local test backend container.
+The browser tests use a local fixture backend and do not write to the configured Supabase project. `npm run test:sql` requires Docker and the running local `supabase_db_work-instructions` container. It creates a database from a schema-only dump, applies the control migrations and regression fixtures, then removes its own test database. A migration that is already applied to the running database stops at its first "already exists" error inside its own transaction, so the runner reports it as already present and re-applies only that migration's top-level grant and revoke statements (the dump does not carry permissions). It does not migrate or reset the application database. Set `SQL_TEST_CONTAINER` only to another intended local test backend container.
 
 Spreadsheet imports use SheetJS 0.20.3 from its [official distribution](https://docs.sheetjs.com/docs/getting-started/installation/nodejs/), since the npm registry's legacy `xlsx` package is no longer current. The package lock records the downloaded tarball's integrity. Runtime and dependency updates should be verified with `npm run typecheck`, `npm run lint`, `npm test`, `npm run test:e2e`, `npm run test:integration`, and `npm run build`.
 
@@ -351,7 +355,7 @@ Follow [Synology deployment and tablet media](./docs/SYNOLOGY_DEPLOYMENT.md) for
 - "Too many failed sign-in attempts":
   - wait a minute, or have a system admin reset that user's PIN, which clears the lock
 - AI provider section says keys can't be saved:
-  - set `AI_KEY_ENCRYPTION_KEY` (32 bytes, for example from `openssl rand -base64 32`) in the server environment and restart the app
+  - set `AI_KEY_ENCRYPTION_KEY` (32 bytes, generated as described in [AI provider key](#ai-provider-key)) in the server environment and restart the app
 - AI provider section says the saved key can't be decrypted:
   - `AI_KEY_ENCRYPTION_KEY` changed since the key was saved; restore the old value or enter the API key again
 - `supabase_vector_*` container keeps restarting:

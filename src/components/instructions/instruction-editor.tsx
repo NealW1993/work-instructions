@@ -7,9 +7,12 @@ import { useRouter } from "next/navigation";
 import {
   ChevronDown,
   Loader2,
+  Plus,
   Sparkles,
+  Star,
   Wrench,
   UploadCloud,
+  X,
 } from "lucide-react";
 import { createPortal } from "react-dom";
 
@@ -19,12 +22,15 @@ import { sanitizeRichHtml } from "@/lib/rich-text-html";
 import { MarkdownEditor } from "@/components/ui/markdown-editor";
 import { EditorDialog } from "@/components/ui/editor-blocks";
 import { registerArchivedInstructionRedirect } from "@/components/instructions/instruction-archived-redirect-state";
+import { INSTRUCTION_DETAILS } from "@/lib/instruction-details";
 import { ISO_9001_CLAUSE_OPTIONS } from "@/lib/process-documents";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { cn, drainResponse, escapeLikeQuery } from "@/lib/utils";
 
 interface InstructionEditorProps {
   mode: "create" | "edit" | "fork";
+  /** Whether this person may add tools to, or remove them from, the shared list everyone picks from. */
+  canManageSharedTools?: boolean;
   initialData?: {
     instructionId?: string;
     updatedAt?: string;
@@ -778,41 +784,41 @@ function buildInstructionUpdateSummary(params: {
     params.nextDepartmentId,
   );
   addFieldChange(fieldChanges, "Part ID", params.previousPartId, params.nextPartId);
-  addFieldChange(fieldChanges, "Work Item Title", params.previousItemTitle, params.nextItemTitle);
+  addFieldChange(fieldChanges, "Title", params.previousItemTitle, params.nextItemTitle);
   addFieldChange(
     fieldChanges,
-    "ISO 9001 clauses",
+    "Quality system references",
     summarizeListForAudit(normalizeInstructionIsoClauseRefs(params.previousIsoClauseRefs)),
     summarizeListForAudit(normalizeInstructionIsoClauseRefs(params.nextIsoClauseRefs)),
   );
   addFieldChange(
     fieldChanges,
-    "Process scope / applicability",
+    INSTRUCTION_DETAILS.processScope.label,
     params.previousProcessScope,
     params.nextProcessScope,
   );
   addFieldChange(
     fieldChanges,
-    "Acceptance criteria",
+    INSTRUCTION_DETAILS.acceptanceCriteria.label,
     params.previousAcceptanceCriteria,
     params.nextAcceptanceCriteria,
   );
   addFieldChange(
     fieldChanges,
-    "Verification records",
+    INSTRUCTION_DETAILS.verificationRecords.label,
     params.previousVerificationRecords,
     params.nextVerificationRecords,
   );
-  addFieldChange(fieldChanges, "Risk controls", params.previousRiskControls, params.nextRiskControls);
+  addFieldChange(fieldChanges, INSTRUCTION_DETAILS.riskControls.label, params.previousRiskControls, params.nextRiskControls);
   addFieldChange(
     fieldChanges,
-    "Suggested tools",
+    "Tools from the shared list",
     summarizeListForAudit(params.previousSuggestedToolIds),
     summarizeListForAudit(params.nextSuggestedToolIds),
   );
   addFieldChange(
     fieldChanges,
-    "Uncommon tools",
+    "Other tools",
     params.previousUncommonTools,
     params.nextUncommonTools,
   );
@@ -898,7 +904,7 @@ function getDepartmentNameFromRelation(
   return relation.name;
 }
 
-export function InstructionEditor({ mode, initialData }: InstructionEditorProps) {
+export function InstructionEditor({ mode, canManageSharedTools = false, initialData }: InstructionEditorProps) {
   const router = useRouter();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
@@ -923,7 +929,8 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   const [uploadBusy, setUploadBusy] = useState(false);
   const [revisionReason, setRevisionReason] = useState("");
   const [revision, setRevision] = useState(initialData?.revision ?? 1);
-  const [isoClauseRefs, setIsoClauseRefs] = useState<string[]>(() =>
+  // Kept as saved (older instructions carry these references); the form no longer asks for them.
+  const [isoClauseRefs] = useState<string[]>(() =>
     normalizeInstructionIsoClauseRefsOrDefault(initialData?.isoClauseRefs),
   );
   const [processScope, setProcessScope] = useState(initialData?.processScope ?? "");
@@ -934,6 +941,13 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     initialData?.verificationRecords ?? "",
   );
   const [riskControls, setRiskControls] = useState(initialData?.riskControls ?? "");
+  // The extra details are optional. The section opens by itself when an instruction already has some.
+  const [moreDetailsOpen, setMoreDetailsOpen] = useState(() =>
+    [initialData?.processScope, initialData?.acceptanceCriteria, initialData?.verificationRecords, initialData?.riskControls]
+      .some((value) => Boolean(value?.trim())),
+  );
+  const filledDetailCount = [processScope, acceptanceCriteria, verificationRecords, riskControls]
+    .filter((value) => value.trim()).length;
   const [suggestedTools, setSuggestedTools] = useState<SuggestedToolOption[]>([]);
   const [selectedToolIds, setSelectedToolIds] = useState<string[]>(
     initialData?.suggestedToolIds ?? [],
@@ -941,14 +955,13 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   const [uncommonToolList, setUncommonToolList] = useState<string[]>(() =>
     parseToolNameList(initialData?.uncommonTools ?? ""),
   );
-  const [uncommonToolsInput, setUncommonToolsInput] = useState("");
+  // One field adds tools: type to filter the shared list, pick a match, or press Enter to add your own.
+  const [toolQuery, setToolQuery] = useState("");
+  const [toolMenuOpen, setToolMenuOpen] = useState(false);
+  const [toolActiveIndex, setToolActiveIndex] = useState(-1);
   const [toolCatalogBusy, setToolCatalogBusy] = useState(false);
   const [toolCatalogError, setToolCatalogError] = useState<string | null>(null);
   const [toolSetupBusy, setToolSetupBusy] = useState(false);
-  const [commonToolInputMode, setCommonToolInputMode] = useState<"type" | "select">("type");
-  const [toolPickerToolId, setToolPickerToolId] = useState("");
-  const [commonToolSearchInput, setCommonToolSearchInput] = useState("");
-  const [commonToolSelectOpen, setCommonToolSelectOpen] = useState(false);
   const [duplicateToolNotice, setDuplicateToolNotice] = useState<string | null>(null);
   const [pendingCommonToolChanges, setPendingCommonToolChanges] = useState<
     Record<string, PendingCommonToolChangeEntry>
@@ -970,13 +983,13 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   const [enhancementComparison, setEnhancementComparison] =
     useState<EnhancementComparisonState | null>(null);
   const [enhancementModalOpen, setEnhancementModalOpen] = useState(false);
-  const [editorParametersOpen, setEditorParametersOpen] = useState(false);
   const [pendingAiEnhancementId, setPendingAiEnhancementId] = useState<string | null>(null);
 
   const formRef = useRef<HTMLFormElement | null>(null);
   const partInputRef = useRef<HTMLInputElement | null>(null);
   const itemTitleInputRef = useRef<HTMLInputElement | null>(null);
-  const commonToolSelectRef = useRef<HTMLDivElement | null>(null);
+  const toolFieldRef = useRef<HTMLDivElement | null>(null);
+  const toolInputRef = useRef<HTMLInputElement | null>(null);
   const duplicateToolNoticeTimeoutRef = useRef<number | null>(null);
   const hasUnsavedChangesRef = useRef(false);
   const navigationModalOpenRef = useRef(false);
@@ -1057,7 +1070,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       currentSnapshot.selectedToolIds.length > 0 ||
       currentSnapshot.uncommonTools.length > 0 ||
       hasIsoContextChanges ||
-      uncommonToolsInput.trim().length > 0 ||
+      toolQuery.trim().length > 0 ||
       hasPendingCommonToolChanges ||
       currentSnapshot.bodyMarkdown.trim().length > 0;
 
@@ -1071,7 +1084,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     departmentTouched,
     initialSnapshot,
     hasPendingCommonToolChanges,
-    uncommonToolsInput,
+    toolQuery,
   ]);
 
   const hasUnsavedChanges = useMemo(() => {
@@ -1093,15 +1106,6 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
 
   const selectedToolSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
 
-  function toggleIsoClauseRef(clause: string) {
-    setIsoClauseRefs((current) => {
-      const active = current.includes(clause);
-      return active
-        ? current.filter((entry) => entry !== clause)
-        : [...current, clause];
-    });
-  }
-
   const commonToolOptions = useMemo(
     () =>
       suggestedTools
@@ -1116,17 +1120,6 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       ),
     [commonToolOptions],
   );
-  const filteredCommonToolOptions = useMemo(() => {
-    const query = commonToolSearchInput.trim().toLowerCase();
-    if (!query) {
-      return commonToolOptions;
-    }
-
-    return commonToolOptions.filter((tool) =>
-      tool.name.trim().toLowerCase().includes(query),
-    );
-  }, [commonToolOptions, commonToolSearchInput]);
-
   const selectedTools = useMemo(
     () =>
       suggestedTools
@@ -1148,10 +1141,6 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       ),
     [uncommonToolList],
   );
-  const selectedPickerTool = useMemo(
-    () => commonToolOptions.find((tool) => tool.id === toolPickerToolId) ?? null,
-    [commonToolOptions, toolPickerToolId],
-  );
   const commonToolNameSet = useMemo(
     () =>
       new Set(
@@ -1160,9 +1149,24 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     [commonToolOptions],
   );
   const toolListCount = selectedTools.length + uncommonToolList.length;
-  const uncommonToolCandidates = useMemo(() => {
-    return parseToolNameList(uncommonToolsInput);
-  }, [uncommonToolsInput]);
+  // Shared tools that are not on this instruction yet, narrowed by what has been typed.
+  const toolMatches = useMemo(() => {
+    const query = normalizeToolName(toolQuery).toLowerCase();
+    return commonToolOptions
+      .filter((tool) => {
+        const key = normalizeToolName(tool.name).toLowerCase();
+        return !selectedToolSet.has(tool.id) && !uncommonToolNameSet.has(key) && (!query || key.includes(query));
+      })
+      .slice(0, 40);
+  }, [commonToolOptions, selectedToolSet, toolQuery, uncommonToolNameSet]);
+  // What was typed is not in the shared list (or on this instruction), so it can be added as written.
+  const customToolName = useMemo(() => {
+    const name = normalizeToolName(toolQuery);
+    const key = name.toLowerCase();
+    if (!key || commonToolNameSet.has(key) || selectedToolNameSet.has(key) || uncommonToolNameSet.has(key)) return "";
+    return name;
+  }, [commonToolNameSet, selectedToolNameSet, toolQuery, uncommonToolNameSet]);
+  const toolMenuRowCount = toolMatches.length + (customToolName ? 1 : 0);
 
   useEffect(
     () => () => {
@@ -1343,6 +1347,11 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         return;
       }
 
+      // Links inside the editor are being edited, not followed.
+      if (anchor.isContentEditable) {
+        return;
+      }
+
       if (anchor.target && anchor.target !== "_self") {
         return;
       }
@@ -1502,14 +1511,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       setToolCatalogBusy(true);
       setToolCatalogError(null);
       try {
-        const nextTools = await loadSuggestedTools(initialData?.suggestedToolIds ?? []);
-        if (!isActive) {
-          return;
-        }
-
-        setToolPickerToolId((current) =>
-          current && nextTools.some((tool) => tool.id === current) ? current : "",
-        );
+        await loadSuggestedTools(initialData?.suggestedToolIds ?? []);
       } catch {
         if (!isActive) {
           return;
@@ -1530,34 +1532,27 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
   }, [initialData?.suggestedToolIds, loadSuggestedTools]);
 
 
+  // The tool suggestions close when the author clicks somewhere else.
   useEffect(() => {
-    if (!commonToolSelectOpen || commonToolInputMode !== "select") {
+    if (!toolMenuOpen) {
       return;
     }
 
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node | null;
-      if (!commonToolSelectRef.current || !target || commonToolSelectRef.current.contains(target)) {
+      if (!toolFieldRef.current || !target || toolFieldRef.current.contains(target)) {
         return;
       }
 
-      setCommonToolSelectOpen(false);
-    };
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setCommonToolSelectOpen(false);
-      }
+      setToolMenuOpen(false);
     };
 
     document.addEventListener("mousedown", handleClickOutside);
-    document.addEventListener("keydown", handleEscape);
 
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("keydown", handleEscape);
     };
-  }, [commonToolInputMode, commonToolSelectOpen]);
+  }, [toolMenuOpen]);
 
 
   useEffect(() => {
@@ -1654,91 +1649,89 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
     }, 2000);
   }
 
-  function resolveCommonToolSelectionId() {
-    if (commonToolInputMode === "select") {
-      return commonToolOptions.some((tool) => tool.id === toolPickerToolId) ? toolPickerToolId : "";
-    }
-
-    if (toolPickerToolId && commonToolOptions.some((tool) => tool.id === toolPickerToolId)) {
-      return toolPickerToolId;
-    }
-
-    const normalizedQuery = commonToolSearchInput.trim().toLowerCase();
-    if (!normalizedQuery) {
-      return "";
-    }
-
-    const exactMatchId = commonToolIdByName.get(normalizedQuery);
-    if (exactMatchId) {
-      return exactMatchId;
-    }
-
-    return filteredCommonToolOptions[0]?.id ?? "";
-  }
-
-  function addCommonToolToToolList() {
-    const resolvedToolId = resolveCommonToolSelectionId();
-    if (!resolvedToolId) {
-      return;
-    }
-
-    const selectedTool = commonToolOptions.find((tool) => tool.id === resolvedToolId);
-    if (selectedToolIds.includes(resolvedToolId)) {
-      showDuplicateToolNotice();
-      return;
-    }
-    if (selectedTool && uncommonToolNameSet.has(normalizeToolName(selectedTool.name).toLowerCase())) {
-      showDuplicateToolNotice();
-      return;
-    }
-
-    setCommonToolSearchInput("");
-    setToolPickerToolId("");
-    setCommonToolSelectOpen(false);
-    setSelectedToolIds((current) =>
-      current.includes(resolvedToolId) ? current : [...current, resolvedToolId],
-    );
-  }
-
-  function addUncommonToolsToToolList() {
+  function addSharedTool(toolId: string) {
     setToolCatalogError(null);
-    const parsedCandidates = uncommonToolCandidates.map((candidate) => normalizeToolName(candidate));
-    if (parsedCandidates.length === 0) {
+    const tool = commonToolOptions.find((candidate) => candidate.id === toolId);
+    if (!tool) {
+      return;
+    }
+    if (selectedToolIds.includes(toolId) || uncommonToolNameSet.has(normalizeToolName(tool.name).toLowerCase())) {
+      showDuplicateToolNotice();
       return;
     }
 
-    const filteredToAdd: string[] = [];
-    const seenInBatch = new Set<string>();
+    setSelectedToolIds((current) => (current.includes(toolId) ? current : [...current, toolId]));
+    setToolQuery("");
+    setToolActiveIndex(-1);
+  }
+
+  /** Adds what was typed: a tool from the shared list when the name matches, otherwise a tool of the author's own. */
+  function addTypedTools() {
+    setToolCatalogError(null);
+    const typedNames = parseToolNameList(toolQuery).map((candidate) => normalizeToolName(candidate));
+    if (typedNames.length === 0) {
+      return;
+    }
+
+    const sharedIdsToAdd: string[] = [];
+    const ownNamesToAdd: string[] = [];
+    const seen = new Set<string>();
     let blockedDuplicate = false;
 
-    for (const candidate of parsedCandidates) {
-      const normalizedKey = candidate.toLowerCase();
-      if (
-        !normalizedKey ||
-        seenInBatch.has(normalizedKey) ||
-        uncommonToolNameSet.has(normalizedKey) ||
-        selectedToolNameSet.has(normalizedKey)
-      ) {
-        blockedDuplicate = true;
+    for (const name of typedNames) {
+      const key = name.toLowerCase();
+      if (!key || seen.has(key) || uncommonToolNameSet.has(key) || selectedToolNameSet.has(key)) {
+        blockedDuplicate = blockedDuplicate || Boolean(key);
         continue;
       }
 
-      seenInBatch.add(normalizedKey);
-      filteredToAdd.push(candidate);
+      seen.add(key);
+      const sharedToolId = commonToolIdByName.get(key);
+      if (sharedToolId) sharedIdsToAdd.push(sharedToolId);
+      else ownNamesToAdd.push(name);
     }
 
-    if (filteredToAdd.length > 0) {
-      setUncommonToolList((current) => mergeToolNameLists(current, filteredToAdd));
-      setUncommonToolsInput("");
+    if (sharedIdsToAdd.length > 0) {
+      setSelectedToolIds((current) => [...current, ...sharedIdsToAdd.filter((toolId) => !current.includes(toolId))]);
     }
-
+    if (ownNamesToAdd.length > 0) {
+      setUncommonToolList((current) => mergeToolNameLists(current, ownNamesToAdd));
+    }
+    if (sharedIdsToAdd.length > 0 || ownNamesToAdd.length > 0) {
+      setToolQuery("");
+      setToolActiveIndex(-1);
+    }
     if (blockedDuplicate) {
       showDuplicateToolNotice();
     }
+  }
 
-    if (filteredToAdd.length === 0) {
+  /** The tool list to save, including a tool name that was typed but not added yet, so it is not lost. */
+  function toolsForSave() {
+    const toolIds = [...selectedToolIds];
+    let ownTools = uncommonToolList;
+    for (const name of parseToolNameList(toolQuery).map((candidate) => normalizeToolName(candidate))) {
+      const key = name.toLowerCase();
+      if (!key || selectedToolNameSet.has(key) || ownTools.some((entry) => entry.trim().toLowerCase() === key)) continue;
+      const sharedToolId = commonToolIdByName.get(key);
+      if (sharedToolId) {
+        if (!toolIds.includes(sharedToolId)) toolIds.push(sharedToolId);
+      } else {
+        ownTools = mergeToolNameLists(ownTools, [name]);
+      }
+    }
+    return { toolIds, ownTools };
+  }
+
+  /** Enter (or the Add button) adds the highlighted suggestion, or what was typed. */
+  function addHighlightedOrTypedTool() {
+    // No row is highlighted until the author types or uses the arrow keys, so Enter never adds by surprise.
+    const highlighted = toolMenuOpen && toolActiveIndex >= 0 ? toolMatches[toolActiveIndex] : undefined;
+    if (highlighted) {
+      addSharedTool(highlighted.id);
       return;
     }
+    addTypedTools();
   }
 
   function removeUncommonToolFromList(toolName: string) {
@@ -1910,13 +1903,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         activeCommonToolNames.delete(normalizedNameKey);
       }
 
-      const nextTools = await loadSuggestedTools(selectedToolIds);
-      const resolvedToolId = resolveCommonToolSelectionId();
-      if (resolvedToolId && nextTools.some((tool) => tool.id === resolvedToolId)) {
-        setToolPickerToolId(resolvedToolId);
-      } else if (!nextTools.some((tool) => tool.id === toolPickerToolId)) {
-        setToolPickerToolId("");
-      }
+      await loadSuggestedTools(selectedToolIds);
       setPendingCommonToolChanges({});
     } finally {
       setToolSetupBusy(false);
@@ -2205,7 +2192,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         ...current,
         itemTitle: true,
       }));
-      setError("Work item title is required.");
+      setError("Title is required.");
       itemTitleInputRef.current?.focus();
       setBusy(false);
       return;
@@ -2228,24 +2215,6 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       }));
       setError("Instruction steps are required.");
       setBodyFocusRequestKey((current) => current + 1);
-      setBusy(false);
-      return;
-    }
-
-    if (!processScope.trim()) {
-      setError("Process scope / applicability is required before an instruction can be submitted for review.");
-      setBusy(false);
-      return;
-    }
-
-    if (!acceptanceCriteria.trim()) {
-      setError("Acceptance criteria is required before an instruction can be submitted for review.");
-      setBusy(false);
-      return;
-    }
-
-    if (!verificationRecords.trim()) {
-      setError("Verification records are required before an instruction can be submitted for review.");
       setBusy(false);
       return;
     }
@@ -2275,6 +2244,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
       }
 
       const isEditRevisionBump = mode === "edit" && revision > (initialData?.revision ?? revision);
+      const { toolIds: toolIdsToSave, ownTools: ownToolsToSave } = toolsForSave();
       const changeComputation = mode === "edit"
         ? buildInstructionUpdateSummary({
             previousBody: initialData?.bodyMarkdown ?? "", nextBody: bodyMarkdown,
@@ -2287,8 +2257,8 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
             previousAcceptanceCriteria: initialData?.acceptanceCriteria ?? "", nextAcceptanceCriteria: acceptanceCriteria.trim(),
             previousVerificationRecords: initialData?.verificationRecords ?? "", nextVerificationRecords: verificationRecords.trim(),
             previousRiskControls: initialData?.riskControls ?? "", nextRiskControls: riskControls.trim(),
-            previousSuggestedToolIds: initialData?.suggestedToolIds ?? [], nextSuggestedToolIds: selectedToolIds,
-            previousUncommonTools: initialData?.uncommonTools ?? "", nextUncommonTools: serializeToolNameList(uncommonToolList),
+            previousSuggestedToolIds: initialData?.suggestedToolIds ?? [], nextSuggestedToolIds: toolIdsToSave,
+            previousUncommonTools: initialData?.uncommonTools ?? "", nextUncommonTools: serializeToolNameList(ownToolsToSave),
           })
         : { summary: buildInstructionCreateSummary(bodyMarkdown, revision) };
       const { data, error: saveError } = await supabase.rpc("save_work_instruction_controlled", {
@@ -2300,8 +2270,8 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           departmentId: normalizedDepartmentId, partId: normalizedPartId, itemTitle: itemTitle.trim(),
           bodyMarkdown, revision, isoClauseRefs, processScope: processScope.trim(),
           acceptanceCriteria: acceptanceCriteria.trim(), verificationRecords: verificationRecords.trim(),
-          riskControls: riskControls.trim(), uncommonTools: serializeToolNameList(uncommonToolList),
-          suggestedToolIds: selectedToolIds, changeSummary: revisionReason.trim() || changeComputation.summary,
+          riskControls: riskControls.trim(), uncommonTools: serializeToolNameList(ownToolsToSave),
+          suggestedToolIds: toolIdsToSave, changeSummary: revisionReason.trim() || changeComputation.summary,
           aiEnhancementId: pendingAiEnhancementId,
         },
       });
@@ -2464,10 +2434,10 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           </label>
 
           <label className="grid gap-1.5 text-sm">
-            <span className="font-semibold">Work Item Title</span>
+            <span className="font-semibold">Title</span>
             <input
               ref={itemTitleInputRef}
-              placeholder="Example: Pouring Procedure"
+              placeholder="What is this instruction for? Example: Pouring Procedure"
               value={itemTitle}
               aria-invalid={fieldErrors.itemTitle}
               onChange={(event) => {
@@ -2556,83 +2526,194 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           </label>
         ) : null}
 
-        <details
-          open
-          className="group rounded-2xl border border-slate-300/70 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-900/50"
-        >
-          <summary className="flex cursor-pointer list-none items-start justify-between gap-3">
-            <div>
-              <h2 className="text-base font-extrabold text-slate-900 dark:text-slate-100">
-                ISO / Control Context
-              </h2>
-              <p className="text-xs text-slate-600 dark:text-slate-300">
-                Capture the audit-sensitive scope, acceptance criteria, records, and reaction controls for this instruction.
-              </p>
+        <div className="grid gap-1.5 text-sm">
+          <label htmlFor="instruction-tool-input" className="font-semibold">
+            Tools needed <span className="font-normal text-slate-500 dark:text-slate-400">(optional)</span>
+          </label>
+          <div ref={toolFieldRef} className="relative">
+            {/* Clicking anywhere in the field puts the cursor in the box, ready to type a tool. */}
+            <div
+              data-tools-field=""
+              onClick={() => toolInputRef.current?.focus()}
+              className="flex min-h-12 cursor-text flex-wrap items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-2 py-1.5 transition focus-within:border-cyan-500 focus-within:ring-2 focus-within:ring-cyan-500/20 dark:border-slate-700 dark:bg-slate-950"
+            >
+              <Wrench size={16} aria-hidden="true" className="ml-1 shrink-0 text-slate-400" />
+              {[
+                ...selectedTools.map((tool) => ({ key: tool.id, name: tool.name, retired: !tool.isActive, remove: () => toggleSelectedTool(tool.id) })),
+                ...uncommonToolList.map((toolName) => ({ key: `own:${toolName.toLowerCase()}`, name: toolName, retired: false, remove: () => removeUncommonToolFromList(toolName) })),
+              ].map((chip) => {
+                const inSharedList = isToolSavedToCommonList(chip.name);
+                return (
+                  <span
+                    key={chip.key}
+                    data-tool-chip={chip.name}
+                    className="inline-flex items-center gap-0.5 rounded-md border border-slate-300 bg-slate-100 py-0.5 pl-2.5 pr-0.5 text-sm font-medium text-slate-800 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                  >
+                    <span>{chip.name}</span>
+                    {canManageSharedTools && chip.retired ? (
+                      <span title="This tool was removed from the shared list" className="ml-1 rounded bg-amber-100 px-1 text-[11px] font-semibold uppercase tracking-wide text-amber-800 dark:bg-amber-500/20 dark:text-amber-200">
+                        Retired
+                      </span>
+                    ) : null}
+                    {canManageSharedTools ? (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleCommonToolSavedState(chip.name);
+                        }}
+                        disabled={toolSetupBusy}
+                        aria-pressed={inSharedList}
+                        aria-label={inSharedList ? `${chip.name} is in the shared tool list. Remove it from the shared list.` : `Add ${chip.name} to the shared tool list`}
+                        title={inSharedList ? "In the shared list (applies when you save)" : "Add to the shared list (applies when you save)"}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-slate-700"
+                      >
+                        <Star size={15} aria-hidden="true" className={inSharedList ? "fill-amber-400 text-amber-500" : "text-slate-400"} />
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        chip.remove();
+                      }}
+                      aria-label={`Remove ${chip.name}`}
+                      title="Remove"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded text-slate-500 transition hover:bg-slate-200 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-white"
+                    >
+                      <X size={15} aria-hidden="true" />
+                    </button>
+                  </span>
+                );
+              })}
+              <input
+                id="instruction-tool-input"
+                ref={toolInputRef}
+                role="combobox"
+                aria-expanded={toolMenuOpen && toolMenuRowCount > 0}
+                aria-controls="instruction-tool-options"
+                aria-autocomplete="list"
+                aria-activedescendant={toolMenuOpen && toolActiveIndex >= 0 ? `instruction-tool-option-${toolActiveIndex}` : undefined}
+                aria-describedby="instruction-tool-help"
+                aria-busy={toolCatalogBusy}
+                value={toolQuery}
+                autoComplete="off"
+                placeholder={toolListCount === 0 ? "Type a tool, then press Enter" : "Add another tool"}
+                onFocus={() => setToolMenuOpen(true)}
+                onChange={(event) => {
+                  setToolQuery(event.target.value);
+                  setToolActiveIndex(event.target.value.trim() ? 0 : -1);
+                  setToolMenuOpen(true);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                    if (toolMenuRowCount === 0) return;
+                    event.preventDefault();
+                    setToolMenuOpen(true);
+                    setToolActiveIndex((current) => {
+                      if (event.key === "ArrowDown") return current + 1 >= toolMenuRowCount ? 0 : current + 1;
+                      return current <= 0 ? toolMenuRowCount - 1 : current - 1;
+                    });
+                    return;
+                  }
+                  if (event.key === "Enter") {
+                    // Enter adds a tool. It must never submit the instruction.
+                    event.preventDefault();
+                    addHighlightedOrTypedTool();
+                    return;
+                  }
+                  if (event.key === "Escape" && toolMenuOpen) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setToolMenuOpen(false);
+                  }
+                }}
+                className="inline-field min-w-[11rem] flex-1 bg-transparent px-1.5 py-1.5 outline-none placeholder:text-slate-400"
+              />
+              <button
+                type="button"
+                disabled={!toolQuery.trim()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  addHighlightedOrTypedTool();
+                  toolInputRef.current?.focus();
+                }}
+                className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                <Plus size={15} aria-hidden="true" />
+                Add tool
+              </button>
             </div>
-            <ChevronDown
-              size={18}
-              className="mt-1 shrink-0 text-slate-500 transition group-open:rotate-180"
-            />
-          </summary>
 
-          <div className="mt-3 grid gap-3">
-            <fieldset className="grid gap-2">
-              <legend className="text-sm font-semibold">ISO 9001 Clauses</legend>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {ISO_9001_CLAUSE_OPTIONS.map((clause) => (
-                  <label key={clause} className="flex items-start gap-2 text-xs text-slate-700 dark:text-slate-200">
-                    <input
-                      type="checkbox"
-                      checked={isoClauseRefs.includes(clause)}
-                      onChange={() => toggleIsoClauseRef(clause)}
-                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
-                    />
-                    <span>{clause}</span>
-                  </label>
+            {toolMenuOpen && toolMenuRowCount > 0 ? (
+              <ul
+                id="instruction-tool-options"
+                role="listbox"
+                aria-label="Tool suggestions"
+                className="absolute left-0 right-0 top-[calc(100%+0.25rem)] z-30 max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-xl dark:border-slate-700 dark:bg-slate-900"
+              >
+                {toolMatches.map((tool, index) => (
+                  <li
+                    key={tool.id}
+                    id={`instruction-tool-option-${index}`}
+                    role="option"
+                    aria-selected={index === toolActiveIndex}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onMouseEnter={() => setToolActiveIndex(index)}
+                    onClick={() => {
+                      addSharedTool(tool.id);
+                      toolInputRef.current?.focus();
+                    }}
+                    className={cn(
+                      "flex min-h-11 cursor-pointer items-center rounded-md px-2.5 text-sm",
+                      index === toolActiveIndex
+                        ? "bg-cyan-50 text-cyan-950 dark:bg-cyan-500/15 dark:text-cyan-50"
+                        : "text-slate-700 dark:text-slate-200",
+                    )}
+                  >
+                    {tool.name}
+                  </li>
                 ))}
-              </div>
-            </fieldset>
-
-            <div className="grid gap-3 md:grid-cols-2">
-              <label className="grid gap-1.5 text-sm">
-                <span className="font-semibold">Process scope / applicability</span>
-                <textarea
-                  value={processScope}
-                  onChange={(event) => setProcessScope(event.target.value)}
-                  rows={3}
-                  className="resize-y rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                />
-              </label>
-              <label className="grid gap-1.5 text-sm">
-                <span className="font-semibold">Acceptance criteria</span>
-                <textarea
-                  value={acceptanceCriteria}
-                  onChange={(event) => setAcceptanceCriteria(event.target.value)}
-                  rows={3}
-                  className="resize-y rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                />
-              </label>
-              <label className="grid gap-1.5 text-sm">
-                <span className="font-semibold">Verification records</span>
-                <textarea
-                  value={verificationRecords}
-                  onChange={(event) => setVerificationRecords(event.target.value)}
-                  rows={3}
-                  className="resize-y rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                />
-              </label>
-              <label className="grid gap-1.5 text-sm">
-                <span className="font-semibold">Risks, controls, and reaction plan</span>
-                <textarea
-                  value={riskControls}
-                  onChange={(event) => setRiskControls(event.target.value)}
-                  rows={3}
-                  className="resize-y rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                />
-              </label>
-            </div>
+                {customToolName ? (
+                  <li
+                    id={`instruction-tool-option-${toolMatches.length}`}
+                    role="option"
+                    aria-selected={toolActiveIndex === toolMatches.length}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onMouseEnter={() => setToolActiveIndex(toolMatches.length)}
+                    onClick={() => {
+                      addTypedTools();
+                      toolInputRef.current?.focus();
+                    }}
+                    className={cn(
+                      "flex min-h-11 cursor-pointer items-center gap-2 rounded-md px-2.5 text-sm font-semibold",
+                      toolActiveIndex === toolMatches.length
+                        ? "bg-cyan-50 text-cyan-950 dark:bg-cyan-500/15 dark:text-cyan-50"
+                        : "text-slate-700 dark:text-slate-200",
+                    )}
+                  >
+                    <Plus size={15} aria-hidden="true" />
+                    Add &ldquo;{customToolName}&rdquo;
+                  </li>
+                ) : null}
+              </ul>
+            ) : null}
           </div>
-        </details>
+          <p id="instruction-tool-help" className="text-xs text-slate-500 dark:text-slate-400">
+            Pick from the list or type your own and press Enter.
+            {canManageSharedTools ? " The star keeps a tool in the shared list that everyone picks from; star changes apply when you save." : ""}
+          </p>
+          {duplicateToolNotice ? (
+            <p role="status" className="w-fit rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-100">
+              That tool is already in the list.
+            </p>
+          ) : null}
+          {toolCatalogError ? (
+            <p role="alert" className="rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200">
+              {toolCatalogError}
+            </p>
+          ) : null}
+        </div>
 
         <MarkdownEditor
           onUploadStateChange={setUploadBusy}
@@ -2652,9 +2733,9 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
           focusRequestKey={bodyFocusRequestKey}
           notice={legacyBodyConverted ? (
             <p>
-              <strong>Converted to Markdown.</strong> This instruction was written in the previous editor. Colours,
-              font sizes and alignment are not part of Markdown, so coloured or highlighted text is now <strong>bold</strong>.
-              Check the preview before saving.
+              <strong>Updated for the new editor.</strong> This instruction was written in the previous editor. Colours,
+              font sizes and alignment are not kept, so coloured or highlighted text is now <strong>bold</strong>.
+              Check it before saving.
             </p>
           ) : null}
           toolbarAfterRedoContent={
@@ -2676,371 +2757,47 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
               )}
             </button>
           }
-          toolbarEndContent={
-            <button
-              type="button"
-              onClick={() => setEditorParametersOpen((current) => !current)}
-              aria-expanded={editorParametersOpen}
-              aria-label="Toggle tool list panel"
-              title="Tool List"
-              className="inline-flex h-9 min-w-20 items-center justify-center gap-1.5 rounded-xl border border-cyan-500/35 bg-cyan-500/10 px-2 text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-100"
-            >
-              <Wrench size={14} />
-              <span className="rounded-full bg-slate-900/15 px-2 py-0.5 text-xs font-bold dark:bg-white/20">
-                {toolListCount}
-              </span>
-              <ChevronDown
-                size={13}
-                className={cn("transition", editorParametersOpen ? "rotate-180" : "rotate-0")}
-              />
-            </button>
-          }
-          aboveEditorContent={
-            editorParametersOpen ? (
-              <>
-                <div className="grid gap-2 rounded-2xl border border-cyan-500/30 bg-cyan-500/5 px-3 py-3.5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                      Tool List
-                    </p>
-                    <span className="rounded-full border border-cyan-500/40 bg-cyan-500/15 px-2 py-0.5 text-[11px] font-semibold text-cyan-800 dark:text-cyan-200">
-                      {toolListCount} in Tool List
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-600 dark:text-slate-300">
-                    Search common tools with auto-suggest and add both common and uncommon tools
-                    into the Tool List.
-                  </p>
-
-                  <div className="inline-flex w-fit items-center rounded-lg border border-slate-300/80 bg-white/90 p-0.5 text-xs dark:border-slate-700 dark:bg-slate-950/70">
-                    <button
-                      type="button"
-                      onClick={() => setCommonToolInputMode("type")}
-                      className={cn(
-                        "rounded-md px-2.5 py-1 font-semibold transition",
-                        commonToolInputMode === "type"
-                          ? "bg-cyan-500/20 text-cyan-800 dark:text-cyan-100"
-                          : "text-slate-700 hover:bg-slate-200/80 dark:text-slate-300 dark:hover:bg-slate-800",
-                      )}
-                    >
-                      Type
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setCommonToolInputMode("select")}
-                      className={cn(
-                        "rounded-md px-2.5 py-1 font-semibold transition",
-                        commonToolInputMode === "select"
-                          ? "bg-cyan-500/20 text-cyan-800 dark:text-cyan-100"
-                          : "text-slate-700 hover:bg-slate-200/80 dark:text-slate-300 dark:hover:bg-slate-800",
-                      )}
-                    >
-                      Select
-                    </button>
-                  </div>
-
-                  {toolCatalogError ? (
-                    <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-200">
-                      {toolCatalogError}
-                    </p>
-                  ) : null}
-
-                  <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-                    <label className="grid gap-1 text-xs font-semibold text-slate-700 dark:text-slate-200">
-                      <span>
-                        {commonToolInputMode === "type"
-                          ? "Search Common Tools"
-                          : "Select Common Tool"}
-                      </span>
-                      {commonToolInputMode === "type" ? (
-                        <>
-                          <input
-                            list="instruction-common-tool-options"
-                            value={commonToolSearchInput}
-                            onChange={(event) => {
-                              const nextValue = event.target.value;
-                              setCommonToolSearchInput(nextValue);
-                              const normalizedQuery = nextValue.trim().toLowerCase();
-                              const matchedToolId =
-                                commonToolIdByName.get(normalizedQuery) ??
-                                commonToolOptions.find((tool) =>
-                                  tool.name.trim().toLowerCase().includes(normalizedQuery),
-                                )?.id ??
-                                "";
-                              setToolPickerToolId(matchedToolId);
-                            }}
-                            onKeyDown={(event) => {
-                              const shouldAddTool =
-                                event.key === "Enter" ||
-                                (event.key === "Tab" && !event.shiftKey);
-                              if (!shouldAddTool || !resolveCommonToolSelectionId()) {
-                                return;
-                              }
-
-                              event.preventDefault();
-                              addCommonToolToToolList();
-                            }}
-                            placeholder="Start typing to auto-suggest common tools..."
-                            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                            disabled={toolCatalogBusy || commonToolOptions.length === 0}
-                          />
-                          <datalist id="instruction-common-tool-options">
-                            {filteredCommonToolOptions.map((tool) => (
-                              <option key={tool.id} value={tool.name} />
-                            ))}
-                          </datalist>
-                        </>
-                      ) : (
-                        <div ref={commonToolSelectRef} className="relative">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (toolCatalogBusy || commonToolOptions.length === 0) {
-                                return;
-                              }
-                              setCommonToolSelectOpen((current) => !current);
-                            }}
-                            className="flex w-full items-center justify-between gap-2 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-left outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                            disabled={toolCatalogBusy || commonToolOptions.length === 0}
-                            aria-expanded={commonToolSelectOpen}
-                            aria-haspopup="listbox"
-                          >
-                            <span className="truncate">
-                              {selectedPickerTool?.name ?? "Select a common tool..."}
-                            </span>
-                            <ChevronDown
-                              size={14}
-                              className={cn("shrink-0 transition", commonToolSelectOpen ? "rotate-180" : "")}
-                            />
-                          </button>
-
-                          {commonToolSelectOpen ? (
-                            <div className="absolute left-0 right-0 top-[calc(100%+0.35rem)] z-30 rounded-lg border border-slate-300 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-950">
-                              <div className="max-h-[18rem] overflow-y-auto">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setToolPickerToolId("");
-                                    setCommonToolSearchInput("");
-                                    setCommonToolSelectOpen(false);
-                                  }}
-                                  className={cn(
-                                    "w-full px-2.5 py-1.5 text-left text-sm transition",
-                                    toolPickerToolId
-                                      ? "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900"
-                                      : "bg-cyan-500/10 text-cyan-900 dark:text-cyan-100",
-                                  )}
-                                >
-                                  Select a common tool...
-                                </button>
-                                {commonToolOptions.map((tool) => (
-                                  <button
-                                    key={tool.id}
-                                    type="button"
-                                    onClick={() => {
-                                      setToolPickerToolId(tool.id);
-                                      setCommonToolSearchInput(tool.name);
-                                      setCommonToolSelectOpen(false);
-                                    }}
-                                    className={cn(
-                                      "w-full px-2.5 py-1.5 text-left text-sm transition hover:bg-slate-100 dark:hover:bg-slate-900",
-                                      toolPickerToolId === tool.id
-                                        ? "bg-cyan-500/10 text-cyan-900 dark:text-cyan-100"
-                                        : "text-slate-700 dark:text-slate-200",
-                                    )}
-                                  >
-                                    {tool.name}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          ) : null}
-                        </div>
-                      )}
-                    </label>
-
-                    <button
-                      type="button"
-                      disabled={!resolveCommonToolSelectionId()}
-                      onClick={addCommonToolToToolList}
-                      className="rounded-lg border border-cyan-500/40 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-100"
-                    >
-                      Add
-                    </button>
-                  </div>
-
-                  <div className="grid gap-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                        Tool List ({toolListCount})
-                      </p>
-                      <button
-                        type="button"
-                        className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-400/70 text-[10px] font-bold text-slate-600 dark:border-slate-600 dark:text-slate-300"
-                        title="Bubble controls are staged until you save the instruction. Click a lit bubble to stage removal from Common Tools, or click an unlit bubble to stage adding it. Changes apply only after this instruction is saved."
-                        aria-label="How common tool bubbles work"
-                      >
-                        ?
-                      </button>
-                    </div>
-                    <p className="text-xs text-slate-600 dark:text-slate-300">
-                      Click a bubble to stage common-tool changes. Lit = will be in Common Tools
-                      after instruction save. Unlit = will be removed/not added after instruction
-                      save.
-                    </p>
-                    {duplicateToolNotice ? (
-                      <p className="w-fit rounded-md border border-amber-500/45 bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:text-amber-100">
-                        {duplicateToolNotice}
-                      </p>
-                    ) : null}
-                    {toolListCount === 0 ? (
-                      <p className="rounded-lg border border-slate-300/70 bg-white/80 px-2.5 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300">
-                        No tools in the list yet.
-                      </p>
-                    ) : (
-                      <div className="flex flex-wrap gap-1.5">
-                        {selectedTools.map((tool) => {
-                          const savedToCommonList = isToolSavedToCommonList(tool.name);
-                          return (
-                            <div
-                              key={tool.id}
-                              className="inline-flex items-center gap-1 rounded-full border border-cyan-500/45 bg-cyan-500/15 px-2.5 py-1 text-xs font-semibold text-cyan-800 dark:text-cyan-100"
-                            >
-                              <span>{tool.name}</span>
-                              {!tool.isActive ? (
-                                <span className="rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-200">
-                                  Hidden
-                                </span>
-                              ) : null}
-                              <button
-                                type="button"
-                                onClick={() => toggleSelectedTool(tool.id)}
-                                className="opacity-70 transition hover:opacity-100"
-                                title="Remove from Tool List"
-                                aria-label={`Remove ${tool.name} from Tool List`}
-                              >
-                                x
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => toggleCommonToolSavedState(tool.name)}
-                                disabled={toolSetupBusy}
-                                className={cn(
-                                  "inline-flex h-4 w-4 items-center justify-center rounded-full border transition disabled:cursor-not-allowed disabled:opacity-60",
-                                  savedToCommonList
-                                    ? "border-emerald-500/70 bg-emerald-500/70"
-                                    : "border-cyan-500/45 bg-white/40 hover:bg-cyan-500/20 dark:bg-slate-900/40",
-                                )}
-                                title={
-                                  savedToCommonList
-                                    ? "Saved in Common Tools"
-                                    : "Save to Common Tools"
-                                }
-                                aria-label={
-                                  savedToCommonList
-                                    ? `${tool.name} is saved in Common Tools`
-                                    : `Save ${tool.name} to Common Tools`
-                                }
-                                aria-pressed={savedToCommonList}
-                              >
-                                <span
-                                  className={cn(
-                                    "h-2 w-2 rounded-full transition",
-                                    savedToCommonList ? "bg-white" : "bg-transparent",
-                                  )}
-                                />
-                              </button>
-                            </div>
-                          );
-                        })}
-                        {uncommonToolList.map((toolName) => {
-                          const savedToCommonList = isToolSavedToCommonList(toolName);
-                          return (
-                            <div
-                              key={`uncommon:${toolName.toLowerCase()}`}
-                              className="inline-flex items-center gap-1 rounded-full border border-amber-500/45 bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:text-amber-100"
-                            >
-                              <span>{toolName}</span>
-                              <button
-                                type="button"
-                                onClick={() => removeUncommonToolFromList(toolName)}
-                                className="opacity-70 transition hover:opacity-100"
-                                title="Remove from Tool List"
-                                aria-label={`Remove ${toolName} from Tool List`}
-                              >
-                                x
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => toggleCommonToolSavedState(toolName)}
-                                disabled={toolSetupBusy}
-                                className={cn(
-                                  "inline-flex h-4 w-4 items-center justify-center rounded-full border transition disabled:cursor-not-allowed disabled:opacity-60",
-                                  savedToCommonList
-                                    ? "border-emerald-500/70 bg-emerald-500/70"
-                                    : "border-amber-500/45 bg-white/40 hover:bg-amber-500/20 dark:bg-slate-900/40",
-                                )}
-                                title={
-                                  savedToCommonList
-                                    ? "Saved in Common Tools"
-                                    : "Save to Common Tools"
-                                }
-                                aria-label={
-                                  savedToCommonList
-                                    ? `${toolName} is saved in Common Tools`
-                                    : `Save ${toolName} to Common Tools`
-                                }
-                                aria-pressed={savedToCommonList}
-                              >
-                                <span
-                                  className={cn(
-                                    "h-2 w-2 rounded-full transition",
-                                    savedToCommonList ? "bg-white" : "bg-transparent",
-                                  )}
-                                />
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-                    <label className="grid gap-1.5 text-sm">
-                      <span className="font-semibold">Uncommon Tools</span>
-                      <input
-                        value={uncommonToolsInput}
-                        onChange={(event) => setUncommonToolsInput(event.target.value)}
-                        onKeyDown={(event) => {
-                          const shouldAddTool =
-                            event.key === "Enter" ||
-                            (event.key === "Tab" && !event.shiftKey);
-                          if (!shouldAddTool || uncommonToolCandidates.length === 0) {
-                            return;
-                          }
-
-                          event.preventDefault();
-                          addUncommonToolsToToolList();
-                        }}
-                        placeholder="Type uncommon tools here (comma separated if multiple)"
-                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      disabled={toolSetupBusy || uncommonToolCandidates.length === 0}
-                      onClick={addUncommonToolsToToolList}
-                      className="rounded-lg border border-cyan-500/35 px-3 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-60 dark:text-cyan-200"
-                    >
-                      Add
-                    </button>
-                  </div>
-                </div>
-              </>
-            ) : null
-          }
         />
+
+        <details
+          open={moreDetailsOpen}
+          onToggle={(event) => setMoreDetailsOpen(event.currentTarget.open)}
+          className="group rounded-xl border border-slate-200 bg-slate-50/70 dark:border-slate-700 dark:bg-slate-900/40"
+        >
+          <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 py-2.5 [&::-webkit-details-marker]:hidden">
+            <span className="grid">
+              <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                More details <span className="font-normal text-slate-500 dark:text-slate-400">(optional)</span>
+              </span>
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                {filledDetailCount > 0
+                  ? `${filledDetailCount} of 4 filled in`
+                  : "Where it applies, what good looks like, records and safety notes"}
+              </span>
+            </span>
+            <ChevronDown size={18} aria-hidden="true" className="shrink-0 text-slate-500 transition group-open:rotate-180" />
+          </summary>
+
+          <div className="grid gap-3 border-t border-slate-200 p-4 md:grid-cols-2 dark:border-slate-700">
+            {([
+              ["processScope", processScope, setProcessScope],
+              ["acceptanceCriteria", acceptanceCriteria, setAcceptanceCriteria],
+              ["verificationRecords", verificationRecords, setVerificationRecords],
+              ["riskControls", riskControls, setRiskControls],
+            ] as const).map(([key, value, setValue]) => (
+              <label key={key} className="grid gap-1.5 text-sm">
+                <span className="font-semibold">{INSTRUCTION_DETAILS[key].label}</span>
+                <textarea
+                  value={value}
+                  onChange={(event) => setValue(event.target.value)}
+                  rows={3}
+                  placeholder={INSTRUCTION_DETAILS[key].placeholder}
+                  className="resize-y rounded-xl border border-slate-300 bg-white px-3 py-2 outline-none transition placeholder:text-slate-400 focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950"
+                />
+              </label>
+            ))}
+          </div>
+        </details>
 
         {enhanceError ? (
           <p className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-200">
@@ -3051,7 +2808,7 @@ export function InstructionEditor({ mode, initialData }: InstructionEditorProps)
         <button
           type="submit"
           disabled={busy || uploadBusy}
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-700 shadow-sm hover:bg-cyan-800 dark:bg-cyan-600 dark:hover:bg-cyan-500 px-4 py-3 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-70"
         >
           {busy ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />}
           {mode === "edit"

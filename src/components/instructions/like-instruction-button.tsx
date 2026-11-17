@@ -94,22 +94,23 @@ export function LikeInstructionButton({
         onClick={() => void handleToggle()}
         aria-label={isLiked ? "Unlike instruction" : "Like instruction"}
         className={cn(
-          "inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-70",
+          "inline-flex h-10 items-center gap-2 rounded-md border px-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-70",
           isLiked
-            ? "border-emerald-500/45 bg-emerald-500/15 text-emerald-800 hover:bg-emerald-500/25 dark:text-emerald-200"
-            : "border-slate-400/30 bg-slate-900/10 text-slate-700 hover:bg-slate-900/15 dark:bg-white/10 dark:text-slate-100",
+            ? "border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-500/45 dark:bg-emerald-500/15 dark:text-emerald-200 dark:hover:bg-emerald-500/25"
+            : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800",
           className,
         )}
       >
         {busy ? (
-          <Loader2 size={14} className="animate-spin" />
+          <Loader2 size={15} className="animate-spin" aria-hidden="true" />
         ) : (
           <ThumbsUp
-            size={14}
+            size={15}
+            aria-hidden="true"
             className={cn(thumbAnimating ? "instruction-like-thumb-pop" : undefined)}
           />
         )}
-        <span className="rounded-full bg-slate-900/15 px-2 py-0.5 text-xs font-bold dark:bg-white/20">
+        <span className="rounded bg-slate-200/80 px-1.5 py-0.5 text-xs font-bold tabular-nums text-slate-700 dark:bg-slate-700 dark:text-slate-100">
           {likeCount}
         </span>
       </button>

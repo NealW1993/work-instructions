@@ -352,25 +352,26 @@ export function KpiActivitySection({ usageByActiveUsers }: KpiActivitySectionPro
       {/* Activity Trend */}
       <section
         id="kpi-activity-trend"
-        className="scroll-mt-24 grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-6"
+        className="scroll-mt-24 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 md:p-5"
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3">
-            <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
-              Activity Trend
+            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+              Activity
             </h2>
             {/* Period selector */}
-            <div className="inline-flex overflow-hidden rounded-xl border border-slate-300/70 bg-white/70 dark:border-slate-700 dark:bg-slate-900/50">
+            <div className="inline-flex gap-0.5 rounded-md bg-slate-100 p-0.5 dark:bg-slate-800">
               {PERIOD_BUTTONS.map((btn) => (
                 <button
                   key={btn.value}
                   type="button"
+                  aria-pressed={currentPeriod === btn.value}
                   onClick={() => handlePeriodChange(btn.value)}
                   className={cn(
-                    "px-3 py-1.5 text-xs font-semibold transition",
+                    "rounded px-3 py-1 text-xs font-semibold transition",
                     currentPeriod === btn.value
-                      ? "bg-cyan-500/20 text-cyan-800 dark:text-cyan-100"
-                      : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800",
+                      ? "bg-white text-slate-900 shadow-sm dark:bg-slate-950 dark:text-slate-50"
+                      : "text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-50",
                   )}
                 >
                   {btn.label}
@@ -386,7 +387,7 @@ export function KpiActivitySection({ usageByActiveUsers }: KpiActivitySectionPro
               onClick={handlePrev}
               disabled={loading}
               aria-label="Previous period"
-              className="rounded-lg border border-slate-300/70 bg-white/70 p-1.5 text-slate-600 transition hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="rounded-md border border-slate-300 bg-white p-1.5 text-slate-600 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <ChevronLeft size={14} />
             </button>
@@ -398,7 +399,7 @@ export function KpiActivitySection({ usageByActiveUsers }: KpiActivitySectionPro
               onClick={handleNext}
               disabled={loading}
               aria-label="Next period"
-              className="rounded-lg border border-slate-300/70 bg-white/70 p-1.5 text-slate-600 transition hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="rounded-md border border-slate-300 bg-white p-1.5 text-slate-600 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <ChevronRight size={14} />
             </button>
@@ -422,10 +423,10 @@ export function KpiActivitySection({ usageByActiveUsers }: KpiActivitySectionPro
                   Updated
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 dark:text-slate-500">Click a bar to drill down</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Click a bar to see the changes</p>
             </div>
 
-            <div className="rounded-xl border border-slate-300/70 bg-white/70 p-2 dark:border-slate-700 dark:bg-slate-900/50">
+            <div className="rounded-lg border border-slate-200 p-2 dark:border-slate-800">
               {loading ? (
                 <div className="flex h-44 items-center justify-center">
                   <Loader2 size={22} className="animate-spin text-slate-400" />
@@ -574,19 +575,19 @@ export function KpiActivitySection({ usageByActiveUsers }: KpiActivitySectionPro
 
       <section
         id="kpi-active-users-all-time-usage"
-        className="scroll-mt-24 grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-6"
+        className="scroll-mt-24 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 md:p-5"
       >
-        <div className="flex flex-wrap items-end justify-between gap-2">
-          <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
-            Active Users: All-Time Usage
+        <div className="grid gap-0.5">
+          <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+            Time in the app
           </h2>
-          <p className="text-xs text-slate-600 dark:text-slate-300">
-            Includes current in-progress session time.
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+            Total time each person has spent signed in, including anyone signed in right now.
           </p>
         </div>
 
         {usageByActiveUsers.length === 0 ? (
-          <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+          <p className="rounded-lg border border-dashed border-slate-300 px-3 py-5 text-center text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300">
             No active users found.
           </p>
         ) : (
@@ -607,7 +608,7 @@ export function KpiActivitySection({ usageByActiveUsers }: KpiActivitySectionPro
               return (
                 <article
                   key={entry.id}
-                  className="group relative grid gap-1 rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50"
+                  className="group relative grid gap-1.5 rounded-lg px-3 py-2.5 transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
                 >
                   <KpiTooltip
                     title={entry.label}
@@ -628,7 +629,7 @@ export function KpiActivitySection({ usageByActiveUsers }: KpiActivitySectionPro
                   </div>
                   <div className="h-2 rounded-full bg-slate-300/40 dark:bg-slate-700/50">
                     <div
-                      className="h-2 rounded-full bg-gradient-to-r from-cyan-500 to-blue-500"
+                      className="h-2 rounded-full bg-cyan-600 dark:bg-cyan-500"
                       style={{ width: `${Math.max(width, 2)}%` }}
                     />
                   </div>
@@ -731,14 +732,14 @@ export function KpiActivitySection({ usageByActiveUsers }: KpiActivitySectionPro
       {/* Top Contributors */}
       <section
         id="kpi-top-contributors"
-        className="scroll-mt-24 grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-6"
+        className="scroll-mt-24 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 md:p-5"
       >
-        <div className="flex flex-wrap items-end justify-between gap-2">
-          <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
-            Top Contributors
+        <div className="grid gap-0.5">
+          <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+            Top contributors
           </h2>
-          <p className="text-xs text-slate-600 dark:text-slate-300">
-            All-time rank by viewed, created, updated, and forked instruction activity.
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+            Ranked by instructions viewed, created, updated and forked, all time.
           </p>
         </div>
 
@@ -751,7 +752,7 @@ export function KpiActivitySection({ usageByActiveUsers }: KpiActivitySectionPro
             {error}
           </p>
         ) : topContributorsAllTime.length === 0 ? (
-          <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+          <p className="rounded-lg border border-dashed border-slate-300 px-3 py-5 text-center text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300">
             No all-time contributor activity has been recorded yet.
           </p>
         ) : (
@@ -765,7 +766,7 @@ export function KpiActivitySection({ usageByActiveUsers }: KpiActivitySectionPro
               return (
                 <article
                   key={entry.userId}
-                  className="group relative grid gap-1 rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50"
+                  className="group relative grid gap-1.5 rounded-lg px-3 py-2.5 transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
                 >
                   <KpiTooltip
                     align="right"
@@ -786,7 +787,7 @@ export function KpiActivitySection({ usageByActiveUsers }: KpiActivitySectionPro
                       {entry.totalActions.toLocaleString()} actions
                     </p>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600 dark:text-slate-300">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600 dark:text-slate-300">
                     <span>{entry.viewed.toLocaleString()} viewed</span>
                     <span>{entry.created.toLocaleString()} created</span>
                     <span>{entry.updated.toLocaleString()} updated</span>
@@ -794,7 +795,7 @@ export function KpiActivitySection({ usageByActiveUsers }: KpiActivitySectionPro
                   </div>
                   <div className="h-2 rounded-full bg-slate-300/40 dark:bg-slate-700/50">
                     <div
-                      className="h-2 rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500"
+                      className="h-2 rounded-full bg-violet-500"
                       style={{ width: `${Math.max(width, 2)}%` }}
                     />
                   </div>

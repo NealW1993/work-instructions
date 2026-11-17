@@ -5,13 +5,7 @@ import { Providers } from "@/components/providers";
 
 import "./globals.css";
 
-const headingFont = localFont({
-  src: "./fonts/SpaceGrotesk-Variable.ttf",
-  weight: "300 700",
-  variable: "--font-heading",
-  display: "swap",
-});
-
+// One typeface for headings and text: Source Sans 3 reads clearly on shop-floor screens and in print.
 const bodyFont = localFont({
   src: [
     { path: "./fonts/SourceSans3-Variable.ttf", weight: "200 900", style: "normal" },
@@ -33,7 +27,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${headingFont.variable} ${bodyFont.variable} antialiased`}>
+      <body className={`${bodyFont.variable} antialiased`}>
         <Providers>{children}</Providers>
       </body>
     </html>

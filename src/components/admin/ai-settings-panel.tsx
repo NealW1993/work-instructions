@@ -34,7 +34,7 @@ type Mode = "idle" | "change" | "reveal" | "remove";
 const buttonClass =
   "inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-900";
 const primaryButtonClass =
-  "inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-cyan-700 shadow-sm hover:bg-cyan-800 dark:bg-cyan-600 dark:hover:bg-cyan-500 px-4 py-2 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-60";
 const inputClass =
   "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none transition focus:border-cyan-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
 
@@ -276,7 +276,9 @@ export function AiSettingsPanel() {
           {status.encryption !== "ready" ? (
             <p className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
               {status.encryption === "missing" ? "The server has no AI_KEY_ENCRYPTION_KEY, so keys can't be saved yet." : "The server's AI_KEY_ENCRYPTION_KEY is not a valid 32-byte key."}{" "}
-              Ask whoever runs the server to set it (for example, the output of <code>openssl rand -base64 32</code>) and restart the app.
+              Ask whoever runs the server to generate one, add it to the server&apos;s <code>.env</code> file and restart the app. It can be generated with{" "}
+              <code className="break-all">node -e &quot;console.log(require(&apos;crypto&apos;).randomBytes(32).toString(&apos;base64&apos;))&quot;</code>{" "}
+              or <code>openssl rand -base64 32</code>.
             </p>
           ) : null}
           {status.source === "app" && !status.keyReadable ? (

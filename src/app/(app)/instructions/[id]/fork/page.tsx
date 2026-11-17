@@ -110,6 +110,7 @@ export default async function ForkInstructionPage({ params }: ForkInstructionPag
       </header>
 
       <InstructionEditor
+        canManageSharedTools={canEditInstructions(profile.role)}
         mode="fork"
         initialData={{
           sourceInstructionId: instruction.id,

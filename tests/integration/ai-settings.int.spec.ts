@@ -188,7 +188,8 @@ test.describe.serial("AI provider key", () => {
 
     const adminPage = await pageFor(browser, "admin");
     await adminPage.goto("/admin/users");
-    await expect(adminPage.getByText("Only system administrators create and change user accounts.")).toBeVisible();
+    // Scoped to the page content: while a page streams in, Next.js can briefly hold a hidden copy of it.
+    await expect(adminPage.getByRole("main").getByText("Only system administrators create and change user accounts.")).toBeVisible();
     await expect(adminPage.getByRole("region", { name: "AI provider" })).toHaveCount(0);
   });
 });

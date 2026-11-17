@@ -907,7 +907,7 @@ export function AccountSettingsPanel({
               className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
                 saveDisabled
                   ? "cursor-not-allowed border border-slate-300 bg-slate-200 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400"
-                  : "bg-gradient-to-r from-cyan-500 to-blue-600 text-white hover:brightness-110"
+                  : "bg-cyan-700 shadow-sm hover:bg-cyan-800 dark:bg-cyan-600 dark:hover:bg-cyan-500 text-white"
               }`}
             >
               {busy ? "Saving..." : "Save changes"}

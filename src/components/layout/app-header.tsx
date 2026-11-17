@@ -2,15 +2,19 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import {
+  Archive,
   BookOpen,
   Calculator,
   ChartNetwork,
-  CircleAlert,
   ChevronDown,
   ClipboardList,
+  FileClock,
+  FileUp,
   LayoutGrid,
+  type LucideIcon,
+  Plus,
   UsersRound,
 } from "lucide-react";
 import {
@@ -19,354 +23,191 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 
+import { HeaderBackgroundVideo } from "@/components/layout/header-background-video";
 import { UserAccountMenu } from "@/components/layout/user-account-menu";
 import {
-  DASHBOARD_LAYOUT_COMMAND_EVENT,
   DASHBOARD_LAYOUT_DEFAULT_STATE,
-  DASHBOARD_LAYOUT_MENU_INTENT_KEY,
-  DASHBOARD_LAYOUT_MENU_INTENT_OPEN_CUSTOMIZE,
   DASHBOARD_LAYOUT_STATE_EVENT,
-  type DashboardLayoutCommand,
-  type DashboardLayoutCommandEventDetail,
   type DashboardLayoutStateEventDetail,
 } from "@/lib/dashboard-controls";
-import { accessLevelLabel, canCreateInstructions, hasFullAccess } from "@/lib/roles";
+import { canCreateInstructions, hasFullAccess } from "@/lib/roles";
 import type { Profile } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const DASHBOARD_RETURN_STATE_KEY = "__dashboardInstructionReturnState";
 
-function HeaderDate() {
-  const [label, setLabel] = useState("");
-
-  useEffect(() => {
-    function update() {
-      const now = new Date();
-      const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-      const day = days[now.getDay()];
-      const dd = String(now.getDate()).padStart(2, "0");
-      const mm = String(now.getMonth() + 1).padStart(2, "0");
-      const yyyy = now.getFullYear();
-      setLabel(`${day} ${mm}/${dd}/${yyyy}`);
-    }
-
-    update();
-
-    // Tablets may remain signed in for multiple shifts or sleep through midnight.
-    const timerId = window.setInterval(update, 60_000);
-    window.addEventListener("focus", update);
-    return () => {
-      window.clearInterval(timerId);
-      window.removeEventListener("focus", update);
-    };
-  }, []);
-
-  if (!label) return null;
-
-  return (
-    <span className="hidden select-none text-xs text-slate-500 dark:text-slate-400 xl:block">
-      {label}
-    </span>
-  );
+interface Workspace {
+  href: string;
+  label: string;
+  icon: LucideIcon;
 }
-const MENU_ANIMATION_MS = 260;
+
+const WORKSPACES: Workspace[] = [
+  { href: "/dashboard", label: "Dashboard", icon: LayoutGrid },
+  { href: "/doc-center", label: "Doc Center", icon: BookOpen },
+  { href: "/process-documents", label: "Process Docs", icon: ClipboardList },
+  { href: "/process-maps", label: "Process Maps", icon: ChartNetwork },
+  { href: "/process-maps/formulas", label: "Formula Tools", icon: Calculator },
+  { href: "/groups", label: "Groups", icon: UsersRound },
+];
+
+/** Fades the edge of the tab bar where more tabs are scrolled out of view. */
+function tabFadeMask({ start, end }: { start: boolean; end: boolean }) {
+  if (!start && !end) return undefined;
+  const from = start ? "transparent 0, black 2rem" : "black 0";
+  const to = end ? "black calc(100% - 2rem), transparent 100%" : "black 100%";
+  return `linear-gradient(to right, ${from}, ${to})`;
+}
 
 function isActivePath(pathname: string, href: string) {
-  if (href === "/admin/users" && pathname.startsWith("/admin/")) {
-    return true;
-  }
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
 
-  if (pathname === href) {
-    return true;
+function isWorkspaceActive(pathname: string, href: string) {
+  // Formula tools live under process maps but have their own tab.
+  if (href === "/process-maps") {
+    return isActivePath(pathname, href) && !isActivePath(pathname, "/process-maps/formulas");
   }
+  return isActivePath(pathname, href);
+}
 
-  return pathname.startsWith(`${href}/`);
+/* The clock ticks once a minute: tablets stay signed in across shifts and through midnight. */
+function subscribeToClock(onTick: () => void) {
+  const timerId = window.setInterval(onTick, 15_000);
+  window.addEventListener("focus", onTick);
+  return () => {
+    window.clearInterval(timerId);
+    window.removeEventListener("focus", onTick);
+  };
+}
+
+function currentMinute() {
+  return Math.floor(Date.now() / 60_000);
+}
+
+function HeaderClock() {
+  const minute = useSyncExternalStore(subscribeToClock, currentMinute, () => null);
+  if (minute === null) return null;
+  const now = new Date(minute * 60_000);
+  return (
+    <p className="hidden shrink-0 items-center gap-2 whitespace-nowrap text-xs font-medium tabular-nums text-slate-500 lg:flex dark:text-slate-400">
+      <time dateTime={now.toISOString()}>
+        {now.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
+      </time>
+      <span aria-hidden="true" className="text-slate-300 dark:text-slate-600">|</span>
+      <span>{now.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</span>
+    </p>
+  );
+}
+
+/** The primary action, with the other ways to start or find an instruction. */
+function InstructionMenu({ pathname, canViewArchived }: { pathname: string; canViewArchived: boolean }) {
+  // The menu belongs to the page it was opened on, so navigating closes it.
+  const [openOnPath, setOpenOnPath] = useState<string | null>(null);
+  const open = openOnPath === pathname;
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpenOnPath(null);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setOpenOnPath(null);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const items = [
+    { href: "/instructions/import", label: "Import instruction", description: "From a Word, Excel, PDF or image file", icon: FileUp },
+    { href: "/drafts", label: "My drafts", description: "Pick up unfinished work", icon: FileClock },
+    ...(canViewArchived
+      ? [{ href: "/instructions/archived", label: "Archived instructions", description: "Review or restore retired work", icon: Archive }]
+      : []),
+  ];
+  const primaryActive = isActivePath(pathname, "/instructions/new");
+
+  return (
+    <div ref={rootRef} className="relative inline-flex shrink-0">
+      <Link
+        href="/instructions/new"
+        aria-label="New Instruction"
+        aria-current={primaryActive ? "page" : undefined}
+        className="inline-flex h-10 items-center gap-2 rounded-l-md bg-cyan-700 px-3 text-sm font-semibold text-white shadow-sm transition hover:bg-cyan-800 focus-visible:z-10 sm:px-4 dark:bg-cyan-600 dark:hover:bg-cyan-500"
+      >
+        <Plus size={18} aria-hidden="true" />
+        <span className="hidden sm:inline">New Instruction</span>
+      </Link>
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-label="More instruction options"
+        aria-expanded={open}
+        aria-controls="instruction-options"
+        onClick={() => setOpenOnPath(open ? null : pathname)}
+        className="inline-flex h-10 items-center rounded-r-md border-l border-white/25 bg-cyan-700 px-2 text-white shadow-sm transition hover:bg-cyan-800 focus-visible:z-10 dark:bg-cyan-600 dark:hover:bg-cyan-500"
+      >
+        <ChevronDown size={16} aria-hidden="true" className={cn("transition-transform", open && "rotate-180")} />
+      </button>
+      {open ? (
+        <div
+          id="instruction-options"
+          className="absolute right-0 top-[calc(100%+0.5rem)] z-[90] grid w-72 max-w-[calc(100vw-2rem)] gap-0.5 rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-900"
+        >
+          {items.map((item) => {
+            const Icon = item.icon;
+            const active = isActivePath(pathname, item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                aria-current={active ? "page" : undefined}
+                onClick={() => setOpenOnPath(null)}
+                className={cn(
+                  "flex min-h-12 items-center gap-3 rounded-md px-2.5 py-2 transition",
+                  active ? "bg-cyan-50 text-cyan-900 dark:bg-cyan-500/15 dark:text-cyan-100" : "text-slate-800 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800",
+                )}
+              >
+                <span aria-hidden="true" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                  <Icon size={16} />
+                </span>
+                <span className="grid min-w-0">
+                  <span className="text-sm font-semibold">{item.label}</span>
+                  <span className="truncate text-xs text-slate-500 dark:text-slate-400">{item.description}</span>
+                </span>
+              </Link>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function AppHeader({ profile }: { profile: Profile }) {
   const pathname = usePathname();
-  const router = useRouter();
-  const [dashboardMenuOpen, setDashboardMenuOpen] = useState(false);
-  const [dashboardMenuPathname, setDashboardMenuPathname] = useState(pathname);
-  const [dashboardMenuMounted, setDashboardMenuMounted] = useState(false);
-  const [dashboardMenuEntered, setDashboardMenuEntered] = useState(false);
-  const [dashboardMenuWidth, setDashboardMenuWidth] = useState(300);
-  const [instructionMenuOpen, setInstructionMenuOpen] = useState(false);
-  const [instructionMenuPathname, setInstructionMenuPathname] = useState(pathname);
-  const [instructionMenuMounted, setInstructionMenuMounted] = useState(false);
-  const [instructionMenuEntered, setInstructionMenuEntered] = useState(false);
-  const [dashboardLayoutState, setDashboardLayoutState] = useState(
-    DASHBOARD_LAYOUT_DEFAULT_STATE,
-  );
-  const dashboardMenuCloseTimeoutRef = useRef<number | null>(null);
-  const instructionMenuCloseTimeoutRef = useRef<number | null>(null);
-
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const [tabsOverflow, setTabsOverflow] = useState({ start: false, end: false });
+  const [dashboardLayoutState, setDashboardLayoutState] = useState(DASHBOARD_LAYOUT_DEFAULT_STATE);
   const userCanCreateInstructions = canCreateInstructions(profile.role);
-  const userHasFullAccess = hasFullAccess(profile.role);
-  const accessLabel = accessLevelLabel(profile.role);
-  const canViewArchivedInstructions = userHasFullAccess;
-  const isDashboardActive = isActivePath(pathname, "/dashboard");
-  const isDocCenterActive = isActivePath(pathname, "/doc-center");
-  const isGroupsActive = isActivePath(pathname, "/groups");
-  const isProcessDocumentsActive = isActivePath(pathname, "/process-documents");
-  const isFormulaToolsActive = isActivePath(pathname, "/process-maps/formulas");
-  const isProcessMapsActive =
-    isActivePath(pathname, "/process-maps") && !isFormulaToolsActive;
-  const isDashboardWorkspaceActive =
-    isDashboardActive ||
-    isDocCenterActive ||
-    isGroupsActive ||
-    isProcessDocumentsActive ||
-    isProcessMapsActive ||
-    isFormulaToolsActive;
-  const isNewInstructionActive = isActivePath(pathname, "/instructions/new");
-  const isImportInstructionActive = isActivePath(pathname, "/instructions/import");
-  const isArchivedInstructionActive = isActivePath(pathname, "/instructions/archived");
-  const instructionControlActive =
-    isNewInstructionActive || isImportInstructionActive || isArchivedInstructionActive;
-  const dashboardControlHref = isDocCenterActive
-    ? "/doc-center"
-    : isGroupsActive
-    ? "/groups"
-    : isProcessDocumentsActive
-    ? "/process-documents"
-    : isFormulaToolsActive
-      ? "/process-maps/formulas"
-      : isProcessMapsActive
-      ? "/process-maps"
-      : "/dashboard";
-  const dashboardControlLabel = isDocCenterActive
-    ? "Doc Center"
-    : isGroupsActive
-    ? "Groups"
-    : isProcessDocumentsActive
-    ? "Process Docs"
-    : isFormulaToolsActive
-      ? "Formula Tools"
-      : isProcessMapsActive
-      ? "Process Maps"
-      : "Dashboard";
-  const activeDashboardLayoutState = isDashboardActive
-    ? dashboardLayoutState
-    : DASHBOARD_LAYOUT_DEFAULT_STATE;
-  const dashboardMenuVisible =
-    dashboardMenuOpen && dashboardMenuPathname === pathname;
-  const instructionMenuVisible =
-    instructionMenuOpen &&
-    instructionMenuPathname === pathname;
-  const canSendDashboardLayoutActions =
-    isDashboardActive && activeDashboardLayoutState.available;
-  const dashboardNeedsAttention =
-    canSendDashboardLayoutActions &&
-    (activeDashboardLayoutState.layoutDirty ||
-      activeDashboardLayoutState.layoutSaving ||
-      Boolean(activeDashboardLayoutState.layoutError));
-  const showDashboardStudioButton =
-    canSendDashboardLayoutActions && activeDashboardLayoutState.customizeOpen;
-  const studioNeedsAttention =
-    showDashboardStudioButton &&
-    (activeDashboardLayoutState.layoutDirty ||
-      activeDashboardLayoutState.layoutSaving ||
-      Boolean(activeDashboardLayoutState.layoutError));
-  const dashboardNavigationItems = [
-    {
-      href: "/dashboard",
-      label: "Dashboard",
-      icon: LayoutGrid,
-      active: isDashboardActive,
-    },
-    {
-      href: "/doc-center",
-      label: "Doc Center",
-      icon: BookOpen,
-      active: isDocCenterActive,
-    },
-    {
-      href: "/process-documents",
-      label: "Process Docs",
-      icon: ClipboardList,
-      active: isProcessDocumentsActive,
-    },
-    {
-      href: "/process-maps",
-      label: "Process Maps",
-      icon: ChartNetwork,
-      active: isProcessMapsActive,
-    },
-    {
-      href: "/process-maps/formulas",
-      label: "Formula Tools",
-      icon: Calculator,
-      active: isFormulaToolsActive,
-    },
-    {
-      href: "/groups",
-      label: "Groups",
-      icon: UsersRound,
-      active: isGroupsActive,
-    },
-  ];
-  const customizeLabel =
-    canSendDashboardLayoutActions && activeDashboardLayoutState.customizeOpen
-      ? "Close Customize Panel"
-      : "Customize Dashboard";
+  const isDashboard = isActivePath(pathname, "/dashboard");
 
-  const syncDashboardMenuWidth = useCallback(() => {
-    if (typeof document === "undefined") {
-      return;
-    }
-
-    const visibleDashboardRoot = [...document.querySelectorAll<HTMLElement>('[data-dashboard-menu-root="true"]')]
-      .find((element) => element.offsetParent !== null);
-    if (!visibleDashboardRoot) {
-      return;
-    }
-
-    const visibleInstructionRoot = [...document.querySelectorAll<HTMLElement>('[data-instruction-menu-root="true"]')]
-      .find((element) => element.offsetParent !== null);
-    const dashboardRect = visibleDashboardRoot.getBoundingClientRect();
-    const instructionRect = visibleInstructionRoot?.getBoundingClientRect() ?? null;
-    const targetWidth =
-      instructionRect && instructionRect.right > dashboardRect.left
-        ? Math.round(instructionRect.right - dashboardRect.left)
-        : 300;
-
-    setDashboardMenuWidth(Math.max(targetWidth, 300));
-  }, []);
-
-  const closeDashboardMenu = useCallback(() => {
-    if (!dashboardMenuMounted && !dashboardMenuOpen) {
-      return;
-    }
-
-    if (dashboardMenuCloseTimeoutRef.current !== null) {
-      window.clearTimeout(dashboardMenuCloseTimeoutRef.current);
-      dashboardMenuCloseTimeoutRef.current = null;
-    }
-
-    setDashboardMenuEntered(false);
-    setDashboardMenuOpen(false);
-
-    dashboardMenuCloseTimeoutRef.current = window.setTimeout(() => {
-      setDashboardMenuMounted(false);
-      dashboardMenuCloseTimeoutRef.current = null;
-    }, MENU_ANIMATION_MS);
-  }, [dashboardMenuMounted, dashboardMenuOpen]);
-
-  const openDashboardMenu = useCallback(() => {
-    if (dashboardMenuCloseTimeoutRef.current !== null) {
-      window.clearTimeout(dashboardMenuCloseTimeoutRef.current);
-      dashboardMenuCloseTimeoutRef.current = null;
-    }
-
-    syncDashboardMenuWidth();
-    setDashboardMenuPathname(pathname);
-    setDashboardMenuMounted(true);
-    setDashboardMenuOpen(true);
-    window.requestAnimationFrame(() => {
-      setDashboardMenuEntered(true);
-    });
-  }, [pathname, syncDashboardMenuWidth]);
-
-  const closeInstructionMenu = useCallback(() => {
-    if (!instructionMenuMounted && !instructionMenuOpen) {
-      return;
-    }
-
-    if (instructionMenuCloseTimeoutRef.current !== null) {
-      window.clearTimeout(instructionMenuCloseTimeoutRef.current);
-      instructionMenuCloseTimeoutRef.current = null;
-    }
-
-    setInstructionMenuEntered(false);
-    setInstructionMenuOpen(false);
-
-    instructionMenuCloseTimeoutRef.current = window.setTimeout(() => {
-      setInstructionMenuMounted(false);
-      instructionMenuCloseTimeoutRef.current = null;
-    }, MENU_ANIMATION_MS);
-  }, [instructionMenuMounted, instructionMenuOpen]);
-
-  const openInstructionMenu = useCallback(() => {
-    if (instructionMenuCloseTimeoutRef.current !== null) {
-      window.clearTimeout(instructionMenuCloseTimeoutRef.current);
-      instructionMenuCloseTimeoutRef.current = null;
-    }
-
-    setInstructionMenuPathname(pathname);
-    setInstructionMenuMounted(true);
-    setInstructionMenuOpen(true);
-    window.requestAnimationFrame(() => {
-      setInstructionMenuEntered(true);
-    });
-  }, [pathname]);
-
-  useEffect(() => {
-    if (!dashboardMenuOpen || dashboardMenuPathname === pathname) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      closeDashboardMenu();
-    }, 0);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [closeDashboardMenu, dashboardMenuOpen, dashboardMenuPathname, pathname]);
-
-  useEffect(() => {
-    if (!instructionMenuOpen || instructionMenuPathname === pathname) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      closeInstructionMenu();
-    }, 0);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [closeInstructionMenu, instructionMenuOpen, instructionMenuPathname, pathname]);
-
-  useEffect(() => {
-    if (!dashboardMenuMounted) {
-      return;
-    }
-
-    const onWindowResize = () => {
-      syncDashboardMenuWidth();
-    };
-    const frameId = window.requestAnimationFrame(syncDashboardMenuWidth);
-    window.addEventListener("resize", onWindowResize);
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      window.removeEventListener("resize", onWindowResize);
-    };
-  }, [dashboardMenuMounted, syncDashboardMenuWidth]);
-
-  useEffect(
-    () => () => {
-      if (dashboardMenuCloseTimeoutRef.current !== null) {
-        window.clearTimeout(dashboardMenuCloseTimeoutRef.current);
-      }
-      if (instructionMenuCloseTimeoutRef.current !== null) {
-        window.clearTimeout(instructionMenuCloseTimeoutRef.current);
-      }
-    },
-    [],
-  );
-
+  // The homepage reports its editor state so the header can offer a way back to unsaved layout changes.
   useEffect(() => {
     const handleDashboardLayoutState = (event: Event) => {
       const detail = (event as CustomEvent<DashboardLayoutStateEventDetail>).detail;
-      if (!detail || typeof detail.available !== "boolean") {
-        return;
-      }
-
+      if (!detail || typeof detail.available !== "boolean") return;
       setDashboardLayoutState({
         available: detail.available,
         customizeOpen: Boolean(detail.customizeOpen),
@@ -375,499 +216,160 @@ export function AppHeader({ profile }: { profile: Profile }) {
         layoutError: detail.layoutError ?? null,
         canUndoLayout: Boolean(detail.canUndoLayout),
         canRedoLayout: Boolean(detail.canRedoLayout),
-        activeLayoutPresetId:
-          typeof detail.activeLayoutPresetId === "string"
-            ? detail.activeLayoutPresetId
-            : null,
-        layoutPresets: Array.isArray(detail.layoutPresets)
-          ? detail.layoutPresets
-          : [],
-        studioWidgets: Array.isArray(detail.studioWidgets)
-          ? detail.studioWidgets
-          : [],
+        activeLayoutPresetId: typeof detail.activeLayoutPresetId === "string" ? detail.activeLayoutPresetId : null,
+        layoutPresets: Array.isArray(detail.layoutPresets) ? detail.layoutPresets : [],
+        studioWidgets: Array.isArray(detail.studioWidgets) ? detail.studioWidgets : [],
       });
     };
+    window.addEventListener(DASHBOARD_LAYOUT_STATE_EVENT, handleDashboardLayoutState as EventListener);
+    return () => window.removeEventListener(DASHBOARD_LAYOUT_STATE_EVENT, handleDashboardLayoutState as EventListener);
+  }, []);
 
-    window.addEventListener(
-      DASHBOARD_LAYOUT_STATE_EVENT,
-      handleDashboardLayoutState as EventListener,
-    );
+  // On narrow screens the tabs scroll sideways; keep the current one in view.
+  useEffect(() => {
+    const container = tabsRef.current;
+    const active = container?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!container || !active) return;
+    const start = active.offsetLeft - 16;
+    const end = active.offsetLeft + active.offsetWidth + 16;
+    if (start < container.scrollLeft) container.scrollLeft = start;
+    else if (end > container.scrollLeft + container.clientWidth) container.scrollLeft = end - container.clientWidth;
+  }, [pathname]);
+
+  // Track whether tabs are hidden past either edge, to hint that the bar scrolls.
+  useEffect(() => {
+    const container = tabsRef.current;
+    if (!container) return;
+    function updateOverflow() {
+      if (!container) return;
+      const start = container.scrollLeft > 4;
+      const end = container.scrollLeft + container.clientWidth < container.scrollWidth - 4;
+      setTabsOverflow((current) => (current.start === start && current.end === end ? current : { start, end }));
+    }
+    updateOverflow();
+    container.addEventListener("scroll", updateOverflow, { passive: true });
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateOverflow);
+    observer?.observe(container);
     return () => {
-      window.removeEventListener(
-        DASHBOARD_LAYOUT_STATE_EVENT,
-        handleDashboardLayoutState as EventListener,
-      );
+      container.removeEventListener("scroll", updateOverflow);
+      observer?.disconnect();
     };
   }, []);
 
-  useEffect(() => {
-    if (!dashboardMenuVisible && !instructionMenuVisible) {
-      return;
-    }
-
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (
-        target?.closest('[data-dashboard-menu-root="true"]') ||
-        target?.closest('[data-instruction-menu-root="true"]')
-      ) {
-        return;
-      }
-
-      closeDashboardMenu();
-      closeInstructionMenu();
-    };
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        const panel = document.activeElement?.closest<HTMLElement>("[data-header-panel]");
-        const trigger = panel?.parentElement?.querySelector<HTMLButtonElement>("[data-menu-trigger]");
-        closeDashboardMenu();
-        closeInstructionMenu();
-        trigger?.focus();
-      }
-    };
-
-    document.addEventListener("pointerdown", handleClickOutside);
-    document.addEventListener("keydown", handleEscape);
-
-    return () => {
-      document.removeEventListener("pointerdown", handleClickOutside);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, [
-    closeDashboardMenu,
-    closeInstructionMenu,
-    dashboardMenuVisible,
-    instructionMenuVisible,
-  ]);
-
-  const clearDashboardInstructionReturnState = useCallback(() => {
+  const handleDashboardLinkClick = useCallback((event: ReactMouseEvent<HTMLAnchorElement>) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     try {
       window.sessionStorage.removeItem(DASHBOARD_RETURN_STATE_KEY);
     } catch {
       // Session storage cleanup is best-effort.
     }
-  }, []);
+    if (pathname !== "/dashboard") return;
+    // Already on the dashboard: return to the top instead of reloading.
+    event.preventDefault();
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [pathname]);
 
-  const handleDashboardLinkClick = useCallback(
-    (event: ReactMouseEvent<HTMLAnchorElement>) => {
-      if (event.defaultPrevented || event.button !== 0) {
-        return;
-      }
+  const studioState = isDashboard ? dashboardLayoutState : DASHBOARD_LAYOUT_DEFAULT_STATE;
+  const showStudioStatus = studioState.available && studioState.customizeOpen;
+  const studioStatus = studioState.layoutSaving
+    ? "Saving"
+    : studioState.layoutError
+      ? "Save failed"
+      : studioState.layoutDirty
+        ? "Unsaved"
+        : "Saved";
+  const studioNeedsAttention = studioState.layoutDirty || studioState.layoutSaving || Boolean(studioState.layoutError);
 
-      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
-        return;
-      }
-
-      clearDashboardInstructionReturnState();
-      closeDashboardMenu();
-      closeInstructionMenu();
-
-      let targetPathname = "/dashboard";
-      try {
-        targetPathname = new URL(event.currentTarget.href, window.location.href).pathname;
-      } catch {
-        targetPathname = "/dashboard";
-      }
-
-      if (pathname !== targetPathname) {
-        return;
-      }
-
-      event.preventDefault();
-      window.scrollTo({
-        top: 0,
-        left: 0,
-        behavior: "auto",
-      });
-    },
-    [
-      clearDashboardInstructionReturnState,
-      closeDashboardMenu,
-      closeInstructionMenu,
-      pathname,
-    ],
-  );
-
-  const triggerDashboardAction = useCallback(
-    (detail: DashboardLayoutCommandEventDetail) => {
-      const command = detail.command;
-      if (isDashboardActive) {
-        if (command === "toggle-customize" && !dashboardLayoutState.available) {
-          try {
-            window.sessionStorage.setItem(
-              DASHBOARD_LAYOUT_MENU_INTENT_KEY,
-              DASHBOARD_LAYOUT_MENU_INTENT_OPEN_CUSTOMIZE,
-            );
-          } catch {
-            // Menu intent persistence is best-effort.
-          }
-        }
-
-        window.dispatchEvent(
-          new CustomEvent<DashboardLayoutCommandEventDetail>(
-            DASHBOARD_LAYOUT_COMMAND_EVENT,
-            {
-              detail,
-            },
-          ),
-        );
-        return;
-      }
-
-      if (command === "toggle-customize") {
-        try {
-          window.sessionStorage.setItem(
-            DASHBOARD_LAYOUT_MENU_INTENT_KEY,
-            DASHBOARD_LAYOUT_MENU_INTENT_OPEN_CUSTOMIZE,
-          );
-        } catch {
-          // Menu intent persistence is best-effort.
-        }
-      }
-
-      clearDashboardInstructionReturnState();
-      router.push("/dashboard");
-    },
-    [clearDashboardInstructionReturnState, dashboardLayoutState.available, isDashboardActive, router],
-  );
-
-  const handleDashboardAction = useCallback(
-    (command: DashboardLayoutCommand) => {
-      triggerDashboardAction({ command });
-      closeDashboardMenu();
-      closeInstructionMenu();
-    },
-    [closeDashboardMenu, closeInstructionMenu, triggerDashboardAction],
-  );
-
-  const renderDashboardControl = (mobile: boolean) => {
-    return (
-      <div
-        data-dashboard-menu-root="true"
-        className={cn(mobile ? "inline-flex max-w-full" : "relative inline-flex")}
-      >
-        <Link
-          href={dashboardControlHref}
-          onClick={handleDashboardLinkClick}
-          className={cn(
-            "inline-flex items-center rounded-l-xl border border-r-0 px-4 py-2 text-sm font-semibold transition",
-            isDashboardWorkspaceActive
-              ? "border-cyan-700 bg-cyan-600 text-white shadow-sm dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900"
-              : "border-slate-300/70 bg-white/80 text-slate-700 hover:border-slate-400 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-800",
-          )}
-        >
-          {dashboardControlLabel}
-        </Link>
-
-        <button
-          type="button"
-          data-menu-trigger="true"
-          aria-controls={`workspace-options-${mobile ? "mobile" : "desktop"}`}
-          aria-expanded={dashboardMenuVisible}
-          aria-label={
-            dashboardNeedsAttention
-              ? "Open dashboard options. Action required."
-              : "Open dashboard options"
-          }
-          onClick={() => {
-            if (dashboardMenuVisible) {
-              closeDashboardMenu();
-              return;
-            }
-            closeInstructionMenu();
-            openDashboardMenu();
-          }}
-          className={cn(
-            "relative inline-flex items-center rounded-r-xl border px-2.5 py-2 transition",
-            isDashboardWorkspaceActive
-              ? "border-cyan-700 bg-cyan-600 text-white hover:bg-cyan-700 dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
-              : "border-slate-300/70 bg-white/80 text-slate-700 hover:border-slate-400 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-800",
-          )}
-        >
-          {dashboardNeedsAttention ? (
-            <span className="absolute -right-1 -top-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-amber-200/40 bg-amber-500 text-amber-950 shadow-lg">
-              <CircleAlert size={11} />
-            </span>
-          ) : null}
-          <ChevronDown
-            size={14}
-            className={cn("transition", dashboardMenuVisible ? "rotate-180" : "")}
-          />
-        </button>
-
-        {dashboardMenuMounted ? (
-          <div
-            id={`workspace-options-${mobile ? "mobile" : "desktop"}`}
-            data-header-panel="true"
-            inert={!dashboardMenuVisible}
-            className={cn(
-              "absolute top-[calc(100%+0.5rem)] z-[90] grid max-h-[72dvh] gap-2 overflow-y-auto overscroll-contain rounded-xl border border-white/20 bg-slate-950 p-2 shadow-xl transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
-              mobile ? "left-2 right-2" : "left-0",
-              dashboardMenuEntered ? "pointer-events-auto" : "pointer-events-none",
-            )}
-            style={{
-              ...(mobile ? {} : { width: `${dashboardMenuWidth}px` }),
-              opacity: dashboardMenuEntered ? 1 : 0,
-              filter: dashboardMenuEntered ? "blur(0px)" : "blur(6px)",
-              transform: dashboardMenuEntered
-                ? "translateY(0px) scale(1)"
-                : "translateY(-8px) scale(0.98)",
-              transformOrigin: mobile ? "top center" : "top left",
-            }}
+  return (
+    <header className="sticky top-0 z-[80] print:hidden">
+      <div className="relative border-b border-slate-900/10 dark:border-white/10">
+        <div aria-hidden="true" className="absolute inset-0 overflow-hidden bg-white dark:bg-black">
+          <HeaderBackgroundVideo />
+          {/* A light veil keeps the loop clearly visible while the label stays readable over it. */}
+          <div className="absolute inset-0 bg-white/40 dark:bg-black/35" />
+        </div>
+        <div className="relative mx-auto flex h-14 w-full max-w-[1600px] items-center gap-3 px-4 sm:h-16 md:px-8">
+          <Link
+            href="/dashboard"
+            onClick={handleDashboardLinkClick}
+            aria-label="Work Instructions dashboard"
+            className="flex min-w-0 items-center gap-3 rounded-md py-1 pr-1"
           >
-            <section className="grid gap-1 rounded-xl border border-white/15 bg-white/5 p-2">
-              <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                Workspaces
-              </p>
-              {dashboardNavigationItems.map((item) => {
-                const Icon = item.icon;
+            <Image src="/delta-logo.svg" alt="" width={36} height={36} priority className="h-9 w-9 shrink-0" />
+            <span className="hidden truncate text-base font-bold tracking-tight text-slate-950 sm:block dark:text-white">Work Instructions</span>
+          </Link>
+          <div className="ml-auto flex min-w-0 items-center gap-2 sm:gap-3">
+            {userCanCreateInstructions ? (
+              <InstructionMenu pathname={pathname} canViewArchived={hasFullAccess(profile.role)} />
+            ) : null}
+            <UserAccountMenu profile={profile} />
+          </div>
+        </div>
+      </div>
+
+      <div className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+        <div className="mx-auto flex w-full max-w-[1600px] items-center gap-3 pl-2 pr-4 md:pl-6 md:pr-8">
+          <nav aria-label="Workspace navigation" className="min-w-0 flex-1">
+            <div
+              ref={tabsRef}
+              style={{ maskImage: tabFadeMask(tabsOverflow), WebkitMaskImage: tabFadeMask(tabsOverflow) }}
+              className="relative flex items-stretch gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            >
+              {WORKSPACES.map((workspace) => {
+                const Icon = workspace.icon;
+                const active = isWorkspaceActive(pathname, workspace.href);
                 return (
                   <Link
-                    key={item.href}
-                    href={item.href}
-                    onClick={() => {
-                      closeDashboardMenu();
-                      closeInstructionMenu();
-                    }}
+                    key={workspace.href}
+                    href={workspace.href}
+                    aria-current={active ? "page" : undefined}
+                    onClick={workspace.href === "/dashboard" ? handleDashboardLinkClick : undefined}
                     className={cn(
-                      "inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition",
-                      item.active
-                        ? "border-cyan-500/45 bg-cyan-500/20 text-cyan-100"
-                        : "border-white/10 bg-white/5 text-slate-100 hover:bg-white/15",
+                      "relative inline-flex min-h-12 shrink-0 items-center gap-2 px-3 text-sm font-semibold transition-colors",
+                      "after:absolute after:inset-x-2 after:bottom-0 after:h-[3px] after:rounded-t-sm after:transition-colors",
+                      active
+                        ? "text-slate-950 after:bg-cyan-600 dark:text-white dark:after:bg-cyan-400"
+                        : "text-slate-600 after:bg-transparent hover:text-slate-950 hover:after:bg-slate-300 dark:text-slate-400 dark:hover:text-white dark:hover:after:bg-slate-600",
                     )}
-                    aria-current={item.active ? "page" : undefined}
                   >
-                    <Icon size={14} />
-                    {item.label}
+                    <Icon size={16} aria-hidden="true" className={active ? "text-cyan-700 dark:text-cyan-400" : "text-slate-400 dark:text-slate-500"} />
+                    {workspace.label}
                   </Link>
                 );
               })}
-            </section>
-
+            </div>
+          </nav>
+          {showStudioStatus ? (
             <button
               type="button"
-              onClick={() => handleDashboardAction("toggle-customize")}
-              className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/45 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/25"
-            >
-              <LayoutGrid size={14} />
-              {customizeLabel}
-            </button>
-
-            {activeDashboardLayoutState.layoutError ? (
-              <p className="rounded-xl border border-rose-500/40 bg-rose-500/15 px-3 py-2 text-[11px] text-rose-100">
-                {activeDashboardLayoutState.layoutError}
-              </p>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-    );
-  };
-
-  const renderDashboardStudioControl = () => {
-    if (!showDashboardStudioButton) return null;
-
-    const editorStatus = activeDashboardLayoutState.layoutSaving
-      ? "Saving"
-      : activeDashboardLayoutState.layoutError
-        ? "Save failed"
-        : activeDashboardLayoutState.layoutDirty
-          ? "Unsaved"
-          : "Saved";
-
-    return (
-      <button
-        type="button"
-        aria-controls="homepage-editor"
-        aria-label={`Go to homepage editor. ${editorStatus}.`}
-        onClick={() => {
-          closeDashboardMenu();
-          closeInstructionMenu();
-          const editor = document.getElementById("homepage-editor");
-          editor?.scrollIntoView({
-            block: "start",
-            behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
-          });
-          editor?.querySelector<HTMLElement>("h2")?.focus({ preventScroll: true });
-        }}
-        className="inline-flex min-h-11 max-w-full items-center gap-2 rounded-xl border border-cyan-600 bg-cyan-50 px-3 py-2 text-sm font-semibold text-cyan-900 transition hover:bg-cyan-100 dark:border-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-100 dark:hover:bg-cyan-950/70"
-      >
-        <LayoutGrid size={15} aria-hidden="true" />
-        <span>Homepage editor</span>
-        <span className={cn(
-          "rounded-full px-2 py-0.5 text-[10px] font-bold",
-          studioNeedsAttention ? "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200" : "bg-white text-cyan-800 dark:bg-slate-900 dark:text-cyan-300",
-        )}>{editorStatus}</span>
-      </button>
-    );
-  };
-
-  const renderInstructionControl = (mobile: boolean) => {
-    if (!userCanCreateInstructions) {
-      return null;
-    }
-
-    return (
-      <div
-        data-instruction-menu-root="true"
-        className={cn(mobile ? "inline-flex max-w-full" : "relative inline-flex")}
-      >
-        <Link
-          href="/instructions/new"
-          onClick={() => {
-            closeDashboardMenu();
-            closeInstructionMenu();
-          }}
-          className={cn(
-            "inline-flex items-center rounded-l-xl border border-r-0 px-4 py-2 text-sm font-semibold transition",
-            instructionControlActive
-              ? "border-cyan-700 bg-cyan-600 text-white shadow-sm dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900"
-              : "border-slate-300/70 bg-white/80 text-slate-700 hover:border-slate-400 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-800",
-          )}
-        >
-          New Instruction
-        </Link>
-
-        <button
-          type="button"
-          data-menu-trigger="true"
-          aria-controls={`instruction-options-${mobile ? "mobile" : "desktop"}`}
-          aria-expanded={instructionMenuVisible}
-          aria-label="Open instruction options"
-          onClick={() => {
-            if (instructionMenuVisible) {
-              closeInstructionMenu();
-              return;
-            }
-
-            closeDashboardMenu();
-            openInstructionMenu();
-          }}
-          className={cn(
-            "inline-flex items-center rounded-r-xl border px-2.5 py-2 transition",
-            instructionControlActive
-              ? "border-cyan-700 bg-cyan-600 text-white hover:bg-cyan-700 dark:border-slate-200/70 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
-              : "border-slate-300/70 bg-white/80 text-slate-700 hover:border-slate-400 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:border-slate-500 dark:hover:bg-slate-800",
-          )}
-        >
-          <ChevronDown
-            size={14}
-            className={cn("transition", instructionMenuVisible ? "rotate-180" : "")}
-          />
-        </button>
-
-        {instructionMenuMounted ? (
-          <div
-            id={`instruction-options-${mobile ? "mobile" : "desktop"}`}
-            data-header-panel="true"
-            inert={!instructionMenuVisible}
-            className={cn(
-              "absolute top-[calc(100%+0.5rem)] z-[90] grid gap-2 rounded-2xl border border-white/20 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-xl transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
-              mobile ? "left-2 right-2" : "left-0 w-[220px]",
-              instructionMenuEntered ? "pointer-events-auto" : "pointer-events-none",
-            )}
-            style={{
-              opacity: instructionMenuEntered ? 1 : 0,
-              filter: instructionMenuEntered ? "blur(0px)" : "blur(6px)",
-              transform: instructionMenuEntered ? "translateY(0px) scale(1)" : "translateY(-8px) scale(0.98)",
-              transformOrigin: mobile ? "top center" : "top left",
-            }}
-          >
-            <Link
-              href="/instructions/import"
+              aria-controls="homepage-editor"
+              aria-label={`Go to homepage editor. ${studioStatus}.`}
               onClick={() => {
-                closeDashboardMenu();
-                closeInstructionMenu();
+                const editor = document.getElementById("homepage-editor");
+                editor?.scrollIntoView({
+                  block: "start",
+                  behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+                });
+                editor?.querySelector<HTMLElement>("h2")?.focus({ preventScroll: true });
               }}
-              className={cn(
-                "inline-flex items-center rounded-xl border px-3 py-2 text-sm font-semibold transition",
-                isImportInstructionActive
-                  ? "border-cyan-500/45 bg-cyan-500/20 text-cyan-100"
-                  : "border-white/20 bg-white/10 text-slate-100 hover:bg-white/20",
-              )}
+              className="inline-flex min-h-9 shrink-0 items-center gap-2 rounded-md border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
             >
-              Import
-            </Link>
-            {canViewArchivedInstructions ? (
-              <Link
-                href="/instructions/archived"
-                onClick={() => {
-                  closeDashboardMenu();
-                  closeInstructionMenu();
-                }}
+              <LayoutGrid size={14} aria-hidden="true" />
+              <span className="hidden sm:inline">Homepage editor</span>
+              <span
                 className={cn(
-                  "inline-flex items-center rounded-xl border px-3 py-2 text-sm font-semibold transition",
-                  isArchivedInstructionActive
-                    ? "border-cyan-500/45 bg-cyan-500/20 text-cyan-100"
-                    : "border-white/20 bg-white/10 text-slate-100 hover:bg-white/20",
+                  "rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                  studioNeedsAttention
+                    ? "bg-amber-100 text-amber-900 dark:bg-amber-500/20 dark:text-amber-200"
+                    : "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-200",
                 )}
               >
-                Archived
-              </Link>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-    );
-  };
-
-  return (
-    <header className="sticky top-0 z-[80] border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur-sm print:hidden dark:border-slate-800 dark:bg-slate-950/95">
-      <div className="relative z-10 mx-auto w-full max-w-[1600px] px-4 py-3 md:px-8">
-        <div className="flex items-center justify-end gap-3">
-          <div className="mr-auto flex items-center gap-3">
-            <Link
-              href="/dashboard"
-              onClick={handleDashboardLinkClick}
-              aria-label="Delta Dashboard"
-              className="inline-flex items-center rounded-lg px-1 py-1 transition hover:opacity-90"
-            >
-              <Image
-                src="/delta-logo.svg"
-                alt="Delta"
-                width={36}
-                height={36}
-                priority
-                className="h-9 w-9"
-              />
-            </Link>
-            <HeaderDate />
-          </div>
-          <nav aria-label="Workspace navigation" className="hidden items-center gap-2 xl:flex">
-            {renderDashboardStudioControl()}
-            {renderDashboardControl(false)}
-            {renderInstructionControl(false)}
-          </nav>
-          <span
-            className={cn(
-              "hidden rounded-full border px-3 py-1 text-xs font-extrabold uppercase tracking-wide xl:inline-flex",
-              userHasFullAccess
-                ? "border-emerald-500/35 bg-emerald-500/15 text-emerald-800 dark:text-emerald-100"
-                : "border-amber-500/40 bg-amber-500/15 text-amber-800 dark:text-amber-100",
-            )}
-          >
-            {accessLabel}
-          </span>
-          <UserAccountMenu profile={profile} />
+                {studioStatus}
+              </span>
+            </button>
+          ) : null}
+          <HeaderClock />
         </div>
-
-        <nav aria-label="Mobile workspace navigation" className="relative mt-2 flex flex-wrap items-center justify-center gap-2 xl:hidden">
-          {renderDashboardStudioControl()}
-          {renderDashboardControl(true)}
-          {renderInstructionControl(true)}
-          <span
-            className={cn(
-              "inline-flex rounded-full border px-3 py-1 text-xs font-extrabold uppercase tracking-wide",
-              userHasFullAccess
-                ? "border-emerald-500/35 bg-emerald-500/15 text-emerald-800 dark:text-emerald-100"
-                : "border-amber-500/40 bg-amber-500/15 text-amber-800 dark:text-amber-100",
-            )}
-          >
-            {accessLabel}
-          </span>
-        </nav>
       </div>
     </header>
   );

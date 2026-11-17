@@ -16,21 +16,19 @@ test.afterEach(closeRoleContexts);
 
 async function fillInstructionHeader(page: Page, partId: string, title: string, department: string) {
   await page.getByRole("textbox", { name: "Part ID", exact: true }).fill(partId);
-  await page.getByRole("textbox", { name: "Work Item Title", exact: true }).fill(title);
+  await page.getByRole("textbox", { name: "Title", exact: true }).fill(title);
   await page.getByRole("combobox", { name: "Department" }).selectOption({ label: department });
-  await page.getByRole("textbox", { name: "Process scope / applicability", exact: true }).fill("Assembly cell 3, all shifts.");
-  await page.getByRole("textbox", { name: "Acceptance criteria", exact: true }).fill("Torque within the released drawing limits.");
-  await page.getByRole("textbox", { name: "Verification records", exact: true }).fill("Torque log on the traveler.");
+  // Nothing else is required: tools and the "More details" section are optional.
 }
 
 async function readInstruction(id: string) {
   const { data, error } = await serviceClient()
     .from("work_instructions")
-    .select("id, revision, approval_status, is_archived, body_markdown, revision_family_id")
+    .select("id, revision, approval_status, is_archived, body_markdown, revision_family_id, uncommon_tools, process_scope, acceptance_criteria, verification_records")
     .eq("id", id)
     .single();
   if (error) throw error;
-  return data as { id: string; revision: number; approval_status: string; is_archived: boolean; body_markdown: string; revision_family_id: string };
+  return data as { id: string; revision: number; approval_status: string; is_archived: boolean; body_markdown: string; revision_family_id: string; uncommon_tools: string; process_scope: string; acceptance_criteria: string; verification_records: string };
 }
 
 /** The rendered body. A hidden print copy also exists, so only the visible one counts. */
@@ -50,56 +48,75 @@ test.describe.serial("work instruction lifecycle on the real backend", () => {
   let instructionId = "";
   let revisedInstructionId = "";
 
-  test("an admin writes a new instruction in Markdown with callouts, steps, a table, a chart and a photo", async ({ page }) => {
+  test("an admin writes a new instruction with callouts, steps, a table, a chart and a photo", async ({ page }) => {
     const errors = captureRuntimeErrors(page);
     await signIn(page, "admin");
     await page.goto("/instructions/new");
     await fillInstructionHeader(page, partId, title, "Assembly");
 
+    // Tools: type one and press Enter. One optional detail: what good looks like.
+    const toolField = page.getByRole("combobox", { name: /^Tools needed/ });
+    await toolField.click();
+    await toolField.pressSequentially("Torque wrench");
+    await toolField.press("Enter");
+    await expect(page.locator('[data-tool-chip="Torque wrench"]')).toBeVisible();
+    await page.locator("details").filter({ hasText: "More details" }).locator("summary").click();
+    await page.getByRole("textbox", { name: "What good looks like", exact: true }).fill("Torque within the released drawing limits.");
+
     const editor = page.getByRole("textbox", { name: "Work Instructions", exact: true });
+    const tools = page.getByRole("group", { name: "Work Instructions editor" });
     await editor.click();
-    await page.keyboard.type("## Setup\n\n");
-    await page.getByRole("button", { name: "Callout" }).click();
+    // Formatting appears as you type: "## " starts a heading and "1. " a numbered list.
+    await page.keyboard.type("## Setup");
+    await page.keyboard.press("Enter");
+    await tools.getByRole("button", { name: "Callout" }).click();
     await page.getByRole("menuitem", { name: /Caution/ }).click();
     await page.keyboard.type("Lock out the press before starting.");
-    // Enter continues the callout; a second Enter leaves it with a separating blank line.
-    await page.keyboard.type("\n\n## Steps\n\n1. Hand-start all six bolts\nTorque to 12 Nm in a star pattern\n\n");
+    // Enter adds a line inside the callout; Enter on that empty line continues below it.
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("## Steps");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("1. Hand-start all six bolts");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("Torque to 12 Nm in a star pattern");
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Enter");
     await page.keyboard.type("Mark each bolt ");
-    await page.getByRole("button", { name: "Bold" }).click();
+    await tools.getByRole("button", { name: "Bold", exact: true }).click();
     await page.keyboard.type("after torquing");
-    await page.keyboard.press("End");
-    await page.keyboard.type("\n\n");
-    await page.getByRole("button", { name: "Checklist" }).click();
-    await page.keyboard.type("Paint mark visible\nTorque logged\n\n");
-    await page.getByRole("button", { name: "Insert table" }).click();
+    await tools.getByRole("button", { name: "Bold", exact: true }).click();
+    await page.keyboard.press("Enter");
+    await tools.getByRole("button", { name: "Checklist" }).click();
+    await page.keyboard.type("Paint mark visible");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("Torque logged");
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Enter");
+    await tools.getByRole("button", { name: "Insert table" }).click();
+    // A new table starts in its first empty cell; Tab moves to the next cell.
+    await page.keyboard.type("1");
+    await page.keyboard.press("Tab");
+    await page.keyboard.type("Torque sequence");
     await editor.press("Control+End");
 
-    await page.getByRole("button", { name: "Insert chart" }).click();
+    await tools.getByRole("button", { name: "Insert chart" }).click();
     const chartDialog = page.getByRole("dialog", { name: "Chart" });
     await chartDialog.getByLabel("Chart title").fill("Torque audit (Nm)");
     await chartDialog.getByRole("textbox", { name: "Chart data" }).fill("Bolt 1, 24\nBolt 2, 23.5");
     await chartDialog.getByRole("button", { name: "Insert chart" }).click();
     await expect(chartDialog).toBeHidden();
-    await expect(editor).toHaveValue(/```chart\ntype: bar\ntitle: Torque audit \(Nm\)\nBolt 1: 24\nBolt 2: 23\.5\n```/);
+    await expect(editor.locator("figure[data-type='instruction-chart'] figcaption")).toHaveText("Torque audit (Nm)");
 
     await page.getByLabel("Choose photos or videos to upload").setInputFiles({ name: "locator.png", mimeType: "image/png", buffer: TINY_PNG });
-    await expect(editor).toHaveValue(/!\[locator\]\(http[^)\s]+\.png\)/, { timeout: 60_000 });
+    await expect(editor.locator('figure img[alt="locator"]')).toBeVisible({ timeout: 60_000 });
     await expect(page.getByText(/Uploading locator\.png/)).toHaveCount(0);
 
-    await expect(editor).toHaveValue(new RegExp([
-      "^## Setup\\n\\n> \\[!CAUTION\\]\\n> Lock out the press before starting\\.\\n\\n",
-      "## Steps\\n\\n1\\. Hand-start all six bolts\\n2\\. Torque to 12 Nm in a star pattern\\n\\n",
-      "Mark each bolt \\*\\*after torquing\\*\\*\\n\\n",
-      "- \\[ \\] Paint mark visible\\n- \\[ \\] Torque logged\\n\\n",
-      "\\| Step \\| Check \\| Result \\|",
-    ].join("")));
-
-    // The live preview renders the same blocks operators will see.
-    await page.getByRole("button", { name: "Preview", exact: true }).click();
-    const preview = page.getByRole("region", { name: "Work Instructions preview" });
-    await expect(preview.locator('aside[data-tone="danger"]')).toContainText("Lock out the press");
-    await expect(preview.locator("figure[data-type='instruction-chart'] svg")).toBeVisible();
-    await page.getByRole("button", { name: "Write", exact: true }).click();
+    // What the author sees while writing is what operators will see.
+    await expect(editor.locator('aside[data-tone="danger"]')).toContainText("Lock out the press before starting.");
+    await expect(editor.locator("ol > li")).toHaveText(["Hand-start all six bolts", "Torque to 12 Nm in a star pattern"]);
+    await expect(editor.locator('ul[data-type="taskList"] > li > div')).toHaveText(["Paint mark visible", "Torque logged"]);
+    await expect(editor.locator("figure[data-type='instruction-chart'] svg")).toBeVisible();
 
     await page.getByRole("button", { name: "Create Instruction" }).click();
     await page.waitForURL(/\/instructions\/[0-9a-f-]{36}$/, { timeout: 90_000 });
@@ -116,11 +133,25 @@ test.describe.serial("work instruction lifecycle on the real backend", () => {
     await expect(photo).toHaveAttribute("src", /instruction-media/);
     await expect.poll(() => photo.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth)).toBeGreaterThan(0);
 
+    // It is stored as Markdown.
     const stored = await readInstruction(instructionId);
     expect(stored.approval_status).toBe("pending_review");
     expect(stored.revision).toBe(1);
-    expect(stored.body_markdown.startsWith("## Setup\n\n> [!CAUTION]")).toBe(true);
-    expect(stored.body_markdown).toContain("```chart");
+    expect(stored.body_markdown).toMatch(new RegExp([
+      "^## Setup\\n\\n> \\[!CAUTION\\]\\n> Lock out the press before starting\\.\\n\\n",
+      "## Steps\\n\\n1\\. Hand-start all six bolts\\n2\\. Torque to 12 Nm in a star pattern\\n\\n",
+      "Mark each bolt \\*\\*after torquing\\*\\*\\n\\n",
+      "- \\[ \\] Paint mark visible\\n- \\[ \\] Torque logged\\n\\n",
+      "\\| Step +\\| Check +\\| Result +\\|\\n\\| -+ \\| -+ \\| -+ \\|\\n\\| 1 +\\| Torque sequence \\| +\\|",
+    ].join("")));
+    expect(stored.body_markdown).toMatch(/```chart\ntype: bar\ntitle: Torque audit \(Nm\)\nBolt 1: 24\nBolt 2: 23\.5\n```\n\n!\[locator\]\(http[^)\s]+\.png\)$/);
+    // The tool and the one detail that was filled in are saved; the details left blank stay blank.
+    expect(stored.uncommon_tools).toBe("Torque wrench");
+    expect(stored.acceptance_criteria).toBe("Torque within the released drawing limits.");
+    expect([stored.process_scope, stored.verification_records]).toEqual(["", ""]);
+    // The detail is shown in its own box above the steps, not inside the steps text.
+    const goodLooksLike = page.getByRole("complementary").filter({ has: page.getByRole("heading", { name: "What good looks like", exact: true }) });
+    await expect(goodLooksLike).toContainText("Torque within the released drawing limits.");
     expect(errors).toEqual([]);
   });
 
@@ -153,18 +184,22 @@ test.describe.serial("work instruction lifecycle on the real backend", () => {
     await expect(pinned.getByRole("link", { name: new RegExp(partId) })).toBeVisible();
   });
 
-  test("an admin revises the released instruction; the editor loads Markdown and a new revision is created", async ({ page }) => {
+  test("an admin revises the released instruction; the editor opens it formatted and a new revision is created", async ({ page }) => {
     await signIn(page, "admin");
     await page.goto(`/instructions/${instructionId}/edit`);
     const editor = page.getByRole("textbox", { name: "Work Instructions", exact: true });
-    await expect(editor).toHaveValue(/^## Setup\n\n> \[!CAUTION\]/);
-    await expect(page.getByText("Converted to Markdown.")).toHaveCount(0);
+    await expect(editor.getByRole("heading", { name: "Setup", exact: true })).toBeVisible();
+    await expect(editor.locator('aside[data-tone="danger"]')).toContainText("Lock out the press before starting.");
+    await expect(editor.locator('figure img[alt="locator"]')).toBeVisible();
+    await expect(page.getByText("Updated for the new editor.")).toHaveCount(0);
 
     await page.getByRole("spinbutton", { name: "Revision" }).fill("2");
     await page.getByPlaceholder("What changed and why?").fill("Added the final verification step.");
-    await editor.click();
+    // The editor keeps an empty line below the final photo to continue writing on.
     await editor.press("Control+End");
-    await page.keyboard.type("\n\n## Final check\n\nVerify the paint mark on every bolt.");
+    await page.keyboard.type("## Final check");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("Verify the paint mark on every bolt.");
     await page.getByRole("button", { name: "Save Changes" }).click();
     await page.getByRole("button", { name: "Continue and Save" }).click();
     await page.waitForURL((url) => /\/instructions\/[0-9a-f-]{36}$/.test(url.pathname), { timeout: 90_000 });
@@ -191,7 +226,7 @@ test.describe.serial("deleting (archiving) and restoring an instruction", () => 
     await signIn(page, "admin");
     await page.goto("/instructions/new");
     await fillInstructionHeader(page, partId, "Temporary trim check", "Trim");
-    await page.getByRole("textbox", { name: "Work Instructions", exact: true }).fill("1. Inspect the trimmed edge.");
+    await page.getByRole("textbox", { name: "Work Instructions", exact: true }).pressSequentially("1. Inspect the trimmed edge.");
     await page.getByRole("button", { name: "Create Instruction" }).click();
     await page.waitForURL(/\/instructions\/[0-9a-f-]{36}$/, { timeout: 90_000 });
     instructionId = instructionIdFromUrl(page);
@@ -222,7 +257,7 @@ test.describe.serial("deleting (archiving) and restoring an instruction", () => 
   });
 });
 
-test("legacy rich-text instructions open as Markdown without a false unsaved-changes prompt and save as Markdown", async ({ page }) => {
+test("legacy rich-text instructions open in the editor without a false unsaved-changes prompt and save as Markdown", async ({ page }) => {
   const partId = uniqueId("LEG");
   const legacyHtml = '<h2>Legacy setup</h2><p><span style="color:#dc2626">Do not skip</span> the warm-up.</p>'
     + '<aside data-type="callout" data-tone="warning"><p>Hot surface.</p></aside>'
@@ -244,19 +279,24 @@ test("legacy rich-text instructions open as Markdown without a false unsaved-cha
   await signIn(page, "admin");
   await page.goto(`/instructions/${legacy!.id}/edit`);
   const editor = page.getByRole("textbox", { name: "Work Instructions", exact: true });
-  await expect(page.getByText("Converted to Markdown.")).toBeVisible();
-  await expect(editor).toHaveValue("## Legacy setup\n\n**Do not skip** the warm-up.\n\n> [!WARNING]\n> Hot surface.\n\n1. Warm the mold\n2. Run a test shot");
+  await expect(page.getByText("Updated for the new editor.")).toBeVisible();
+  // Colour is not kept; the highlighted words become bold.
+  await expect(editor.getByRole("heading", { name: "Legacy setup", exact: true })).toBeVisible();
+  await expect(editor.locator("strong")).toHaveText("Do not skip");
+  await expect(editor.locator('aside[data-tone="warning"]')).toHaveText("Hot surface.");
+  await expect(editor.locator("ol > li")).toHaveText(["Warm the mold", "Run a test shot"]);
 
   // Opening a converted record is not an edit, so leaving must not ask to discard changes.
-  await page.getByRole("link", { name: "Delta Dashboard" }).click();
+  await page.getByRole("navigation", { name: "Workspace navigation" }).getByRole("link", { name: "Dashboard", exact: true }).click();
   await page.waitForURL(/\/dashboard/, { timeout: 30_000 });
   await expect(page.getByText("Discard unsaved changes?")).toHaveCount(0);
 
   await page.goto(`/instructions/${legacy!.id}/edit`);
-  await editor.click();
-  await editor.press("Control+End");
-  // Enter continues the numbered list automatically.
-  await page.keyboard.type("\nRecord the first part");
+  await editor.locator("ol > li").last().click();
+  await page.keyboard.press("End");
+  // Enter continues the numbered list.
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Record the first part");
   await page.getByRole("button", { name: "Save Changes" }).click();
   await page.waitForURL((url) => /\/instructions\/[0-9a-f-]{36}$/.test(url.pathname), { timeout: 90_000 });
   const savedId = instructionIdFromUrl(page);

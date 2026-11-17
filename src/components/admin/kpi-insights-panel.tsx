@@ -461,7 +461,7 @@ export function KpiInsightsPanel() {
       <section className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-6">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
-            Instruction Views by Range
+            Views over time
           </h2>
           <button
             type="button"

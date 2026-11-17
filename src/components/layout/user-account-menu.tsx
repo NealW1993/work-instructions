@@ -6,6 +6,7 @@ import {
   Bell,
   CircleHelp,
   ChevronDown,
+  Clapperboard,
   Clock3,
   FileText,
   Inbox,
@@ -22,7 +23,8 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { createPortal } from "react-dom";
 
 import { FloatingStatusNotices } from "@/components/ui/floating-status-notices";
-import { canViewKpis, hasFullAccess } from "@/lib/roles";
+import { setHeaderAnimationEnabled, useHeaderAnimationEnabled } from "@/lib/header-animation";
+import { accessLevelLabel, canViewKpis, hasFullAccess, roleLabel } from "@/lib/roles";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { clearBrowserExitSignOutPending } from "@/lib/session-exit";
 import {
@@ -161,6 +163,10 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
   const iconColor = useMemo(() => resolveIconColor(profile.icon_color), [profile.icon_color]);
   const fontColor = useMemo(() => resolveFontColor(profile.font_color), [profile.font_color]);
   const isDarkTheme = themePreference === "dark";
+  const headerAnimationOn = useHeaderAnimationEnabled() ?? true;
+  // Administrators see their role; everyone else sees what they can do.
+  const roleText = hasFullAccess(profile.role) ? roleLabel(profile.role) : accessLevelLabel(profile.role);
+  const menuRowClass = "flex min-h-11 w-full items-center gap-3 rounded-md px-2.5 text-left text-sm font-medium transition hover:bg-slate-100 dark:hover:bg-slate-800";
   const canUsePortal = typeof document !== "undefined";
   const unreadNotificationLabel =
     unreadNotificationCount > 99 ? "99+" : String(unreadNotificationCount);
@@ -687,47 +693,64 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
         type="button"
         onClick={() => (open ? closeMenu() : openMenu())}
         aria-expanded={open}
-        className="inline-flex items-center gap-2 rounded-xl border border-slate-300/70 bg-white/80 px-3 py-1.5 text-sm font-semibold text-slate-800 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-100 dark:hover:bg-slate-900"
+        aria-label={`Account: ${profile.full_name}, ${roleText}${unreadNotificationCount > 0 ? `, ${unreadNotificationLabel} unread notifications` : ""}`}
+        className="inline-flex h-10 max-w-[16rem] items-center gap-2 rounded-md border border-slate-300 bg-white/90 pl-1 pr-2 text-left shadow-sm transition hover:bg-white dark:border-white/15 dark:bg-black/55 dark:hover:bg-black/75"
       >
         <span
-          className="inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-extrabold"
+          aria-hidden="true"
+          className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-xs font-extrabold"
           style={{ backgroundColor: iconColor, color: fontColor }}
         >
           {initials}
+          {unreadNotificationCount > 0 ? (
+            <span className="absolute -right-1.5 -top-1.5 min-w-4 rounded-full bg-rose-600 px-1 text-center text-[10px] font-bold leading-4 text-white ring-2 ring-white dark:ring-black">
+              {unreadNotificationLabel}
+            </span>
+          ) : null}
         </span>
-        <span className="max-w-[150px] truncate">{profile.full_name}</span>
-        {unreadNotificationCount > 0 ? (
-          <span className="rounded-full bg-rose-600 px-1.5 py-0.5 text-[10px] font-extrabold leading-none text-white">
-            {unreadNotificationLabel}
-          </span>
-        ) : null}
-        <ChevronDown size={14} className={open ? "rotate-180 transition" : "transition"} />
+        <span aria-hidden="true" className="hidden min-w-0 leading-tight md:grid">
+          <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{profile.full_name}</span>
+          <span className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400">{roleText}</span>
+        </span>
+        <ChevronDown size={14} aria-hidden="true" className={cn("shrink-0 text-slate-500 transition-transform dark:text-slate-400", open && "rotate-180")} />
       </button>
 
       {menuMounted ? (
         <div
           className={cn(
-            "absolute right-0 z-[90] mt-2 grid gap-3 rounded-xl border border-white/20 bg-slate-950/95 p-3 shadow-2xl backdrop-blur-xl transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform",
+            "absolute right-0 z-[90] mt-2 grid gap-0.5 rounded-lg border border-slate-200 bg-white p-1.5 text-slate-800 shadow-xl transition-[opacity,transform] duration-200 ease-out dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100",
             menuEntered ? "pointer-events-auto" : "pointer-events-none",
           )}
           style={{
             width: `${menuWidth}px`,
             maxWidth: "92vw",
             opacity: menuEntered ? 1 : 0,
-            filter: menuEntered ? "blur(0px)" : "blur(6px)",
-            transform: menuEntered ? "translateY(0px) scale(1)" : "translateY(-8px) scale(0.98)",
+            transform: menuEntered ? "translateY(0px)" : "translateY(-6px)",
             transformOrigin: "top right",
           }}
         >
-          <div className="rounded-xl border border-cyan-500/35 bg-cyan-500/12 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-cyan-200/90">
-              Active Session
-            </p>
-            <p className="mt-1 inline-flex items-center gap-2 font-mono text-2xl font-bold text-cyan-100">
-              <Clock3 size={16} />
-              {sessionElapsedLabel}
-            </p>
+          <div className="flex items-center gap-3 px-2.5 py-2.5">
+            <span
+              aria-hidden="true"
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-sm font-extrabold"
+              style={{ backgroundColor: iconColor, color: fontColor }}
+            >
+              {initials}
+            </span>
+            <span className="grid min-w-0">
+              <span className="truncate font-semibold">{profile.full_name}</span>
+              <span className="truncate text-xs text-slate-500 dark:text-slate-400">{roleText}</span>
+            </span>
+            <span className="ml-auto grid shrink-0 justify-items-end text-right">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Session</span>
+              <span className="inline-flex items-center gap-1 font-mono text-sm font-semibold tabular-nums">
+                <Clock3 size={13} aria-hidden="true" />
+                {sessionElapsedLabel}
+              </span>
+            </span>
           </div>
+
+          <div aria-hidden="true" className="my-1 h-px bg-slate-200 dark:bg-slate-700" />
 
           <button
             type="button"
@@ -735,24 +758,50 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
             aria-label={`Switch to ${isDarkTheme ? "light" : "dark"} mode`}
             aria-pressed={isDarkTheme}
             aria-busy={themeSaving}
-            className="inline-flex items-center justify-between gap-3 rounded-xl border border-cyan-500/40 bg-cyan-500/14 px-3 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/24"
+            className={cn(menuRowClass, "justify-between")}
           >
-            <span className="inline-flex items-center gap-2">
-              {isDarkTheme ? <Moon size={15} /> : <Sun size={15} />}
-              Theme
+            <span className="inline-flex items-center gap-3">
+              {isDarkTheme ? <Moon size={16} aria-hidden="true" /> : <Sun size={16} aria-hidden="true" />}
+              Dark mode
             </span>
             <span
+              aria-hidden="true"
               className={cn(
-                "relative inline-flex h-5 w-10 shrink-0 overflow-hidden rounded-md border transition-[background-color,border-color] duration-140 ease-[cubic-bezier(0.2,0.8,0.2,1)]",
-                isDarkTheme
-                  ? "border-cyan-300/50 bg-cyan-400/45"
-                  : "border-slate-400/45 bg-slate-700/80",
+                "relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors",
+                isDarkTheme ? "bg-cyan-600" : "bg-slate-300 dark:bg-slate-600",
               )}
             >
               <span
                 className={cn(
-                  "absolute left-[2px] top-[2px] h-3.5 w-3.5 rounded-[3px] bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.2)] transition-transform duration-140 ease-[cubic-bezier(0.2,0.8,0.2,1)]",
-                  isDarkTheme ? "translate-x-[22px]" : "translate-x-0",
+                  "absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform",
+                  isDarkTheme ? "translate-x-4" : "translate-x-0",
+                )}
+              />
+            </span>
+          </button>
+
+          <button
+            type="button"
+            role="switch"
+            aria-checked={headerAnimationOn}
+            onClick={() => setHeaderAnimationEnabled(!headerAnimationOn)}
+            className={cn(menuRowClass, "justify-between")}
+          >
+            <span className="inline-flex items-center gap-3">
+              <Clapperboard size={16} aria-hidden="true" />
+              Header animation
+            </span>
+            <span
+              aria-hidden="true"
+              className={cn(
+                "relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors",
+                headerAnimationOn ? "bg-cyan-600" : "bg-slate-300 dark:bg-slate-600",
+              )}
+            >
+              <span
+                className={cn(
+                  "absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform",
+                  headerAnimationOn ? "translate-x-4" : "translate-x-0",
                 )}
               />
             </span>
@@ -761,57 +810,56 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
           <section className="relative">
             <button
               type="button"
+              aria-expanded={notificationsOpen}
               onClick={() => {
                 setNotificationsOpen((current) => !current);
                 if (!notificationsOpen) {
                   void loadNotifications();
                 }
               }}
-              className={cn(
-                "flex w-full items-center justify-between gap-3 rounded-xl border border-white/15 px-3 py-2 text-left text-sm font-semibold text-slate-100 transition hover:bg-white/10",
-                notificationsOpen ? "bg-white/10" : "bg-white/5",
-              )}
+              className={cn(menuRowClass, "justify-between", notificationsOpen && "bg-slate-100 dark:bg-slate-800")}
             >
-              <span className="inline-flex min-w-0 items-center gap-2">
-                <Bell size={15} />
+              <span className="inline-flex min-w-0 items-center gap-3">
+                <Bell size={16} aria-hidden="true" />
                 <span>Notifications</span>
               </span>
               <span className="inline-flex items-center gap-2">
                 {unreadNotificationCount > 0 ? (
-                  <span className="rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-extrabold leading-none text-white">
+                  <span className="rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-bold leading-none text-white">
                     {unreadNotificationLabel}
                   </span>
                 ) : null}
                 <ChevronDown
                   size={14}
-                  className={notificationsOpen ? "rotate-180 transition" : "transition"}
+                  aria-hidden="true"
+                  className={cn("text-slate-400 transition-transform", notificationsOpen && "rotate-180")}
                 />
               </span>
             </button>
             {notificationsOpen ? (
-              <div className="absolute right-0 top-full z-[95] mt-2 grid w-[28rem] max-w-[calc(100vw-2rem)] gap-2 rounded-xl border border-white/15 bg-slate-950/98 p-3 shadow-2xl backdrop-blur-xl lg:right-full lg:top-0 lg:mr-3 lg:mt-0">
+              <div className="absolute right-0 top-full z-[95] mt-2 grid w-[28rem] max-w-[calc(100vw-2rem)] gap-2 rounded-lg border border-slate-200 bg-white p-3 shadow-xl lg:right-full lg:top-0 lg:mr-3 lg:mt-0 dark:border-slate-700 dark:bg-slate-900">
                 <div className="flex items-center justify-between gap-2 px-1">
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                     Recent activity
                   </span>
                   <button
                     type="button"
                     onClick={() => void markNotificationsRead()}
                     disabled={unreadNotificationCount === 0}
-                    className="text-[11px] font-semibold text-cyan-200 transition hover:text-cyan-100 disabled:cursor-not-allowed disabled:text-slate-500"
+                    className="text-xs font-semibold text-cyan-700 transition hover:text-cyan-900 disabled:cursor-not-allowed disabled:text-slate-400 dark:text-cyan-300 dark:hover:text-cyan-100 dark:disabled:text-slate-600"
                   >
                     Mark all read
                   </button>
                 </div>
                 {notificationsError ? (
-                  <p className="rounded-lg border border-rose-400/35 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
+                  <p className="rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-xs text-rose-800 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200">
                     {notificationsError}
                   </p>
                 ) : null}
                 <div className="grid max-h-[28rem] gap-2 overflow-y-auto pr-1">
                   {notifications.length === 0 && !notificationsBusy ? (
-                    <div className="grid place-items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-5 text-center text-xs text-slate-300">
-                      <Inbox size={18} />
+                    <div className="grid place-items-center gap-2 rounded-md border border-dashed border-slate-300 px-3 py-5 text-center text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                      <Inbox size={18} aria-hidden="true" />
                       No notifications yet.
                     </div>
                   ) : null}
@@ -820,21 +868,21 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
                     const content = (
                       <div
                         className={cn(
-                          "grid gap-1 rounded-lg border px-3 py-2 text-left transition",
+                          "grid gap-1 rounded-md border px-3 py-2 text-left transition",
                           isUnread
-                            ? "border-cyan-300/45 bg-cyan-500/15"
-                            : "border-white/10 bg-black/20 hover:bg-white/10",
+                            ? "border-cyan-200 bg-cyan-50 dark:border-cyan-500/30 dark:bg-cyan-500/10"
+                            : "border-slate-200 bg-white hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800",
                         )}
                       >
                         <div className="flex items-start justify-between gap-2">
-                          <p className="min-w-0 text-xs font-extrabold text-slate-100">
+                          <p className="min-w-0 text-xs font-bold text-slate-900 dark:text-slate-100">
                             {notification.title}
                           </p>
                           {isUnread ? (
-                            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-cyan-300" />
+                            <span aria-label="Unread" className="mt-1 h-2 w-2 shrink-0 rounded-full bg-cyan-600 dark:bg-cyan-300" />
                           ) : null}
                         </div>
-                        <p className="text-xs leading-snug text-slate-300">
+                        <p className="text-xs leading-snug text-slate-600 dark:text-slate-300">
                           {notification.body}
                         </p>
                         <p className="text-[11px] text-slate-500">
@@ -870,7 +918,7 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
                     );
                   })}
                   {notificationsBusy ? (
-                    <p className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-300">
+                    <p className="rounded-md border border-slate-200 px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
                       Loading notifications...
                     </p>
                   ) : null}
@@ -879,43 +927,29 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
             ) : null}
           </section>
 
-          <Link
-            href="/account"
-            onClick={() => closeMenu()}
-            className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
-          >
-            <Settings size={15} />
-            Account Settings
+          <div aria-hidden="true" className="my-1 h-px bg-slate-200 dark:bg-slate-700" />
+
+          <Link href="/account" onClick={() => closeMenu()} className={menuRowClass}>
+            <Settings size={16} aria-hidden="true" />
+            Account settings
           </Link>
 
-          <Link
-            href="/drafts"
-            onClick={() => closeMenu()}
-            className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
-          >
-            <FileText size={15} />
-            My Drafts
+          <Link href="/drafts" onClick={() => closeMenu()} className={menuRowClass}>
+            <FileText size={16} aria-hidden="true" />
+            My drafts
           </Link>
 
           {hasFullAccess(profile.role) ? (
-            <Link
-              href="/admin/users"
-              onClick={() => closeMenu()}
-              className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/40 bg-cyan-500/15 px-3 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/25"
-            >
-              <SlidersHorizontal size={15} />
-              System Settings
+            <Link href="/admin/users" onClick={() => closeMenu()} className={menuRowClass}>
+              <SlidersHorizontal size={16} aria-hidden="true" />
+              System settings
             </Link>
           ) : null}
 
           {canViewKpis(profile.role) ? (
-            <Link
-              href="/admin/kpis"
-              onClick={() => closeMenu()}
-              className="inline-flex items-center gap-2 rounded-xl border border-violet-500/40 bg-violet-500/15 px-3 py-2 text-sm font-semibold text-violet-100 transition hover:bg-violet-500/25"
-            >
-              <BarChart3 size={15} />
-              KPI Dashboard
+            <Link href="/admin/kpis" onClick={() => closeMenu()} className={menuRowClass}>
+              <BarChart3 size={16} aria-hidden="true" />
+              KPI dashboard
             </Link>
           ) : null}
 
@@ -927,24 +961,21 @@ export function UserAccountMenu({ profile }: UserAccountMenuProps) {
               setHelpError(null);
               setHelpStatus(null);
             }}
-            className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/35 bg-cyan-500/10 px-3 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-500/20"
+            className={menuRowClass}
           >
-            <CircleHelp size={15} />
-            Help Chat
+            <CircleHelp size={16} aria-hidden="true" />
+            Help chat
           </button>
+
+          <div aria-hidden="true" className="my-1 h-px bg-slate-200 dark:bg-slate-700" />
 
           <button
             type="button"
             onClick={() => void handleSignOut()}
-            className={cn(
-              "inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition",
-              isDarkTheme
-                ? "border-rose-500/55 bg-rose-600/30 text-rose-100 hover:bg-rose-600/40"
-                : "border-rose-800/85 bg-rose-700 text-white hover:bg-rose-800",
-            )}
+            className={cn(menuRowClass, "font-semibold text-rose-700 hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-500/10")}
           >
-            <LogOut size={15} />
-            Logout
+            <LogOut size={16} aria-hidden="true" />
+            Sign out
           </button>
         </div>
       ) : null}

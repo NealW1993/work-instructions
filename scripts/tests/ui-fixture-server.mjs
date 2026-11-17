@@ -1,7 +1,8 @@
 // Isolated API fixtures. Writes remain in memory and never use a real backend.
+import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { handleMedia, readBody } from "./media-fixture.mjs";
 import { handleProfileFixture } from "./profile-fixture.mjs";
 
@@ -62,11 +63,24 @@ const server = http.createServer(async (request, response) => {
   return send(request.headers.accept?.includes("application/vnd.pgrst.object+json") ? rows[0] || null : rows);
 });
 
-// Webpack keeps the isolated Windows browser fixture predictable after dependency updates.
-// The production application still uses its configured default bundler.
-const nextProcess = spawn(process.execPath, [path.resolve("node_modules/next/dist/bin/next"), "dev", "--webpack", "--hostname", "127.0.0.1", "--port", "3100"], {
+// The suite runs against a production build by default: pages are compiled once, so results do not
+// depend on how fast a development server can compile on demand. UI_FIXTURE_MODE=development uses
+// the webpack development server instead (useful while editing). Both use the same isolated folder.
+// UI_FIXTURE_REUSE_BUILD=1 starts the last production build without rebuilding; only use it when no
+// application code has changed since that build.
+const nextBin = path.resolve("node_modules/next/dist/bin/next");
+const production = process.env.UI_FIXTURE_MODE !== "development";
+const fixtureEnv = { ...process.env, NEXT_BUILD_DIR: ".next-ui-smoke", NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:3900", SUPABASE_URL_INTERNAL: "http://127.0.0.1:3900", NEXT_PUBLIC_SUPABASE_ANON_KEY: "fixture-anon-key", SUPABASE_ANON_KEY: "fixture-anon-key", SUPABASE_SERVICE_ROLE_KEY: "fixture-service-key", NEXT_PUBLIC_APP_URL: "http://127.0.0.1:3100", NEXT_PUBLIC_POSTHOG_KEY: "", OPENAI_API_KEY: "", SYSTEM_ADMIN_EMAIL: "", NEXT_TELEMETRY_DISABLED: "1" };
+const reuseBuild = process.env.UI_FIXTURE_REUSE_BUILD === "1" && fs.existsSync(path.resolve(".next-ui-smoke/BUILD_ID"));
+if (production && !reuseBuild) {
+  const build = spawnSync(process.execPath, [nextBin, "build"], { stdio: "inherit", env: fixtureEnv });
+  if (build.status !== 0) process.exit(build.status ?? 1);
+}
+const nextProcess = spawn(process.execPath, production
+  ? [nextBin, "start", "--hostname", "127.0.0.1", "--port", "3100"]
+  : [nextBin, "dev", "--webpack", "--hostname", "127.0.0.1", "--port", "3100"], {
   stdio: "inherit",
-  env: { ...process.env, NEXT_BUILD_DIR: ".next-ui-smoke", NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:3900", SUPABASE_URL_INTERNAL: "http://127.0.0.1:3900", NEXT_PUBLIC_SUPABASE_ANON_KEY: "fixture-anon-key", SUPABASE_ANON_KEY: "fixture-anon-key", SUPABASE_SERVICE_ROLE_KEY: "fixture-service-key", NEXT_PUBLIC_APP_URL: "http://127.0.0.1:3100", NEXT_PUBLIC_POSTHOG_KEY: "", OPENAI_API_KEY: "", SYSTEM_ADMIN_EMAIL: "", NEXT_TELEMETRY_DISABLED: "1" },
+  env: fixtureEnv,
 });
 server.listen(3900, "127.0.0.1");
 nextProcess.on("exit", (code) => { server.close(); process.exitCode = code || 0; });

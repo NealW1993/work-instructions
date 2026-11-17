@@ -11,6 +11,8 @@ import {
   ChartLine,
   ChartNetwork,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   ClipboardCheck,
   Eye,
   EyeOff,
@@ -26,6 +28,7 @@ import {
   type LucideIcon,
   Pencil,
   Pin,
+  ScanBarcode,
   SearchX,
   SlidersHorizontal,
   Sparkles,
@@ -906,18 +909,41 @@ function getGreeting(nowMs: number) {
   return "Good evening";
 }
 
-function getWidgetSpanClass(size: DashboardWidgetSize) {
-  switch (size) {
-    case "compact":
-      return "col-span-12 md:col-span-6 lg:col-span-4";
-    case "wide":
-      return "col-span-12 lg:col-span-8";
-    case "full":
-      return "col-span-12";
-    case "standard":
-    default:
-      return "col-span-12 md:col-span-6 lg:col-span-6";
-  }
+/* Homepage widgets sit on a 12-column grid: one column of widgets on phones, two on tablets, up to three on desktops. */
+const DESKTOP_WIDGET_COLUMNS: Record<DashboardWidgetSize, number> = { compact: 4, standard: 6, wide: 8, full: 12 };
+const TABLET_WIDGET_COLUMNS: Record<DashboardWidgetSize, number> = { compact: 6, standard: 6, wide: 12, full: 12 };
+const DESKTOP_SPAN_CLASSES: Record<number, string> = {
+  4: "lg:col-span-4", 5: "lg:col-span-5", 6: "lg:col-span-6", 7: "lg:col-span-7", 8: "lg:col-span-8",
+  9: "lg:col-span-9", 10: "lg:col-span-10", 11: "lg:col-span-11", 12: "lg:col-span-12",
+};
+const TABLET_SPAN_CLASSES: Record<number, string> = { 6: "md:col-span-6", 12: "md:col-span-12" };
+
+/**
+ * Fits widgets into rows of 12 columns in order. When the next widget does not fit, the columns left
+ * over in the row are shared among the widgets already in it (the last one takes any remainder), so
+ * the layout never leaves an empty hole beside a widget.
+ */
+function packWidgetRows(columns: number[]): number[] {
+  const spans = [...columns];
+  let rowStart = 0;
+  let used = 0;
+  const closeRow = (rowEnd: number) => {
+    const count = rowEnd - rowStart;
+    const spare = 12 - used;
+    if (count > 0 && spare > 0) {
+      const share = Math.floor(spare / count);
+      for (let index = rowStart; index < rowEnd; index += 1) spans[index] += share;
+      spans[rowEnd - 1] += spare - share * count;
+    }
+    rowStart = rowEnd;
+    used = 0;
+  };
+  columns.forEach((span, index) => {
+    if (used + span > 12) closeRow(index);
+    used += span;
+  });
+  closeRow(columns.length);
+  return spans;
 }
 
 type DashboardPendingNavigation =
@@ -958,25 +984,22 @@ interface ImpactKpiCardProps {
   compact?: boolean;
 }
 
-function ImpactKpiCard({ label, value, onOpen, compact = false }: ImpactKpiCardProps) {
+/** A figure at a glance; selecting it opens the records behind the number. */
+function ImpactKpiCard({ label, value, onOpen }: ImpactKpiCardProps) {
   return (
     <button
       type="button"
       onClick={onOpen}
-      className="group grid min-w-0 w-full gap-1 rounded-xl border border-slate-300/70 bg-white/70 p-3 text-left transition hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/50 dark:hover:border-cyan-500/50 dark:hover:bg-cyan-500/10"
+      className="group grid min-h-[5.25rem] w-full min-w-0 content-between gap-1 rounded-lg border border-slate-200 bg-white p-3 text-left transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:border-slate-700 dark:hover:bg-slate-900"
     >
-      <div className="mb-1 flex min-w-0 flex-wrap items-start justify-between gap-1.5">
-        <p className="min-w-0 break-words text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-          {label}
-        </p>
-        <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-semibold text-cyan-700 dark:text-cyan-300">
-          {compact ? "Details" : "Drill down"}
-          {!compact ? <Info size={12} className="text-cyan-600 dark:text-cyan-300" /> : null}
-        </span>
-      </div>
-      <p className="min-w-0 break-words text-2xl font-extrabold text-slate-900 dark:text-slate-100">
+      <span className="flex min-w-0 items-start justify-between gap-2">
+        <span className="min-w-0 break-words text-xs font-medium text-slate-500 dark:text-slate-400">{label}</span>
+        <ChevronRight size={15} aria-hidden="true" className="mt-0.5 shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-cyan-700 dark:text-slate-600 dark:group-hover:text-cyan-400" />
+      </span>
+      <span className="min-w-0 break-words text-2xl font-semibold tabular-nums tracking-tight text-slate-950 dark:text-white">
         {value}
-      </p>
+      </span>
+      <span className="sr-only">Open details</span>
     </button>
   );
 }
@@ -1191,7 +1214,7 @@ function KpiTimeRangePicker({
   onChange: (nextValue: KpiTimeRangeDays) => void;
 }) {
   return (
-    <div role="group" aria-label="Time range" className="inline-flex items-center gap-1 rounded-xl border border-slate-300 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-900">
+    <div role="group" aria-label="Time range" className="inline-flex items-center gap-0.5 rounded-md bg-slate-100 p-0.5 dark:bg-slate-800">
       {KPI_TIME_RANGE_OPTIONS.map((option) => (
         <button
           key={option.value}
@@ -1199,10 +1222,10 @@ function KpiTimeRangePicker({
           aria-pressed={value === option.value}
           onClick={() => onChange(option.value)}
           className={cn(
-            "min-h-9 min-w-11 rounded-lg px-2.5 text-sm font-semibold transition",
+            "min-h-9 min-w-11 rounded px-2.5 text-xs font-semibold tabular-nums transition",
             value === option.value
-              ? "bg-white text-slate-950 shadow-sm dark:bg-slate-700 dark:text-white"
-              : "text-slate-600 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-slate-800",
+              ? "bg-white text-slate-950 shadow-sm dark:bg-slate-600 dark:text-white"
+              : "text-slate-600 hover:text-slate-950 dark:text-slate-300 dark:hover:text-white",
           )}
         >
           {option.label}
@@ -5506,7 +5529,7 @@ export function DashboardClient({
               departmentName={instruction.workItem.department_name}
               departmentColor={normalizeDepartmentColor(instruction.workItem.department_color)}
               revision={instruction.revision}
-              badges={<>{renderForkBadge(instruction.fork_number, instruction.fork_root_instruction_id)}{renderReviewBadge(instruction.id)}</>}
+              badges={<>{renderForkBadge(instruction.fork_number, instruction.fork_root_instruction_id)}{renderReviewBadge(instruction)}</>}
               meta={<>Updated {relativeTime(instruction.updated_at)}</>}
             />
           ))}
@@ -5565,7 +5588,7 @@ export function DashboardClient({
                 departmentName={instruction.workItem.department_name}
                 departmentColor={normalizeDepartmentColor(instruction.workItem.department_color)}
                 revision={instruction.revision}
-                badges={<>{renderForkBadge(instruction.fork_number, instruction.fork_root_instruction_id)}{renderReviewBadge(instruction.id)}</>}
+                badges={<>{renderForkBadge(instruction.fork_number, instruction.fork_root_instruction_id)}{renderReviewBadge(instruction)}</>}
                 meta={<>Created {relativeTime(instruction.created_at)} by {instruction.creator_name}</>}
               />
             ))}
@@ -5650,8 +5673,8 @@ export function DashboardClient({
               : overdueDays === null
                 ? "Review status unavailable"
                 : overdueDays === 0
-                  ? "Due for re-check now"
-                  : `${overdueDays} day${overdueDays === 1 ? "" : "s"} past review`;
+                  ? "Review check due now"
+                  : `Review check ${overdueDays} day${overdueDays === 1 ? "" : "s"} overdue`;
 
             return (
               <InstructionRow
@@ -5665,8 +5688,8 @@ export function DashboardClient({
                 revision={entry.instruction.revision}
                 badges={<>
                   {renderForkBadge(entry.instruction.fork_number, entry.instruction.fork_root_instruction_id)}
-                  <StatusPill tone={entry.isFlagged ? "rose" : "amber"} icon={TriangleAlert} title={entry.isFlagged ? getNeedsReviewPillTooltip(entry.reviewStatus) : undefined}>
-                    {entry.isFlagged ? "Needs review" : "Out of range"}
+                  <StatusPill tone={entry.isFlagged ? "rose" : "amber"} icon={TriangleAlert} title={entry.isFlagged ? getNeedsReviewPillTooltip(entry.reviewStatus) : `Checks are due every ${normalizedReviewWindowDays} days.`}>
+                    Needs review
                   </StatusPill>
                 </>}
                 meta={<>{reason} · {formatElapsedDaysLabel(entry.daysSinceUpdate)}</>}
@@ -5692,12 +5715,12 @@ export function DashboardClient({
               <Link
                 key={label}
                 href="/process-maps/formulas"
-                className="grid gap-1 rounded-xl border border-slate-300/70 bg-white/70 p-3 transition hover:border-cyan-400/60 hover:bg-cyan-500/10 dark:border-slate-700 dark:bg-slate-900/50 dark:hover:border-cyan-500/50"
+                className="grid min-h-[5.25rem] content-between gap-1 rounded-lg border border-slate-200 bg-white p-3 transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:border-slate-700 dark:hover:bg-slate-900"
               >
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
                   {label}
                 </span>
-                <span className="text-2xl font-extrabold text-slate-900 dark:text-slate-100">
+                <span className="text-2xl font-semibold tabular-nums tracking-tight text-slate-950 dark:text-white">
                   {value}
                 </span>
               </Link>
@@ -5857,17 +5880,16 @@ export function DashboardClient({
               type="button"
               onClick={() => setSelectedSystemHistoryEventId(null)}
               disabled={!selectedSystemHistoryEventId}
-              className="inline-flex items-center rounded-lg border border-slate-400/40 bg-slate-900/8 px-2.5 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-900/12 disabled:cursor-not-allowed disabled:opacity-45 dark:text-slate-200 dark:hover:bg-white/10"
+              className="inline-flex min-h-8 items-center rounded-md border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
             >
               Collapse all
             </button>
           </div>
 
           {visibleSystemHistoryEvents.length === 0 ? (
-            <p className="rounded-2xl border border-slate-300/70 bg-white/70 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-              No system activity in the last {systemHistoryTimeRangeDays} days for{" "}
-              {selectedDepartmentName}.
-            </p>
+            <WidgetEmptyState icon={History} title="No activity in this period">
+              Nothing was created or changed in the last {systemHistoryTimeRangeDays} days for {selectedDepartmentName}.
+            </WidgetEmptyState>
           ) : (
             <div
               ref={systemHistoryListRef}
@@ -5908,26 +5930,24 @@ export function DashboardClient({
                       }
                     }}
                     style={{
-                      borderColor: colorWithAlpha(event.workItem.department_color, 0.5),
-                      backgroundColor: colorWithAlpha(event.workItem.department_color, 0.12),
-                      boxShadow: `inset 4px 0 0 ${colorWithAlpha(
-                        event.workItem.department_color,
-                        isSelected ? 1 : 0.85,
-                      )}`,
+                      // The left edge carries the department colour, as on the instruction rows.
+                      boxShadow: `inset 4px 0 0 ${colorWithAlpha(event.workItem.department_color, 1)}`,
                     }}
                     className={cn(
-                      "grid gap-2 rounded-xl border px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/55",
-                      isSelected ? "ring-2 ring-cyan-500/45" : "hover:brightness-105",
+                      "grid cursor-pointer gap-1.5 rounded-md border bg-white py-3 pl-4 pr-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/55 dark:bg-slate-950",
+                      isSelected
+                        ? "border-cyan-500 ring-1 ring-cyan-500/40"
+                        : "border-slate-200 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:hover:border-slate-700 dark:hover:bg-slate-900",
                     )}
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="inline-flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
                         <LocalDateTime value={event.occurred_at} mode="dateTime" />
                         <span className="font-semibold text-slate-700 dark:text-slate-200">
-                          By {event.actor_name}
+                          {event.actor_name}
                         </span>
                       </p>
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-200">
+                      <p className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
                         {event.action_label}
                       </p>
                     </div>
@@ -5938,37 +5958,28 @@ export function DashboardClient({
                       </p>
                     </div>
 
-                    <p className="text-xs text-slate-600 dark:text-slate-300">
-                      <span className="font-semibold">Instruction:</span>{" "}
-                      <span className="font-bold text-slate-900 dark:text-slate-100">
-                        {event.workItem.item_title}
-                      </span>
+                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                      {event.workItem.item_title}
                     </p>
 
                     <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                      <p
-                        className={cn(
-                          "font-semibold",
-                          isSelected
-                            ? "text-cyan-800 dark:text-cyan-200"
-                            : "text-slate-600 dark:text-slate-300",
-                        )}
-                      >
-                        {isSelected ? "Version check active" : "Click card for version check"}
+                      <p className="inline-flex items-center gap-1 font-medium text-slate-500 dark:text-slate-400">
+                        <ChevronDown size={14} aria-hidden="true" className={cn("transition-transform", isSelected ? "rotate-180" : "")} />
+                        {isSelected ? "Hide what changed" : "Show what changed"}
                       </p>
                       <Link
                         href={openInstructionHref}
                         onClick={(clickEvent) => clickEvent.stopPropagation()}
-                        className="inline-flex items-center rounded-lg border border-cyan-500/35 bg-cyan-500/10 px-2.5 py-1 font-semibold text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-200"
+                        className="inline-flex min-h-8 items-center rounded-md border border-slate-300 bg-white px-2.5 font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                       >
                         Open instruction
                       </Link>
                     </div>
 
                     {isSelected && versionDetails ? (
-                      <div className="grid gap-2 rounded-lg border border-cyan-500/35 bg-cyan-500/10 p-2.5 dark:border-slate-600 dark:bg-slate-950/70">
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-cyan-800 dark:text-cyan-200">
-                          Version Check
+                      <div className="mt-1 grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
+                        <p className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                          What changed
                         </p>
                         <p className="text-xs text-slate-700 dark:text-slate-300">
                           Original file: {versionDetails.baselineEvent?.actor_name ?? "Unknown"} on{" "}
@@ -6013,7 +6024,7 @@ export function DashboardClient({
                                     change.actorName,
                                     change.occurredAt,
                                   )}
-                                  className="rounded-full border border-cyan-500/45 bg-cyan-500/20 px-2 py-0.5 text-[11px] font-semibold text-cyan-900 dark:text-cyan-100"
+                                  className="rounded border border-cyan-200 bg-cyan-50 px-1.5 py-0.5 text-[11px] font-semibold text-cyan-900 dark:border-cyan-500/40 dark:bg-cyan-500/15 dark:text-cyan-100"
                                 >
                                   {change.label}
                                 </span>
@@ -6039,7 +6050,7 @@ export function DashboardClient({
                                     change.actorName,
                                     change.occurredAt,
                                   )}
-                                  className="rounded-full border border-slate-400/60 bg-white/70 px-2 py-0.5 text-[11px] font-semibold text-slate-800 dark:border-slate-600 dark:bg-slate-900/70 dark:text-slate-200"
+                                  className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-semibold text-slate-700 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-200"
                                 >
                                   {change.label}
                                 </span>
@@ -6069,17 +6080,14 @@ export function DashboardClient({
         <div className="grid gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                Time Series Filter
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
             </div>
             <KpiTimeRangePicker
               value={getKpiWidgetTimeRange(widgetId)}
               onChange={(days) => setKpiWidgetTimeRange(widgetId, days)}
             />
           </div>
-          <div className="rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+          <div className="border-l-2 border-cyan-600 pl-3 dark:border-cyan-400">
             <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
               {totalEvents} event{totalEvents === 1 ? "" : "s"} captured in the selected range.
             </p>
@@ -6113,17 +6121,14 @@ export function DashboardClient({
         <div className="grid gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                Time Series Filter
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
             </div>
             <KpiTimeRangePicker
               value={getKpiWidgetTimeRange(widgetId)}
               onChange={(days) => setKpiWidgetTimeRange(widgetId, days)}
             />
           </div>
-          <div className="rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+          <div className="border-l-2 border-cyan-600 pl-3 dark:border-cyan-400">
             <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
               {totalCreated} instruction{totalCreated === 1 ? "" : "s"} created in this window.
             </p>
@@ -6158,17 +6163,14 @@ export function DashboardClient({
         <div className="grid gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                Time Series Filter
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
             </div>
             <KpiTimeRangePicker
               value={getKpiWidgetTimeRange(widgetId)}
               onChange={(days) => setKpiWidgetTimeRange(widgetId, days)}
             />
           </div>
-          <div className="rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+          <div className="border-l-2 border-cyan-600 pl-3 dark:border-cyan-400">
             <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
               Top department load across {totalEvents} event
               {totalEvents === 1 ? "" : "s"}.
@@ -6203,10 +6205,7 @@ export function DashboardClient({
         <div className="grid gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                Time Series Filter
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
             </div>
             <KpiTimeRangePicker
               value={getKpiWidgetTimeRange(widgetId)}
@@ -6236,10 +6235,7 @@ export function DashboardClient({
         <div className="grid gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                Time Series Filter
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
             </div>
             <KpiTimeRangePicker
               value={getKpiWidgetTimeRange(widgetId)}
@@ -6276,10 +6272,7 @@ export function DashboardClient({
         <div className="grid gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                Time Series Filter
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
             </div>
             <KpiTimeRangePicker
               value={getKpiWidgetTimeRange(widgetId)}
@@ -6314,10 +6307,7 @@ export function DashboardClient({
         <div className="grid gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                Time Series Filter
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
             </div>
             <KpiTimeRangePicker
               value={getKpiWidgetTimeRange(widgetId)}
@@ -6352,10 +6342,7 @@ export function DashboardClient({
         <div className="grid gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                Time Series Filter
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
             </div>
             <KpiTimeRangePicker
               value={getKpiWidgetTimeRange(widgetId)}
@@ -6390,10 +6377,7 @@ export function DashboardClient({
         <div className="grid gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                Time Series Filter
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{kpiData.dateRangeLabel}</p>
             </div>
             <KpiTimeRangePicker
               value={getKpiWidgetTimeRange(widgetId)}
@@ -6426,7 +6410,7 @@ export function DashboardClient({
 
     return (
       <div className="grid gap-3">
-        <div className={cn("grid gap-2", isMyImpactCompact ? "grid-cols-1" : "md:grid-cols-2")}>
+        <div className={cn("grid grid-cols-2 gap-2", isMyImpactCompact ? "" : "xl:grid-cols-4")}>
           <ImpactKpiCard
             label="Authored Instructions"
             value={myInstructionEntries.length}
@@ -6463,59 +6447,28 @@ export function DashboardClient({
 
         {myRecentEntries.length > 0 ? (
           <div className="grid gap-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-              Recently Authored
+            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+              Recently authored
             </p>
             {myRecentEntries.map((entry) => (
-              <Link
+              <InstructionRow
                 key={entry.instruction.id}
                 href={`/instructions/${entry.instruction.id}`}
-                style={{
-                  borderColor: colorWithAlpha(entry.workItem.department_color, 0.45),
-                  backgroundColor: colorWithAlpha(entry.workItem.department_color, 0.12),
-                }}
-                className="rounded-xl border p-3 transition hover:brightness-105"
-              >
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <PartDepartmentHeading workItem={entry.workItem} />
-                  {getForkLabel(
-                    entry.instruction.fork_number,
-                    entry.instruction.fork_root_instruction_id,
-                  ) ? (
-                    <span className="inline-flex items-center rounded-full border border-cyan-500/45 bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-200">
-                      {getForkLabel(
-                        entry.instruction.fork_number,
-                        entry.instruction.fork_root_instruction_id,
-                      )}
-                    </span>
-                  ) : null}
-                  {instructionReviewStatusByInstructionId[entry.instruction.id]?.status ===
-                    "needs_review" && (
-                    <span
-                      title={getNeedsReviewPillTooltip(
-                        instructionReviewStatusByInstructionId[entry.instruction.id],
-                      )}
-                      className="inline-flex items-center gap-0.5 rounded-full border border-amber-500/45 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300"
-                    >
-                      <TriangleAlert size={10} />
-                      Needs Review
-                    </span>
-                  )}
-                </div>
-                <p className="text-sm font-bold text-slate-800 dark:text-slate-100">
-                  {entry.workItem.item_title}
-                </p>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Revision {entry.instruction.revision} | Created{" "}
-                  <LocalDateTime value={entry.instruction.created_at} mode="date" />
-                </p>
-              </Link>
+                onClick={persistInstructionReturnState}
+                partId={entry.workItem.part_id}
+                title={entry.workItem.item_title}
+                departmentName={entry.workItem.department_name}
+                departmentColor={normalizeDepartmentColor(entry.workItem.department_color)}
+                revision={entry.instruction.revision}
+                badges={<>{renderForkBadge(entry.instruction.fork_number, entry.instruction.fork_root_instruction_id)}{renderReviewBadge(entry.instruction)}</>}
+                meta={<>Created <LocalDateTime value={entry.instruction.created_at} mode="date" /></>}
+              />
             ))}
           </div>
         ) : (
-          <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-            You have not authored any active instructions yet.
-          </p>
+          <WidgetEmptyState icon={FilePlus2} title="Nothing authored yet">
+            Instructions you write will be listed here.
+          </WidgetEmptyState>
         )}
       </div>
     );
@@ -6523,12 +6476,22 @@ export function DashboardClient({
 
   const firstName = currentUserName.trim().split(/\s+/)[0] ?? "";
   const homepageWidgets = visibleWidgets.filter((widget) => widget.id !== "finder");
+  // Widgets keep their order and chosen size; each row's spare columns are shared so no row has a hole.
+  const laidOutWidgets = homepageWidgets.filter((widget) => widgetDefinitionsById.has(widget.id));
+  const desktopSpans = packWidgetRows(laidOutWidgets.map((widget) => DESKTOP_WIDGET_COLUMNS[widget.size]));
+  const tabletSpans = packWidgetRows(laidOutWidgets.map((widget) => TABLET_WIDGET_COLUMNS[widget.size]));
   const relativeTime = (value: string) => (nowMs > 0 ? formatRelativeDays(value, nowMs) : <LocalDateTime value={value} mode="date" />);
   const otherSearchMatches = smartSuggestions.filter((suggestion) => suggestion.type === "process_document" || suggestion.type === "formula").slice(0, 6);
   const departmentChips = departmentInsights.filter((department) => department.instructionCount > 0 || department.id === selectedDepartmentId);
+  const selectedDepartmentChip = departmentChips.find((department) => department.id === selectedDepartmentId) ?? null;
 
   function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // Nothing entered yet: put the cursor in the search box, ready for a scan.
+    if (!normalizedQuery) {
+      searchInputRef.current?.focus();
+      return;
+    }
     // A barcode scan or exact part number with a single match opens that instruction directly.
     if (filteredFinderInstructionCards.length === 1) {
       persistInstructionReturnState();
@@ -6538,10 +6501,15 @@ export function DashboardClient({
     searchResultsRef.current?.querySelector<HTMLAnchorElement>("a[href]")?.focus();
   }
 
-  function renderReviewBadge(instructionId: string) {
-    const status = instructionReviewStatusByInstructionId[instructionId];
-    return status?.status === "needs_review" ? (
-      <StatusPill tone="amber" icon={TriangleAlert} title={getNeedsReviewPillTooltip(status)}>Needs review</StatusPill>
+  function renderReviewBadge(instruction: { id: string; updated_at: string }) {
+    const status = instructionReviewStatusByInstructionId[instruction.id];
+    if (status?.status === "needs_review") {
+      return <StatusPill tone="amber" icon={TriangleAlert} title={getNeedsReviewPillTooltip(status)}>Needs review</StatusPill>;
+    }
+    // A review check that is past due needs review too, even though nobody flagged it.
+    const daysSinceCheck = toElapsedCalendarDays(status?.last_calibrated_at ?? instruction.updated_at);
+    return daysSinceCheck !== null && daysSinceCheck >= normalizedReviewWindowDays ? (
+      <StatusPill tone="amber" icon={TriangleAlert} title={`Review check is due: last checked ${daysSinceCheck} days ago (checks are every ${normalizedReviewWindowDays} days).`}>Needs review</StatusPill>
     ) : null;
   }
 
@@ -6553,15 +6521,16 @@ export function DashboardClient({
   return (
     <>
       <div className="grid gap-5">
-        <section aria-label="Find work instructions" data-hydrated={portalReady ? "true" : undefined} className="relative min-w-0 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
-          <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-44 bg-gradient-to-b from-cyan-50 to-transparent dark:from-cyan-500/10" />
-          <div className="relative grid gap-5 p-5 sm:p-7 lg:p-8">
-            <div className="flex flex-wrap items-start justify-between gap-4">
+        <section aria-label="Find work instructions" data-hydrated={portalReady ? "true" : undefined} className="relative min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <div aria-hidden="true" className="absolute inset-x-0 top-0 h-1 bg-cyan-600 dark:bg-cyan-500" />
+          <div className="relative grid gap-5 p-4 pt-5 sm:p-6 sm:pt-7">
+            <div className="flex flex-wrap items-end justify-between gap-4">
               <div className="grid min-w-0 gap-1">
-                <h1 className="text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl dark:text-white">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-700 dark:text-cyan-400">Instruction finder</p>
+                <h1 className="text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl dark:text-white">
                   {getGreeting(nowMs)}{firstName ? `, ${firstName}` : ""}
                 </h1>
-                <p className="text-base text-slate-600 sm:text-lg dark:text-slate-300">Find the current instruction for the job in front of you.</p>
+                <p className="text-sm text-slate-600 sm:text-base dark:text-slate-300">Find the current instruction for the job in front of you.</p>
               </div>
               <button
                 type="button"
@@ -6569,7 +6538,7 @@ export function DashboardClient({
                 aria-controls="homepage-editor"
                 disabled={layoutLoading || layoutSaving}
                 onClick={() => { void openHomepageEditor(); }}
-                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-cyan-400 hover:text-cyan-800 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-cyan-500 dark:hover:text-cyan-200"
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white"
               >
                 {layoutLoading ? <Loader2 size={17} className="animate-spin" /> : <SlidersHorizontal size={17} />}
                 {layoutLoading ? "Loading editor…" : "Customize homepage"}
@@ -6578,8 +6547,16 @@ export function DashboardClient({
 
             <form role="search" onSubmit={handleSearchSubmit} className="grid gap-2">
               <label htmlFor="dashboard-search" className="sr-only">Search for anything</label>
-              <div className="relative">
-                <Search size={26} aria-hidden="true" className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <div
+                className={cn(
+                  "grid min-w-0 gap-2",
+                  departmentChips.length > 0
+                    ? "grid-cols-[minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_minmax(13rem,19rem)_auto]"
+                    : "grid-cols-[minmax(0,1fr)_auto]",
+                )}
+              >
+              <div className={cn("relative min-w-0", departmentChips.length > 0 ? "col-span-2 lg:col-span-1" : "")}>
+                <ScanBarcode size={24} aria-hidden="true" className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   id="dashboard-search"
                   ref={searchInputRef}
@@ -6594,8 +6571,8 @@ export function DashboardClient({
                   placeholder="Part #, mold #, or instruction"
                   onChange={(event) => setQuery(event.target.value)}
                   className={cn(
-                    "dashboard-search-input h-16 w-full rounded-2xl border-2 border-slate-300 bg-white pl-14 text-lg font-medium text-slate-950 shadow-sm outline-none transition placeholder:font-normal placeholder:text-slate-400 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-500/20 sm:h-[4.5rem] sm:text-xl dark:border-slate-700 dark:bg-slate-900 dark:text-white",
-                    query.length > 0 ? "pr-28" : "pr-4",
+                    "dashboard-search-input h-14 w-full rounded-md border-2 border-slate-300 bg-white pl-12 text-base font-medium text-slate-950 outline-none transition placeholder:font-normal placeholder:text-slate-400 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-500/15 sm:h-16 sm:text-xl dark:border-slate-700 dark:bg-slate-900 dark:text-white",
+                    query.length > 0 ? "pr-24" : "pr-4",
                   )}
                 />
                 {query.length > 0 ? (
@@ -6606,57 +6583,50 @@ export function DashboardClient({
                       searchInputRef.current?.focus();
                     }}
                     aria-label="Clear search"
-                    className="absolute right-3 top-1/2 inline-flex min-h-11 -translate-y-1/2 items-center gap-1 rounded-xl px-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                    className="absolute right-2 top-1/2 inline-flex min-h-11 -translate-y-1/2 items-center gap-1 rounded-md px-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
                   >
                     <X size={18} />
                     Clear
                   </button>
                 ) : null}
               </div>
+              {departmentChips.length > 0 ? (
+                // One menu filters the search results and every list on the page by department.
+                <div className="relative min-w-0">
+                  {selectedDepartmentChip ? (
+                    <span aria-hidden="true" className="pointer-events-none absolute left-4 top-1/2 h-3 w-3 -translate-y-1/2 rounded-sm" style={{ backgroundColor: selectedDepartmentChip.color_hex }} />
+                  ) : (
+                    <Building2 size={20} aria-hidden="true" className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                  )}
+                  <select
+                    aria-label="Department"
+                    value={selectedDepartmentId}
+                    onChange={(event) => chooseDepartment(event.target.value)}
+                    className="dashboard-search-select h-14 w-full appearance-none truncate rounded-md border-2 border-slate-300 bg-white pl-11 pr-10 text-base font-semibold text-slate-900 outline-none transition focus:border-cyan-600 focus:ring-4 focus:ring-cyan-500/15 sm:h-16 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                  >
+                    <option value="all">All departments ({totalInstructionCount})</option>
+                    {departmentChips.map((department) => (
+                      <option key={department.id} value={department.id}>
+                        {department.name} ({department.instructionCount})
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={18} aria-hidden="true" className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                </div>
+              ) : null}
+              <button
+                type="submit"
+                aria-label="Search"
+                className="inline-flex h-14 shrink-0 items-center justify-center gap-2 rounded-md bg-slate-900 px-4 text-base font-semibold text-white shadow-sm transition hover:bg-slate-700 sm:h-16 sm:px-6 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white"
+              >
+                <Search size={20} aria-hidden="true" />
+                <span className="hidden sm:inline">Search</span>
+              </button>
+              </div>
               <p id="dashboard-search-help" className="text-sm text-slate-500 dark:text-slate-400">
                 Scan a part label or type a few characters. A single match opens when you press Enter.
               </p>
             </form>
-
-            {departmentChips.length > 0 ? (
-              <div role="group" aria-label="Filter by department" className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
-                <button
-                  type="button"
-                  aria-pressed={selectedDepartmentId === "all"}
-                  onClick={() => chooseDepartment("all")}
-                  className={cn(
-                    "inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border px-4 text-sm font-semibold transition",
-                    selectedDepartmentId === "all"
-                      ? "border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-950"
-                      : "border-slate-300 bg-white text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200",
-                  )}
-                >
-                  All departments
-                  <span className="rounded-full bg-slate-500/15 px-2 text-xs">{totalInstructionCount}</span>
-                </button>
-                {departmentChips.map((department) => {
-                  const selected = selectedDepartmentId === department.id;
-                  return (
-                    <button
-                      key={department.id}
-                      type="button"
-                      aria-pressed={selected}
-                      onClick={() => chooseDepartment((current) => (current === department.id ? "all" : department.id))}
-                      className={cn(
-                        "inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border px-4 text-sm font-semibold transition",
-                        selected
-                          ? "border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-950"
-                          : "border-slate-300 bg-white text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200",
-                      )}
-                    >
-                      <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: department.color_hex }} />
-                      {department.name}
-                      <span className="rounded-full bg-slate-500/15 px-2 text-xs">{department.instructionCount}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
           </div>
 
           {isSearching ? (
@@ -6684,7 +6654,7 @@ export function DashboardClient({
                         departmentName={entry.workItem.department_name}
                         departmentColor={normalizeDepartmentColor(entry.workItem.department_color)}
                         revision={entry.instruction.revision}
-                        badges={<>{renderForkBadge(entry.instruction.fork_number, entry.instruction.fork_root_instruction_id)}{renderReviewBadge(entry.instruction.id)}</>}
+                        badges={<>{renderForkBadge(entry.instruction.fork_number, entry.instruction.fork_root_instruction_id)}{renderReviewBadge(entry.instruction)}</>}
                         meta={<>Updated {relativeTime(entry.instruction.updated_at)}</>}
                       />
                     </li>
@@ -6746,10 +6716,10 @@ export function DashboardClient({
             onReset={() => { void resetDashboardLayout(); }} onLoadDefault={() => { void loadDefaultDashboardLayout(); }} onSaveDefault={() => { void saveDashboardLayoutAsDefault(); }}
           />
         </div> : null}
-        {homepageWidgets.length === 0 && !isSearching ? <section className="grid justify-items-center gap-3 rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center dark:border-slate-700 dark:bg-slate-950"><LayoutDashboard size={30} className="text-cyan-600" /><h2 className="text-xl font-semibold">Make this homepage yours</h2><p className="max-w-lg text-sm text-slate-600 dark:text-slate-400">Add pinned instructions, recent changes, review queues, or document insights. Start with a layout and adjust it to your work.</p>{!customizeOpen ? <button type="button" disabled={layoutLoading} onClick={() => { void openHomepageEditor(); }} className="min-h-11 rounded-lg bg-cyan-700 px-4 font-semibold text-white">Choose widgets</button> : null}</section> : null}
+        {homepageWidgets.length === 0 && !isSearching ? <section className="grid justify-items-center gap-3 rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center dark:border-slate-700 dark:bg-slate-950"><span aria-hidden="true" className="inline-flex h-12 w-12 items-center justify-center rounded-md bg-cyan-50 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-300"><LayoutDashboard size={24} /></span><h2 className="text-xl font-semibold">Make this homepage yours</h2><p className="max-w-lg text-sm text-slate-600 dark:text-slate-400">Add pinned instructions, recent changes, review queues, or document insights. Start with a layout and adjust it to your work.</p>{!customizeOpen ? <button type="button" disabled={layoutLoading} onClick={() => { void openHomepageEditor(); }} className="min-h-11 rounded-md bg-cyan-700 px-4 font-semibold text-white shadow-sm transition hover:bg-cyan-800">Choose widgets</button> : null}</section> : null}
 
-        {!isSearching ? <div aria-label="Homepage widgets" className="grid grid-cols-12 items-start gap-4 lg:gap-5">
-          {homepageWidgets.map((widget) => {
+        {!isSearching ? <div aria-label="Homepage widgets" className="grid grid-cols-12 gap-4 lg:gap-5">
+          {laidOutWidgets.map((widget, widgetIndex) => {
             const definition = widgetDefinitionsById.get(widget.id);
             if (!definition) {
               return null;
@@ -6811,10 +6781,10 @@ export function DashboardClient({
                 data-dashboard-widget-id={widget.id}
                 id={`homepage-widget-${widget.id}`}
                 className={cn(
-                  getWidgetSpanClass(widget.size),
-                  "relative min-w-0 scroll-mt-28 rounded-2xl border border-slate-200 bg-white shadow-sm transition dark:border-slate-800 dark:bg-slate-950",
-                  "overflow-hidden",
-                  widget.size === "compact" ? "p-4" : "p-4 md:p-5",
+                  "col-span-12",
+                  TABLET_SPAN_CLASSES[tabletSpans[widgetIndex]],
+                  DESKTOP_SPAN_CLASSES[desktopSpans[widgetIndex]],
+                  "relative flex min-w-0 scroll-mt-28 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_1px_2px_rgb(15_23_42/0.05)] transition dark:border-slate-800 dark:bg-slate-950",
                   isDragging ? "scale-[0.99] opacity-70" : "",
                   isDragOverTarget
                     ? "ring-2 ring-cyan-400/80 ring-offset-2 ring-offset-transparent"
@@ -6827,22 +6797,23 @@ export function DashboardClient({
                     onClick={() => toggleWidget(widget.id)}
                     disabled={layoutSaving || layoutLoading}
                     aria-label={`Remove ${widgetDisplayTitle} widget`}
-                    className="absolute right-3 top-3 z-10 inline-flex h-11 w-11 items-center justify-center rounded-full border border-rose-500/40 bg-rose-500/10 text-rose-700 transition hover:bg-rose-500/20 dark:text-rose-200"
+                    className="absolute right-2 top-2 z-10 inline-flex h-11 w-11 items-center justify-center rounded-md border border-rose-300 bg-rose-50 text-rose-700 transition hover:bg-rose-100 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200 dark:hover:bg-rose-500/20"
                   >
-                    <X size={12} />
+                    <X size={14} />
                   </button>
                 ) : null}
 
                 <div
                   className={cn(
+                    "border-b border-slate-100 dark:border-slate-800",
+                    // A shared minimum height keeps panel contents aligned across a row, with or without header controls.
+                    widget.size === "compact" ? "px-3 py-2 md:min-h-[3.25rem]" : "px-4 py-2 md:min-h-[3.5rem]",
                     useInlineHeaderControls
-                      ? widget.size === "compact"
-                        ? "mb-2 flex items-start justify-between gap-2"
-                        : "mb-3 flex items-start justify-between gap-2.5"
+                      ? "flex items-start justify-between gap-2.5"
                       : widget.size === "compact"
-                        ? "mb-2 flex flex-col items-start gap-2"
-                        : "mb-3 flex flex-col gap-2.5 md:flex-row md:items-start md:justify-between",
-                    customizeOpen ? "pr-12" : "",
+                        ? "flex flex-col items-start gap-2"
+                        : "flex flex-col gap-2.5 md:flex-row md:items-center md:justify-between",
+                    customizeOpen ? "pr-14" : "",
                   )}
                 >
                   <div
@@ -6879,13 +6850,11 @@ export function DashboardClient({
                       ) : (
                         <div className="flex min-w-0 items-center gap-2.5">
                           {WidgetIcon ? (
-                            <span aria-hidden="true" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cyan-50 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-300">
-                              <WidgetIcon size={20} />
-                            </span>
+                            <WidgetIcon size={18} aria-hidden="true" className="shrink-0 text-cyan-700 dark:text-cyan-400" />
                           ) : null}
-                          <h2 className="min-w-0 break-words text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100">{widgetDisplayTitle}</h2>
+                          <h2 className="min-w-0 break-words text-base font-semibold tracking-tight text-slate-900 dark:text-slate-100">{widgetDisplayTitle}</h2>
                           {widgetCount !== null ? (
-                            <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-sm font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-200">{widgetCount}</span>
+                            <span className="rounded bg-slate-200/80 px-1.5 py-0.5 text-xs font-semibold tabular-nums text-slate-700 dark:bg-slate-800 dark:text-slate-200">{widgetCount}</span>
                           ) : null}
                           {customizeOpen ? <button type="button" disabled={widgetTitleSaving || layoutSaving} onClick={() => beginWidgetTitleEdit(widget.id)} aria-label={`Rename ${widgetDisplayTitle} widget`} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800"><Pencil size={15} /></button> : null}
                         </div>
@@ -6910,7 +6879,9 @@ export function DashboardClient({
                   </div>
                 </div>
 
-                {renderWidgetContent(widget.id, widget.size)}
+                <div className={cn("min-w-0 flex-1", widget.size === "compact" ? "p-3" : "p-4")}>
+                  {renderWidgetContent(widget.id, widget.size)}
+                </div>
               </section>
             );
           })}

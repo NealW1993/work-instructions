@@ -26,7 +26,7 @@ export const CALLOUT_KINDS: Record<CalloutKind, { tone: string; label: string }>
   CAUTION: { tone: "danger", label: "Caution" },
 };
 
-function calloutKindForTone(tone: string | null | undefined): CalloutKind {
+export function calloutKindForTone(tone: string | null | undefined): CalloutKind {
   const match = (Object.entries(CALLOUT_KINDS) as Array<[CalloutKind, { tone: string }]>).find(([, value]) => value.tone === tone);
   return match?.[0] ?? "NOTE";
 }
@@ -155,14 +155,33 @@ const calloutExtension: TokenizerAndRendererExtension = {
   },
 };
 
-function createMarkdownParser() {
+/**
+ * In the editor a chart is an editable block, so its original text travels with it, even when the
+ * text has an error, which the viewer shows as a warning instead of a chart.
+ */
+function renderEditableChartBlock(source: string): string {
+  const parsed = parseChartSource(source);
+  const attributes = [`data-type="instruction-chart"`, `data-chart-source="${escapeHtml(source)}"`];
+  if (parsed.chart) {
+    attributes.push(
+      `data-chart-type="${parsed.chart.type}"`,
+      `data-chart-title="${escapeHtml(parsed.chart.title)}"`,
+      `data-chart-data="${escapeHtml(JSON.stringify(parsed.chart.data))}"`,
+    );
+  }
+  return `<figure ${attributes.join(" ")}></figure>\n`;
+}
+
+function createMarkdownParser(options: { editableCharts?: boolean } = {}) {
   return new Marked({
     gfm: true,
     breaks: true,
     extensions: [calloutExtension],
     renderer: {
       code(token) {
-        if ((token.lang ?? "").trim().toLowerCase() === "chart") return renderChartBlock(token.text);
+        if ((token.lang ?? "").trim().toLowerCase() === "chart") {
+          return options.editableCharts ? renderEditableChartBlock(token.text) : renderChartBlock(token.text);
+        }
         return false;
       },
       paragraph(token) {
@@ -202,12 +221,24 @@ function createMarkdownParser() {
 }
 
 let markdownParser: Marked | null = null;
+let editableMarkdownParser: Marked | null = null;
 
 /** Renders authored Markdown to (unsanitized) HTML. Always pass the result through sanitizeRichHtml for display. */
 export function markdownToEditorHtml(value: string): string {
   if (!value.trim()) return "";
   markdownParser ??= createMarkdownParser();
   return markdownParser.parse(value, { async: false }).trim();
+}
+
+/**
+ * Renders Markdown for loading into the formatted editor: the same output operators see, except that
+ * chart blocks keep their original text so they can be edited. The editor keeps only the content its
+ * schema understands, so scripts and unknown markup are dropped on load.
+ */
+export function markdownToEditableHtml(value: string): string {
+  if (!value.trim()) return "";
+  editableMarkdownParser ??= createMarkdownParser({ editableCharts: true });
+  return editableMarkdownParser.parse(value, { async: false }).trim();
 }
 
 const HTML_BLOCK_START = /^\s*<(?:p|div|section|aside|figure|h[1-6]|ul|ol|blockquote|pre|table|hr|img|video|br)\b/i;
@@ -238,7 +269,7 @@ export function toMarkdownSource(value: string): string {
  * HTML -> Markdown
  * ----------------------------------------------------------------------------------------------*/
 
-function markdownImage(alt: string, src: string, caption?: string | null): string {
+export function markdownImage(alt: string, src: string, caption?: string | null): string {
   const safeAlt = alt.replace(/[\[\]\\]/g, "").replace(/\s+/g, " ").trim();
   const target = /[\s()<>]/.test(src) ? `<${src.replace(/[<>]/g, "")}>` : src;
   const title = caption?.trim() ? ` "${caption.trim().replace(/"/g, "'")}"` : "";

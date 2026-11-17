@@ -464,18 +464,18 @@ export default async function SystemKpisPage() {
           fallbackHref={hasFullAccess(profile.role) ? "/admin/users" : "/dashboard"}
         />
         <div className="grid min-w-0 gap-1">
-          <h1 className="text-3xl font-extrabold text-slate-900 dark:text-slate-100">
+          <h1 className="text-2xl font-bold tracking-tight text-slate-950 dark:text-slate-50 md:text-3xl">
             Operations & Quality Metrics
           </h1>
           <p className="text-sm text-slate-600 dark:text-slate-300">
-            Operations and usage metrics for your work instructions system.
+            How instructions are used, kept up to date and changed across the plant.
           </p>
         </div>
       </header>
 
       {dataErrors.length > 0 ? (
-        <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-200">
-          Some KPI datasets could not be loaded. Showing available data.
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+          Some numbers could not be loaded. Showing what is available.
         </div>
       ) : null}
 
@@ -495,22 +495,22 @@ export default async function SystemKpisPage() {
         <ForkMergeKpiPanel />
       </DisclosureSection>
 
-      <section className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-sm backdrop-blur-sm dark:border-white/10 dark:bg-slate-900/70 md:p-6">
-          <div className="flex flex-wrap items-end justify-between gap-2">
-            <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
-              Instruction Load by Department
+      <section className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 md:p-5">
+          <div className="grid gap-0.5">
+            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+              Instructions by department
             </h2>
-            <p className="text-xs text-slate-600 dark:text-slate-300">
-              Active vs archived instruction volume.
+            <p className="text-sm text-slate-600 dark:text-slate-400">
+              How many instructions each department has. The grey part of a bar is archived.
             </p>
           </div>
 
           {departmentBreakdown.length === 0 ? (
-            <p className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-              No instruction data available.
+            <p className="rounded-lg border border-dashed border-slate-300 px-3 py-5 text-center text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300">
+              No instructions yet.
             </p>
           ) : (
-            <div className="grid gap-2">
+            <div className="grid gap-1">
               {departmentBreakdown.map((entry) => {
                 const width = (entry.totalCount / maxDepartmentTotal) * 100;
                 const activeWidth = entry.totalCount > 0 ? (entry.activeCount / entry.totalCount) * 100 : 0;
@@ -523,7 +523,7 @@ export default async function SystemKpisPage() {
                 return (
                   <article
                     key={entry.id}
-                    className="group relative grid gap-1.5 rounded-xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50"
+                    className="group relative grid gap-1.5 rounded-lg px-3 py-2.5 transition hover:bg-slate-50 dark:hover:bg-slate-800/50"
                   >
                     <KpiDataTooltip
                       align="left"
@@ -535,26 +535,26 @@ export default async function SystemKpisPage() {
                         `${departmentSharePercent.toFixed(1)}% of all instruction volume.`,
                       ]}
                     />
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                      <p className="font-semibold text-slate-800 dark:text-slate-100">{entry.name}</p>
-                      <p className="text-slate-600 dark:text-slate-300">
-                        {entry.activeCount} active / {entry.archivedCount} archived
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-slate-800 dark:text-slate-100">{entry.name}</p>
+                      <p className="text-xs tabular-nums text-slate-600 dark:text-slate-300">
+                        {entry.activeCount} in use · {entry.archivedCount} archived
                       </p>
                     </div>
-                    <div className="h-3 rounded-full bg-slate-300/35 dark:bg-slate-700/45">
+                    <div className="h-2.5 rounded-full bg-slate-100 dark:bg-slate-800">
                       <div
-                        className="flex h-3 overflow-hidden rounded-full"
+                        className="flex h-2.5 overflow-hidden rounded-full"
                         style={{ width: `${Math.max(width, 2)}%` }}
                       >
                         <span
-                          className="h-3"
+                          className="h-2.5"
                           style={{
                             width: `${activeWidth}%`,
                             backgroundColor: colorWithAlpha(entry.colorHex, 0.9),
                           }}
                         />
                         <span
-                          className="h-3 bg-slate-500/60"
+                          className="h-2.5 bg-slate-400 dark:bg-slate-600"
                           style={{ width: `${archivedWidth}%` }}
                         />
                       </div>

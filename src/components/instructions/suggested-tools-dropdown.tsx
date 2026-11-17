@@ -17,6 +17,7 @@ interface SuggestedToolsDropdownProps {
   className?: string;
 }
 
+/** The tools an operator needs for the job, as a checklist to tick off while gathering them. */
 export function SuggestedToolsDropdown({ tools, className }: SuggestedToolsDropdownProps) {
   const [open, setOpen] = useState(false);
   const [checkedToolIds, setCheckedToolIds] = useState<string[]>([]);
@@ -32,10 +33,15 @@ export function SuggestedToolsDropdown({ tools, className }: SuggestedToolsDropd
         setOpen(false);
       }
     };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
 
     document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
     return () => {
       document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
     };
   }, [open]);
 
@@ -53,72 +59,70 @@ export function SuggestedToolsDropdown({ tools, className }: SuggestedToolsDropd
     );
   }
 
-  function clearCheckedTools() {
-    setCheckedToolIds([]);
-  }
-
   return (
     <div ref={containerRef} className={cn("relative", className)}>
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
-        className={cn(
-          "inline-flex w-auto items-center justify-center gap-1.5 rounded-xl border px-2 py-1.5 text-sm font-semibold transition",
-          open
-            ? "border-cyan-500/45 bg-cyan-500/20 text-cyan-900 dark:text-cyan-100"
-            : "border-cyan-500/30 bg-cyan-500/10 text-cyan-800 hover:bg-cyan-500/20 dark:text-cyan-200",
-        )}
         aria-expanded={open}
+        aria-label={`Tools needed: ${totalCount}`}
+        className={cn(
+          "inline-flex h-10 items-center gap-2 rounded-md border px-3 text-sm font-semibold transition",
+          open
+            ? "border-slate-400 bg-slate-100 text-slate-950 dark:border-slate-500 dark:bg-slate-800 dark:text-white"
+            : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800",
+        )}
       >
-        <Wrench size={14} />
-        <span className="rounded-full bg-slate-900/15 px-2 py-0.5 text-xs font-bold dark:bg-white/20">
+        <Wrench size={15} aria-hidden="true" />
+        <span aria-hidden="true">Tools</span>
+        <span aria-hidden="true" className="rounded bg-slate-200/80 px-1.5 py-0.5 text-xs font-bold tabular-nums text-slate-700 dark:bg-slate-700 dark:text-slate-100">
           {totalCount}
         </span>
-        <ChevronDown
-          size={13}
-          className={cn("transition", open ? "rotate-180" : "rotate-0")}
-        />
+        <ChevronDown size={14} aria-hidden="true" className={cn("transition", open ? "rotate-180" : "rotate-0")} />
       </button>
 
       {open ? (
-        <div className="fixed inset-x-4 bottom-4 z-40 grid max-h-[calc(100dvh-2rem)] gap-3 overflow-hidden rounded-xl border border-slate-300/80 bg-white/95 p-3 shadow-2xl backdrop-blur-xl dark:border-slate-700/80 dark:bg-slate-900/95 sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-[calc(100%+0.5rem)] sm:w-[min(24rem,90vw)] sm:max-h-none">
+        <div className="fixed inset-x-4 bottom-4 z-40 grid max-h-[calc(100dvh-2rem)] gap-3 overflow-hidden rounded-lg border border-slate-200 bg-white p-3 shadow-xl dark:border-slate-700 dark:bg-slate-900 sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-[calc(100%+0.5rem)] sm:w-[min(24rem,90vw)] sm:max-h-none">
           <div className="flex items-center justify-between gap-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-              Tool List
-            </p>
-            <button
-              type="button"
-              onClick={clearCheckedTools}
-              className="rounded-lg border border-slate-400/45 px-2 py-0.5 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-200/60 dark:text-slate-200 dark:hover:bg-slate-700/70"
-            >
-              Clear
-            </button>
+            <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">Tools needed</p>
+            {checkedToolIds.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setCheckedToolIds([])}
+                className="rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                Clear ticks
+              </button>
+            ) : null}
           </div>
 
           {sortedTools.length === 0 ? (
-            <p className="rounded-lg border border-slate-300/70 bg-slate-100/80 px-2.5 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300">
-              No tools in this list yet.
+            <p className="rounded-md border border-dashed border-slate-300 px-2.5 py-3 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300">
+              No tools are listed for this instruction.
             </p>
           ) : (
-            <div className="grid max-h-[min(18rem,calc(100dvh-10rem))] gap-2 overflow-y-auto pr-1 sm:max-h-72">
-              {sortedTools.map((tool) => (
-                <label
-                  key={tool.id}
-                  className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300/70 bg-slate-100/70 px-2.5 py-1.5 text-xs text-slate-700 transition hover:bg-slate-200/70 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-800/70"
-                >
-                  <input
-                    type="checkbox"
-                    checked={checkedToolIds.includes(tool.id)}
-                    onChange={() => handleToolToggle(tool.id)}
-                    className="h-4 w-4 rounded border-slate-400 text-cyan-600 focus:ring-cyan-500"
-                  />
-                  <span className="flex-1">{tool.name}</span>
-                  {checkedToolIds.includes(tool.id) ? (
-                    <CheckSquare size={13} className="text-emerald-600 dark:text-emerald-300" />
-                  ) : null}
-                </label>
-              ))}
-            </div>
+            <>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Tick each tool as you collect it.</p>
+              <div className="grid max-h-[min(18rem,calc(100dvh-10rem))] gap-1.5 overflow-y-auto pr-1 sm:max-h-72">
+                {sortedTools.map((tool) => (
+                  <label
+                    key={tool.id}
+                    className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-800 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-800"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checkedToolIds.includes(tool.id)}
+                      onChange={() => handleToolToggle(tool.id)}
+                      className="h-5 w-5 rounded border-slate-400 text-cyan-600 focus:ring-cyan-500"
+                    />
+                    <span className="flex-1">{tool.name}</span>
+                    {checkedToolIds.includes(tool.id) ? (
+                      <CheckSquare size={15} aria-hidden="true" className="text-emerald-600 dark:text-emerald-300" />
+                    ) : null}
+                  </label>
+                ))}
+              </div>
+            </>
           )}
         </div>
       ) : null}

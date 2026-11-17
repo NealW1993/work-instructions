@@ -23,15 +23,13 @@ export interface KpiSummaryCardConfig {
   scrollTargetId?: string;
 }
 
-const CARD_TONE_CLASSES: Record<KpiSummaryTone, string> = {
-  cyan: "border-cyan-500/40 bg-cyan-500/10 text-cyan-900 transition hover:bg-cyan-500/15 dark:text-cyan-100",
-  emerald:
-    "border-emerald-500/40 bg-emerald-500/10 text-emerald-900 transition hover:bg-emerald-500/15 dark:text-emerald-100",
-  amber:
-    "border-amber-500/40 bg-amber-500/10 text-amber-900 transition hover:bg-amber-500/15 dark:text-amber-100",
-  violet:
-    "border-violet-500/40 bg-violet-500/10 text-violet-900 transition hover:bg-violet-500/15 dark:text-violet-100",
-  rose: "border-rose-500/40 bg-rose-500/10 text-rose-900 transition hover:bg-rose-500/15 dark:text-rose-100",
+// Each figure keeps a small colour cue on its icon; the cards themselves stay neutral.
+const ICON_TONE_CLASSES: Record<KpiSummaryTone, string> = {
+  cyan: "bg-cyan-50 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-300",
+  emerald: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300",
+  amber: "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
+  violet: "bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300",
+  rose: "bg-rose-50 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300",
 };
 
 const ICON_BY_CARD_ID: Record<KpiSummaryCardConfig["id"], LucideIcon> = {
@@ -97,20 +95,19 @@ export function KpiSummaryCards({ cards }: { cards: KpiSummaryCardConfig[] }) {
               key={card.id}
               type="button"
               onClick={() => handleCardClick(card)}
-              className={cn(
-                "grid gap-1 rounded-2xl border p-4 text-left shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/60 dark:focus-visible:ring-cyan-300/70",
-                CARD_TONE_CLASSES[card.tone],
-              )}
+              className="group grid gap-3 rounded-lg border border-slate-200 bg-white p-4 text-left transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/60 dark:border-slate-800 dark:bg-slate-950 dark:hover:border-slate-700 dark:hover:bg-slate-900"
               aria-haspopup={isScrollCard ? undefined : "dialog"}
             >
-              <p className="inline-flex items-center gap-2 text-xs font-extrabold uppercase tracking-wide opacity-90">
-                <Icon size={14} />
-                {card.label}
-              </p>
-              <p className="text-2xl font-extrabold">{card.value}</p>
-              <p className="text-[11px] font-semibold opacity-85">
-                {isScrollCard ? "Click to jump" : "Click for details"}
-              </p>
+              <span className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium text-slate-600 dark:text-slate-300">{card.label}</span>
+                <span aria-hidden="true" className={cn("inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md", ICON_TONE_CLASSES[card.tone])}>
+                  <Icon size={16} />
+                </span>
+              </span>
+              <span className="text-3xl font-semibold tabular-nums tracking-tight text-slate-950 dark:text-white">{card.value}</span>
+              <span className="text-xs font-medium text-slate-500 transition group-hover:text-cyan-700 dark:text-slate-400 dark:group-hover:text-cyan-300">
+                {isScrollCard ? "Jump to the breakdown" : "View details"}
+              </span>
             </button>
           );
         })}

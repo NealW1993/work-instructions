@@ -67,7 +67,7 @@ export function InstructionImportClient({ departments }: InstructionImportClient
     const normalizedPartId = partId.trim();
     const normalizedTitle = itemTitle.trim() || fileNameWithoutExtension(file.name);
     if (!departmentId || !normalizedPartId || !normalizedTitle) {
-      setError("Department, Part ID, and Work Item Title are required.");
+      setError("Department, Part ID and Title are required.");
       return;
     }
 
@@ -137,7 +137,7 @@ export function InstructionImportClient({ departments }: InstructionImportClient
           />
         </label>
         <label className="grid gap-1 text-sm">
-          <span className="font-semibold text-slate-700 dark:text-slate-200">Work Item Title</span>
+          <span className="font-semibold text-slate-700 dark:text-slate-200">Title</span>
           <input
             value={itemTitle}
             onChange={(event) => setItemTitle(event.target.value)}

@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { InstructionBackButton } from "@/components/instructions/instruction-back-button";
 import { InstructionEditor } from "@/components/instructions/instruction-editor";
 import { requireAuthenticatedUser } from "@/lib/auth";
-import { canCreateInstructions } from "@/lib/roles";
+import { canCreateInstructions, canEditInstructions } from "@/lib/roles";
 
 export default async function NewInstructionPage() {
   const { profile } = await requireAuthenticatedUser();
@@ -25,7 +25,7 @@ export default async function NewInstructionPage() {
           </p>
         </div>
       </header>
-      <InstructionEditor mode="create" />
+      <InstructionEditor mode="create" canManageSharedTools={canEditInstructions(profile.role)} />
     </div>
   );
 }

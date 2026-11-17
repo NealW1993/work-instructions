@@ -18,6 +18,8 @@ interface InstructionReviewControlsProps {
   initialStatus: "up_to_date" | "needs_review";
   initialLastCalibratedAt: string | null;
   initialFlaggedAt: string | null;
+  /** Whether the periodic review check is already due (worked out on the server, so the first render matches). */
+  initialReviewDue: boolean;
   className?: string;
 }
 
@@ -95,6 +97,7 @@ export function InstructionReviewControls({
   initialStatus,
   initialLastCalibratedAt,
   initialFlaggedAt,
+  initialReviewDue,
   className,
 }: InstructionReviewControlsProps) {
   const router = useRouter();
@@ -106,6 +109,9 @@ export function InstructionReviewControls({
     initialLastCalibratedAt ?? instructionUpdatedAt,
   );
   const [flaggedAt, setFlaggedAt] = useState<string | null>(initialFlaggedAt);
+  // A review check that is past due needs review, exactly like an instruction someone flagged.
+  const [reviewDue, setReviewDue] = useState(initialReviewDue);
+  const needsReview = status === "needs_review" || reviewDue;
   const [busyStatus, setBusyStatus] = useState<InstructionReviewStatusPayload["status"] | null>(
     null,
   );
@@ -119,8 +125,6 @@ export function InstructionReviewControls({
 
   const normalizedReviewWindowDays = normalizeReviewWindowDays(reviewWindowDays);
   const daysSinceCalibration = toElapsedCalendarDays(lastCalibratedAt);
-  const reviewIsOutOfRange =
-    daysSinceCalibration !== null && daysSinceCalibration >= normalizedReviewWindowDays;
   const daysUntilDue =
     daysSinceCalibration === null
       ? null
@@ -188,7 +192,9 @@ export function InstructionReviewControls({
       return false;
     }
 
-    if (nextStatus === status) {
+    // Confirming "Up To Date" when the check is due is a real action even though nothing was flagged.
+    const confirmingDueCheck = nextStatus === "up_to_date" && reviewDue;
+    if (nextStatus === status && !confirmingDueCheck) {
       closeStateMenu();
       return true;
     }
@@ -229,6 +235,10 @@ export function InstructionReviewControls({
       const serverReviewStatus = isInstructionReviewStatusPayload(payload.reviewStatus)
         ? payload.reviewStatus
         : null;
+
+      if (nextStatus === "up_to_date") {
+        setReviewDue(false);
+      }
 
       if (serverReviewStatus) {
         setStatus(serverReviewStatus.status);
@@ -335,17 +345,16 @@ export function InstructionReviewControls({
 
   const statusSummary =
     status === "needs_review"
-      ? "Needs review is flagged. This instruction is still available for use."
-      : reviewIsOutOfRange
-        ? `Review window has passed (${normalizedReviewWindowDays}-day range). Please re-check and confirm Up To Date.`
+      ? "Someone flagged this instruction for review. It is still available for use."
+      : reviewDue
+        ? `The review check is due (checks are every ${normalizedReviewWindowDays} days). Make sure the instruction is still correct, then choose Up To Date.`
         : daysUntilDue === null
           ? "Review timing is unavailable."
-          : daysUntilDue === 0
-            ? "Review check is due today."
-            : null;
+          : null;
 
-  const nextReviewCheckLabel =
-    daysUntilDue === null
+  const nextReviewCheckLabel = reviewDue
+    ? "Review check is due now."
+    : daysUntilDue === null
       ? "Next review check unavailable."
       : daysUntilDue === 0
         ? "Next review check due today."
@@ -371,69 +380,70 @@ export function InstructionReviewControls({
         ]}
       />
       <div ref={menuRootRef} className={cn("relative inline-flex", className)}>
-        <div
+        <button
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={stateMenuOpen}
+          aria-label={`Review status: ${needsReview ? "Needs Review" : "Up To Date"}. Change review status.`}
+          disabled={busyStatus !== null}
+          onClick={() => {
+            if (stateMenuOpen) {
+              closeStateMenu();
+              return;
+            }
+
+            openStateMenu();
+          }}
           className={cn(
-            "inline-flex overflow-hidden rounded-xl border",
-            status === "needs_review"
-              ? "border-amber-500/45 bg-amber-500/12 text-amber-800 dark:text-amber-200"
-              : "border-emerald-500/45 bg-emerald-500/12 text-emerald-800 dark:text-emerald-200",
+            "inline-flex h-10 items-center gap-2 rounded-md border px-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60",
+            needsReview
+              ? "border-amber-400 bg-amber-50 text-amber-900 hover:bg-amber-100 dark:border-amber-500/50 dark:bg-amber-500/15 dark:text-amber-100 dark:hover:bg-amber-500/25"
+              : "border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100 dark:border-emerald-500/45 dark:bg-emerald-500/15 dark:text-emerald-100 dark:hover:bg-emerald-500/25",
           )}
         >
-          <span className="inline-flex items-center gap-1.5 border-r border-current/25 px-3 py-1.5 text-sm font-semibold">
-            {status === "needs_review" ? (
-              <TriangleAlert size={14} />
-            ) : (
-              <CheckCircle2 size={14} />
-            )}
-            {status === "needs_review" ? "Needs Review" : "Up To Date"}
-          </span>
-          <button
-            type="button"
-            aria-haspopup="menu"
-            aria-expanded={stateMenuOpen}
-            disabled={busyStatus !== null}
-            onClick={() => {
-              if (stateMenuOpen) {
-                closeStateMenu();
-                return;
-              }
-
-              openStateMenu();
-            }}
-            className="inline-flex items-center px-2.5 transition hover:bg-black/10 disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-white/10"
-          >
-            {busyStatus ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <ChevronDown
-                size={14}
-                className={cn("transition", stateMenuOpen ? "rotate-180" : "")}
-              />
-            )}
-          </button>
-        </div>
+          {busyStatus ? (
+            <Loader2 size={15} className="animate-spin" aria-hidden="true" />
+          ) : needsReview ? (
+            <TriangleAlert size={15} aria-hidden="true" />
+          ) : (
+            <CheckCircle2 size={15} aria-hidden="true" />
+          )}
+          <span aria-hidden="true">{needsReview ? "Needs Review" : "Up To Date"}</span>
+          <ChevronDown size={14} aria-hidden="true" className={cn("transition", stateMenuOpen ? "rotate-180" : "")} />
+        </button>
 
         {menuMounted ? (
           <div
             className={cn(
-              "fixed inset-x-4 bottom-4 z-[80] grid max-h-[calc(100dvh-2rem)] gap-2 overflow-y-auto rounded-xl border border-white/20 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-xl transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-[calc(100%+0.35rem)] sm:min-w-[270px] sm:max-h-none",
+              "fixed inset-x-4 bottom-4 z-[80] grid max-h-[calc(100dvh-2rem)] gap-1.5 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 text-slate-800 shadow-xl transition-[opacity,transform] duration-200 ease-out dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-[calc(100%+0.35rem)] sm:w-80 sm:max-h-none",
               menuEntered ? "pointer-events-auto" : "pointer-events-none",
             )}
             style={{
               opacity: menuEntered ? 1 : 0,
-              filter: menuEntered ? "blur(0px)" : "blur(6px)",
-              transform: menuEntered ? "translateY(0px) scale(1)" : "translateY(-8px) scale(0.98)",
+              transform: menuEntered ? "translateY(0px)" : "translateY(-6px)",
               transformOrigin: "top right",
             }}
           >
+            {statusSummary ? (
+              <p className={cn(
+                "rounded-md px-2.5 py-2 text-xs font-medium",
+                needsReview ? "bg-amber-50 text-amber-900 dark:bg-amber-500/15 dark:text-amber-100" : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200",
+              )}>
+                {statusSummary}
+              </p>
+            ) : null}
+
             <button
               type="button"
-              disabled={status === "up_to_date" || busyStatus !== null}
+              disabled={!needsReview || busyStatus !== null}
               onClick={() => void updateInstructionReviewStatus("up_to_date")}
-              className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/45 bg-emerald-500/15 px-2.5 py-1.5 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex min-h-11 items-center gap-2.5 rounded-md px-2.5 text-left text-sm font-semibold text-emerald-800 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-45 dark:text-emerald-200 dark:hover:bg-emerald-500/10"
             >
-              <CheckCircle2 size={13} />
-              Up To Date
+              <CheckCircle2 size={16} aria-hidden="true" />
+              <span className="grid">
+                <span>Up To Date</span>
+                <span className="text-xs font-normal text-slate-500 dark:text-slate-400">I checked it and it is still correct</span>
+              </span>
             </button>
             <button
               type="button"
@@ -445,30 +455,27 @@ export function InstructionReviewControls({
                 setNeedsReviewModalOpen(true);
                 setNeedsReviewNote("");
               }}
-              className="inline-flex items-center gap-2 rounded-lg border border-amber-500/45 bg-amber-500/15 px-2.5 py-1.5 text-sm font-semibold text-amber-100 transition hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex min-h-11 items-center gap-2.5 rounded-md px-2.5 text-left text-sm font-semibold text-amber-800 transition hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-45 dark:text-amber-200 dark:hover:bg-amber-500/10"
             >
-              <TriangleAlert size={13} />
-              Needs Review
+              <TriangleAlert size={16} aria-hidden="true" />
+              <span className="grid">
+                <span>Needs Review</span>
+                <span className="text-xs font-normal text-slate-500 dark:text-slate-400">Something looks wrong or out of date</span>
+              </span>
             </button>
 
-            <div className="rounded-lg border border-white/15 bg-white/5 px-2.5 py-2 text-[11px] text-slate-200">
+            <div className="mt-1 border-t border-slate-200 px-2.5 pt-2 text-xs text-slate-600 dark:border-slate-700 dark:text-slate-300">
               <p className="font-semibold">{nextReviewCheckLabel}</p>
-              <p className="mt-1 text-slate-300">
-                Last reviewed by <span className="font-semibold">{lastReviewedByName}</span>
-              </p>
-              <p className="text-slate-400">
-                Last review check: <LocalDateTime value={lastCalibratedAt} mode="dateTime" />
+              <p className="mt-1">
+                Last checked by <span className="font-semibold">{lastReviewedByName}</span> on{" "}
+                <LocalDateTime value={lastCalibratedAt} mode="dateTime" />
               </p>
               {flaggedAt ? (
-                <p className="text-slate-400">
-                  Latest needs-review flag: <LocalDateTime value={flaggedAt} mode="dateTime" />
+                <p>
+                  Flagged for review on <LocalDateTime value={flaggedAt} mode="dateTime" />
                 </p>
               ) : null}
             </div>
-
-            {statusSummary ? (
-              <p className="text-[11px] font-semibold text-slate-300">{statusSummary}</p>
-            ) : null}
           </div>
         ) : null}
       </div>

@@ -99,7 +99,7 @@ const RICH_HTML_SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
       "tspan",
     ],
     allowedAttributes: {
-      figure: ["data-type", "data-align", "data-width", "data-document-cover", "data-chart-type", "data-chart-title", "data-chart-data", "style", "class"],
+      figure: ["data-type", "data-align", "data-width", "data-document-cover", "data-chart-type", "data-chart-title", "data-chart-data", "data-chart-source", "style", "class"],
       aside: ["data-type", "data-tone", "class"],
       a: ["href", "title", "target", "rel"],
       img: ["src", "alt", "title", "width", "height", "style", "class"],

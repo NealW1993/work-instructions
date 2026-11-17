@@ -171,7 +171,16 @@ export async function PATCH(
     return NextResponse.json({ error: upsertError.message }, { status: 500 });
   }
 
-  if (existingStatus?.status !== requestedStatus) {
+  // Confirming "Up To Date" again after a day or more is a completed review check, so it is recorded
+  // even though the stored status did not change (the check had simply come due).
+  const previousCheckAt = Date.parse(existingStatus?.last_calibrated_at ?? instruction.updated_at ?? "");
+  const confirmedDueCheck =
+    requestedStatus === "up_to_date" &&
+    existingStatus?.status !== "needs_review" &&
+    Number.isFinite(previousCheckAt) &&
+    Date.now() - previousCheckAt >= 24 * 60 * 60 * 1000;
+
+  if (existingStatus?.status !== requestedStatus || confirmedDueCheck) {
     const reviewStateDetail =
       requestedStatus === "needs_review"
         ? reviewOrigin === "system"
@@ -193,7 +202,7 @@ export async function PATCH(
           occurred_at: nowIso,
           source_payload: {
             kind: "instruction_review_state",
-            previousStatus: existingStatus?.status ?? null,
+            previousStatus: confirmedDueCheck ? "review_due" : existingStatus?.status ?? null,
             nextStatus: requestedStatus,
             reviewOrigin,
             note: reviewNote,

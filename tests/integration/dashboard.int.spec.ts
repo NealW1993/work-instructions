@@ -4,7 +4,7 @@ import { captureRuntimeErrors, createReleasedInstruction, serviceClient, signIn,
 const studio = (page: import("@playwright/test").Page) => page.locator('[data-dashboard-layout-studio="true"]');
 
 test("operators get a focused homepage: big search, department filter, and the shortcuts their role allows", async ({ page, request }) => {
-  // Department chips list only departments that have released instructions.
+  // The department menu lists only departments that have released instructions.
   await createReleasedInstruction(request, { department: "Assembly", title: "Gearbox torque sequence" });
   const errors = captureRuntimeErrors(page);
   await signIn(page, "operator");
@@ -18,16 +18,16 @@ test("operators get a focused homepage: big search, department filter, and the s
   await expect(quickActions.getByRole("link", { name: /New instruction/ })).toBeVisible();
   await expect(quickActions.getByRole("link", { name: /My drafts/ })).toBeVisible();
 
-  // Department chips filter every list on the page.
-  const departments = page.getByRole("group", { name: "Filter by department" });
-  const assembly = departments.getByRole("button", { name: /^Assembly/ });
-  await assembly.click();
-  await expect(assembly).toHaveAttribute("aria-pressed", "true");
+  // The department menu beside the search box filters every list on the page.
+  const departments = page.getByRole("combobox", { name: "Department", exact: true });
+  await expect(departments.locator("option").first()).toHaveText(/^All departments \(\d+\)$/);
+  const assemblyOption = await departments.locator("option").filter({ hasText: /^Assembly \(\d+\)$/ }).getAttribute("value");
+  await departments.selectOption(assemblyOption!);
   const newest = page.locator("#homepage-widget-newest");
   const rows = newest.getByRole("link");
   await expect(rows.first()).toBeVisible();
   for (const text of await rows.allInnerTexts()) expect(text).toContain("Assembly");
-  await departments.getByRole("button", { name: /^All departments/ }).click();
+  await departments.selectOption("all");
 
   const search = page.getByRole("searchbox", { name: "Search for anything" });
   await search.fill("zz-no-such-part-zz");

@@ -116,6 +116,7 @@ export default async function EditInstructionPage({ params }: EditInstructionPag
         </div>
       </header>
       <InstructionEditor
+        canManageSharedTools={canEditInstructions(profile.role)}
         mode="edit"
         initialData={{
           instructionId: instruction.id,

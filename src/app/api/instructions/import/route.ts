@@ -46,11 +46,8 @@ export async function POST(request: NextRequest) {
       departmentId, partId, itemTitle, revision,
       bodyMarkdown: `Imported source document: ${fileName}\n\nOpen the retained original source file below. Review and approval are required before production use.`,
       uncommonTools: "", suggestedToolIds: [],
-      isoClauseRefs: ["7.5 Documented information", "8.5 Production and service provision"],
-      processScope: "Imported work instruction retained as an original source document.",
-      acceptanceCriteria: "Review the original document and verify its acceptance criteria before controlled release.",
-      verificationRecords: `Original source file retained: ${fileName}`,
-      riskControls: "Do not use this instruction for production until review and approval are complete.",
+      // The optional details stay empty for the author to fill in; the retained file is listed on the instruction.
+      processScope: "", acceptanceCriteria: "", verificationRecords: "", riskControls: "",
       changeSummary: `Imported source document ${fileName}.`,
     },
     p_file: { file_name: fileName, content_type: contentType, file_size: bytes.length, content_base64: contentBase64 },

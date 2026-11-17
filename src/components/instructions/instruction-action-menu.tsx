@@ -1,6 +1,6 @@
 "use client";
 
-import { SlidersHorizontal } from "lucide-react";
+import { MoreHorizontal } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { cn } from "@/lib/utils";
@@ -8,14 +8,10 @@ import { cn } from "@/lib/utils";
 interface InstructionActionMenuProps {
   children: ReactNode;
   className?: string;
-  badgeCount?: number;
 }
 
-export function InstructionActionMenu({
-  children,
-  className,
-  badgeCount,
-}: InstructionActionMenuProps) {
+/** Less-used instruction actions (updates, print, pin, edit, archive) behind one labelled button. */
+export function InstructionActionMenu({ children, className }: InstructionActionMenuProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -58,20 +54,20 @@ export function InstructionActionMenu({
         type="button"
         onClick={() => setOpen((current) => !current)}
         aria-expanded={open}
-        aria-label="Open instruction action menu"
-        className="relative inline-flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-500/35 bg-cyan-500/10 text-cyan-800 transition hover:bg-cyan-500/20 dark:text-cyan-100"
+        aria-label="More actions"
+        className={cn(
+          "inline-flex h-10 items-center gap-2 rounded-md border px-3 text-sm font-semibold transition",
+          open
+            ? "border-slate-400 bg-slate-100 text-slate-950 dark:border-slate-500 dark:bg-slate-800 dark:text-white"
+            : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800",
+        )}
       >
-        <SlidersHorizontal size={16} />
-        {badgeCount !== undefined && badgeCount >= 0 ? (
-          <span className="absolute -right-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-cyan-500 px-1 text-[9px] font-bold leading-none text-white">
-            ({badgeCount})
-          </span>
-        ) : null}
-        <span className="sr-only">Open instruction action menu</span>
+        <MoreHorizontal size={16} aria-hidden="true" />
+        <span aria-hidden="true">More</span>
       </button>
 
       {open ? (
-        <div className="fixed inset-x-4 bottom-4 z-30 grid max-h-[calc(100dvh-2rem)] gap-2 overflow-y-auto rounded-2xl border border-white/25 bg-white/95 p-2 shadow-2xl backdrop-blur-xl dark:border-white/15 dark:bg-slate-950/95 sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-[calc(100%+0.5rem)] sm:w-[min(22rem,calc(100vw-2rem))] sm:max-h-none sm:overflow-visible">
+        <div className="fixed inset-x-4 bottom-4 z-30 grid max-h-[calc(100dvh-2rem)] gap-2 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 shadow-xl dark:border-slate-700 dark:bg-slate-900 sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-[calc(100%+0.5rem)] sm:w-[min(22rem,calc(100vw-2rem))] sm:max-h-none sm:overflow-visible">
           {children}
         </div>
       ) : null}

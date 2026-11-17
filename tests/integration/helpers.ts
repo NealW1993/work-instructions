@@ -141,5 +141,5 @@ export async function searchDashboard(page: Page, query: string) {
 }
 
 export async function openActionMenu(page: Page) {
-  await page.getByRole("button", { name: "Open instruction action menu" }).click();
+  await page.getByRole("button", { name: "More actions", exact: true }).click();
 }

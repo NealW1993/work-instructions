@@ -1,6 +1,8 @@
 /* SQL regression checks use an empty schema clone, never application records. */
 import { spawnSync } from "node:child_process";
-import { resolve } from "node:path";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 const container = process.env.SQL_TEST_CONTAINER || "supabase_db_work-instructions";
 const database = `codex_control_test_${Date.now()}`;
@@ -18,6 +20,7 @@ function sql(command) {
 
 let created = false;
 const temporaryFiles = [`/tmp/${database}.sql`];
+const scratch = mkdtempSync(join(tmpdir(), "wi-sql-test-"));
 try {
   sql(`createdb -U supabase_admin ${database}`);
   created = true;
@@ -32,7 +35,9 @@ try {
     "supabase/migrations/202611070004_media_uploads.sql",
     "supabase/migrations/202611080001_access_hardening.sql",
     "supabase/migrations/202611090001_ai_provider_settings.sql",
+    "supabase/migrations/202611140001_instruction_details_optional.sql",
     "tests/instruction-control.sql",
+    "tests/instruction-details.sql",
     "tests/instruction-import.sql",
     "tests/document-control.sql",
     "tests/media-storage.sql",
@@ -43,11 +48,31 @@ try {
     const remote = `/tmp/${database}-${index}.sql`;
     temporaryFiles.push(remote);
     run(["cp", resolve(file), `${container}:${remote}`]);
-    sql(`psql -U supabase_admin -d ${database} -v ON_ERROR_STOP=1 -q -f ${remote}`);
-    console.log(`Passed: ${file}`);
+    try {
+      sql(`psql -U supabase_admin -d ${database} -v ON_ERROR_STOP=1 -q -f ${remote}`);
+      console.log(`Passed: ${file}`);
+    } catch (error) {
+      // The copy is taken from the running database. A migration that was already applied there stops at
+      // its first "already exists" (each migration runs in one transaction, so nothing is half-applied),
+      // and its tables, functions and policies are already in the copy. The copy has no permissions, though,
+      // so the migration's own top-level grant/revoke statements run again here, in their original order.
+      // Test files must always pass.
+      if (!file.startsWith("supabase/migrations/") || !/already exists/.test(String(error?.message))) throw error;
+      const permissions = readFileSync(resolve(file), "utf8").match(/^(?:grant|revoke)\b[^;]*;/gim) ?? [];
+      if (permissions.length > 0) {
+        const permissionsFile = resolve(scratch, `permissions-${index}.sql`);
+        writeFileSync(permissionsFile, `${permissions.join("\n")}\n`);
+        const remotePermissions = `/tmp/${database}-${index}-permissions.sql`;
+        temporaryFiles.push(remotePermissions);
+        run(["cp", permissionsFile, `${container}:${remotePermissions}`]);
+        sql(`psql -U supabase_admin -d ${database} -v ON_ERROR_STOP=1 -q -f ${remotePermissions}`);
+      }
+      console.log(`Already in the source database (permissions re-applied): ${file}`);
+    }
   }
   console.log("Database control regression checks passed.");
 } finally {
+  rmSync(scratch, { recursive: true, force: true });
   // Only the database created by this invocation can be removed.
   if (created) {
     sql(`dropdb -U supabase_admin ${database}`);

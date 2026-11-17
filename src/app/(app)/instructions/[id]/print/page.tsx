@@ -10,6 +10,7 @@ import {
 } from "@/components/instructions/print-media-isolator";
 import { PrintPageControls } from "@/components/instructions/print-page-controls";
 import { requireAuthenticatedUser } from "@/lib/auth";
+import { instructionDetailRows } from "@/lib/instruction-details";
 import {
   type MediaUrlRuntimeContext,
   getMediaUrlRuntimeFromHeaders,
@@ -367,16 +368,13 @@ export default async function InstructionPrintPage({
   const toolNames = Array.from(toolNamesByKey.values()).sort((first, second) =>
     first.localeCompare(second),
   );
-  const isoContextRows = [
-    {
-      label: "ISO 9001 Clauses",
-      value: (instruction.iso_clause_refs ?? []).join(", "),
-    },
-    { label: "Scope", value: instruction.process_scope ?? "" },
-    { label: "Acceptance Criteria", value: instruction.acceptance_criteria ?? "" },
-    { label: "Verification Records", value: instruction.verification_records ?? "" },
-    { label: "Risks / Controls", value: instruction.risk_controls ?? "" },
-  ].filter((entry) => entry.value.trim().length > 0);
+  // Optional details the author filled in, in shop-floor wording.
+  const detailRows = instructionDetailRows({
+    processScope: instruction.process_scope,
+    acceptanceCriteria: instruction.acceptance_criteria,
+    verificationRecords: instruction.verification_records,
+    riskControls: instruction.risk_controls,
+  });
   const printBodyMedia = extractPrintMediaFromBody(
     rewriteLoopbackMediaUrlsInHtml(sanitizeRichHtml(instruction.body_markdown), mediaUrlRuntime),
   );
@@ -536,13 +534,13 @@ export default async function InstructionPrintPage({
           )}
         </section>
 
-        {isoContextRows.length > 0 ? (
+        {detailRows.length > 0 ? (
           <section className="mt-5 grid gap-2">
             <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">
-              ISO / Control Context
+              More details
             </h2>
             <dl className="grid gap-2 text-sm text-slate-800 dark:text-slate-200">
-              {isoContextRows.map((entry) => (
+              {detailRows.map((entry) => (
                 <div key={entry.label}>
                   <dt className="font-bold">{entry.label}</dt>
                   <dd className="whitespace-pre-wrap">{entry.value}</dd>

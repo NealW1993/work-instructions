@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, Loader2, RotateCcw, XCircle } from "lucide-react";
+import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
@@ -14,34 +14,6 @@ interface InstructionApprovalControlsProps {
   expectedUpdatedAt: string;
   canApprove: boolean;
   className?: string;
-}
-
-function statusLabel(status: InstructionApprovalStatus) {
-  switch (status) {
-    case "pending_review":
-      return "Pending Review";
-    case "rejected":
-      return "Rejected";
-    case "draft":
-      return "Draft";
-    case "approved":
-    default:
-      return "Approved";
-  }
-}
-
-function statusTone(status: InstructionApprovalStatus) {
-  switch (status) {
-    case "pending_review":
-      return "border-amber-500/45 bg-amber-500/15 text-amber-800 dark:text-amber-200";
-    case "rejected":
-      return "border-rose-500/45 bg-rose-500/15 text-rose-800 dark:text-rose-200";
-    case "draft":
-      return "border-slate-500/45 bg-slate-500/15 text-slate-700 dark:text-slate-300";
-    case "approved":
-    default:
-      return "border-emerald-500/45 bg-emerald-500/15 text-emerald-800 dark:text-emerald-200";
-  }
 }
 
 export function InstructionApprovalControls({
@@ -112,52 +84,48 @@ export function InstructionApprovalControls({
     }
   }
 
+  const errorNote = error ? (
+    <p role="alert" className="max-w-sm text-xs font-semibold text-rose-600 dark:text-rose-300">{error}</p>
+  ) : null;
+
+  // The status itself is shown beside the title. These buttons appear only when there is a decision to make.
+  if (!canApprove || status !== "pending_review") {
+    return errorNote;
+  }
+
   return (
     <div className={cn("grid gap-1", className)}>
-      <div
-        className={cn(
-          "inline-flex overflow-hidden rounded-xl border text-sm font-semibold",
-          statusTone(status),
-        )}
-      >
-        <span className="inline-flex items-center gap-1.5 border-r border-current/25 px-3 py-1.5">
-          {status === "approved" ? <CheckCircle2 size={14} /> : <RotateCcw size={14} />}
-          {statusLabel(status)}
-        </span>
-        {canApprove && status === "pending_review" ? (
-          <>
-            <button
-              type="button"
-              disabled={busyStatus !== null}
-              onClick={() => void updateApproval("approved")}
-              className="inline-flex items-center px-2.5 transition hover:bg-black/10 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/10"
-              aria-label="Approve instruction"
-              title="Approve instruction"
-            >
-              {busyStatus === "approved" ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <CheckCircle2 size={14} />
-              )}
-            </button>
-            <button
-              type="button"
-              disabled={busyStatus !== null}
-              onClick={() => void updateApproval("rejected")}
-              className="inline-flex items-center px-2.5 transition hover:bg-black/10 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/10"
-              aria-label="Reject instruction"
-              title="Reject instruction"
-            >
-              {busyStatus === "rejected" ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <XCircle size={14} />
-              )}
-            </button>
-          </>
-        ) : null}
+      <div className="inline-flex items-center gap-2">
+        <button
+          type="button"
+          disabled={busyStatus !== null}
+          onClick={() => void updateApproval("approved")}
+          aria-label="Approve instruction"
+          className="inline-flex h-10 items-center gap-2 rounded-md bg-emerald-700 px-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-emerald-600 dark:hover:bg-emerald-500"
+        >
+          {busyStatus === "approved" ? (
+            <Loader2 size={15} className="animate-spin" aria-hidden="true" />
+          ) : (
+            <CheckCircle2 size={15} aria-hidden="true" />
+          )}
+          <span aria-hidden="true">Approve</span>
+        </button>
+        <button
+          type="button"
+          disabled={busyStatus !== null}
+          onClick={() => void updateApproval("rejected")}
+          aria-label="Reject instruction"
+          className="inline-flex h-10 items-center gap-2 rounded-md border border-rose-300 bg-white px-3 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-rose-500/40 dark:bg-slate-900 dark:text-rose-300 dark:hover:bg-rose-500/10"
+        >
+          {busyStatus === "rejected" ? (
+            <Loader2 size={15} className="animate-spin" aria-hidden="true" />
+          ) : (
+            <XCircle size={15} aria-hidden="true" />
+          )}
+          <span aria-hidden="true">Reject</span>
+        </button>
       </div>
-      {error ? <p role="alert" className="max-w-sm text-xs font-semibold text-rose-600 dark:text-rose-300">{error}</p> : null}
+      {errorNote}
     </div>
   );
 }

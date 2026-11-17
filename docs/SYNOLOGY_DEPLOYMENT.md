@@ -41,7 +41,7 @@ Apply the media upload migration, and configure the **global** Supabase Storage 
 ## Upgrade sequence
 
 1. Back up the database and storage objects together. Confirm the current migration history.
-2. Test against a restored staging instance. Apply only pending migrations in filename order, including `202611070001_document_control.sql` through `202611090001_ai_provider_settings.sql`. Fresh databases require the complete earlier migration set as well. Configure the global Storage limit separately.
+2. Test against a restored staging instance. Apply only pending migrations in filename order, including `202611070001_document_control.sql` through `202611140001_instruction_details_optional.sql`. Fresh databases require the complete earlier migration set as well. Configure the global Storage limit separately.
 3. Build the new container with the final public environment values. During a maintenance window, stop application writes, apply the tested pending migrations and replace the app container together. The new application requires the new RPCs; the old application uses write paths that are intentionally restricted by the new schema. Do not restore browser write grants or replay old policy hotfixes to make an old container work.
 4. Validate login, approved-versus-working revision visibility, an instruction submission/approval, a photo capture and a video capture using the actual HTTPS hostname.
 5. Play and seek an uploaded video on the production tablet and a large-screen workstation. Interrupt Wi-Fi during a large upload, reconnect, and confirm it completes without inserting a partial document.

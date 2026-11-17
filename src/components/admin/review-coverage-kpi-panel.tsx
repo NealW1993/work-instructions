@@ -1,5 +1,6 @@
 "use client";
 
+import { RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -47,16 +48,61 @@ interface ReviewCoveragePayload {
 
 const MAX_VISIBLE_NEEDS_REVIEW_ROWS = 5;
 const MAX_VISIBLE_USER_ROWS = 5;
-const NEEDS_REVIEW_ROW_HEIGHT_PX = 112;
-const USER_ACTION_ROW_HEIGHT_PX = 42;
+const NEEDS_REVIEW_ROW_HEIGHT_PX = 84;
+const USER_ACTION_ROW_HEIGHT_PX = 40;
+const USER_ACTION_HEADER_HEIGHT_PX = 34;
 
 function formatDurationDays(value: number | null) {
   if (value === null) {
-    return "Unknown";
+    return "None yet";
   }
 
   const rounded = Math.max(0, value);
   return `${rounded.toFixed(1)} day${rounded === 1 ? "" : "s"}`;
+}
+
+function plural(count: number, word: string) {
+  return `${count} ${word}${count === 1 ? "" : "s"}`;
+}
+
+/** The same plain wording the instruction page uses for why something needs a look. */
+function reviewReasonLabel(instruction: ReviewCoverageInstruction) {
+  if (instruction.isFlagged && instruction.isOutOfRange) {
+    return "Flagged, check is due";
+  }
+  if (instruction.isFlagged) {
+    return "Flagged";
+  }
+  if (instruction.isOutOfRange) {
+    return "Check is due";
+  }
+  return instruction.reviewReason;
+}
+
+const STAT_TONE_CLASSES = {
+  neutral: "text-slate-900 dark:text-slate-50",
+  amber: "text-amber-700 dark:text-amber-300",
+  emerald: "text-emerald-700 dark:text-emerald-300",
+} as const;
+
+function CoverageStat({
+  label,
+  value,
+  note,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  note: string;
+  tone?: keyof typeof STAT_TONE_CLASSES;
+}) {
+  return (
+    <div className="grid content-start gap-1 rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-3 dark:border-slate-800 dark:bg-slate-900/40">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</p>
+      <p className={`text-2xl font-bold tabular-nums ${STAT_TONE_CLASSES[tone]}`}>{value}</p>
+      <p className="text-xs text-slate-600 dark:text-slate-400">{note}</p>
+    </div>
+  );
 }
 
 export function ReviewCoverageKpiPanel() {
@@ -81,9 +127,6 @@ export function ReviewCoverageKpiPanel() {
   }, [supabase]);
 
   const fetchReviewCoverage = useCallback(async () => {
-
-
-
     try {
       const headers = await getAuthHeaders();
       setLoading(true);
@@ -127,233 +170,196 @@ export function ReviewCoverageKpiPanel() {
   const totalInstructions = payload?.totalInstructions ?? 0;
   const needsReviewCount = payload?.needsReviewCount ?? 0;
   const reviewedCount = payload?.reviewedCount ?? 0;
+  const reviewWindowDays = payload?.reviewWindowDays ?? 0;
   const averageNeedsReviewDurationDays = payload?.averageNeedsReviewDurationDays ?? null;
   const totalNeedsReviewDurationDays = payload?.totalNeedsReviewDurationDays ?? 0;
   const averageResolvedNeedsReviewDays = payload?.averageResolvedNeedsReviewDays ?? null;
   const resolvedNeedsReviewCycleCount = payload?.resolvedNeedsReviewCycleCount ?? 0;
+  const needsReviewInstructions = payload?.needsReviewInstructions ?? [];
   const userReviewActions = payload?.userReviewActions ?? [];
-  const shouldScrollNeedsReviewList =
-    (payload?.needsReviewInstructions.length ?? 0) > MAX_VISIBLE_NEEDS_REVIEW_ROWS;
+  const shouldScrollNeedsReviewList = needsReviewInstructions.length > MAX_VISIBLE_NEEDS_REVIEW_ROWS;
   const needsReviewListMaxHeight = shouldScrollNeedsReviewList
     ? MAX_VISIBLE_NEEDS_REVIEW_ROWS * NEEDS_REVIEW_ROW_HEIGHT_PX
     : undefined;
-  const shouldScrollUserActions = userReviewActions.length > MAX_VISIBLE_USER_ROWS;
-  const userActionsListMaxHeight = shouldScrollUserActions
-    ? MAX_VISIBLE_USER_ROWS * USER_ACTION_ROW_HEIGHT_PX
-    : undefined;
-  const donutRatio = totalInstructions > 0 ? needsReviewCount / totalInstructions : 0;
-  const donutRadius = 56;
-  const donutCircumference = 2 * Math.PI * donutRadius;
-  const donutArc = donutCircumference * donutRatio;
+  const userActionsListMaxHeight =
+    userReviewActions.length > MAX_VISIBLE_USER_ROWS
+      ? MAX_VISIBLE_USER_ROWS * USER_ACTION_ROW_HEIGHT_PX + USER_ACTION_HEADER_HEIGHT_PX
+      : undefined;
+  const upToDatePercent = totalInstructions > 0 ? Math.round((reviewedCount / totalInstructions) * 100) : 0;
+  const needsReviewPercent = totalInstructions > 0 ? (needsReviewCount / totalInstructions) * 100 : 0;
 
   return (
-    <section className="grid gap-3 rounded-3xl border border-white/30 bg-white/80 p-5 shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 md:p-6">
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">
-          Review Coverage
-        </h2>
+    <section className="grid gap-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-slate-600 dark:text-slate-300">
+          {payload === null
+            ? loading
+              ? "Loading review status..."
+              : "Review status is not available."
+            : totalInstructions === 0
+              ? "No instructions yet."
+              : `${upToDatePercent}% of instructions are up to date. Each one is due for a check every ${plural(reviewWindowDays, "day")}.`}
+        </p>
         <button
           type="button"
           disabled={loading}
           onClick={() => void fetchReviewCoverage()}
-          className="rounded-xl border border-slate-300/70 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-200 dark:hover:bg-slate-800/70"
+          className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
         >
-          {loading ? "Loading..." : "Reload Coverage"}
+          <RefreshCw aria-hidden="true" size={15} className={loading ? "animate-spin" : undefined} />
+          {loading ? "Loading..." : "Refresh"}
         </button>
       </div>
 
       {error ? (
-        <p className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-200">
+        <p className="rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200">
           {error}
         </p>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
-        <div className="grid place-items-center rounded-2xl border border-slate-300/70 bg-white/70 p-4 dark:border-slate-700 dark:bg-slate-900/50">
-          <div className="relative h-36 w-36">
-            <svg viewBox="0 0 140 140" className="h-36 w-36">
-              <circle
-                cx="70"
-                cy="70"
-                r={donutRadius}
-                fill="none"
-                stroke="rgba(148, 163, 184, 0.28)"
-                strokeWidth="18"
-              />
-              {donutArc > 0 ? (
-                <circle
-                  cx="70"
-                  cy="70"
-                  r={donutRadius}
-                  fill="none"
-                  stroke="rgba(245, 158, 11, 0.95)"
-                  strokeWidth="18"
-                  strokeLinecap="round"
-                  strokeDasharray={`${donutArc} ${donutCircumference - donutArc}`}
-                  transform="rotate(-90 70 70)"
-                />
-              ) : null}
-            </svg>
-            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-0.5">
-              <p className="text-2xl font-extrabold leading-none text-slate-900 dark:text-slate-100">
-                {needsReviewCount}
-              </p>
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
-                Needs Review
-              </p>
-            </div>
-          </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <CoverageStat
+          label="Needs review"
+          value={String(needsReviewCount)}
+          tone={needsReviewCount > 0 ? "amber" : "neutral"}
+          note={needsReviewCount > 0 ? "Flagged or past the check date" : "Nothing is waiting"}
+        />
+        <CoverageStat
+          label="Up to date"
+          value={String(reviewedCount)}
+          tone="emerald"
+          note={`Out of ${plural(totalInstructions, "instruction")}`}
+        />
+        <CoverageStat
+          label="Average wait"
+          value={formatDurationDays(averageNeedsReviewDurationDays)}
+          note={`${totalNeedsReviewDurationDays.toFixed(1)} days waiting in total`}
+        />
+        <CoverageStat
+          label="Average time to clear"
+          value={formatDurationDays(averageResolvedNeedsReviewDays)}
+          note={`${plural(resolvedNeedsReviewCycleCount, "review")} cleared so far`}
+        />
+      </div>
 
-          <div className="mt-2 grid gap-1 text-xs text-slate-600 dark:text-slate-300">
-            <p className="inline-flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-sm bg-amber-500" />
-              Needs Review: {needsReviewCount}
-            </p>
-            <p className="inline-flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-sm bg-slate-400" />
-              Reviewed: {reviewedCount}
-            </p>
-            <p>Total Instructions: {totalInstructions}</p>
-            <p>Review Window: {payload?.reviewWindowDays ?? 0} day(s)</p>
-            <p>
-              Avg time currently in Needs Review:{" "}
-              {formatDurationDays(averageNeedsReviewDurationDays)}
-            </p>
-            <p>Total Needs Review days (queue): {totalNeedsReviewDurationDays.toFixed(1)}</p>
-            <p>
-              Avg time to return Up To Date: {formatDurationDays(averageResolvedNeedsReviewDays)}
-              {` (${resolvedNeedsReviewCycleCount} resolved cycle${
-                resolvedNeedsReviewCycleCount === 1 ? "" : "s"
-              })`}
-            </p>
+      {totalInstructions > 0 ? (
+        <div className="grid gap-2">
+          <div
+            role="img"
+            aria-label={`${reviewedCount} up to date, ${needsReviewCount} need review`}
+            className="flex h-2.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800"
+          >
+            <span className="h-full bg-emerald-500" style={{ width: `${100 - needsReviewPercent}%` }} />
+            <span className="h-full bg-amber-500" style={{ width: `${needsReviewPercent}%` }} />
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600 dark:text-slate-400">
+            <span className="inline-flex items-center gap-1.5">
+              <span aria-hidden="true" className="h-2 w-2 rounded-full bg-emerald-500" />
+              Up to date
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span aria-hidden="true" className="h-2 w-2 rounded-full bg-amber-500" />
+              Needs review
+            </span>
           </div>
         </div>
+      ) : null}
 
-        <div className="grid gap-3">
-          <div className="grid gap-2 rounded-2xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                Needs Review Drill-Down
-              </h3>
-              {shouldScrollNeedsReviewList ? (
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Showing 5 at a time. Scroll for more.
-                </p>
-              ) : null}
-            </div>
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+        <div className="grid content-start gap-2">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Waiting for a review</h3>
+            {shouldScrollNeedsReviewList ? (
+              <p className="text-xs text-slate-500 dark:text-slate-400">Scroll for more</p>
+            ) : null}
+          </div>
 
-            {payload?.needsReviewInstructions.length ? (
-              <div
-                className="grid gap-1 overflow-y-auto pr-1"
-                style={
-                  needsReviewListMaxHeight
-                    ? {
-                        maxHeight: `${needsReviewListMaxHeight}px`,
-                      }
-                    : undefined
-                }
-              >
-                {payload.needsReviewInstructions.map((instruction) => (
+          {needsReviewInstructions.length > 0 ? (
+            <ul
+              className="divide-y divide-slate-200 overflow-y-auto rounded-lg border border-slate-200 dark:divide-slate-800 dark:border-slate-800"
+              style={needsReviewListMaxHeight ? { maxHeight: `${needsReviewListMaxHeight}px` } : undefined}
+            >
+              {needsReviewInstructions.map((instruction) => (
+                <li key={instruction.instructionId}>
                   <Link
-                    key={instruction.instructionId}
                     href={`/instructions/${instruction.instructionId}`}
-                    className="grid gap-1 rounded-lg border border-slate-300/70 bg-white/85 px-3 py-2 transition hover:border-amber-400/60 hover:bg-amber-500/10 dark:border-slate-700 dark:bg-slate-950/60 dark:hover:border-amber-500/50 dark:hover:bg-amber-500/15"
+                    className="grid gap-0.5 px-3 py-2.5 transition hover:bg-amber-50 dark:hover:bg-amber-500/10"
                   >
-                    <div className="flex flex-wrap items-center justify-between gap-1">
-                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                        {instruction.partId} | Rev {instruction.revision} | {instruction.departmentName}
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="min-w-0 truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+                        <span className="font-mono">{instruction.partId}</span>
+                        <span className="ml-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+                          Rev {instruction.revision}
+                        </span>
                       </p>
-                      <span className="rounded-full border border-amber-500/45 bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-100">
-                        {instruction.reviewReason}
+                      <span className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-xs font-semibold text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+                        {reviewReasonLabel(instruction)}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-600 dark:text-slate-300">
-                      {instruction.itemTitle}
-                    </p>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Last review check:{" "}
-                      <LocalDateTime value={instruction.lastCalibratedAt} mode="dateTime" />
-                      {instruction.overdueDays !== null
-                        ? ` | Overdue by ${instruction.overdueDays} day${
-                            instruction.overdueDays === 1 ? "" : "s"
-                          }`
+                    <p className="truncate text-sm text-slate-700 dark:text-slate-200">{instruction.itemTitle}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {instruction.departmentName} · Last checked{" "}
+                      <LocalDateTime value={instruction.lastCalibratedAt} mode="date" />
+                      {instruction.overdueDays !== null && instruction.overdueDays > 0
+                        ? ` · ${plural(instruction.overdueDays, "day")} overdue`
+                        : ""}
+                      {instruction.needsReviewDurationDays !== null
+                        ? ` · waiting ${plural(instruction.needsReviewDurationDays, "day")}`
                         : ""}
                     </p>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      In Needs Review:{" "}
-                      {instruction.needsReviewDurationDays !== null
-                        ? `${instruction.needsReviewDurationDays} day${
-                            instruction.needsReviewDurationDays === 1 ? "" : "s"
-                          }`
-                        : "Unknown"}
-                      {instruction.needsReviewSinceAt ? " | Since " : ""}
-                      {instruction.needsReviewSinceAt ? (
-                        <LocalDateTime
-                          value={instruction.needsReviewSinceAt}
-                          mode="dateTime"
-                        />
-                      ) : null}
-                    </p>
                   </Link>
-                ))}
-              </div>
-            ) : (
-              <p className="rounded-lg border border-slate-300/70 bg-white/80 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300">
-                No instructions currently require review.
-              </p>
-            )}
-          </div>
-
-          <div className="grid gap-2 rounded-2xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-900/50">
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-              Review Status User Interaction
-            </h3>
-            <p className="text-xs text-slate-600 dark:text-slate-300">
-              Needs Review marks: {payload?.totalMarkedNeedsReviewActions ?? 0} | Up To Date
-              marks: {payload?.totalMarkedUpToDateActions ?? 0}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="rounded-lg border border-dashed border-slate-300 px-3 py-5 text-center text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300">
+              Nothing is waiting for a review.
             </p>
+          )}
+        </div>
 
-            {userReviewActions.length === 0 ? (
-              <p className="rounded-lg border border-slate-300/70 bg-white/80 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300">
-                No review state interactions found yet.
-              </p>
-            ) : (
-              <div
-                className="overflow-y-auto rounded-lg border border-slate-300/70 dark:border-slate-700"
-                style={
-                  userActionsListMaxHeight
-                    ? {
-                        maxHeight: `${userActionsListMaxHeight}px`,
-                      }
-                    : undefined
-                }
-              >
-                <table className="min-w-full text-xs">
-                  <thead className="bg-slate-900/10 text-left dark:bg-white/10">
-                    <tr>
-                      <th className="px-3 py-2">User</th>
-                      <th className="px-3 py-2">Marked Needs Review</th>
-                      <th className="px-3 py-2">Marked Up To Date</th>
-                      <th className="px-3 py-2">Total Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {userReviewActions.map((entry) => (
-                      <tr
-                        key={entry.userId}
-                        className="border-t border-slate-200/70 dark:border-slate-800"
-                      >
-                        <td className="px-3 py-2 font-medium">{entry.label}</td>
-                        <td className="px-3 py-2">{entry.markedNeedsReviewCount}</td>
-                        <td className="px-3 py-2">{entry.markedUpToDateCount}</td>
-                        <td className="px-3 py-2">{entry.totalReviewActions}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+        <div className="grid content-start gap-2">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Who checks instructions</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {payload?.totalMarkedUpToDateActions ?? 0} marked up to date ·{" "}
+              {payload?.totalMarkedNeedsReviewActions ?? 0} marked needs review
+            </p>
           </div>
+
+          {userReviewActions.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-slate-300 px-3 py-5 text-center text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300">
+              No one has checked an instruction yet.
+            </p>
+          ) : (
+            <div
+              className="overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-800"
+              style={userActionsListMaxHeight ? { maxHeight: `${userActionsListMaxHeight}px` } : undefined}
+            >
+              <table className="min-w-full text-sm">
+                <thead className="sticky top-0 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                  <tr>
+                    <th scope="col" className="px-3 py-2">Person</th>
+                    <th scope="col" className="px-3 py-2 text-right">Up to date</th>
+                    <th scope="col" className="px-3 py-2 text-right">Needs review</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                  {userReviewActions.map((entry) => (
+                    <tr key={entry.userId}>
+                      <td className="px-3 py-2 font-medium text-slate-800 dark:text-slate-100">{entry.label}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">
+                        {entry.markedUpToDateCount}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">
+                        {entry.markedNeedsReviewCount}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </section>

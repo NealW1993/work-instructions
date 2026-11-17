@@ -10,15 +10,16 @@ html dialog.instruction-image-dialog h2 {
   --background: #eef0f4;
   --surface: #f9fafccc;
   --surface-strong: #ffffff;
-  --foreground: #3d4150;
-  --muted: #73798a;
-  --ring: #3f6ed8;
-  --ui-radius-sm: 0.3rem;
-  --ui-radius-md: 0.4rem;
+  --foreground: #334155;
+  --muted: #64748b;
+  --ring: #0891b2;
+  /* Crisp corners: panels and controls read as precise equipment, not consumer cards. */
+  --ui-radius-sm: 0.25rem;
+  --ui-radius-md: 0.375rem;
   --ui-radius-lg: 0.5rem;
-  --ui-radius-xl: 0.62rem;
-  --ui-radius-2xl: 0.76rem;
-  --ui-radius-3xl: 0.92rem;
+  --ui-radius-xl: 0.5rem;
+  --ui-radius-2xl: 0.625rem;
+  --ui-radius-3xl: 0.75rem;
 }
 
 .dark {
@@ -52,11 +53,20 @@ html dialog.instruction-image-dialog h2 {
   --color-muted: var(--muted);
   --color-ring: var(--ring);
   --font-sans: var(--font-body);
-  --font-heading: var(--font-heading);
+  --font-heading: var(--font-body);
 }
 
-* {
-  border-color: color-mix(in oklab, var(--foreground) 18%, transparent);
+/*
+ * The default border colour. It lives in the base layer so that border colour classes can override
+ * it: outside a layer it outranks every Tailwind class, which silently turned all borders grey
+ * (including the red border on a field with an error).
+ */
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: color-mix(in oklab, var(--foreground) 18%, transparent);
+  }
 }
 
 html,
@@ -73,11 +83,7 @@ html.dark {
 }
 
 body {
-  background:
-    radial-gradient(circle at 12% 14%, rgba(61, 65, 80, 0.08) 0%, transparent 46%),
-    radial-gradient(circle at 86% 10%, rgba(115, 121, 138, 0.08) 0%, transparent 40%),
-    linear-gradient(180deg, #f5f6f9 0%, #eceff4 100%),
-    var(--background);
+  background: #f2f4f7;
   color: var(--foreground);
   font-family: var(--font-body), "Segoe UI", sans-serif;
   line-height: 1.5;
@@ -164,11 +170,7 @@ body {
 }
 
 .dark body {
-  background:
-    radial-gradient(circle at 10% 15%, rgba(255, 255, 255, 0.045) 0%, transparent 42%),
-    radial-gradient(circle at 84% 10%, rgba(255, 255, 255, 0.03) 0%, transparent 34%),
-    radial-gradient(circle at 18% 86%, rgba(255, 255, 255, 0.02) 0%, transparent 35%),
-    var(--background);
+  background: var(--background);
 }
 
 h1,
@@ -177,7 +179,7 @@ h3,
 h4,
 h5,
 h6 {
-  font-family: var(--font-heading), "Segoe UI", sans-serif;
+  font-family: var(--font-body), "Segoe UI", sans-serif;
 }
 
 .prose-markdown {
@@ -566,11 +568,83 @@ h6 {
 .prose-markdown li[data-type="taskItem"] > div { flex: 1; min-width: 0; }
 .prose-markdown li[data-type="taskItem"] > div > p { margin: 0; }
 
-/* Markdown source editor: the surrounding frame shows focus, so the textarea itself stays flat. */
-.md-source {
-  tab-size: 2;
-  font-variant-ligatures: none;
+/* Formatted instruction editor: the writing surface reuses the viewer's prose styles, so authors see what operators see. */
+.rich-editor-content {
+  padding: 0.85rem 1rem 1.25rem;
+  outline: none;
+  font-size: 1rem;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
 }
+.rich-editor-surface > .ProseMirror:focus { outline: none; }
+.rich-editor-content p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: #94a3b8;
+}
+.rich-editor-content .ProseMirror-selectednode,
+.rich-editor-content .is-selected {
+  outline: 3px solid #06b6d4;
+  outline-offset: 3px;
+  border-radius: 0.5rem;
+}
+.rich-editor-content .editor-chart-block { margin: 1rem 0; }
+.rich-editor-content .editor-block-button {
+  margin-top: 0.35rem;
+  min-height: 2.5rem;
+  padding: 0 0.85rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.5rem;
+  background: #ffffff;
+  color: #0e7490;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.dark .rich-editor-content .editor-block-button { border-color: #334155; background: #020617; color: #67e8f9; }
+.rich-editor-content .editor-media { margin: 1rem auto; }
+.rich-editor-content .editor-media :is(img, video) {
+  display: block;
+  max-width: 100%;
+  max-height: 28rem;
+  margin: 0 auto;
+  border-radius: 0.5rem;
+}
+.rich-editor-content .editor-media-caption {
+  display: block;
+  width: 100%;
+  margin-top: 0.4rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px dashed #cbd5e1;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: inherit;
+  font-size: 0.875rem;
+  text-align: center;
+}
+.dark .rich-editor-content .editor-media-caption { border-color: #475569; }
+.rich-editor-content .editor-media-caption:focus { border-style: solid; outline: 2px solid #06b6d4; }
+.rich-editor-content .editor-inline-image { display: inline-block; max-height: 12rem; vertical-align: middle; }
+.rich-editor-content .editor-upload-placeholder {
+  margin: 0.75rem 0;
+  padding: 0.75rem 1rem;
+  border: 1px dashed #06b6d4;
+  border-radius: 0.75rem;
+  background: rgb(6 182 212 / 0.06);
+  color: #0e7490;
+  font-weight: 600;
+}
+.dark .rich-editor-content .editor-upload-placeholder { color: #67e8f9; }
+.rich-editor-content :is(td, th) { position: relative; min-width: 4rem; vertical-align: top; }
+.rich-editor-content .selectedCell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgb(6 182 212 / 0.14);
+  pointer-events: none;
+}
+.rich-editor-content li[data-type="taskItem"] > label { user-select: none; }
 /* The homepage search is the primary control on the plant floor; keep it high-contrast with a strong focus ring. */
 input.dashboard-search-input::-webkit-search-cancel-button,
 input.dashboard-search-input::-webkit-search-decoration {
@@ -587,13 +661,6 @@ html:not(.dark) input.dashboard-search-input:focus {
   border-color: #0891b2 !important;
   box-shadow: 0 0 0 4px rgb(8 145 178 / 0.2) !important;
 }
-html:not(.dark) textarea.md-source,
-html:not(.dark) textarea.md-source:focus {
-  background-color: #ffffff !important;
-  color: #0f172a !important;
-  border-color: #e2e8f0 !important;
-  box-shadow: none !important;
-}
 
 @media print {
   .prose-markdown :is(aside[data-type="callout"], figure[data-type="instruction-chart"]) {
@@ -608,9 +675,9 @@ html:not(.dark) textarea.md-source:focus {
 html:not(.dark) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]),
 html:not(.dark) textarea,
 html:not(.dark) select {
-  background-color: #f7f8fb !important;
-  color: #3d4150 !important;
-  border-color: #afb3bd !important;
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
 }
 
 html:not(.dark) h1,
@@ -619,24 +686,24 @@ html:not(.dark) h3,
 html:not(.dark) h4,
 html:not(.dark) h5,
 html:not(.dark) h6 {
-  color: #3d4150 !important;
+  color: #0f172a !important;
 }
 
 html:not(.dark) label,
 html:not(.dark) legend {
-  color: #4a5060 !important;
+  color: #334155 !important;
 }
 
 html:not(.dark) input::placeholder,
 html:not(.dark) textarea::placeholder {
-  color: #858b9a !important;
+  color: #94a3b8 !important;
 }
 
 html:not(.dark) input:focus,
 html:not(.dark) textarea:focus,
 html:not(.dark) select:focus {
-  border-color: #5268c8 !important;
-  box-shadow: 0 0 0 1px rgba(82, 104, 200, 0.2) !important;
+  border-color: #0891b2 !important;
+  box-shadow: 0 0 0 3px rgb(8 145 178 / 0.18) !important;
 }
 
 html:not(.dark) input:-webkit-autofill,
@@ -645,9 +712,9 @@ html:not(.dark) input:-webkit-autofill:focus,
 html:not(.dark) textarea:-webkit-autofill,
 html:not(.dark) textarea:-webkit-autofill:hover,
 html:not(.dark) textarea:-webkit-autofill:focus {
-  -webkit-text-fill-color: #3d4150 !important;
-  box-shadow: 0 0 0 1000px #f7f8fb inset !important;
-  caret-color: #3d4150 !important;
+  -webkit-text-fill-color: #0f172a !important;
+  box-shadow: 0 0 0 1000px #ffffff inset !important;
+  caret-color: #0f172a !important;
   transition: background-color 9999s ease-in-out 0s;
 }
 
@@ -896,4 +963,93 @@ summary > .rounded-full {
   :is(section, article, form, div)[class*="rounded-3xl"][class*="border"][class*="md:p-8"] {
     padding: 1.4rem !important;
   }
+}
+
+/* ==========================================================================
+ * Modern surfaces
+ * Earlier screens were built with frosted-glass panels, heavy drop shadows, extra-bold headings
+ * and very small text. These rules give every screen the same crisp look without editing each
+ * one: solid panels, hairline borders, flat shadows and calmer type. The sign-in screen keeps
+ * its own look.
+ * ======================================================================== */
+
+/* No frosted glass. */
+[class*="backdrop-blur"] {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+/* Panels are solid with a hairline border. */
+html:not(.dark) :is(.bg-white\/95, .bg-white\/90, .bg-white\/85, .bg-white\/80, .bg-white\/75, .bg-white\/70):not(.auth-login-shell *) {
+  background-color: #ffffff !important;
+}
+
+html:not(.dark) :is(.border-white\/30, .border-white\/25, .border-white\/20, .border-slate-300\/80, .border-slate-300\/70, .border-slate-300\/60):not(.auth-login-shell *) {
+  border-color: #e2e8f0 !important;
+}
+
+html.dark :is(.dark\:bg-slate-900\/70, .dark\:bg-slate-900\/60, .dark\:bg-slate-900\/50, .dark\:bg-slate-950\/55, .dark\:bg-slate-950\/60, .dark\:bg-slate-950\/75, .dark\:bg-slate-950\/80):not(.auth-login-shell *) {
+  background-color: #0d0d0d !important;
+}
+
+html.dark :is(.dark\:border-white\/10, .dark\:border-white\/15):not(.auth-login-shell *) {
+  border-color: #262626 !important;
+}
+
+/* Page panels sit flat. Only floating layers (menus, pop-ups, dialogs) cast a real shadow. */
+:is(.shadow-xl, .shadow-lg, .shadow-md):not(.absolute, .fixed, [role="dialog"], [role="menu"], [role="listbox"], .app-modal-shell > *, .auth-login-shell *) {
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.06) !important;
+}
+
+/* Calmer type: bold instead of extra bold, and nothing smaller than 11px. */
+.font-extrabold:not(.auth-login-shell *) {
+  font-weight: 700 !important;
+}
+
+.text-\[10px\] {
+  font-size: 0.6875rem !important;
+}
+
+.app-workspace :is(h1, h2, h3, h4) {
+  letter-spacing: -0.01em;
+}
+
+/* A panel shown inside a collapsible section sits on the section itself, not in a second frame. */
+.workspace-disclosure > .disclosure-body > :is(section, div)[class*="rounded-3xl"][class*="border"] {
+  border-width: 0 !important;
+  border-radius: 0 !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.workspace-disclosure > .disclosure-body > :is(section, div)[class*="rounded-3xl"] + :is(section, div)[class*="rounded-3xl"] {
+  border-top: 1px solid color-mix(in oklab, var(--foreground) 12%, transparent) !important;
+  padding-top: 1.25rem !important;
+}
+
+.workspace-disclosure > .disclosure-body h2.text-xl {
+  font-size: 1rem !important;
+  line-height: 1.5rem !important;
+  font-weight: 600 !important;
+}
+
+/* A text box that sits inside another bordered box (the tools field) carries no box of its own. */
+html .app-workspace input.inline-field:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]),
+html .app-workspace input.inline-field:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):focus {
+  background-color: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+/* The homepage department menu matches the search box beside it. */
+html:not(.dark) select.dashboard-search-select {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #94a3b8 !important;
+}
+
+html:not(.dark) select.dashboard-search-select:focus {
+  border-color: #0891b2 !important;
+  box-shadow: 0 0 0 4px rgb(8 145 178 / 0.2) !important;
 }

@@ -13,13 +13,6 @@ import {
 import { buildChartHtml, normalizeChartData } from "../src/lib/instruction-chart";
 import { sanitizeRichHtml } from "../src/lib/rich-text-html";
 import { validateEnhancedInstructionAssets } from "../src/lib/instruction-enhancement";
-import {
-  continueMarkdownList,
-  indentMarkdownListLine,
-  insertMarkdownBlock,
-  toggleMarkdownLinePrefix,
-  toggleMarkdownWrap,
-} from "../src/lib/markdown-commands";
 import { DomUtils, parseDocument } from "htmlparser2";
 
 const readings = [{ label: "Setup", value: 0 }, { label: "Check A", value: -2.5 }, { label: "Check B", value: 5 }];
@@ -217,55 +210,6 @@ test.describe("legacy HTML conversion", () => {
     for (const fragment of ["> [!CAUTION]", "1. Clean", "**notch first**", "- [x] Gloves on", "| Diameter |", "![Locator](https://example.com/locator.png \"Notch faces the operator\")", "![Setup clip](https://example.com/setup.mp4)", "```chart", "Shift 2: 0", "[drawing](https://example.com/drawing.pdf)"]) {
       expect(once).toContain(fragment);
     }
-  });
-});
-
-test.describe("toolbar text commands", () => {
-  test("wrapping toggles bold on and off and inserts a placeholder when nothing is selected", () => {
-    const on = toggleMarkdownWrap({ value: "Torque 12 Nm", start: 7, end: 12 }, "**");
-    expect(on.value).toBe("Torque **12 Nm**");
-    expect(on.value.slice(on.start, on.end)).toBe("12 Nm");
-    const off = toggleMarkdownWrap(on, "**");
-    expect(off.value).toBe("Torque 12 Nm");
-    const empty = toggleMarkdownWrap({ value: "A ", start: 2, end: 2 }, "**", "bold text");
-    expect(empty.value).toBe("A **bold text**");
-    expect(empty.value.slice(empty.start, empty.end)).toBe("bold text");
-  });
-
-  test("line prefixes apply to every selected line and toggle off", () => {
-    const listed = toggleMarkdownLinePrefix({ value: "Clean\nLoad\nInspect", start: 0, end: 18 }, "ordered");
-    expect(listed.value).toBe("1. Clean\n2. Load\n3. Inspect");
-    expect(toggleMarkdownLinePrefix(listed, "ordered").value).toBe("Clean\nLoad\nInspect");
-    expect(toggleMarkdownLinePrefix({ value: "Clean", start: 2, end: 2 }, "task").value).toBe("- [ ] Clean");
-    expect(toggleMarkdownLinePrefix({ value: "# Title", start: 3, end: 3 }, "h2").value).toBe("## Title");
-    expect(toggleMarkdownLinePrefix({ value: "## Title", start: 3, end: 3 }, "h2").value).toBe("Title");
-    expect(toggleMarkdownLinePrefix({ value: "- Step", start: 3, end: 3 }, "bullet").value).toBe("Step");
-  });
-
-  test("Enter continues lists, numbers, tasks and quotes, and ends an empty item", () => {
-    expect(continueMarkdownList({ value: "1. Clean", start: 8, end: 8 })?.value).toBe("1. Clean\n2. ");
-    expect(continueMarkdownList({ value: "- [x] Done", start: 10, end: 10 })?.value).toBe("- [x] Done\n- [ ] ");
-    expect(continueMarkdownList({ value: "> [!WARNING]\n> Hot", start: 18, end: 18 })?.value).toBe("> [!WARNING]\n> Hot\n> ");
-    const ended = continueMarkdownList({ value: "- Step\n- ", start: 9, end: 9 });
-    expect(ended?.value).toBe("- Step\n\n");
-    expect(ended?.start).toBe(8);
-    // The paragraph typed after ending the list must not become part of the last item.
-    expect(markdownToEditorHtml(`${ended?.value}Next paragraph`)).toContain("<p>Next paragraph</p>");
-    expect(continueMarkdownList({ value: "> [!CAUTION]\n> Hot\n> ", start: 21, end: 21 })?.value).toBe("> [!CAUTION]\n> Hot\n\n");
-    expect(continueMarkdownList({ value: "Plain", start: 5, end: 5 })).toBeNull();
-  });
-
-  test("Tab nests a list item under its parent's content column and Shift+Tab lifts it", () => {
-    const nested = indentMarkdownListLine({ value: "1. Clean\n2. Wipe", start: 12, end: 12 }, false);
-    expect(nested?.value).toBe("1. Clean\n   1. Wipe");
-    expect(indentMarkdownListLine({ value: "- Gloves\n- Liners", start: 12, end: 12 }, false)?.value).toBe("- Gloves\n  - Liners");
-    expect(indentMarkdownListLine(nested!, true)?.value).toBe("1. Clean\n2. Wipe");
-    expect(indentMarkdownListLine({ value: "Plain", start: 2, end: 2 }, false)).toBeNull();
-  });
-
-  test("blocks are separated from surrounding text by blank lines", () => {
-    const inserted = insertMarkdownBlock({ value: "Intro\nOutro", start: 5, end: 5 }, "---");
-    expect(inserted.value).toBe("Intro\n\n---\n\nOutro");
   });
 });
 

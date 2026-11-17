@@ -14,6 +14,12 @@ export default defineConfig({
   use: {
     baseURL: `http://127.0.0.1:${port}`,
     browserName: "chromium",
+    // No header video loop: these runs exercise the backend, and the loop only costs time and memory.
+    // This is the same per-device setting as "Header animation" in the account menu.
+    storageState: {
+      cookies: [],
+      origins: [{ origin: `http://127.0.0.1:${port}`, localStorage: [{ name: "work-instructions:header-animation", value: "off" }] }],
+    },
     viewport: { width: 1280, height: 900 },
     actionTimeout: 20_000,
     navigationTimeout: 120_000,

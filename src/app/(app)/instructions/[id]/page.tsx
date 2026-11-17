@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { sanitizeRichHtml } from "@/lib/rich-text.server";
 
 import { InstructionActionMenu } from "@/components/instructions/instruction-action-menu";
+import { INSTRUCTION_DETAILS, instructionDetailRows } from "@/lib/instruction-details";
 import { DeleteInstructionButton } from "@/components/instructions/delete-instruction-button";
 import { InstructionBackButton } from "@/components/instructions/instruction-back-button";
 import { InstructionArchivedRedirectGuard } from "@/components/instructions/instruction-archived-redirect-guard";
@@ -986,10 +987,6 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
 
           return fallbackEvents;
         })();
-  const instructionUpdatedEventCount = instructionUpdateEvents.filter(
-    (event) => event.eventType === "updated",
-  ).length;
-
   const [
     { data: pinnedInstruction },
     { data: likedInstruction },
@@ -1178,16 +1175,17 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
   const printToolNames = Array.from(printToolNamesByKey.values()).sort((first, second) =>
     first.localeCompare(second),
   );
-  const isoContextRows = [
-    {
-      label: "ISO 9001 Clauses",
-      value: (instruction.iso_clause_refs ?? []).join(", "),
-    },
-    { label: "Scope", value: instruction.process_scope ?? "" },
-    { label: "Acceptance Criteria", value: instruction.acceptance_criteria ?? "" },
-    { label: "Verification Records", value: instruction.verification_records ?? "" },
-    { label: "Risks / Controls", value: instruction.risk_controls ?? "" },
-  ].filter((entry) => entry.value.trim().length > 0);
+  // Optional details the author filled in, in shop-floor wording. Printouts list all of them; on screen,
+  // what good looks like and the safety notes sit above the steps, so the "More details" section holds the rest.
+  const detailRows = instructionDetailRows({
+    processScope: instruction.process_scope,
+    acceptanceCriteria: instruction.acceptance_criteria,
+    verificationRecords: instruction.verification_records,
+    riskControls: instruction.risk_controls,
+  });
+  const secondaryDetailRows = detailRows.filter(
+    (entry) => entry.key === "processScope" || entry.key === "verificationRecords",
+  );
   const printBodyMedia = extractPrintMediaFromBody(
     rewriteLoopbackMediaUrlsInHtml(sanitizeRichHtml(instruction.body_markdown), mediaUrlRuntime),
   );
@@ -1316,11 +1314,11 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
           )}
         </section>
 
-        {isoContextRows.length > 0 ? (
+        {detailRows.length > 0 ? (
           <section className="mt-6 grid gap-2">
-            <h2 className="text-xl font-bold text-slate-900">ISO / Control Context</h2>
+            <h2 className="text-xl font-bold text-slate-900">More details</h2>
             <dl className="grid gap-2 text-sm text-slate-800">
-              {isoContextRows.map((entry) => (
+              {detailRows.map((entry) => (
                 <div key={entry.label}>
                   <dt className="font-bold">{entry.label}</dt>
                   <dd className="whitespace-pre-wrap">{entry.value}</dd>
@@ -1398,22 +1396,16 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
           </div>
         ) : null}
         {!instructionIsArchived && showReviewIndicator ? (
-          <div
-            className={`mb-4 rounded-2xl border px-4 py-3 ${
-              reviewStatus.status === "needs_review"
-                ? "border-amber-500/45 bg-amber-500/12"
-                : "border-cyan-500/45 bg-cyan-500/12"
-            }`}
-          >
+          <div className="mb-4 rounded-2xl border border-amber-500/45 bg-amber-500/12 px-4 py-3">
             <p className="text-sm font-bold text-slate-900 dark:text-slate-100">
               {reviewStatus.status === "needs_review"
-                ? "Needs Review flagged"
-                : "Review check due"}
+                ? "Needs review: flagged"
+                : "Needs review: check is due"}
             </p>
             <p className="text-xs text-slate-700 dark:text-slate-200">
               {reviewStatus.status === "needs_review"
-                ? "This instruction has been flagged for review. It remains available for use while clarity or accuracy updates are assessed."
-                : `This instruction is outside the ${reviewWindowDays}-day review range. It remains available for use, and should be confirmed as Up To Date.`}
+                ? "Someone flagged this instruction for review. It remains available for use while it is checked."
+                : `This instruction was last checked ${reviewAgeDays} days ago, and checks are due every ${reviewWindowDays} days. It remains available for use. Make sure it is still correct, then set it to Up To Date.`}
             </p>
           </div>
         ) : null}
@@ -1534,6 +1526,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
                   initialStatus={reviewStatus.status}
                   initialLastCalibratedAt={reviewStatus.lastCalibratedAt}
                   initialFlaggedAt={reviewStatus.flaggedAt}
+                  initialReviewDue={reviewIsOutOfRange}
                   className="shrink-0"
                 />
               ) : null}
@@ -1550,7 +1543,7 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
                   className="justify-center"
                 />
               ) : null}
-              <InstructionActionMenu badgeCount={instructionUpdatedEventCount}>
+              <InstructionActionMenu>
                 <InstructionUpdatesPanel
                   events={instructionUpdateEvents}
                   className="h-fit w-full justify-center self-start"
@@ -1618,11 +1611,11 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
         </div>
         </header>
 
-        {isoContextRows.length > 0 ? (
+        {secondaryDetailRows.length > 0 ? (
           <details className="min-w-0 rounded-2xl border border-slate-300/70 bg-white/80 p-5 dark:border-slate-700 dark:bg-slate-900/70">
-            <summary className="cursor-pointer text-base font-semibold">Document controls and traceability</summary>
+            <summary className="cursor-pointer text-base font-semibold">More details</summary>
             <dl className="mt-4 grid gap-3 md:grid-cols-2">
-              {isoContextRows.map((entry) => (
+              {secondaryDetailRows.map((entry) => (
                 <div key={entry.label} className="rounded-2xl border border-slate-300/70 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-950/50">
                   <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                     {entry.label}
@@ -1642,13 +1635,13 @@ export default async function InstructionDetailsPage({ params }: InstructionPage
           <h2 className="text-xl font-bold">Work Instructions</h2>
           {instruction.acceptance_criteria?.trim() ? (
             <aside className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4">
-              <h3 className="text-sm font-semibold">Acceptance criteria</h3>
+              <h3 className="text-sm font-semibold">{INSTRUCTION_DETAILS.acceptanceCriteria.label}</h3>
               <p className="mt-1 whitespace-pre-wrap text-sm">{instruction.acceptance_criteria}</p>
             </aside>
           ) : null}
           {instruction.risk_controls?.trim() ? (
             <aside className="rounded-xl border border-amber-500/35 bg-amber-500/5 p-4">
-              <h3 className="text-sm font-semibold">Safety, controls and reaction plan</h3>
+              <h3 className="text-sm font-semibold">{INSTRUCTION_DETAILS.riskControls.label}</h3>
               <p className="mt-1 whitespace-pre-wrap text-sm">{instruction.risk_controls}</p>
             </aside>
           ) : null}

@@ -5,11 +5,15 @@ The homepage is built for the plant floor: find the right instruction fast, get 
 ## Find an instruction
 
 - The search box at the top searches part numbers, mold numbers and instruction titles as you type.
-- **Scan a part label** (barcode scanners type into the focused box) or type a part number and press **Enter**. If exactly one instruction matches, it opens immediately; otherwise focus moves to the first result.
-- Department chips under the search filter the results and every list on the page. Only departments with instructions are shown. Choose **All departments** to clear the filter.
+- **Scan a part label** (barcode scanners type into the focused box) or type a part number and press **Enter** or **Search**. If exactly one instruction matches, it opens immediately; otherwise focus moves to the first result. With nothing entered, **Search** puts the cursor in the box, ready for a scan.
+- The **Department** menu beside the search box filters the results and every list on the page. It lists only departments with instructions, each with its count. Choose **All departments** to clear the filter.
 - Matching controlled documents and formulas are listed under the instruction results.
 
 Operators only see released instructions; drafts and pending revisions appear for authors and approvers.
+
+## Header
+
+Every page shares one header. The top bar shows the logo and **Work Instructions** over the animated loop (a light and a dark version follow the theme). The loop plays by default, including on computers where Windows animation effects are turned off; anyone can turn it off for their own device with the **Header animation** switch in the account menu. The bar also holds **New Instruction** with a menu for **Import instruction**, **My drafts** and, for administrators, **Archived instructions**, and the account menu with your name and role. Below it, one tab per workspace (Dashboard, Doc Center, Process Docs, Process Maps, Formula Tools, Groups) marks the current page; on phones the tabs scroll sideways. The current date and time are shown at the right on larger screens.
 
 ## Quick actions
 
@@ -24,9 +28,9 @@ The default **Plant floor** layout shows:
 | Pinned instructions | Instructions you pinned from the instruction page (**Pin** in its action menu). |
 | Recently changed | The latest change to each instruction in the chosen time window. |
 | New instructions | Instructions created in the last 7, 30 or 90 days. |
-| Needs review | Instructions flagged by a user or past their review window. |
+| Needs review | Instructions flagged by a user or whose review check is due (past the review window). The instruction page shows them as **Needs review** too, never **Up to date**. |
 
-Each row shows the part number, revision, title, department and when it last changed; tap anywhere on the row to open it.
+Each row shows the part number, revision, title, department (also as the colour of the row's left edge) and when it last changed; tap anywhere on the row to open it. Panels in the same row line up and share a height on larger screens, and each row of panels fills the full width: when the panels in a row add up to less than the full width, they widen to share the spare space, so the layout never leaves a gap.
 
 ## Customize
 

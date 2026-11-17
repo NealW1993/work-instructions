@@ -5,6 +5,8 @@ These unmodified, complete variable TrueType files come from the primary [Google
 - [Space Grotesk upstream files](https://github.com/google/fonts/tree/86aced91de05cd4f96a06838124cca45be337b2b/ofl/spacegrotesk): `SpaceGrotesk[wght].ttf`, weight 300–700, normal style. License: [SpaceGrotesk-OFL.txt](./SpaceGrotesk-OFL.txt).
 - [Source Sans 3 upstream files](https://github.com/google/fonts/tree/86aced91de05cd4f96a06838124cca45be337b2b/ofl/sourcesans3): `SourceSans3[wght].ttf` and `SourceSans3-Italic[wght].ttf`, weight 200–900, normal and italic styles. License: [SourceSans3-OFL.txt](./SourceSans3-OFL.txt).
 
+The application now uses Source Sans 3 for headings as well as text (`src/app/layout.tsx`). Space Grotesk is no longer loaded; its files and license remain here only so earlier builds can be reproduced, and can be removed once that is no longer needed.
+
 Both families use the SIL Open Font License 1.1. Their accompanying copyright and license files are retained verbatim. Only the local filenames were simplified; the font bytes match the upstream Git blobs.
 
 | Local file | SHA-256 |

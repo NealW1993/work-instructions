@@ -26,11 +26,11 @@ function documentBody(page: Page) {
   return page.getByRole("textbox", { name: "Document Body", exact: true });
 }
 
-test.describe.serial("controlled documents use the Markdown editor end to end", () => {
+test.describe.serial("controlled documents use the formatted editor end to end", () => {
   const documentNumber = uniqueId("QMS");
   let documentId = "";
 
-  test("an admin creates a document in Markdown and it is stored as sanitized HTML", async ({ page }) => {
+  test("an admin writes a document in the formatted editor and it is stored as sanitized HTML", async ({ page }) => {
     const errors = captureRuntimeErrors(page);
     await signIn(page, "admin");
     await page.goto("/process-documents");
@@ -39,15 +39,21 @@ test.describe.serial("controlled documents use the Markdown editor end to end", 
     await page.getByRole("textbox", { name: "Title", exact: true }).fill("Integration release procedure");
 
     const body = documentBody(page);
-    await body.fill("");
     await body.click();
-    await page.keyboard.type("## Purpose\n\nControl the release of finished goods.\n\n");
+    await body.press("Control+a");
+    await body.press("Backspace");
+    await page.keyboard.type("## Purpose");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("Control the release of finished goods.");
+    await page.keyboard.press("Enter");
     const editorGroup = page.getByRole("group", { name: "Document Body editor" });
     await editorGroup.getByRole("button", { name: "Callout" }).click();
     await page.getByRole("menuitem", { name: /Warning/ }).click();
     await page.keyboard.type("Never ship without a signed traveler.");
-    await page.keyboard.type("\n\n");
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Enter");
     await editorGroup.getByRole("button", { name: "Insert table" }).click();
+    await expect(body.locator("th")).toHaveText(["Step", "Check", "Result"]);
 
     await page.getByRole("button", { name: "Save Draft" }).click();
     await page.waitForURL(/\/process-documents\?doc=[0-9a-f-]{36}/, { timeout: 90_000 });
@@ -63,15 +69,20 @@ test.describe.serial("controlled documents use the Markdown editor end to end", 
     expect(errors).toEqual([]);
   });
 
-  test("reopening the document shows editable Markdown, and edits save as a new revision", async ({ page }) => {
+  test("reopening the document shows it formatted and ready to edit, and edits save as a new revision", async ({ page }) => {
     await signIn(page, "admin");
     await page.goto(`/process-documents?doc=${documentId}`);
     const body = documentBody(page);
-    await expect(body).toHaveValue(/^## Purpose\n\nControl the release of finished goods\.\n\n> \[!WARNING\]\n> Never ship without a signed traveler\.\n\n\| Step \| Check \| Result \|/);
+    await expect(body.getByRole("heading", { name: "Purpose", exact: true })).toBeVisible();
+    await expect(body.locator("p").first()).toHaveText("Control the release of finished goods.");
+    await expect(body.locator('aside[data-tone="warning"]')).toHaveText("Never ship without a signed traveler.");
+    await expect(body.locator("th")).toHaveText(["Step", "Check", "Result"]);
 
-    await body.click();
+    // The editor keeps an empty line below the final table to continue writing on.
     await body.press("Control+End");
-    await page.keyboard.type("\n\n## Records\n\nKeep the traveler for three years.");
+    await page.keyboard.type("## Records");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("Keep the traveler for three years.");
     await page.getByRole("textbox", { name: "Change Summary", exact: true }).fill("Added the record retention section.");
     await page.getByRole("button", { name: "Save Draft" }).click();
     await expect.poll(async () => (await readDocument(documentNumber))?.latest.body_html ?? "", { timeout: 30_000 }).toContain("<h2>Records</h2>");
